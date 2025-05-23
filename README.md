@@ -14,25 +14,27 @@ bun install
 >
 > Dependencies `npm i @auth0/nextjs-auth0`
 >
-> - [-] [User authentication](https://auth0.com/ai/docs/user-authentication)
+> - [ ] [User authentication](https://auth0.com/ai/docs/user-authentication)
 
-Copy .env file to `.env.local` and add environment variables
+1. Copy .env file to `.env.local` and add environment variables
 
-```bash
-cp example.env.local .env.local
-```
+   ```bash
+   cp example.env.local .env.local
+   ```
 
-```txt
-AUTH0_SECRET='use [openssl rand -hex 32] to generate a 32 bytes value'
-APP_BASE_URL='http://localhost:3000'
-AUTH0_DOMAIN=''
-AUTH0_CLIENT_ID=''
-AUTH0_CLIENT_SECRET=''
+2. Update auth0 secrets
 
-```
+   ```txt
+   AUTH0_SECRET='use [openssl rand -hex 32] to generate a 32 bytes value'
+   APP_BASE_URL='http://localhost:3000'
+   AUTH0_DOMAIN=''
+   AUTH0_CLIENT_ID=''
+   AUTH0_CLIENT_SECRET=''
 
-Run the development server:
+   ```
 
-```bash
-bun dev
-```
+3. Run the development server:
+
+   ```bash
+   bun dev
+   ```
