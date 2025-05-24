@@ -32,6 +32,8 @@ bun install
    AUTH0_CLIENT_SECRET=''
    AUTH0_M2M_CLIENT_ID=''
    AUTH0_M2M_CLIENT_SECRET=''
+   NEXT_PUBLIC_PROFILE_ROUTE=/api/me
+   NEXT_PUBLIC_ACCESS_TOKEN_ROUTE=/api/auth/token
 
    ```
 
