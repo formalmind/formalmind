@@ -28,7 +28,7 @@ import {
 	useSidebar,
 } from "@/components/ui/sidebar"
 
-import { Skeleton } from "./ui/skeleton"
+import { Skeleton } from "@/components/ui/skeleton"
 
 export function NavUser() {
 	const { isMobile } = useSidebar()

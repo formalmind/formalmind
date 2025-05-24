@@ -1,4 +1,4 @@
-import { AppSidebar } from "@/components/app-sidebar"
+import { AppSidebar, } from "@/components/app-sidebar"
 import {
 	Breadcrumb,
 	BreadcrumbItem,
@@ -13,8 +13,31 @@ import {
 	SidebarProvider,
 	SidebarTrigger,
 } from "@/components/ui/sidebar"
+import {
+	SidebarMenu,
+	SidebarMenuButton,
+	SidebarMenuItem,
+} from "@/components/ui/sidebar"
+import { LogIn } from "lucide-react"
+import { auth0 } from "@/lib/auth0"
 
-export default function Page() {
+export default async function Page() {
+	const session = await auth0.getSession()
+
+	if (!session) {
+		return (
+			<SidebarMenu>
+				<SidebarMenuItem>
+					<SidebarMenuButton size="lg" variant="outline" asChild>
+						<a href="/auth/login" className="flex items-center gap-2">
+							<LogIn className="size-5" />
+							<span className="font-medium">Log in to your account</span>
+						</a>
+					</SidebarMenuButton>
+				</SidebarMenuItem>
+			</SidebarMenu>
+		)
+	}
 	return (
 		<SidebarProvider>
 			<AppSidebar />
@@ -40,9 +63,7 @@ export default function Page() {
 				</header>
 				<div className="flex flex-1 flex-col gap-4 p-4 pt-0">
 					<div className="grid auto-rows-min gap-4 md:grid-cols-3">
-						<div className="aspect-video rounded-xl bg-muted/50" />
-						<div className="aspect-video rounded-xl bg-muted/50" />
-						<div className="aspect-video rounded-xl bg-muted/50" />
+						<p>Welcome, {session.user.name}!</p>
 					</div>
 					<div className="min-h-[100vh] flex-1 rounded-xl bg-muted/50 md:min-h-min" />
 				</div>
