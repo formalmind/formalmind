@@ -1,7 +1,7 @@
 import { tool } from "ai";
 import { z } from 'zod';
 import { auth0 } from "./auth0";
-const { Octokit } = require("@octokit/rest");
+import { Octokit } from "@octokit/rest";
 
 // tool to Fetch user details for the authenticated user
 const getUserDetails = tool({
