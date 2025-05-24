@@ -14,6 +14,7 @@ import {
 	SquareTerminal,
 } from "lucide-react"
 
+import Image from "next/image"
 import {
 	Sidebar,
 	SidebarContent,
@@ -156,7 +157,20 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
 						<SidebarMenuButton size="lg" asChild>
 							<a href="#">
 								<div className="flex aspect-square size-8 items-center justify-center rounded-lg bg-sidebar-primary text-sidebar-primary-foreground">
-									<Command className="size-4" />
+									<Image
+										className="block dark:hidden"
+										alt="Formal Mind website logo"
+										src="/SymbolDark.svg"
+										width={24}
+										height={24}
+									/>
+									<Image
+										className="hidden dark:block"
+										alt="Formal Mind website logo"
+										src="/SymbolLight.svg"
+										width={24}
+										height={24}
+									/>
 								</div>
 								<div className="grid flex-1 text-left text-sm leading-tight">
 									<span className="truncate font-semibold">Formal Mind AI</span>
