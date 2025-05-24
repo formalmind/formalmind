@@ -1,6 +1,6 @@
 import { tool } from "ai";
 import { z } from 'zod';
-import { auth0 } from "./auth0";
+import { auth0 } from "@/lib/auth0";
 import { Octokit } from "@octokit/rest";
 
 // tool to Fetch user details for the authenticated user
