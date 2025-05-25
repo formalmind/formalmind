@@ -27,14 +27,17 @@ bun install
    ```txt
    AUTH0_SECRET='use [openssl rand -hex 32] to generate a 32 bytes value'
    APP_BASE_URL='http://localhost:3000'
-   AUTH0_DOMAIN=''
-   AUTH0_CLIENT_ID=''
-   AUTH0_CLIENT_SECRET=''
-   AUTH0_M2M_CLIENT_ID=''
-   AUTH0_M2M_CLIENT_SECRET=''
+   AUTH0_DOMAIN=
+   AUTH0_CLIENT_ID=
+   AUTH0_CLIENT_SECRET=
+   AUTH0_M2M_CLIENT_ID=
+   AUTH0_M2M_CLIENT_SECRET=
    NEXT_PUBLIC_PROFILE_ROUTE=/api/me
    NEXT_PUBLIC_ACCESS_TOKEN_ROUTE=/api/auth/token
-
+   NEXT_PUBLIC_LAMBDA_API_KEY=
+   NEXT_PUBLIC_LAMBDA_BASE_URL=
+   NEXT_PUBLIC_GROQ_API_KEY=
+   NEXT_PUBLIC_GROQ_BASE_URL=https://api.groq.com/openai/v1
    ```
 
 3. Run the development server:

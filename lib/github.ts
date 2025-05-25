@@ -4,7 +4,7 @@ import { auth0 } from "@/lib/auth0";
 import { Octokit } from "@octokit/rest";
 
 // tool to Fetch user details for the authenticated user
-const getUserDetails = tool({
+export const getUserDetails = tool({
 	description: 'Get user details from GitHub',
 	parameters: z.object({}),
 	execute: async () => {
@@ -23,7 +23,7 @@ const getUserDetails = tool({
 });
 
 // tool to fetch repos for the authenticated user
-const getUserRepos = tool({
+export const getUserRepos = tool({
 	description: 'Get user repos from GitHub',
 	parameters: z.object({}),
 	execute: async () => {
@@ -54,6 +54,3 @@ const getUserRepos = tool({
 		}
 	},
 });
-
-
-export { getUserDetails, getUserRepos }
