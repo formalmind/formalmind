@@ -15,7 +15,7 @@ const geistMono = localFont({
 
 export const metadata: Metadata = {
 	title: "Formal Mind Ai",
-	description: "Connect your github and formally proof your code with AI agents.",
+	description: "Connect your github to work with our formal verification AI agents in Lean 4.",
 };
 
 export default function RootLayout({

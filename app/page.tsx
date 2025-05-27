@@ -13,10 +13,8 @@ import {
 	SidebarProvider,
 	SidebarTrigger,
 } from "@/components/ui/sidebar"
-import { LogIn } from "lucide-react"
 import { auth0 } from "@/lib/auth0"
-import { Button } from "@/components/ui/button"
-
+import LoginPage from "@/components/login"
 
 export default async function Page() {
 	const session = await auth0.getSession()
@@ -35,16 +33,7 @@ export default async function Page() {
 
 	if (!session) {
 		return (
-			<div className="flex flex-1 min-h-screen items-center justify-center">
-				<div className="flex flex-1 items-center justify-center">
-					<Button size="lg" variant="outline" asChild>
-						<a href="/auth/login" className="flex items-center gap-2">
-							<LogIn className="size-5" />
-							<span className="font-medium">Log in to your account</span>
-						</a>
-					</Button>
-				</div>
-			</div>
+			<LoginPage />
 		)
 	}
 	return (
