@@ -39,8 +39,8 @@ app.webhooks.on('issue_comment.created', async ({ octokit, payload }) => {
 	const repo = payload.repository.name;
 	const owner = payload.repository.owner.login;
 
-	// Only handle `@agent export` directives
-	if (!comment.includes('@agent export')) return;
+	// Only handle `@agent verify` directives
+	if (!comment.includes('@agent verify')) return;
 
 	// Extract Lean + JSON
 	const lean = extractLeanCodeBlock(comment);
