@@ -11,8 +11,6 @@ export default async function Layout({
 	if (!session) {
 		return <LoginPage />
 	}
-
-	console.log("Main Layout Session:", session);
 	return (
 		<AuthProvider session={session}>
 			<div className="flex flex-col h-full">

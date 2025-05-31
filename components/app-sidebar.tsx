@@ -6,8 +6,6 @@ import {
 	Bot,
 	Frame,
 	LifeBuoy,
-	Map,
-	PieChart,
 	Send,
 	Settings2,
 	SquareTerminal,
@@ -55,26 +53,35 @@ const data = {
 			title: "Agents",
 			url: "",
 			icon: Bot,
+			isActive: true,
 			items: [
 				{
-					title: "Listener Agent",
-					url: "/agents/listener",
+					title: "Modeling Agent",
+					url: "/agents/modeling-agent",
 				},
 				{
-					title: "Lean Spec Agent",
-					url: "/agents/lean-spec",
+					title: "Pr Reviewer Agent",
+					url: "/agents/pr-reviewer-agent",
 				},
 				{
-					title: "Planning Agent",
-					url: "/agents/planner",
+					title: "Push Reviewer Agent",
+					url: "/agents/push-reviewer-agent",
+				},
+				{
+					title: "Reconsiling Agent",
+					url: "/agents/reconsiling-agent",
+				},
+				{
+					title: "Testing Agent V1",
+					url: "/agents/testing-agent-v1",
+				},
+				{
+					title: "Testing Agent",
+					url: "/agents/testing-agent",
 				},
 				{
 					title: "Verification Agent",
-					url: "/agents/verification",
-				},
-				{
-					title: "Implementation Agent",
-					url: "/agents/implementation",
+					url: "/agents/verification-agent",
 				},
 			],
 		},
@@ -82,10 +89,11 @@ const data = {
 			title: "Documentation",
 			url: "#",
 			icon: BookOpen,
+			isActive: true,
 			items: [
 				{
 					title: "Introduction",
-					url: "#",
+					url: "/documentation/introduction",
 				},
 				{
 					title: "Get Started",
@@ -142,16 +150,6 @@ const data = {
 			name: "Agent Design",
 			url: "#",
 			icon: Frame,
-		},
-		{
-			name: "Sales & Marketing",
-			url: "#",
-			icon: PieChart,
-		},
-		{
-			name: "Travel",
-			url: "#",
-			icon: Map,
 		},
 	],
 }

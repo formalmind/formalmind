@@ -14,13 +14,13 @@ const webhookSecret = process.env.GITHUB_WEBHOOK_SECRET!;
 const privateKey = process.env.GITHUB_APP_PRIVATE_KEY!.replace(/\\n/g, "\n");
 
 export const PROMPTS = {
-	modeling: 'prompts/modeling-agent.md',
-	verification: 'prompts/verification-agent.md',
-	testing: 'prompts/testing-agent.md',
-	testingV1: 'prompts/testing-agent-v1.md',
-	pushReviewer: 'prompts/push-reviewer-agent.md',
-	prReviewer: 'prompts/pr-reviewer-agent.md',
-	reconsilingAgent: 'prompts/reconsiling-agent.md',
+	modeling: "app/agents/modeling-agent/page.md",
+	prReviewer: "app/agents/pr-reviewer-agent/page.md",
+	pushReviewer: "app/agents/push-reviewer-agent/page.md",
+	reconsilingAgent: "app/agents/reconsiling-agent/page.md",
+	testing: "app/agents/testing-agent/page.md",
+	testingV1: "app/agents/testing-agent-v1/page.md",
+	verification: "app/agents/verification-agent/page.md",
 };
 
 const app = new App({

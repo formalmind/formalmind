@@ -1,7 +1,7 @@
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
-
+@import 'rehype-callouts/theme/github';
 
 
 @layer base {
@@ -55,8 +55,7 @@
 
     --chart-5: 27 87% 67%;
 
-    --radius: 0.5rem
-  ;
+    --radius: 0.5rem;
 
     --sidebar-background: 0 0% 98%;
 
@@ -72,7 +71,11 @@
 
     --sidebar-border: 220 13% 91%;
 
-    --sidebar-ring: 217.2 91.2% 59.8%}
+    --sidebar-ring: 217.2 91.2% 59.8% --callout-note-color-light: pink;
+
+    --callout-tip-color-light: rgb(255, 192, 203);
+  }
+
   .dark {
 
     --background: 20 14.3% 4.1%;
@@ -121,8 +124,7 @@
 
     --chart-4: 280 65% 60%;
 
-    --chart-5: 340 75% 55%
-  ;
+    --chart-5: 340 75% 55%;
 
     --sidebar-background: 240 5.9% 10%;
 
@@ -138,7 +140,12 @@
 
     --sidebar-border: 240 3.7% 15.9%;
 
-    --sidebar-ring: 217.2 91.2% 59.8%}
+    --sidebar-ring: 217.2 91.2% 59.8%;
+
+    --callout-note-color-dark: #ffc0cb;
+
+    --callout-tip-color-dark: hsl(350, 100%, 88%);
+  }
 }
 
 
@@ -147,7 +154,26 @@
   * {
     @apply border-border;
   }
+
   body {
     @apply bg-background text-foreground;
+  }
+
+  pre.highlight {
+    overflow-x: auto;
+    max-width: 100%;
+  }
+
+  pre {
+    overflow-x: auto;
+    white-space: pre;
+    word-wrap: normal;
+    max-width: 100%;
+    padding: 1rem;
+    border-radius: 0.5rem;
+  }
+
+  code {
+    word-break: break-word;
   }
 }

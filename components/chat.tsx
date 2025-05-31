@@ -86,8 +86,8 @@ export function ChatPage() {
 		URL.revokeObjectURL(url)
 	}
 	return (
-		<div className="flex-1">
-			<Card className="flex-1 flex-col">
+		<div className="flex flex-1 flex-col min-h-0">
+			<Card className="flex flex-1 flex-col min-h-0">
 				<CardHeader className="border-b">
 					<div className="flex items-center justify-between">
 						<CardTitle className="flex items-center gap-2 text-xl">
@@ -119,11 +119,11 @@ export function ChatPage() {
 					</div>
 				</CardHeader>
 
-				<CardContent className="flex-1 p-0">
-					<ScrollArea className="flex-1 p-4" ref={scrollAreaRef}>
-						<div className="space-y-4 m-h-96">
+				<CardContent className="flex flex-col flex-1 overflow-hidden p-0 min-h-0">
+					<ScrollArea className="flex flex-col flex-1 p-4 overflow-y-auto" ref={scrollAreaRef}>
+						<div className="flex flex-col flex-1 min-h-0 space-y-4 max-h-none">
 							{messages.length === 0 && (
-								<div className="text-center text-gray-500 mt-8">
+								<div className="flex flex-col flex-1 min-h-0 text-center text-gray-500 mt-8">
 									<Bot className="h-12 w-12 mx-auto mb-4 text-gray-400" />
 									<p className="text-lg font-medium">Welcome to AI Chat!</p>
 									<p className="text-sm">Start a conversation by typing a message below.</p>

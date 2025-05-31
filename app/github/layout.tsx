@@ -13,10 +13,8 @@ export default async function Layout({
 	}
 	return (
 		<AuthProvider session={session}>
-			<div className="flex flex-col h-full">
-				<div className="flex-1 overflow-y-auto">
-					{children}
-				</div>
+			<div className="flex flex-1 flex-col min-h-0">
+				{children}
 			</div>
 		</AuthProvider>
 	)
