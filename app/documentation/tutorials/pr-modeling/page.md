@@ -99,7 +99,7 @@ This will trigger Lean project generation in the next tutorial 👇
 
 ---
 
-> \[!TIP]
+> [!TIP]
 > The Modeling Agent works best on small, composable modules. Break your logic into files and functions for clearer modeling.
 
 ---

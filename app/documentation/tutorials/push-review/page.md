@@ -77,7 +77,7 @@ You can reply to the comment with questions, thoughts, or even try tagging `@age
 
 ---
 
-> \[!INFO]
+> [!INFO]
 > The Push Reviewer is designed to be fast and lightweight — no repo forking or modeling yet. Just fast, local context-based feedback.
 
 ---

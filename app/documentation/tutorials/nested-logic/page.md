@@ -104,7 +104,7 @@ Watch the agent:
 
 ---
 
-> \[!IMPORTANT]
+> [!IMPORTANT]
 > The agent respects modularity. It treats each file as a component — composing their behavior into a larger formal model.
 
 ---

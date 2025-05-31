@@ -69,7 +69,7 @@ Explore it:
 * Look at the `.github/workflows/lean.yml` CI file
 * Open `lakefile.lean` to see the Lean package metadata
 
-> \[!TIP]
+> [!TIP]
 > The Lean repo will grow over time — as you update the main repo and re-verify, the agent will extend or refine the specs!
 
 ---
@@ -90,7 +90,7 @@ Want to model deeper logic or multiple modules?
 
 ---
 
-> \[!WARNING]
+> [!WARNING]
 > If verification fails, check the agent's output for tactic errors or unsupported patterns. You can always adjust your implementation or modeling assumptions.
 
 Need help? [Email support](mailto:formalmindai@gmail.com)
