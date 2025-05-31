@@ -33,13 +33,13 @@ Project stack:
    AUTH0_M2M_CLIENT_ID=
    AUTH0_M2M_CLIENT_SECRET=
 
-
    # llms api
    OPENAI_API_KEY=
-   NEXT_PUBLIC_LAMBDA_BASE_URL=https://api.lambda.ai/v1
-   NEXT_PUBLIC_LAMBDA_API_KEY=
-   NEXT_PUBLIC_GROQ_BASE_URL=https://api.groq.com/openai/v1
-   NEXT_PUBLIC_GROQ_API_KEY=
+   LAMBDA_BASE_URL=https://api.lambda.ai/v1
+   LAMBDA_API_KEY=
+   GROQ_BASE_URL=https://api.groq.com/openai/v1
+   GROQ_API_KEY=
+   HF_TOKEN=
 
 
    # github app
@@ -49,6 +49,8 @@ Project stack:
 
    # redis
    REDIS_URL=redis://localhost:6379
+   REDIS_PASSWORD=
+   WEBHOOK_URL=http://localhost:3000/api/github/webhook
    ```
 
 > [!TIP]
@@ -189,10 +191,3 @@ useEffect(() => {
   return () => sse.close();
 }, []);
 ```
-
-### 🧠 Next Moves:
-
-* [ ] ✅ Redis-based pub-sub (for agent state across services).
-* [ ] 🎨 Smooth chat interface with status indicators and agent avatars.
-* [ ] 🔌 Add a plugin registration system (for Grok, HF, Lambda).
-* [ ] 🧪 “Replay” button in the chat to re-run modeling agent on a commit.
