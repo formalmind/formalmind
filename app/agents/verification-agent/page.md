@@ -43,8 +43,8 @@ Use whatever is available to guide your reasoning and try to formalize logic whe
   "unprovenTheorems": [
     "transferPreservesInvariant"
   ],
-  "sourceHash": "abc123",
-  "PR": 42
+  "sourceHash": "https://github.com/mmsaki/testing-agent/pull/44/commits/31cd78081ef8643beef4ca92585645bb7589e33a",
+  "PR": "https://github.com/mmsaki/testing-agent/pull/44"
 }
 ````
 

@@ -2,6 +2,7 @@
 import { PROMPTS } from "@/github-actions";
 import { VerificationAgent } from "@/packages/agentkit/base-agent";
 import { buildFileDiffs, extractJsonCodeBlock } from "./helpers";
+import { redis } from "@/lib/redis"
 
 /**
  * NOTE: This function handles the pull request opened event.
@@ -50,6 +51,11 @@ export async function handlePullRequestOpened({ octokit, payload }: any) {
 
 	await handlePullRequestReview({ octokit, payload });
 
+	await redis.lpush(`events:${payload.installation?.id}`, JSON.stringify({
+		type: "pull_request",
+		data: payload,
+		receivedAt: Date.now(),
+	}))
 }
 
 export async function handlePullRequestReview({ octokit, payload }: any) {
@@ -114,6 +120,11 @@ export async function handlePullRequestReview({ octokit, payload }: any) {
 			});
 
 			console.log(`✅ Commented on ${comment.file}:${comment.line}`);
+			await redis.lpush(`events:${payload.installation?.id}`, JSON.stringify({
+				type: "review_comment",
+				data: payload,
+				receivedAt: Date.now(),
+			}))
 		} catch (err) {
 			console.error(`❌ Failed to comment on ${comment.file}:${comment.line}`, err);
 		}

@@ -1,16 +1,19 @@
 import { PROMPTS } from '@/github-actions';
 import fs from 'fs/promises';
 import path from 'path';
+import type { LLMProvider } from "@/lib/llm"; // adjust import path if needed
 
 export abstract class BaseAgent {
 	prompt: string;
 	model: string;
+	provider: LLMProvider;
 	systemPrompt: string;
 	private promptFile: string;
 	me: string;
 
-	constructor(promptFile: string, model = 'gpt-4o') {
+	constructor(promptFile: string, model = 'gpt-4o', provider: LLMProvider = 'groq') {
 		this.model = model;
+		this.provider = provider;
 		this.systemPrompt = 'You are a Formal Verification Agent assisting developers with finding and fixing logic errors in pull requests using Lean 4.';
 		this.prompt = '';
 		this.promptFile = promptFile;

@@ -3,7 +3,7 @@ import { generateText } from "ai"
 import { createOpenAICompatible } from "@ai-sdk/openai-compatible"
 
 
-export type LLMProvider = 'huggingface' | 'lambda' | 'groq' | 'google'
+export type LLMProvider = 'openai' | 'huggingface' | 'lambda' | 'groq' | 'google'
 
 export interface LLMMessage {
 	role: 'user' | 'assistant' | 'system'
@@ -12,15 +12,24 @@ export interface LLMMessage {
 
 export interface CallLLMOptions {
 	provider: LLMProvider
-	model: HuggingFaceModel | LambdaModel | GoogleModel | GroqModel
+	model: OpenAIModel | HuggingFaceModel | LambdaModel | GoogleModel | GroqModel
 	messages: LLMMessage[]
 }
 
 
+export type OpenAIModel = (typeof openAIModelNames)[number]
+export const openAIModelNames = [
+	"gpt-4o",
+	"gpt-4o-mini",
+] as const;
+export const openAIModels: Record<OpenAIModel, string> = Object.fromEntries(
+	openAIModelNames.map((m) => [m, m])
+) as Record<OpenAIModel, string>
+
 export type HuggingFaceModel = (typeof huggingFaceModelNames)[number]
 export const huggingFaceModelNames = [
 	"wellecks/ntpctx-llama3-8b",
-	"wellecks/ntpctx-llama3-8b",
+	"tiiuae/falcon-7b-instruct"
 ] as const;
 export const huggingFaceModels: Record<HuggingFaceModel, string> = Object.fromEntries(
 	huggingFaceModelNames.map((m) => [m, m])
@@ -103,19 +112,48 @@ export async function callLLM({ provider, model, messages }: CallLLMOptions) {
 	const prompt = messages.map((m) => `${m.role}: ${m.content}`).join('\n')
 
 	switch (provider) {
+		case "openai": {
+			const response = await fetch('https://api.openai.com/v1/chat/completions', {
+				method: 'POST',
+				headers: {
+					Authorization: `Bearer ${process.env.OPENAI_API_KEY}`,
+					'Content-Type': 'application/json',
+				},
+				body: JSON.stringify({
+					model: model,
+					messages: messages
+				}),
+			});
+
+			const json = await response.json();
+			return json.choices?.[0]?.message?.content ?? '[No response]';
+		}
 		case 'huggingface': {
-			const modelId = huggingFaceModels[model as HuggingFaceModel]
-			if (!modelId) throw new Error(`Unknown HF model: ${model}`)
+			const modelId = huggingFaceModels[model as HuggingFaceModel];
+			if (!modelId) throw new Error(`Unknown HF model: ${model}`);
+
+			console.log(`Calling Hugging Face model: ${modelId}`)
+			const prompt = messages.map((m) => `${m.role}: ${m.content}`).join('\n');
+
+			const body = JSON.stringify({
+				inputs: prompt,
+				parameters: {
+					max_new_tokens: 100,
+					temperature: 0.7,
+				},
+			})
+			console.log(`Request body: ${body}`)
 
 			const res = await fetch(`https://api-inference.huggingface.co/models/${modelId}`, {
 				method: 'POST',
 				headers: {
-					Authorization: `Bearer ${process.env.HF_API_KEY}`,
+					Authorization: `Bearer ${process.env.HF_TOKEN!}`,
 					'Content-Type': 'application/json',
 				},
-				body: JSON.stringify({ inputs: prompt }),
-			})
-			return res.json()
+				body,
+			});
+
+			return res.json();
 		}
 
 		case 'google': {

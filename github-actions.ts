@@ -70,6 +70,25 @@ app.webhooks.on('issue_comment.created', async ({ octokit, payload }) => {
 	await agent.run(); // ⬅️ This handles: check repo, create from template, write files, commit, push
 });
 
+app.webhooks.on("pull_request.opened", async ({ octokit, payload }) => {
+	const repo = payload.repository;
+	const user = payload.sender.login;
+	const comment = payload.pull_request.body;
+
+	if (!comment) return;
+	if (!comment.includes("@agent codespaces")) return;
+	await octokit.request('POST /user/codespaces', {
+		devcontainer_path: '.devcontainer/devcontainer.json',
+		display_name: `Codespace for ${repo.name} by ${user}`,
+		repository_id: payload.repository.id,
+		ref: 'main',
+		geo: 'UsWest',
+		headers: {
+			'X-GitHub-Api-Version': '2022-11-28'
+		}
+	})
+});
+
 app.webhooks.onError((error) => {
 	if (error.name === "AggregateError") {
 		console.error(`Error processing request: ${error.event}`);

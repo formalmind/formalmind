@@ -1,6 +1,7 @@
 import { PROMPTS } from "@/github-actions";
 import { VerificationAgent } from "@/packages/agentkit/base-agent";
-import { buildFileDiffs, extractJsonCodeBlock } from "./helpers";
+import { buildFileDiffs } from "./helpers";
+import { redis } from "@/lib/redis"
 
 /* NOTE: Implement the handleCheckPushEvent function
  * Handles push events to check for new commits and trigger the verification agent.
@@ -36,7 +37,13 @@ export async function handlePushEvent({ octokit, payload }: any) {
 
 	console.log(`🧠 Push Reviewer Agent response: ${agentOutput}`);
 
-	await handleDetailedPushReview(octokit, owner, repo, commitSha, agentOutput);
+	await handleDetailedPushReview(octokit, owner, repo, commitSha, agentOutput, payload);
+
+	await redis.lpush(`events:${payload.installation?.id}`, JSON.stringify({
+		type: "push", // like 'push' or 'pull_request'
+		data: payload,
+		receivedAt: Date.now(),
+	}))
 }
 
 
@@ -55,7 +62,8 @@ export async function handleDetailedPushReview(
 	owner: string,
 	repo: string,
 	commitSha: string,
-	agentOutput: string
+	agentOutput: string,
+	payload?: any
 ) {
 	const jsonMatch = agentOutput.match(/```json\n([\s\S]*?)\n```/);
 
@@ -92,8 +100,15 @@ export async function handleDetailedPushReview(
 			});
 
 			console.log(`✅ Commented on ${comment.file} at position ${comment.position}`);
+
+			await redis.lpush(`events:${payload.installation?.id}`, JSON.stringify({
+				type: "review_comment",
+				data: payload,
+				receivedAt: Date.now(),
+			}))
 		} catch (err) {
 			console.error(`Failed to comment on ${comment.file} at position ${comment.position}`, err);
 		}
+
 	}
 }

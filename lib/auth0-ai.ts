@@ -5,7 +5,7 @@ const auth0AI = new Auth0AI();
 
 export const withGitHub = auth0AI.withTokenForConnection({
 	connection: "github",
-	scopes: ["repo"],
+	scopes: ["repo codespace"],
 	refreshToken: async () => {
 		const session = await auth0.getSession();
 		const refreshToken = session?.tokenSet.refreshToken as string;

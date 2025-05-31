@@ -36,7 +36,7 @@ export default function OwnerRepoPage() {
 				className="mt-4"
 				onClick={async () => { await initAgent().then(console.log) }}
 			>
-				Get Commit History
+				Clone Repo in Browser History
 			</Button>
 		</div>
 	)

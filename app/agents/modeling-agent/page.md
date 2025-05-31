@@ -107,8 +107,8 @@ Given the `transfer` function, the Lean IR should look like this:
   "unprovenTheorems": [
     "transferPreservesInvariant"
   ],
-  "sourceHash": "<sourceCodeOrPRHashHere>",
-  "PR": <pullRequestNumber>
+  "sourceHash": "https://github.com/mmsaki/testing-agent/pull/34/commits/31cd78081ef8643beef4ca92585645bb7589e33a",
+  "PR": "https://github.com/mmsaki/testing-agent/pull/34"
 }
 ````
 
