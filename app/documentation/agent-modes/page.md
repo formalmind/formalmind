@@ -1,23 +1,15 @@
-# 🧠 Agent Modes & Exploration Paths
-
-Your Formal Mind agent isn’t just a code reviewer. It’s a **mathematical explorer**, trained to walk your repo, detect structure, and verify it with precision.
-
-Here are some exploration modes we’re building — or you can summon them early if you're brave:
-
----
-
-## 🧪 Agent Exploration Modes
+# 🧪 Agent Exploration Modes
 
 | Mode Name | Description |
 |----------|-------------|
-| **Push Review Mode** | Reacts to every push on `main`, offering feedback, specs, and goals |
-| **PR Modeling Mode** | Reads your pull request diff and responds with Lean IR and invariants |
-| **@agent verify** | Triggers the verification workflow and builds a Lean repo from a template |
-| **Nested Logic Exploration** | Handles modular or deeply nested logic like `src/utils/math/graph.ts` |
-| **HK Exploration Mode** | (*Historical Knowledge*) Walks through your repo’s Git history, building symbolic understanding step by step |
+| **@agent verify** ✅ | Triggers the verification workflow and builds a Lean repo from a template |
+| **Agent Summon Tags** *(soon)* | Use `@agent model`, or `@agent explain` to direct intent |
+| **Push Review Mode** ✅ | Reacts to every push on `main`, offering feedback, specs, and goals |
+| **PR Modeling Mode** ✅ | Reads your pull request diff and responds with Lean IR and invariants |
+| **HK Exploration Mode (planned)** | (*Historical Knowledge*) Walks through your repo’s Git history, building symbolic understanding step by step |
+| **Nested Logic Exploration (planned)** | Handles modular or deeply nested logic like `src/utils/math/graph.ts` |
 | **Timewalk Debugging** *(planned)* | Trace how proofs change over time, diffing spec vs. implementation |
 | **Spec Composer** *(planned)* | Allows you to write higher-level specs and maps them to code blocks |
-| **Agent Summon Tags** *(soon)* | Use `@agent model`, `@agent verify`, or `@agent explain` to direct intent |
 
 ---
 
