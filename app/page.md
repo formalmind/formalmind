@@ -24,4 +24,4 @@ _This grants the app permission to access the repositories where you'd like to e
 
 ---
 
-Need help? [Contact support](mailto:meek10k@gmail.com)
+Need help? [Contact support](mailto:meek10x@gmail.com)
