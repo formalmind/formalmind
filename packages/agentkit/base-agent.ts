@@ -1,3 +1,4 @@
+import { PROMPTS } from '@/github-actions';
 import fs from 'fs/promises';
 import path from 'path';
 
@@ -59,7 +60,7 @@ export abstract class BaseAgent {
 }
 
 export class VerificationAgent extends BaseAgent {
-	constructor(promptFile: string = 'prompts/verification-agent.md') {
+	constructor(promptFile: string = PROMPTS.verification) {
 		super(promptFile, 'gpt-4o');
 	}
 
