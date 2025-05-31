@@ -7,7 +7,9 @@ export function useMDXComponents(components: MDXComponents): MDXComponents {
 		h1: ({ children }) => <h1 className="text-xl font-bold mt-8 mb-4">{children}</h1>,
 		h2: ({ children }) => <h2 className="text-lg font-semibold mt-6 mb-3">{children}</h2>,
 		h3: ({ children }) => <h3 className="text-md font-medium mt-4 mb-2">{children}</h3>,
-		p: ({ children }) => <p className="tx-sm mb-4">{children}</p>,
+		p: ({ children }) => <p className="text-sm mb-2">{children}</p>,
+		li: ({ children }) => <li className="text-sm mb-4">{children}</li>,
+		ol: ({ children }) => <ol className="text-sm mb-4">{children}</ol>,
 		code: ({ children }) => (
 			<code className="">
 				{children}

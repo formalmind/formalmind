@@ -7,7 +7,7 @@ import { Input } from "@/components/ui/input"
 import { Card, CardContent, CardFooter, CardHeader, CardTitle } from "@/components/ui/card"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
-import { Send, Bot, User, Download, Trash2 } from "lucide-react"
+import { Send, Bot, User, Download, Trash2, MessageCircleDashed } from "lucide-react"
 import { useEffect, useRef } from "react"
 import { useAuth } from "./auth-context";
 import { useChatWithInterruptions } from "@/hooks/useChatWithInterruptions";
@@ -86,13 +86,13 @@ export function ChatPage() {
 		URL.revokeObjectURL(url)
 	}
 	return (
-		<div className="flex flex-1 flex-col min-h-0">
-			<Card className="flex flex-1 flex-col min-h-0">
+		<div className="flex flex-1 flex-col min-h-0 overflow-hidden">
+			<Card className="flex flex-1 flex-col overflow-hidden">
 				<CardHeader className="border-b">
 					<div className="flex items-center justify-between">
 						<CardTitle className="flex items-center gap-2 text-xl">
-							<Bot className="h-6 w-6 text-blue-600" />
-							AI Chat Assistant
+							<MessageCircleDashed className="h-6 w-6 text-blue-600" />
+							Chat Assistant
 						</CardTitle>
 						<div className="flex gap-2">
 							<Button
@@ -120,11 +120,11 @@ export function ChatPage() {
 				</CardHeader>
 
 				<CardContent className="flex flex-col flex-1 overflow-hidden p-0 min-h-0">
-					<ScrollArea className="flex flex-col flex-1 p-4 overflow-y-auto" ref={scrollAreaRef}>
+					<ScrollArea className="flex flex-1 flex-col p-4 overflow-y-auto">
 						<div className="flex flex-col flex-1 min-h-0 space-y-4 max-h-none">
 							{messages.length === 0 && (
 								<div className="flex flex-col flex-1 min-h-0 text-center text-gray-500 mt-8">
-									<Bot className="h-12 w-12 mx-auto mb-4 text-gray-400" />
+									<MessageCircleDashed className="h-12 w-12 mx-auto mb-4 text-gray-400" />
 									<p className="text-lg font-medium">Welcome to AI Chat!</p>
 									<p className="text-sm">Start a conversation by typing a message below.</p>
 								</div>
@@ -144,10 +144,10 @@ export function ChatPage() {
 									)}
 
 									<div
-										className={`max-w-[70%] rounded-lg px-4 py-2 ${message.role === "user" ? "bg-blue-600 text-white" : "bg-gray-100 text-gray-900"
+										className={`max-w-[70%] rounded-lg px-4 ${message.role === "user" ? "bg-blue-600 text-white" : "bg-gray-100 text-gray-900"
 											}`}
 									>
-										<p className="text-sm whitespace-pre-wrap">{message.content}</p>
+										<p className="text-sm">{message.content}</p>
 									</div>
 
 									{message.role === "user" && (

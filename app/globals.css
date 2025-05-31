@@ -71,7 +71,9 @@
 
     --sidebar-border: 220 13% 91%;
 
-    --sidebar-ring: 217.2 91.2% 59.8% --callout-note-color-light: pink;
+    --sidebar-ring: 217.2 91.2% 59.8%;
+
+    --callout-note-color-light: pink;
 
     --callout-tip-color-light: rgb(255, 192, 203);
   }
@@ -151,8 +153,11 @@
 
 
 @layer base {
-  * {
-    @apply border-border;
+
+  *,
+  ::before,
+  ::after {
+    box-sizing: border-box;
   }
 
   body {

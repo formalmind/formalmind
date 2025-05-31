@@ -4,9 +4,9 @@ import * as React from "react"
 import {
 	BookOpen,
 	Bot,
-	Frame,
 	LifeBuoy,
 	Send,
+	MessageCircleDashed,
 	Settings2,
 	SquareTerminal,
 } from "lucide-react"
@@ -29,26 +29,6 @@ import Link from "next/link"
 
 const data = {
 	navMain: [
-		{
-			title: "Github",
-			url: "/github",
-			icon: SquareTerminal,
-			isActive: true,
-			items: [
-				{
-					title: "Playgorund",
-					url: "/github/playground",
-				},
-				{
-					title: "Webhooks",
-					url: "/github/webhooks",
-				},
-				{
-					title: "Settings",
-					url: "/github/settings",
-				},
-			],
-		},
 		{
 			title: "Agents",
 			url: "",
@@ -84,6 +64,12 @@ const data = {
 					url: "/agents/verification-agent",
 				},
 			],
+		},
+		{
+			title: "Github",
+			url: "/github",
+			icon: SquareTerminal,
+			isActive: true,
 		},
 		{
 			title: "Documentation",
@@ -151,9 +137,9 @@ const data = {
 	],
 	projects: [
 		{
-			name: "Agent Design",
-			url: "#",
-			icon: Frame,
+			name: "Chat",
+			url: "/chat",
+			icon: MessageCircleDashed,
 		},
 	],
 }
