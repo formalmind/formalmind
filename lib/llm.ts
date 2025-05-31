@@ -1,4 +1,3 @@
-import { Groq } from 'groq-sdk';
 import { GoogleGenAI } from "@google/genai";
 import { generateText } from "ai"
 import { createOpenAICompatible } from "@ai-sdk/openai-compatible"
@@ -150,22 +149,23 @@ export async function callLLM({ provider, model, messages }: CallLLMOptions) {
 		}
 
 		case 'groq': {
-			const groq = new Groq({ apiKey: process.env.GROQ_API_KEY });
 			const modelId = groqModels[model as GroqModel]
 			if (!modelId) throw new Error(`Unknown Grok model: ${model}`)
+			const body = JSON.stringify({
+				model: modelId,
+				messages,
+			})
+			const res = await fetch(`https://api.groq.com/openai/v1/chat/completions`, {
+				method: 'POST',
+				headers: {
+					Authorization: `Bearer ${process.env.GROQ_API_KEY}`,
+					'Content-Type': 'application/json',
+				},
+				body: body
+			})
+			const data = await res.json()
 
-			async function getGroqChatCompletion() {
-				return groq.chat.completions.create({
-					messages: [
-						{
-							role: "user",
-							content: "Explain the importance of fast language models",
-						},
-					],
-					model: "llama-3.3-70b-versatile",
-				});
-			}
-			return await getGroqChatCompletion();
+			return data.choices[0].message.content || data.choices[0].text || data.choices[0].message.text || '[No response]';
 		}
 
 		default:
