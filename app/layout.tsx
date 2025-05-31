@@ -75,7 +75,7 @@ export default async function RootLayout({
 								</header>
 								<div className="flex flex-1 flex-col min-h-0 gap-4 p-4 pt-0 text-sm">
 
-									<article className="px-8 markdown prose max-w-full">
+									<article className="px-1 markdown prose max-w-full">
 										{children}
 									</article>
 								</div>
