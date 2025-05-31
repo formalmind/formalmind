@@ -1,21 +1,34 @@
+import { createDataStreamResponse, streamText } from "ai";
+import { setAIContext } from "@auth0/ai-vercel";
+import { errorSerializer, withInterruptions } from "@auth0/ai-vercel/interrupts";
 import { openai } from "@ai-sdk/openai";
-import { streamText } from "ai";
+import { listRepositories } from "@/lib/tools/list-repositories";
 
-export const maxDuration = 30;
+export async function POST(request: Request) {
+	const { id, messages } = await request.json();
+	const tools = { listRepositories };
+	setAIContext({ threadID: id });
 
-export async function POST(req: Request) {
-	const { messages } = await req.json();
+	return createDataStreamResponse({
+		execute: withInterruptions(
+			async (dataStream) => {
+				const result = streamText({
+					model: openai("gpt-4o-mini"),
+					system: "You are a friendly assistant! Keep your responses concise and helpful.",
+					messages,
+					maxSteps: 5,
+					tools,
+				});
 
-	const result = streamText({
-		model: openai("gpt-4o-mini"),
-		maxSteps: 0,
-		tools: {},
-		messages,
-		system: "You are an AI agent for tool calling with Auth0 and can fetch Github repositories.",
-		onError({ error }) {
-			console.error('streamText error', { error });
-		},
+				result.mergeIntoDataStream(dataStream, {
+					sendReasoning: true,
+				});
+			},
+			{ messages, tools }
+		),
+		onError: errorSerializer((err) => {
+			console.log(err);
+			return "Oops, an error occured!";
+		}),
 	});
-
-	return result.toDataStreamResponse();
 }

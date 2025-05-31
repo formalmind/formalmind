@@ -2,23 +2,22 @@
 
 First, clone this repo and run
 
-```bash
+```sh
 bun install
 ```
 
-## Setup
+Project stack:
 
-> [!TIP]
->
-> ### Follow link below to setup Auth0 authentication
->
-> Dependencies `npm i @auth0/nextjs-auth0`
->
-> - [ ] [User authentication](https://auth0.com/ai/docs/user-authentication)
+- Github app - wehooks /api/github/webhook
+- Auth0 - Gen AI auth
+- Redis - real time event
+- LLMs
+
+## Setup
 
 1. Copy .env file to `.env.local` and add environment variables
 
-   ```bash
+   ```sh
    cp example.env.local .env.local
    ```
 
@@ -52,8 +51,25 @@ bun install
    REDIS_URL=redis://localhost:6379
    ```
 
+> [!TIP]
+>
+> ### Auth0 setup authentication
+>
+> Dependencies `npm i @auth0/nextjs-auth0`
+>
+> - [ ] [User authentication](https://auth0.com/ai/docs/user-authentication)
+
 3. Run the development server:
 
-   ```bash
+   ```sh
    bun dev
    ```
+
+## Using redis server for github events
+
+Run locally on docker:
+
+```sh
+docker compose up -d
+```
+

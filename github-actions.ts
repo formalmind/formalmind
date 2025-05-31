@@ -2,12 +2,26 @@ import dotenv from "dotenv";
 import { App } from "octokit";
 import { createNodeMiddleware } from "@octokit/webhooks";
 import http from "http";
+import { handlePushEvent } from "./tools/handle-push";
+import { handlePullRequestOpened } from "./tools/handle-pull-request";
+import { extractJsonCodeBlock, extractLeanCodeBlock } from "./tools/helpers";
+import { TemplateRepoWriterAgent } from "./tools/repo-writer";
 
 dotenv.config();
 
 const appId = process.env.GITHUB_APP_ID!;
 const webhookSecret = process.env.GITHUB_WEBHOOK_SECRET!;
 const privateKey = process.env.GITHUB_APP_PRIVATE_KEY!.replace(/\\n/g, "\n");
+
+export const PROMPTS = {
+	modeling: 'prompts/modeling-agent.md',
+	verification: 'prompts/verification-agent.md',
+	testing: 'prompts/testing-agent.md',
+	testingV1: 'prompts/testing-agent-v1.md',
+	pushReviewer: 'prompts/push-reviewer-agent.md',
+	prReviewer: 'prompts/pr-reviewer-agent.md',
+	reconsilingAgent: 'prompts/reconsiling-agent.md',
+};
 
 const app = new App({
 	appId: appId,
@@ -17,68 +31,45 @@ const app = new App({
 	},
 });
 
-const messageForNewPRs = "Thanks for opening a new PR! Please follow our contributing guidelines to make your PR easier to review.";
-// const messageForNewPRs = `Thanks for opening a new PR! Please follow our contributing guidelines to make your PR easier to review.
-//
-// Want me to add a proof for the new function you added?
-//
-// \`\`\`py
-// def prove_this(name: str):
-//   if name == "agent":
-//     return true
-//   else:
-//     return false
-// \`\`\`
-//
-// ### Suggestion
-//
-// We need to add the types to you function first to this
-//
-// - Add return type
-//
-// \`\`\`py
-//
-// def prove_this(name: str) -> bool:
-//   if name == "agent":
-//     return true
-//   else:
-//     return false
-// \`\`\`
-//
-// @mmsaki Do you want me to add function description to help the formal agent have context about what this function does?
-//
-// Here's what I can help with:
-//
-// - [ ] Add desctiption
-// - [ ] Add function signature
-// - [ ] Create formal proof scaffolds
-// `;
-//
-
-async function handlePullRequestOpened({ octokit, payload }: any) {
-	console.log(`Received a pull request event for #${payload.pull_request.number}`);
-
-	try {
-		await octokit.request("POST /repos/{owner}/{repo}/issues/{issue_number}/comments", {
-			owner: payload.repository.owner.login,
-			repo: payload.repository.name,
-			issue_number: payload.pull_request.number,
-			body: messageForNewPRs,
-			headers: {
-				"x-github-api-version": "2022-11-28",
-			},
-		});
-	} catch (error: any) {
-		if (error.response) {
-			console.error(`Error! Status: ${error.response.status}. Message: ${error.response.data.message}`)
-		}
-		console.error(error)
-	}
-};
 
 app.webhooks.on("pull_request.opened", handlePullRequestOpened);
+app.webhooks.on("push", handlePushEvent);
+app.webhooks.on('issue_comment.created', async ({ octokit, payload }) => {
+	const comment = payload.comment.body;
+	const repo = payload.repository.name;
+	const owner = payload.repository.owner.login;
 
-// This logs any errors that occur.
+	// Only handle `@agent export` directives
+	if (!comment.includes('@agent export')) return;
+
+	// Extract Lean + JSON
+	const lean = extractLeanCodeBlock(comment);
+	const json = extractJsonCodeBlock(comment);
+
+	if (!lean && !json) {
+		console.warn("❌ No Lean or JSON code found in comment.");
+		return;
+	}
+
+	// Determine repo name and user who sent the comment
+	const sender = payload.sender.login;
+	const targetRepo = `modeling-${repo}-${sender}`
+
+	// Create + run the TemplateRepoWriterAgent
+	const agent = new TemplateRepoWriterAgent({
+		octokit,
+		targetOwner: sender, // ⬅️ this user must have your GitHub App installed!
+		targetRepo,
+		commentBody: comment,
+		meta: {
+			commitSha: payload.comment.node_id, // optional
+			pullNumber: payload.issue?.number,
+		}
+	});
+
+	await agent.run(); // ⬅️ This handles: check repo, create from template, write files, commit, push
+});
+
 app.webhooks.onError((error) => {
 	if (error.name === "AggregateError") {
 		console.error(`Error processing request: ${error.event}`);
@@ -96,5 +87,5 @@ const middleware = createNodeMiddleware(app.webhooks, { path });
 
 http.createServer(middleware).listen(port, () => {
 	console.log(`Server is listening for events at: ${localWebhookUrl}`);
-	console.log('Press Ctrl + C to quit.')
+	console.log('Press Ctrl + C to quit.');
 });

@@ -27,45 +27,54 @@ import { NavMain } from "@/components/nav-main"
 import { NavProjects } from "@/components/nav-projects"
 import { NavSecondary } from "@/components/nav-secondary"
 import { NavUser } from "@/components/nav-user"
+import Link from "next/link"
 
 const data = {
 	navMain: [
 		{
-			title: "Playground",
-			url: "#",
+			title: "Github",
+			url: "/github",
 			icon: SquareTerminal,
 			isActive: true,
 			items: [
 				{
-					title: "History",
-					url: "#",
+					title: "Playgorund",
+					url: "/github/playground",
 				},
 				{
-					title: "Starred",
-					url: "#",
+					title: "Webhooks",
+					url: "/github/webhooks",
 				},
 				{
 					title: "Settings",
-					url: "#",
+					url: "/github/settings",
 				},
 			],
 		},
 		{
-			title: "Models",
-			url: "#",
+			title: "Agents",
+			url: "",
 			icon: Bot,
 			items: [
 				{
-					title: "Genesis",
-					url: "#",
+					title: "Listener Agent",
+					url: "/agents/listener",
 				},
 				{
-					title: "Explorer",
-					url: "#",
+					title: "Lean Spec Agent",
+					url: "/agents/lean-spec",
 				},
 				{
-					title: "Quantum",
-					url: "#",
+					title: "Planning Agent",
+					url: "/agents/planner",
+				},
+				{
+					title: "Verification Agent",
+					url: "/agents/verification",
+				},
+				{
+					title: "Implementation Agent",
+					url: "/agents/implementation",
 				},
 			],
 		},
@@ -130,7 +139,7 @@ const data = {
 	],
 	projects: [
 		{
-			name: "Design Engineering",
+			name: "Agent Design",
 			url: "#",
 			icon: Frame,
 		},
@@ -154,7 +163,7 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
 				<SidebarMenu>
 					<SidebarMenuItem>
 						<SidebarMenuButton size="lg" asChild>
-							<a href="#">
+							<Link href="/">
 								<div className="flex aspect-square size-8 items-center justify-center rounded-lg bg-sidebar-primary text-sidebar-primary-foreground">
 									<Image
 										className="block dark:hidden"
@@ -175,7 +184,7 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
 									<span className="truncate font-semibold">Formal Mind AI</span>
 									<span className="truncate text-xs">Enterprise</span>
 								</div>
-							</a>
+							</Link>
 						</SidebarMenuButton>
 					</SidebarMenuItem>
 				</SidebarMenu>
