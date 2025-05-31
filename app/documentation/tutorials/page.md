@@ -46,8 +46,31 @@ These tutorials walk you through real workflows using the Formal Mind Agent. Sta
 
 ---
 
-### [6. Edge Case Exploration (Coming Soon)]
-> 🚧 This mission explores property-based tests and lean tactics for boundary conditions.
+### 🧠 Bonus Challenge: HK's Exploration Tutorial (Coming Soon)
+
+Want to go deeper?
+
+Soon you'll be able to walk through your repo's entire **Git history** — from the **first commit** to the **latest** — and let the agent model how your logic evolved over time. Each step becomes a checkpoint for symbolic modeling and proof.
+
+Think of it as formal archaeology 🏺✨
+
+> \[!INFO]
+> You’ll explore your project's evolution **one commit at a time**, letting the agent extract models, refactor specs, and verify step-wise correctness.
+
+#### Coming Soon:
+
+* 🧬 Diff-based modeling for each commit
+* 🧠 Proof state tracking through Git history
+* 🕵🏽‍♂️ Symbol lineage across refactors
+* 🔍 GitHub visualizer for commit → theorem mapping
+
+---
+
+Want early access? [Email us](mailto:formalmindai@gmail.com) or [star the project](https://github.com/formalmind/formalmind) to get notified. 🌟
+
+---
+
+Let me know if you want to actually scaffold a new `/tutorials/history-walk/page.md` preview tutorial too — happy to lay that groundwork!
 
 ---
 

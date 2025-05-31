@@ -97,15 +97,19 @@ const data = {
 				},
 				{
 					title: "Get Started",
-					url: "#",
+					url: "/documentation/get-started",
 				},
 				{
 					title: "Tutorials",
-					url: "#",
+					url: "/documentation/tutorials",
+				},
+				{
+					title: "Agent Modes",
+					url: "/documentation/agent-modes",
 				},
 				{
 					title: "Changelog",
-					url: "#",
+					url: "/documentation/changelog",
 				},
 			],
 		},
