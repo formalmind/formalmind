@@ -49,6 +49,7 @@
     "get-value": "^4.0.1",
     "github-markdown-css": "^5.8.1",
     "googleapis": "^149.0.0",
+    "groq-sdk": "^0.23.0",
     "ioredis": "^5.6.1",
     "isomorphic-git": "^1.30.2",
     "lucide-react": "^0.511.0",
