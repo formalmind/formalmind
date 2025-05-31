@@ -6,7 +6,7 @@ These tutorials walk you through real workflows using the Formal Mind Agent. Sta
 
 ## 🧠 Available Tutorials
 
-### [1. Push-Based Suggestions](/tutorials/push-review)
+### [1. Push-Based Suggestions](/documentation/tutorials/push-review)
 > 🧾 Learn how the Push Reviewer Agent responds to code changes.
 - Create a new function in `main.ts`
 - Push to `main` or `dev`
@@ -14,7 +14,7 @@ These tutorials walk you through real workflows using the Formal Mind Agent. Sta
 
 ---
 
-### [2. Modeling with Pull Requests](/tutorials/pr-modeling)
+### [2. Modeling with Pull Requests](/documentation/tutorials/pr-modeling)
 > 🧠 Introduce new logic and see how the Modeling Agent responds.
 - Create a new branch
 - Add a stateful module (e.g. counter, registry, etc.)
@@ -22,7 +22,7 @@ These tutorials walk you through real workflows using the Formal Mind Agent. Sta
 
 ---
 
-### [3. Formal Verification Trigger](/tutorials/formal-verification)
+### [3. Formal Verification Trigger](/documentation/tutorials/formal-verification)
 > ✍🏽 Trigger Lean repo generation with `@agent verify`.
 - Reply to the modeling comment with `@agent verify`
 - Inspect the generated Lean repo
@@ -30,7 +30,7 @@ These tutorials walk you through real workflows using the Formal Mind Agent. Sta
 
 ---
 
-### [4. Updating Specs Across Commits](/tutorials/incremental-specs)
+### [4. Updating Specs Across Commits](/documentation/tutorials/incremental-specs)
 > 🔁 Test how the agent tracks changes and expands your spec.
 - Add new functions to existing modules
 - See if the verification repo is updated with new spec stubs
@@ -38,7 +38,7 @@ These tutorials walk you through real workflows using the Formal Mind Agent. Sta
 
 ---
 
-### [5. Nested Logic & Compositional Reasoning](/tutorials/nested-logic)
+### [5. Nested Logic & Compositional Reasoning](/documentation/tutorials/nested-logic)
 > 🧩 Create a library with deep nesting, and model its behavior.
 - Add logic to `src/utils/math/graph.ts`
 - Open a PR and tag `@agent verify`
