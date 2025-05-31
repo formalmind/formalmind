@@ -88,6 +88,24 @@ const data = {
 				{
 					title: "Tutorials",
 					url: "/documentation/tutorials",
+					items: [
+						{
+							title: "formal-verification",
+							url: "/documentation/tutorials/formal-verification",
+						},
+						{
+							title: "nested-logic",
+							url: "/documentation/tutorials/nested-logic",
+						},
+						{
+							title: "pr-modeling",
+							url: "/documentation/tutorials/pr-modeling",
+						},
+						{
+							title: "push-review",
+							url: "/documentation/tutorials/push-review",
+						},
+					],
 				},
 				{
 					title: "Agent Modes",
