@@ -31,7 +31,7 @@ const data = {
 	navMain: [
 		{
 			title: "Agents",
-			url: "",
+			url: "/agents",
 			icon: Bot,
 			isActive: true,
 			items: [

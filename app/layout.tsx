@@ -68,13 +68,10 @@ export default async function RootLayout({
 									<div className="flex items-center gap-2 px-4">
 										<SidebarTrigger className="-ml-1" />
 										<Separator orientation="vertical" className="mr-2 h-4" />
-
 										<BreadCrumbs />
-
 									</div>
 								</header>
 								<div className="flex flex-1 flex-col min-h-0 gap-4 p-4 pt-0 text-sm">
-
 									<article className="px-1 markdown prose max-w-full">
 										{children}
 									</article>

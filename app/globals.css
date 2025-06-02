@@ -2,6 +2,7 @@
 @tailwind components;
 @tailwind utilities;
 @import 'rehype-callouts/theme/github';
+@plugin "@tailwindcss/typography";
 
 
 @layer base {
@@ -162,23 +163,5 @@
 
   body {
     @apply bg-background text-foreground;
-  }
-
-  pre.highlight {
-    overflow-x: auto;
-    max-width: 100%;
-  }
-
-  pre {
-    overflow-x: auto;
-    white-space: pre;
-    word-wrap: normal;
-    max-width: 100%;
-    padding: 1rem;
-    border-radius: 0.5rem;
-  }
-
-  code {
-    word-break: break-word;
   }
 }

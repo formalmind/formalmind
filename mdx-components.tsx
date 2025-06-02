@@ -1,6 +1,7 @@
 import type { MDXComponents } from 'mdx/types';
 import Image, { ImageProps } from 'next/image';
 import Link from 'next/link';
+import YouTubeVideo from '@/components/youtube-video';
 
 export function useMDXComponents(components: MDXComponents): MDXComponents {
 	return {
@@ -15,8 +16,9 @@ export function useMDXComponents(components: MDXComponents): MDXComponents {
 				{children}
 			</code>
 		),
+		hr: ({ children }) => <><hr className='text-blue-300' />{children}</>,
 		pre: ({ children }) => (
-			<pre className="overflow-x-auto max-w-full dark:bg-gray-900">
+			<pre className="overflow-x-auto max-w-full">
 				{children}
 			</pre>
 		),
@@ -32,6 +34,7 @@ export function useMDXComponents(components: MDXComponents): MDXComponents {
 				{...(props as ImageProps)}
 			/>
 		),
+		YouTubeVideo,
 		...components,
 	};
 }
