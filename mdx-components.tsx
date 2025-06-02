@@ -16,7 +16,6 @@ export function useMDXComponents(components: MDXComponents): MDXComponents {
 				{children}
 			</code>
 		),
-		hr: ({ children }) => <><hr className='text-blue-300' />{children}</>,
 		pre: ({ children }) => (
 			<pre className="overflow-x-auto max-w-full">
 				{children}
