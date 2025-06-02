@@ -30,6 +30,12 @@ import Link from "next/link"
 const data = {
 	navMain: [
 		{
+			title: "Github",
+			url: "/github",
+			icon: SquareTerminal,
+			isActive: true,
+		},
+		{
 			title: "Agents",
 			url: "/agents",
 			icon: Bot,
@@ -64,12 +70,6 @@ const data = {
 					url: "/agents/verification-agent",
 				},
 			],
-		},
-		{
-			title: "Github",
-			url: "/github",
-			icon: SquareTerminal,
-			isActive: true,
 		},
 		{
 			title: "Documentation",
