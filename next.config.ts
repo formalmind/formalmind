@@ -8,7 +8,10 @@ import remarkDirective from 'remark-directive'
 const nextConfig: NextConfig = {
 	/* config options here */
 	pageExtensions: ['js', 'jsx', 'md', 'mdx', 'ts', 'tsx'],
-	experimental: {}
+	experimental: {},
+	images: {
+		domains: ['avatars.githubusercontent.com', 'github.com', 'www.youtube.com'],
+	},
 };
 
 import createMDX from '@next/mdx'
