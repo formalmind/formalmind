@@ -11,7 +11,6 @@ import { Send, Bot, User, Download, Trash2, MessageCircleDashed } from "lucide-r
 import { useEffect, useRef } from "react"
 import { useChatWithInterruptions } from "@/hooks/useChatWithInterruptions";
 import { useAuth } from "./auth-context";
-import Image from "next/image";
 import { useUser } from "@auth0/nextjs-auth0";
 import LoginPage from "./login";
 
@@ -22,36 +21,34 @@ export function ChatPage() {
 	const session = useAuth();
 	const user = useUser()
 
-	if (!user || !session) {
-		return <LoginPage />
-	}
 
 	// Load messages on component mount
+	// Load messages from localStorage only once, on mount
 	useEffect(() => {
-		const savedMessages = localStorage.getItem("chat-messages")
+		const savedMessages = localStorage.getItem("chat-messages");
 		if (savedMessages) {
 			try {
-				const parsedMessages = JSON.parse(savedMessages)
-				setMessages(parsedMessages)
+				const parsedMessages = JSON.parse(savedMessages);
+				setMessages(parsedMessages);
 			} catch (error) {
-				console.error("Failed to load saved messages:", error)
+				console.error("Failed to load saved messages:", error);
 			}
 		}
-	}, [setMessages])
+	}, [setMessages]);
 
-	// Save messages whenever they change
+	// Save messages to localStorage when messages change
 	useEffect(() => {
 		if (messages.length > 0) {
-			localStorage.setItem("chat-messages", JSON.stringify(messages))
+			localStorage.setItem("chat-messages", JSON.stringify(messages));
 		}
-	}, [messages])
+	}, [messages]);
 
-	// Auto-scroll to bottom when new messages arrive
+	// Scroll to bottom on new messages
 	useEffect(() => {
 		if (scrollAreaRef.current) {
-			scrollAreaRef.current.scrollTop = scrollAreaRef.current.scrollHeight
+			scrollAreaRef.current.scrollTop = scrollAreaRef.current.scrollHeight;
 		}
-	}, [messages])
+	}, [messages]);
 
 	// Auto-focus input when user starts typing
 	useEffect(() => {
@@ -92,6 +89,14 @@ export function ChatPage() {
 		a.click()
 		document.body.removeChild(a)
 		URL.revokeObjectURL(url)
+	}
+
+	if (!session) {
+		return <LoginPage />
+	}
+
+	if (!user) {
+		return <LoginPage />
 	}
 	return (
 		<div className="flex flex-1 flex-col min-h-0 overflow-hidden">

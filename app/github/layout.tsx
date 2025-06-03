@@ -12,7 +12,7 @@ export default async function Layout({
 		return <LoginPage />
 	}
 	return (
-		<AuthProvider session={session}>
+		<AuthProvider value={session}>
 			<div className="flex flex-1 flex-col min-h-0 prose">
 				{children}
 			</div>
