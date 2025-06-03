@@ -15,13 +15,13 @@ export const useAuth = () => {
 
 export const AuthProvider = ({
 	children,
-	session
+	value
 }: {
 	children: React.ReactNode
-	session: SessionData
+	value: SessionData;
 }) => {
 	return (
-		<AuthContext.Provider value={session}>
+		<AuthContext.Provider value={value}>
 			{children}
 		</AuthContext.Provider>
 	);

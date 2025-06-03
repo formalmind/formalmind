@@ -59,7 +59,7 @@ export default async function RootLayout({
 				suppressHydrationWarning
 				className={`${geistSans.variable} ${geistMono.variable} antialiased light`}
 			>
-				<AuthProvider session={session}>
+				<AuthProvider value={session}>
 					<SidebarProvider>
 						<AppSidebar />
 						<div className="flex-1 overflow-x-auto">

@@ -9,14 +9,22 @@ import { ScrollArea } from "@/components/ui/scroll-area"
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
 import { Send, Bot, User, Download, Trash2, MessageCircleDashed } from "lucide-react"
 import { useEffect, useRef } from "react"
-import { useAuth } from "./auth-context";
 import { useChatWithInterruptions } from "@/hooks/useChatWithInterruptions";
+import { useAuth } from "./auth-context";
+import Image from "next/image";
+import { useUser } from "@auth0/nextjs-auth0";
+import LoginPage from "./login";
 
 export function ChatPage() {
 	const { messages, input, handleInputChange, handleSubmit, isLoading, setMessages, toolInterrupt } = useChatWithInterruptions()
 	const scrollAreaRef = useRef<HTMLDivElement>(null)
-	const session = useAuth();
 	const inputRef = useRef<HTMLInputElement>(null)
+	const session = useAuth();
+	const user = useUser()
+
+	if (!user || !session) {
+		return <LoginPage />
+	}
 
 	// Load messages on component mount
 	useEffect(() => {
@@ -135,6 +143,7 @@ export function ChatPage() {
 									key={message.id}
 									className={`flex gap-3 ${message.role === "user" ? "justify-end" : "justify-start"}`}
 								>
+
 									{message.role === "assistant" && (
 										<Avatar className="h-8 w-8 bg-blue-100">
 											<AvatarFallback>
@@ -151,8 +160,9 @@ export function ChatPage() {
 									</div>
 
 									{message.role === "user" && (
+
 										<Avatar className="h-8 w-8">
-											<AvatarImage src={session?.user?.picture} alt={session?.user?.name || "User"} />
+											<AvatarImage src={session.user.picture} alt={session.user.name || "User"} />
 											<AvatarFallback>
 												{session.user?.name ?
 													session.user.name.charAt(0).toUpperCase()
