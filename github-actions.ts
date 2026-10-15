@@ -3,6 +3,7 @@ import { App } from "octokit";
 import { createNodeMiddleware } from "@octokit/webhooks";
 import http from "http";
 import { handlePushEvent } from "./tools/handle-push";
+import { handleProofsDispatch } from "./tools/handle-proofs-dispatch";
 import { handlePullRequestOpened } from "./tools/handle-pull-request";
 import { extractJsonCodeBlock, extractLeanCodeBlock } from "./tools/helpers";
 import { TemplateRepoWriterAgent } from "./tools/repo-writer";
@@ -34,6 +35,7 @@ const app = new App({
 
 app.webhooks.on("pull_request.opened", handlePullRequestOpened);
 app.webhooks.on("push", handlePushEvent);
+app.webhooks.on("push", handleProofsDispatch);
 app.webhooks.on('issue_comment.created', async ({ octokit, payload }) => {
 	const comment = payload.comment.body;
 	const repo = payload.repository.name;
