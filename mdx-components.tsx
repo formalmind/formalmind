@@ -1,7 +1,6 @@
 import type { MDXComponents } from 'mdx/types';
 import Image, { ImageProps } from 'next/image';
 import Link from 'next/link';
-import YouTubeVideo from '@/components/youtube-video';
 
 export function useMDXComponents(components: MDXComponents): MDXComponents {
 	return {
@@ -33,7 +32,6 @@ export function useMDXComponents(components: MDXComponents): MDXComponents {
 				{...(props as ImageProps)}
 			/>
 		),
-		YouTubeVideo,
 		...components,
 	};
 }

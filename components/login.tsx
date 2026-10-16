@@ -1,5 +1,6 @@
 import { GalleryVerticalEnd } from "lucide-react"
 import { LoginForm } from "@/components/login-form"
+import YouTubeVideo from "@/components/youtube-video"
 
 export default function LoginPage() {
 	return (
@@ -19,7 +20,10 @@ export default function LoginPage() {
 					</div>
 				</div>
 			</div>
-			<div className="relative hidden bg-muted lg:block">
+			<div className="relative hidden bg-muted lg:flex lg:items-center lg:justify-center lg:p-10">
+				<div className="w-full max-w-2xl overflow-hidden rounded-lg">
+					<YouTubeVideo videoId="H-neiYZJD5A" />
+				</div>
 			</div>
 		</div>
 	)
