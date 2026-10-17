@@ -86,8 +86,12 @@ export function Onboarding() {
 	const checkInstall = useCallback(async (repo: string | null) => {
 		if (!repo) return;
 		setInstall((s) => ({ ...s, checking: true }));
-		const body = await fetch(`/api/onboarding/install?repo=${encodeURIComponent(repo)}`).then((r) => r.json()).catch(() => ({ installed: false, error: "Couldn't check just now." }));
-		setInstall({ installed: Boolean(body.installed), checking: false, error: body.error });
+		// A check that fails just leaves the install option up; there is nothing for the visitor to fix.
+		const body = await fetch(`/api/onboarding/install?repo=${encodeURIComponent(repo)}`).then((r) => r.json()).catch(() => ({ installed: false }));
+		const installed = Boolean(body.installed);
+		setInstall({ installed, checking: false });
+		// Already installed: nothing to do on this step, so move on.
+		if (installed) setStep((current) => (current === "github" ? "start" : current));
 	}, []);
 
 	useEffect(() => {
@@ -170,7 +174,7 @@ export function Onboarding() {
 						</Panel>
 					) : step === "github" ? (
 						<Panel {...STEP_COPY.github}>
-							<GitHubCard repo={state.repo} installed={install.installed} checking={install.checking} error={install.error} onCheck={() => void checkInstall(state.repo)} />
+							<GitHubCard repo={state.repo} installed={install.installed} checking={install.checking} onCheck={() => void checkInstall(state.repo)} />
 							<Nav onBack={() => go(-1)} onNext={() => go(1)} />
 						</Panel>
 					) : (
