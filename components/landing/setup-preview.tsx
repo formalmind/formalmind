@@ -12,7 +12,6 @@ import {
 	STEP_COPY,
 	SetupSummary,
 	StepList,
-	StepNav,
 	TeamPicker,
 	type StepKey,
 } from "@/components/onboarding/steps";
@@ -39,32 +38,44 @@ export function SetupPreview({ repo, plan, done, failed, startHref }: { repo: st
 
 	return (
 		<div className="rounded-2xl border bg-card p-4 sm:p-6">
-			<StepList step={step} done={{ plan: done }} onSelect={setStep} horizontal />
+			{/* Steps and the way forward stay at the top, pinned while the step below scrolls. */}
+			<div className="sticky top-0 z-10 -mx-4 -mt-4 flex flex-wrap items-center gap-2 rounded-t-2xl border-b bg-card/95 px-4 py-3 backdrop-blur sm:-mx-6 sm:-mt-6 sm:px-6">
+				<div className="min-w-0 flex-1">
+					<StepList step={step} done={{ plan: done }} onSelect={setStep} horizontal />
+				</div>
+				<div className="flex shrink-0 gap-2">
+					{index > 0 ? (
+						<button type="button" onClick={() => go(-1)} className="h-9 rounded-full border px-4 text-sm hover:bg-muted">Back</button>
+					) : null}
+					{step === "start" ? (
+						<a href={startHref} className="inline-flex h-9 items-center gap-2 rounded-full bg-primary px-4 text-sm font-medium text-primary-foreground hover:opacity-90">
+							<Rocket className="size-4" /> Set up my swarm
+						</a>
+					) : (
+						<button type="button" onClick={() => go(1)} className="h-9 rounded-full bg-primary px-4 text-sm font-medium text-primary-foreground hover:opacity-90">Continue</button>
+					)}
+				</div>
+			</div>
 			<section className="mt-6 min-w-0">
 				{step === "plan" ? (
 					<Panel {...STEP_COPY.plan}>
 						<PlanBoard repo={repo} plan={plan} status={done ? "done" : "planning"} />
-						<StepNav onNext={() => go(1)} />
 					</Panel>
 				) : step === "team" ? (
 					<Panel {...STEP_COPY.team}>
 						<TeamPicker value={team} onChange={setTeam} plannerPick={plannerPick} squadSize={squadSize} onSquadSize={setSquadSize} />
-						<StepNav onBack={() => go(-1)} onNext={() => go(1)} />
 					</Panel>
 				) : step === "budget" ? (
 					<Panel {...STEP_COPY.budget}>
 						<BudgetCard dailyUsd={dailyUsd} onChange={setDailyUsd} />
-						<StepNav onBack={() => go(-1)} onNext={() => go(1)} />
 					</Panel>
 				) : step === "credits" ? (
 					<Panel {...STEP_COPY.credits}>
 						<CreditsCard cents={0} dailyUsd={dailyUsd} configured onDeposit={signUp} />
-						<StepNav onBack={() => go(-1)} onNext={() => go(1)} />
 					</Panel>
 				) : step === "github" ? (
 					<Panel {...STEP_COPY.github}>
 						<GitHubCard repo={repo} installed={false} checking={false} onCheck={signUp} />
-						<StepNav onBack={() => go(-1)} onNext={() => go(1)} />
 					</Panel>
 				) : (
 					<Panel {...STEP_COPY.start}>
@@ -78,9 +89,6 @@ export function SetupPreview({ repo, plan, done, failed, startHref }: { repo: st
 								{ label: "GitHub App", value: "not installed", ok: false },
 							]}
 						/>
-						<a href={startHref} className="mt-5 inline-flex h-10 items-center gap-2 rounded-full bg-primary px-5 text-sm font-medium text-primary-foreground hover:opacity-90">
-							<Rocket className="size-4" /> Set up my swarm
-						</a>
 					</Panel>
 				)}
 			</section>

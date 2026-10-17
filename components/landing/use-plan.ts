@@ -69,5 +69,13 @@ export function usePlan(onDone?: (draft: PlanDraft) => void) {
 		message ??= "The planner stopped early. Try again in a moment.";
 	}
 
-	return { repo, plan: object, start, stop, isLoading, error: message, done: Boolean(repo && object && !isLoading && !error) };
+	/** Back to no repository: stops a plan in flight and unlocks the repository box. */
+	const reset = () => {
+		stop();
+		setRepo(null);
+		repoRef.current = null;
+		setInputError(null);
+	};
+
+	return { repo, plan: object, start, stop, reset, isLoading, error: message, done: Boolean(repo && object && !isLoading && !error) };
 }

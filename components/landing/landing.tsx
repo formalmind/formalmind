@@ -4,7 +4,7 @@ import { Link } from "react-router";
 import { LogoMark } from "@/components/logo";
 import { MarkGithubIcon } from "@primer/octicons-react";
 import { useState } from "react";
-import { Loader2, Maximize2, Minimize2, Play, X } from "lucide-react";
+import { Loader2, Lock, Maximize2, Minimize2, Play, X } from "lucide-react";
 import { SwarmCanvas } from "@/components/swarm/swarm-canvas";
 import YouTubeVideo from "@/components/youtube-video";
 import { SetupPreview } from "./setup-preview";
@@ -19,7 +19,9 @@ const EXAMPLES = EXAMPLE_REPOS;
  */
 export function Landing({ signedIn }: { signedIn: boolean }) {
 	const [input, setInput] = useState("");
-	const { repo, plan, start, isLoading, error, done } = usePlan();
+	const { repo, plan, start, reset, isLoading, error, done } = usePlan();
+	// Once a repository is being planned the box locks, so the next step is the setup below; Change unlocks it.
+	const locked = Boolean(repo) && !(error && !plan);
 	// The intro starts as an icon, opens small, and can expand to most of the page.
 	const [video, setVideo] = useState<"icon" | "small" | "big">("icon");
 	const startHref = signedIn ? "/onboarding" : "/auth/login?screen_hint=signup&returnTo=%2Fonboarding";
@@ -54,28 +56,39 @@ export function Landing({ signedIn }: { signedIn: boolean }) {
 					<form
 						onSubmit={(e) => {
 							e.preventDefault();
+							if (locked) {
+								reset();
+								return;
+							}
 							run(input);
 						}}
-						className="mx-auto mt-8 flex max-w-xl items-center gap-2 rounded-full border bg-background p-1.5 pl-4 shadow-sm focus-within:ring-2 focus-within:ring-ring"
+						className={`mx-auto mt-8 flex max-w-xl items-center gap-2 rounded-full border p-1.5 pl-4 shadow-sm focus-within:ring-2 focus-within:ring-ring ${locked ? "bg-muted/60" : "bg-background"}`}
 					>
-						<MarkGithubIcon size={16} className="shrink-0 text-muted-foreground" />
+						{locked ? <Lock className="size-4 shrink-0 text-muted-foreground" aria-label="Locked" /> : <MarkGithubIcon size={16} className="shrink-0 text-muted-foreground" />}
 						<input
 							value={input}
 							onChange={(e) => setInput(e.target.value)}
+							readOnly={locked}
 							placeholder="github.com/owner/repo"
 							aria-label="GitHub repository"
-							className="min-w-0 flex-1 bg-transparent text-sm outline-none placeholder:text-muted-foreground"
+							className={`min-w-0 flex-1 bg-transparent text-sm outline-none placeholder:text-muted-foreground ${locked ? "cursor-default text-muted-foreground" : ""}`}
 						/>
-						<button type="submit" disabled={isLoading || !input.trim()} className="inline-flex h-9 items-center gap-1.5 rounded-full bg-primary px-4 text-sm font-medium text-primary-foreground transition-opacity hover:opacity-90 disabled:opacity-50">
-							{isLoading ? <Loader2 className="size-4 animate-spin" /> : null}
-							{isLoading ? "Planning…" : "Plan my repo"}
-						</button>
+						{locked ? (
+							<button type="submit" className="inline-flex h-9 items-center gap-1.5 rounded-full border bg-background px-4 text-sm font-medium transition-colors hover:bg-muted">
+								{isLoading ? <Loader2 className="size-4 animate-spin" /> : null}
+								Change
+							</button>
+						) : (
+							<button type="submit" disabled={isLoading || !input.trim()} className="inline-flex h-9 items-center gap-1.5 rounded-full bg-primary px-4 text-sm font-medium text-primary-foreground transition-opacity hover:opacity-90 disabled:opacity-50">
+								Plan my repo
+							</button>
+						)}
 					</form>
 					{error ? <p role="alert" className="mt-3 text-sm text-red-600 dark:text-red-400">{error}</p> : null}
-					<p className="mt-3 text-xs text-muted-foreground">
+					<p className="mt-3 flex flex-wrap items-center justify-center gap-x-1 text-xs text-muted-foreground">
 						{EXAMPLES.map((example, i) => (
-							<span key={example}>
-								<button type="button" onClick={() => run(example)} disabled={isLoading} className="inline-flex items-center gap-1 font-mono underline-offset-4 hover:text-foreground hover:underline">
+							<span key={example} className="inline-flex items-center">
+								<button type="button" onClick={() => run(example)} disabled={locked} className="inline-flex items-center gap-1 font-mono underline-offset-4 hover:text-foreground hover:underline disabled:pointer-events-none disabled:opacity-50">
 									<MarkGithubIcon size={12} className="shrink-0" />
 									{example}
 								</button>
