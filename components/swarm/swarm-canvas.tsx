@@ -1,7 +1,7 @@
 "use client";
 
 import { type ReactNode, useEffect, useMemo, useRef, useState } from "react";
-import { Pause, Play } from "lucide-react";
+import { Maximize, Minus, Pause, Play, Plus } from "lucide-react";
 import type { SwarmItem, SwarmRole, SwarmRun, SwarmState } from "@/lib/swarm";
 import { ROLE_COLORS } from "@/lib/swarm-roles";
 
@@ -361,6 +361,19 @@ export function SwarmCanvas({ state, highlight, fill = false, title, actions }: 
 	const frameRef = useRef<HTMLDivElement>(null);
 	const [fit, setFit] = useState({ scale: 1, x: 0, y: 0 });
 	const { scale } = fit;
+	// In fill mode people can pan and zoom: `view` sits on top of the fitted placement.
+	const [view, setView] = useState({ k: 1, x: 0, y: 0 });
+	const [panning, setPanning] = useState(false);
+	const drag = useRef<{ id: number; x: number; y: number; moved: boolean } | null>(null);
+	const zoomAt = (factor: number, px: number, py: number) =>
+		setView((v) => {
+			const k = Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, v.k * factor));
+			const ratio = k / v.k;
+			// Keep the board point under (px, py) where it is.
+			return { k, x: px - fit.x - (px - fit.x - v.x) * ratio, y: py - fit.y - (py - fit.y - v.y) * ratio };
+		});
+	const zoomAtRef = useRef(zoomAt);
+	zoomAtRef.current = zoomAt;
 	const [step, setStep] = useState(0);
 	const [playing, setPlaying] = useState(true);
 	const [hover, setHover] = useState<{ item: SwarmItem; left: number; top: number; below: boolean } | null>(null);
@@ -402,6 +415,61 @@ export function SwarmCanvas({ state, highlight, fill = false, title, actions }: 
 		observer.observe(el);
 		return () => observer.disconnect();
 	}, [fill]);
+
+	// Trackpad pinch and ctrl/cmd + wheel zoom at the pointer; a plain wheel or two-finger swipe pans.
+	useEffect(() => {
+		const el = frameRef.current;
+		if (!el || !fill) return;
+		const onWheel = (e: WheelEvent) => {
+			e.preventDefault();
+			if (e.ctrlKey || e.metaKey) {
+				const box = el.getBoundingClientRect();
+				zoomAtRef.current(Math.exp(-e.deltaY * 0.01), e.clientX - box.left, e.clientY - box.top);
+			} else {
+				setView((v) => ({ ...v, x: v.x - e.deltaX, y: v.y - e.deltaY }));
+			}
+		};
+		el.addEventListener("wheel", onWheel, { passive: false });
+		return () => el.removeEventListener("wheel", onWheel);
+	}, [fill]);
+
+	// Press and drag anywhere to pan. The pointer is only captured once it moves,
+	// so a plain click still reaches the card under it.
+	const onPointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
+		if (!fill || e.button !== 0 || (e.target as HTMLElement).closest("button")) return;
+		drag.current = { id: e.pointerId, x: e.clientX, y: e.clientY, moved: false };
+	};
+	const onPointerMove = (e: React.PointerEvent<HTMLDivElement>) => {
+		const d = drag.current;
+		if (!d || d.id !== e.pointerId) return;
+		// A release can be missed (outside the window, a lost capture); no button held means the drag is over.
+		if (e.buttons === 0) return endDrag(e);
+		const dx = e.clientX - d.x;
+		const dy = e.clientY - d.y;
+		if (!d.moved) {
+			if (Math.hypot(dx, dy) < 4) return;
+			d.moved = true;
+			e.currentTarget.setPointerCapture(e.pointerId);
+			setPanning(true);
+			setHover(null);
+		}
+		d.x = e.clientX;
+		d.y = e.clientY;
+		setView((v) => ({ ...v, x: v.x + dx, y: v.y + dy }));
+	};
+	const endDrag = (e: React.PointerEvent<HTMLDivElement>) => {
+		if (drag.current?.id !== e.pointerId) return;
+		// Leave the flag up through the click that follows the release, so it can be swallowed.
+		setTimeout(() => (drag.current = null));
+		setPanning(false);
+	};
+	const zoomCentre = (factor: number) => {
+		const box = frameRef.current?.getBoundingClientRect();
+		if (box) zoomAt(factor, box.width / 2, box.height / 2);
+	};
+	const s = scale * view.k;
+	const ox = fit.x + view.x;
+	const oy = fit.y + view.y;
 
 	const shown = live ?? scene;
 	const positions = layout(shown.cards);
@@ -455,20 +523,35 @@ export function SwarmCanvas({ state, highlight, fill = false, title, actions }: 
 		<div ref={wrapRef} className={`relative w-full ${fill ? "h-full" : ""}`}>
 			<div
 				ref={frameRef}
-				className={`relative w-full overflow-hidden bg-card ${fill ? "h-full" : "rounded-xl border"}`}
-				style={fill ? { ...DOTS, backgroundSize: `${20 * scale}px ${20 * scale}px`, backgroundPosition: `${fit.x}px ${fit.y}px` } : { height: H * scale }}
+				className={`relative w-full overflow-hidden bg-card ${fill ? `h-full touch-none select-none ${panning ? "cursor-grabbing" : "cursor-grab"}` : "rounded-xl border"}`}
+				style={fill ? { ...DOTS, backgroundSize: `${20 * s}px ${20 * s}px`, backgroundPosition: `${ox}px ${oy}px` } : { height: H * scale }}
+				onPointerDown={onPointerDown}
+				onPointerMove={onPointerMove}
+				onPointerUp={endDrag}
+				onPointerCancel={endDrag}
+				onLostPointerCapture={endDrag}
+				onClickCapture={(e) => {
+					if (drag.current?.moved) {
+						e.preventDefault();
+						e.stopPropagation();
+					}
+				}}
 			>
 				<div
 					className="absolute left-0 top-0 origin-top-left"
 					style={{
 						width: W,
 						height: H,
-						transform: `translate(${fit.x}px, ${fit.y}px) scale(${scale})`,
+						transform: `translate(${ox}px, ${oy}px) scale(${s})`,
 						...(fill ? {} : DOTS),
 					}}
 				>
-					<DispatcherChip job={shown.job} />
-					<TurnChip turn={shown.turn} />
+					{fill ? null : (
+						<>
+							<DispatcherChip job={shown.job} />
+							<TurnChip turn={shown.turn} />
+						</>
+					)}
 
 					{LANES.map((lane) => (
 						<div
@@ -519,6 +602,12 @@ export function SwarmCanvas({ state, highlight, fill = false, title, actions }: 
 			{hover ? (
 				<ItemHoverCard {...hover} repo={state?.repo ?? ""} onEnter={keepHover} onLeave={hideHover} />
 			) : null}
+			{fill ? (
+				<div className="pointer-events-none absolute inset-x-3 top-14 flex items-center justify-between gap-2 overflow-hidden">
+					<DispatcherChip job={shown.job} pinned />
+					<TurnChip turn={shown.turn} pinned />
+				</div>
+			) : null}
 			{title ? <div className="absolute left-3 top-3 flex min-w-0 max-w-[calc(100%-14rem)] items-center">{title}</div> : null}
 			<div className="absolute right-3 top-3 flex items-center gap-2">
 			{actions}
@@ -544,12 +633,29 @@ export function SwarmCanvas({ state, highlight, fill = false, title, actions }: 
 				</button>
 			)}
 			</div>
+			{fill ? (
+				<div className="absolute bottom-3 right-3 flex h-8 items-center rounded-full border bg-background/90 text-muted-foreground shadow-sm backdrop-blur">
+					<button type="button" onClick={() => zoomCentre(1 / 1.25)} className="flex size-8 items-center justify-center rounded-full transition-colors hover:text-foreground" aria-label="Zoom out" title="Zoom out">
+						<Minus className="size-3.5" />
+					</button>
+					<span className="w-10 text-center text-xs tabular-nums">{Math.round(view.k * 100)}%</span>
+					<button type="button" onClick={() => zoomCentre(1.25)} className="flex size-8 items-center justify-center rounded-full transition-colors hover:text-foreground" aria-label="Zoom in" title="Zoom in">
+						<Plus className="size-3.5" />
+					</button>
+					<button type="button" onClick={() => setView({ k: 1, x: 0, y: 0 })} className="flex size-8 items-center justify-center rounded-full border-l transition-colors hover:text-foreground" aria-label="Fit to screen" title="Fit to screen">
+						<Maximize className="size-3.5" />
+					</button>
+				</div>
+			) : null}
 		</div>
 	);
 }
 
-/** Height kept clear above the board in fill mode for the pinned controls. */
-const PINNED = 56;
+const MIN_ZOOM = 0.5;
+const MAX_ZOOM = 3;
+
+/** Height kept clear above the board in fill mode for the pinned controls and the dispatcher row under them. */
+const PINNED = 100;
 
 const DOTS = { backgroundImage: "radial-gradient(hsl(var(--border)) 1px, transparent 1px)", backgroundSize: "20px 20px" };
 
@@ -668,9 +774,13 @@ export function ItemHoverCard({ item, repo, left, top, below, onEnter, onLeave }
 }
 
 /** Whose turn it is; one role at a time, the way the workflow runs them. */
-function TurnChip({ turn }: { turn: SwarmRole | null }) {
+/** `pinned` drops the board position so the chip can sit in the fixed row above a pannable board. */
+function TurnChip({ turn, pinned = false }: { turn: SwarmRole | null; pinned?: boolean }) {
 	return (
-		<div className="absolute flex h-9 items-center gap-2 rounded-full border bg-background px-3 text-[13px] shadow-sm" style={{ right: 150, top: CHIP.y }}>
+		<div
+			className={`${pinned ? "" : "absolute"} flex h-9 shrink-0 items-center gap-2 rounded-full border bg-background px-3 text-[13px] shadow-sm`}
+			style={pinned ? undefined : { right: 150, top: CHIP.y }}
+		>
 			<span className="text-muted-foreground">Turn</span>
 			{turn ? (
 				<span className="inline-flex items-center gap-1.5 font-medium">
@@ -682,11 +792,14 @@ function TurnChip({ turn }: { turn: SwarmRole | null }) {
 	);
 }
 
-function DispatcherChip({ job }: { job: string | null }) {
+function DispatcherChip({ job, pinned = false }: { job: string | null; pinned?: boolean }) {
 	return (
-		<div className="absolute flex items-center gap-2 rounded-full border bg-background px-3 py-1.5 text-[12px] shadow-sm" style={{ left: CHIP.x, top: CHIP.y }}>
+		<div
+			className={`${pinned ? "min-w-0 overflow-hidden" : "absolute shrink-0"} flex items-center gap-2 whitespace-nowrap rounded-full border bg-background px-3 py-1.5 text-[12px] shadow-sm`}
+			style={pinned ? undefined : { left: CHIP.x, top: CHIP.y }}
+		>
 			<span className="font-medium" style={{ color: ROLE_COLORS.dispatcher }}>dispatcher</span>
-			<span className="text-muted-foreground">every 30 min picks one job:</span>
+			<span className={`text-muted-foreground ${pinned ? "hidden xl:inline" : ""}`}>every 30 min picks one job:</span>
 			{JOBS.map((j, i) => (
 				<span key={j} className="flex items-center gap-2">
 					<span className={`rounded px-1.5 py-px transition-colors ${job === j ? "bg-foreground text-background" : "text-muted-foreground"}`}>{j}</span>
