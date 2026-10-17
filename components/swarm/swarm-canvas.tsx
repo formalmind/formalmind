@@ -1,7 +1,8 @@
 "use client";
 
 import { type ReactNode, useEffect, useMemo, useRef, useState } from "react";
-import { Maximize, Minus, Pause, Play, Plus } from "lucide-react";
+import { Hand, Maximize, Minus, Pause, Play, Plus } from "lucide-react";
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import type { SwarmItem, SwarmRole, SwarmRun, SwarmState } from "@/lib/swarm";
 import { ROLE_COLORS } from "@/lib/swarm-roles";
 
@@ -380,6 +381,10 @@ export function SwarmCanvas({ state, highlight, fill = false, title, actions }: 
 	const setViewRef = useRef(setView);
 	setViewRef.current = setView;
 	const [panning, setPanning] = useState(false);
+	// Dragging only pans on purpose: hold Space, switch on the hand tool (H, V to leave), or use the middle button.
+	const [spaceHeld, setSpaceHeld] = useState(false);
+	const [hand, setHand] = useState(false);
+	const panMode = spaceHeld || hand;
 	const drag = useRef<{ id: number; x: number; y: number; moved: boolean } | null>(null);
 	const zoomAt = (factor: number, px: number, py: number) =>
 		setView((v) => {
@@ -392,6 +397,7 @@ export function SwarmCanvas({ state, highlight, fill = false, title, actions }: 
 	zoomAtRef.current = zoomAt;
 	const [step, setStep] = useState(0);
 	const [playing, setPlaying] = useState(true);
+	const [modal, setModal] = useState<{ card: Card } | { panel: "ledger" | "notebook" | "chief" } | null>(null);
 	const [hover, setHover] = useState<{ item: SwarmItem; left: number; top: number; below: boolean } | null>(null);
 	const hoverTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 	const wrapRef = useRef<HTMLDivElement>(null);
@@ -456,10 +462,41 @@ export function SwarmCanvas({ state, highlight, fill = false, title, actions }: 
 		return () => el.removeEventListener("wheel", onWheel);
 	}, [fill]);
 
+	useEffect(() => {
+		if (!fill) return;
+		const typing = (e: KeyboardEvent) => {
+			const t = e.target as HTMLElement | null;
+			return Boolean(t?.closest("input, textarea, select, [contenteditable=true], [role=dialog]"));
+		};
+		const down = (e: KeyboardEvent) => {
+			if (typing(e) || e.metaKey || e.ctrlKey || e.altKey) return;
+			if (e.code === "Space") {
+				e.preventDefault();
+				setSpaceHeld(true);
+			} else if (e.key === "h" || e.key === "H") setHand((on) => !on);
+			else if (e.key === "v" || e.key === "V" || e.key === "Escape") setHand(false);
+		};
+		const up = (e: KeyboardEvent) => {
+			if (e.code === "Space") setSpaceHeld(false);
+		};
+		const blur = () => setSpaceHeld(false);
+		window.addEventListener("keydown", down);
+		window.addEventListener("keyup", up);
+		window.addEventListener("blur", blur);
+		return () => {
+			window.removeEventListener("keydown", down);
+			window.removeEventListener("keyup", up);
+			window.removeEventListener("blur", blur);
+		};
+	}, [fill]);
+
 	// Press and drag anywhere to pan. The pointer is only captured once it moves,
 	// so a plain click still reaches the card under it.
 	const onPointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
-		if (!fill || e.button !== 0 || (e.target as HTMLElement).closest("button")) return;
+		if (!fill || (e.target as HTMLElement).closest("[data-canvas-ui]")) return;
+		const middle = e.button === 1;
+		if (!middle && !(e.button === 0 && panMode)) return;
+		if (middle) e.preventDefault();
 		drag.current = { id: e.pointerId, x: e.clientX, y: e.clientY, moved: false };
 	};
 	const onPointerMove = (e: React.PointerEvent<HTMLDivElement>) => {
@@ -546,7 +583,7 @@ export function SwarmCanvas({ state, highlight, fill = false, title, actions }: 
 		<div ref={wrapRef} className={`relative w-full ${fill ? "h-full" : ""}`}>
 			<div
 				ref={frameRef}
-				className={`relative w-full overflow-hidden bg-card ${fill ? `h-full touch-none select-none ${panning ? "cursor-grabbing" : "cursor-grab"}` : "rounded-xl border"}`}
+				className={`relative w-full overflow-hidden bg-card ${fill ? `h-full touch-none select-none ${panning ? "cursor-grabbing [&_*]:!cursor-grabbing" : panMode ? "cursor-grab [&_*]:!cursor-grab" : ""}` : "rounded-xl border"}`}
 				style={fill ? { ...DOTS, backgroundSize: `${20 * s}px ${20 * s}px`, backgroundPosition: `${ox}px ${oy}px` } : { height: H * scale }}
 				onPointerDown={onPointerDown}
 				onPointerMove={onPointerMove}
@@ -602,13 +639,14 @@ export function SwarmCanvas({ state, highlight, fill = false, title, actions }: 
 								href={item?.url}
 								onEnter={(el) => showHover(c, el)}
 								onLeave={hideHover}
+								onOpen={fill ? () => setModal({ card: c }) : undefined}
 							/>
 						);
 					})}
 
-					<LedgerPanel spend={shown.spend} costs={shown.costs} />
-					<NotebookPanel notes={shown.notes} />
-					<ChiefPanel headline={shown.chief} />
+					<LedgerPanel spend={shown.spend} costs={shown.costs} onOpen={fill ? () => setModal({ panel: "ledger" }) : undefined} />
+					<NotebookPanel notes={shown.notes} onOpen={fill ? () => setModal({ panel: "notebook" }) : undefined} />
+					<ChiefPanel headline={shown.chief} onOpen={fill ? () => setModal({ panel: "chief" }) : undefined} />
 
 					{ROLES.map((role) => (
 						<SwarmCursor
@@ -622,6 +660,23 @@ export function SwarmCanvas({ state, highlight, fill = false, title, actions }: 
 					))}
 				</div>
 			</div>
+			<Dialog open={modal !== null} onOpenChange={(open) => !open && setModal(null)}>
+				<DialogContent className="max-h-[85vh] overflow-y-auto">
+					{modal && "card" in modal ? (
+						<CardDetails card={modal.card} item={itemFor(modal.card)} repo={state?.repo ?? ""} />
+					) : modal ? (
+						<>
+							<DialogHeader>
+								<DialogTitle className="font-mono text-sm">{PANEL_NAMES[modal.panel]}</DialogTitle>
+								<DialogDescription className="sr-only">{PANEL_NAMES[modal.panel]}</DialogDescription>
+							</DialogHeader>
+							{modal.panel === "ledger" ? <LedgerPanel spend={shown.spend} costs={shown.costs} bare /> : null}
+							{modal.panel === "notebook" ? <NotebookPanel notes={shown.notes} bare /> : null}
+							{modal.panel === "chief" ? <ChiefPanel headline={shown.chief} bare /> : null}
+						</>
+					) : null}
+				</DialogContent>
+			</Dialog>
 			{hover ? (
 				<ItemHoverCard {...hover} repo={state?.repo ?? ""} onEnter={keepHover} onLeave={hideHover} />
 			) : null}
@@ -657,7 +712,17 @@ export function SwarmCanvas({ state, highlight, fill = false, title, actions }: 
 			)}
 			</div>
 			{fill ? (
-				<div className="absolute bottom-3 right-3 flex h-8 items-center rounded-full border bg-background/90 text-muted-foreground shadow-sm backdrop-blur">
+				<div data-canvas-ui className="absolute bottom-3 right-3 flex h-8 items-center rounded-full border bg-background/90 text-muted-foreground shadow-sm backdrop-blur">
+					<button
+						type="button"
+						onClick={() => setHand((on) => !on)}
+						aria-pressed={hand}
+						className={`flex size-8 items-center justify-center rounded-full border-r transition-colors ${hand ? "bg-foreground text-background" : "hover:text-foreground"}`}
+						aria-label="Hand tool"
+						title={hand ? "Hand tool on: drag to move the canvas (V to leave)" : "Hand tool (H), or hold Space and drag"}
+					>
+						<Hand className="size-3.5" />
+					</button>
 					<button type="button" onClick={() => zoomCentre(1 / 1.25)} className="flex size-8 items-center justify-center rounded-full transition-colors hover:text-foreground" aria-label="Zoom out" title="Zoom out">
 						<Minus className="size-3.5" />
 					</button>
@@ -683,6 +748,35 @@ const MAX_ZOOM = 3;
 const PINNED = 100;
 
 const DOTS = { backgroundImage: "radial-gradient(hsl(var(--border)) 1px, transparent 1px)", backgroundSize: "20px 20px" };
+
+const PANEL_NAMES = { ledger: "#38 ledger", notebook: "#55 notebook", chief: "#53 chief updates" } as const;
+
+/** Modal body for a clicked card: the real issue or PR when there is one, else what the replay card stands for. */
+function CardDetails({ card, item, repo }: { card: Card; item?: SwarmItem; repo: string }) {
+	if (!item) {
+		return (
+			<DialogHeader>
+				<DialogTitle className="text-base leading-snug">{card.title}</DialogTitle>
+				<DialogDescription>
+					<span className={`mr-1.5 rounded px-1.5 py-px font-mono text-[10px] ${LABEL_STYLES[card.label] ?? LABEL_STYLES.README}`}>{card.label}</span>
+					{card.kind === "doc" ? "The roadmap in the proofs repo's README." : "A card in the replay; it stands in for an issue and links nowhere."}
+				</DialogDescription>
+			</DialogHeader>
+		);
+	}
+	return (
+		<>
+			<DialogTitle className="sr-only">{item.title}</DialogTitle>
+			<DialogDescription className="sr-only">{`${item.kind === "pr" ? "PR" : "Issue"} #${item.number} in ${repo}`}</DialogDescription>
+			<div className="pr-6">
+				<ItemPreview item={item} repo={repo} full />
+			</div>
+			<a href={item.url} target="_blank" rel="noreferrer" className="inline-flex h-8 w-fit items-center rounded-full bg-foreground px-3 text-xs font-medium text-background transition-opacity hover:opacity-90">
+				Open on GitHub
+			</a>
+		</>
+	);
+}
 
 const MOVE = "transition-transform duration-700 ease-[cubic-bezier(0.22,1,0.36,1)] motion-reduce:transition-none";
 
@@ -714,7 +808,8 @@ export function SwarmCursor({ role, x, y, say, dim, turn, side }: { role: SwarmR
 	);
 }
 
-function BoardCard({ card, x, y, hidden, href, onEnter, onLeave }: {
+/** With `onOpen` the card is a button that opens its details; otherwise it links out and previews on hover. */
+function BoardCard({ card, x, y, hidden, href, onEnter, onLeave, onOpen }: {
 	card: Card;
 	x: number;
 	y: number;
@@ -722,16 +817,22 @@ function BoardCard({ card, x, y, hidden, href, onEnter, onLeave }: {
 	href?: string;
 	onEnter: (el: HTMLElement) => void;
 	onLeave: () => void;
+	onOpen?: () => void;
 }) {
-	const Tag = href ? "a" : "div";
+	const Tag = onOpen ? "button" : href ? "a" : "div";
 	return (
 		<Tag
-			{...(href ? { href, target: "_blank", rel: "noreferrer" } : {})}
-			onMouseEnter={(e: React.MouseEvent<HTMLElement>) => onEnter(e.currentTarget)}
-			onMouseLeave={onLeave}
-			onFocus={(e: React.FocusEvent<HTMLElement>) => onEnter(e.currentTarget)}
-			onBlur={onLeave}
-			className={`absolute left-0 top-0 z-10 block rounded-lg border bg-background p-2.5 shadow-sm ${MOVE} ${href ? "cursor-pointer hover:border-foreground/30" : ""}`}
+			{...(onOpen
+				? { type: "button" as const, onClick: onOpen }
+				: {
+						...(href ? { href, target: "_blank", rel: "noreferrer" } : {}),
+						onMouseEnter: (e: React.MouseEvent<HTMLElement>) => onEnter(e.currentTarget),
+						onMouseLeave: onLeave,
+						onFocus: (e: React.FocusEvent<HTMLElement>) => onEnter(e.currentTarget),
+						onBlur: onLeave,
+					})}
+			data-component
+			className={`absolute left-0 top-0 z-10 block rounded-lg border bg-background p-2.5 text-left shadow-sm ${MOVE} ${href || onOpen ? "cursor-pointer hover:border-foreground/30" : "cursor-default"}`}
 			style={{ width: CARD_W, height: 78, transform: `translate(${x}px, ${y}px)`, opacity: hidden ? 0 : 1, transitionProperty: "transform, opacity, border-color" }}
 		>
 			<div className="flex items-center gap-1.5 text-[12px]">
@@ -760,8 +861,6 @@ export function ItemHoverCard({ item, repo, left, top, below, onEnter, onLeave }
 	onEnter: () => void;
 	onLeave: () => void;
 }) {
-	const state = item.merged ? "merged" : item.state ?? "open";
-	const stateColor = state === "open" ? "text-emerald-600 dark:text-emerald-400" : "text-violet-600 dark:text-violet-400";
 	return (
 		<div
 			role="tooltip"
@@ -770,6 +869,17 @@ export function ItemHoverCard({ item, repo, left, top, below, onEnter, onLeave }
 			className="absolute z-30 w-[320px] rounded-xl border bg-popover p-4 text-popover-foreground shadow-lg animate-in fade-in-0 zoom-in-95 duration-150"
 			style={{ left, top, transform: below ? undefined : "translateY(-100%)" }}
 		>
+			<ItemPreview item={item} repo={repo} />
+		</div>
+	);
+}
+
+/** The issue or PR behind a card: state, title, excerpt, labels, author. `full` shows the whole excerpt. */
+function ItemPreview({ item, repo, full = false }: { item: SwarmItem; repo: string; full?: boolean }) {
+	const state = item.merged ? "merged" : item.state ?? "open";
+	const stateColor = state === "open" ? "text-emerald-600 dark:text-emerald-400" : "text-violet-600 dark:text-violet-400";
+	return (
+		<div>
 			<p className="flex items-center gap-1.5 text-xs text-muted-foreground">
 				<span className={`font-medium ${stateColor}`}>{`${state[0].toUpperCase()}${state.slice(1)} ${item.kind === "pr" ? "PR" : "issue"}`}</span>
 				<span>· {repo}</span>
@@ -778,7 +888,7 @@ export function ItemHoverCard({ item, repo, left, top, below, onEnter, onLeave }
 			<a href={item.url} target="_blank" rel="noreferrer" className="mt-1.5 block text-sm font-semibold leading-snug hover:underline">
 				{item.title} <span className="font-normal text-muted-foreground">#{item.number}</span>
 			</a>
-			{item.excerpt ? <p className="mt-2 line-clamp-3 text-xs leading-5 text-muted-foreground">{item.excerpt}</p> : null}
+			{item.excerpt ? <p className={`mt-2 text-xs leading-5 text-muted-foreground ${full ? "whitespace-pre-line" : "line-clamp-3"}`}>{item.excerpt}</p> : null}
 			{item.labels.length ? (
 				<div className="mt-3 flex flex-wrap gap-1">
 					{item.labels.map((label) => (
@@ -835,18 +945,31 @@ function DispatcherChip({ job, pinned = false }: { job: string | null; pinned?: 
 	);
 }
 
-function Panel({ index, title, children }: { index: number; title: string; children: React.ReactNode }) {
+/** `onOpen` makes the panel open in a modal on click; `bare` renders only the contents, for that modal. */
+type PanelMode = { onOpen?: () => void; bare?: boolean };
+
+function Panel({ index, title, onOpen, bare, children }: PanelMode & { index: number; title: string; children: React.ReactNode }) {
+	if (bare) return <div className="flex flex-col">{children}</div>;
 	return (
-		<div className="absolute flex flex-col rounded-lg border bg-background p-3" style={{ left: panelX(index), top: PANEL_TOP, width: PANEL_W, height: 136 }}>
+		<div
+			data-component
+			role={onOpen ? "button" : undefined}
+			tabIndex={onOpen ? 0 : undefined}
+			aria-label={onOpen ? `Open ${title}` : undefined}
+			onClick={onOpen}
+			onKeyDown={onOpen ? (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onOpen(); } } : undefined}
+			className={`absolute flex flex-col rounded-lg border bg-background p-3 ${onOpen ? "cursor-pointer transition-colors hover:border-foreground/30" : "cursor-default"}`}
+			style={{ left: panelX(index), top: PANEL_TOP, width: PANEL_W, height: 136 }}
+		>
 			<p className="font-mono text-[12px] font-medium text-muted-foreground">{title}</p>
 			<div className="mt-2 flex min-h-0 flex-1 flex-col">{children}</div>
 		</div>
 	);
 }
 
-function LedgerPanel({ spend, costs }: { spend: number; costs: { role: SwarmRole; usd: number }[] }) {
+function LedgerPanel({ spend, costs, ...mode }: PanelMode & { spend: number; costs: { role: SwarmRole; usd: number }[] }) {
 	return (
-		<Panel index={0} title="#38 ledger">
+		<Panel index={0} title="#38 ledger" {...mode}>
 			<div className="flex items-baseline justify-between text-[12px]">
 				<span className="text-[13px] text-foreground">Spent today</span>
 				<span className="font-mono tabular-nums text-foreground">${spend.toFixed(2)} / $5.00</span>
@@ -866,9 +989,9 @@ function LedgerPanel({ spend, costs }: { spend: number; costs: { role: SwarmRole
 	);
 }
 
-function NotebookPanel({ notes }: { notes: Note[] }) {
+function NotebookPanel({ notes, ...mode }: PanelMode & { notes: Note[] }) {
 	return (
-		<Panel index={1} title="#55 notebook">
+		<Panel index={1} title="#55 notebook" {...mode}>
 			<ul data-scroll className="no-scrollbar min-h-0 flex-1 space-y-1 overflow-y-auto text-[13px]">
 				{notes.length === 0 ? <li className="text-muted-foreground">Each run opens a task list here first.</li> : null}
 				{notes.map((n, i) => (
@@ -876,7 +999,7 @@ function NotebookPanel({ notes }: { notes: Note[] }) {
 						<span className={`mt-0.5 inline-flex size-3.5 shrink-0 items-center justify-center rounded-sm border text-[9px] ${n.done ? "border-transparent text-white" : ""}`} style={n.done ? { backgroundColor: ROLE_COLORS[n.role] } : undefined}>
 							{n.done ? "✓" : ""}
 						</span>
-						<span className={`truncate ${n.done ? "text-muted-foreground line-through" : "text-foreground"}`}>
+						<span className={`${mode.bare ? "" : "truncate"} ${n.done ? "text-muted-foreground line-through" : "text-foreground"}`}>
 							<span style={{ color: ROLE_COLORS[n.role] }}>{n.role}</span> {n.text}
 						</span>
 					</li>
@@ -886,9 +1009,9 @@ function NotebookPanel({ notes }: { notes: Note[] }) {
 	);
 }
 
-function ChiefPanel({ headline }: { headline: string }) {
+function ChiefPanel({ headline, ...mode }: PanelMode & { headline: string }) {
 	return (
-		<Panel index={2} title="#53 chief updates">
+		<Panel index={2} title="#53 chief updates" {...mode}>
 			<p className="text-[13px] text-muted-foreground">Daily at 23:40 UTC, before the budget resets</p>
 			<p className="mt-2 text-[14px] font-medium leading-snug text-foreground">{headline}</p>
 		</Panel>
