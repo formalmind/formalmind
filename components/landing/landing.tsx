@@ -4,7 +4,7 @@ import { Link } from "react-router";
 import { LogoMark } from "@/components/logo";
 import { MarkGithubIcon } from "@primer/octicons-react";
 import { useState } from "react";
-import { Loader2, Maximize2, Minimize2, X } from "lucide-react";
+import { Loader2, Maximize2, Minimize2, Play, X } from "lucide-react";
 import { SwarmCanvas } from "@/components/swarm/swarm-canvas";
 import YouTubeVideo from "@/components/youtube-video";
 import { SetupPreview } from "./setup-preview";
@@ -19,8 +19,8 @@ const EXAMPLES = ["Uniswap/v4-core", "morpho-org/morpho-blue", "transmissions11/
 export function Landing({ signedIn }: { signedIn: boolean }) {
 	const [input, setInput] = useState("");
 	const { repo, plan, start, isLoading, error, done } = usePlan();
-	const [showVideo, setShowVideo] = useState(true);
-	const [bigVideo, setBigVideo] = useState(false);
+	// The intro starts as an icon, opens small, and can expand to most of the page.
+	const [video, setVideo] = useState<"icon" | "small" | "big">("icon");
 	const startHref = signedIn ? "/onboarding" : "/auth/login?screen_hint=signup&returnTo=%2Fonboarding";
 
 	const run = (value: string) => {
@@ -29,8 +29,9 @@ export function Landing({ signedIn }: { signedIn: boolean }) {
 	};
 
 	return (
-		<div className="min-h-dvh bg-background text-foreground">
-			<header className="mx-auto flex h-16 max-w-6xl items-center justify-between px-4 sm:px-6">
+		// One screen: header and hero at the top, the demo (or the setup steps) taking every pixel left.
+		<div className="flex h-dvh flex-col bg-background text-foreground">
+			<header className="mx-auto flex h-16 w-full max-w-6xl shrink-0 items-center justify-between px-4 sm:px-6">
 				<Link to="/welcome" className="flex items-center gap-2 font-semibold tracking-tight">
 					<LogoMark size={24} />
 					Formal Mind.
@@ -43,9 +44,8 @@ export function Landing({ signedIn }: { signedIn: boolean }) {
 				</nav>
 			</header>
 
-			{/* One page: no footer, and room at the bottom so the floating video never covers the end of the demo. */}
-			<main className="pb-32">
-				<section className="mx-auto max-w-6xl px-4 pb-10 pt-10 text-center sm:px-6 sm:pt-16">
+			<main className="flex min-h-0 flex-1 flex-col overflow-y-auto">
+				<section className="mx-auto w-full max-w-6xl shrink-0 px-4 pb-8 pt-8 text-center sm:px-6 sm:pt-12">
 					<h1 className="mx-auto max-w-3xl text-balance text-4xl font-semibold tracking-tight sm:text-5xl">
 						A swarm of Lean4 agents for proving Solidity codebases
 					</h1>
@@ -82,48 +82,60 @@ export function Landing({ signedIn }: { signedIn: boolean }) {
 					</p>
 				</section>
 
-				<section className="mx-auto max-w-6xl px-4 sm:px-6">
+				<section className={`mx-auto w-full max-w-6xl px-4 pb-6 sm:px-6 ${repo ? "" : "min-h-[320px] flex-1"}`}>
 					{/* A plan that failed before anything arrived leaves the demo in place, with the error above. */}
 					{repo && !(error && !plan) ? (
 						<div aria-live="polite">
 							<SetupPreview repo={repo} plan={plan} done={done} failed={Boolean(error)} startHref={startHref} />
 						</div>
 					) : (
-						<div>
-							<SwarmCanvas state={null} />
-							<p className="mt-2 text-center text-xs text-muted-foreground">A replay of the swarm working one issue: turns, a question, a take-over, a merge.</p>
+						// Tilted back a little, like a screen on a desk.
+						<div className="h-full [perspective:2400px]">
+							<div className="h-full origin-bottom [transform:rotateX(10deg)_rotateZ(-0.6deg)] motion-reduce:[transform:none]">
+								<SwarmCanvas state={null} contain />
+							</div>
 						</div>
 					)}
 				</section>
 
 			</main>
 
-			{showVideo ? (
-				// The intro floats bottom-right, small until hovered (or focused), then grows on the card-resize curve.
+			{video === "icon" ? (
+				<button
+					type="button"
+					onClick={() => setVideo("small")}
+					aria-label="Play the quick intro"
+					title="Watch the quick intro"
+					className="fixed bottom-4 right-4 z-40 flex size-12 items-center justify-center rounded-full bg-foreground text-background shadow-2xl transition-transform duration-200 hover:scale-105 active:scale-95 animate-in fade-in-0 zoom-in-90 motion-reduce:transition-none"
+				>
+					<Play className="ml-0.5 size-5 fill-current" />
+				</button>
+			) : (
 				<aside
 					aria-label="Formal Mind quick intro"
-					className={`fixed bottom-4 right-4 z-40 overflow-hidden ${bigVideo ? "w-[min(1100px,calc(100vw-2rem))]" : "w-48 focus-within:w-[min(360px,calc(100vw-2rem))] hover:w-[min(360px,calc(100vw-2rem))]"} rounded-2xl border bg-black shadow-2xl transition-[width] duration-300 [transition-timing-function:cubic-bezier(0.22,1,0.36,1)] animate-in fade-in-0 slide-in-from-bottom-4 motion-reduce:transition-none`}
+					className={`fixed bottom-4 right-4 z-40 overflow-hidden ${video === "big" ? "w-[min(1100px,calc(100vw-2rem))]" : "w-[min(288px,calc(100vw-2rem))]"} rounded-2xl border bg-black shadow-2xl transition-[width] duration-300 [transition-timing-function:cubic-bezier(0.22,1,0.36,1)] animate-in fade-in-0 zoom-in-95 motion-reduce:transition-none`}
 				>
 					<YouTubeVideo videoId="xyZZqCQlmCE" title="Formal Mind quick intro" />
 					<button
 						type="button"
-						onClick={() => setBigVideo((big) => !big)}
-						aria-label={bigVideo ? "Shrink video" : "Expand video"}
-						title={bigVideo ? "Shrink video" : "Expand video"}
+						onClick={() => setVideo(video === "big" ? "small" : "big")}
+						aria-label={video === "big" ? "Shrink video" : "Expand video"}
+						title={video === "big" ? "Shrink video" : "Expand video"}
 						className="absolute right-11 top-2 z-10 flex size-7 items-center justify-center rounded-full bg-black/60 text-white backdrop-blur-sm transition-colors hover:bg-black/80"
 					>
-						{bigVideo ? <Minimize2 className="size-3.5" /> : <Maximize2 className="size-3.5" />}
+						{video === "big" ? <Minimize2 className="size-3.5" /> : <Maximize2 className="size-3.5" />}
 					</button>
 					<button
 						type="button"
-						onClick={() => setShowVideo(false)}
-						aria-label="Close video"
+						onClick={() => setVideo("icon")}
+						aria-label="Minimize video"
+						title="Minimize"
 						className="absolute right-2 top-2 z-10 flex size-7 items-center justify-center rounded-full bg-black/60 text-white backdrop-blur-sm transition-colors hover:bg-black/80"
 					>
 						<X className="size-3.5" />
 					</button>
 				</aside>
-			) : null}
+			)}
 
 		</div>
 	);

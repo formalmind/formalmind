@@ -424,8 +424,10 @@ function cloneScene(scene: Scene): Scene {
  * `fill` makes the board fill its parent, scaled to fit both ways and centred, below a strip kept clear
  * for the pinned controls; otherwise it scales to the width. `title` and `actions` are pinned top-left and top-right.
  */
-export function SwarmCanvas({ state, fill = false, title, actions, repo }: {
+export function SwarmCanvas({ state, fill = false, contain = false, title, actions, repo }: {
 	state: SwarmState | null;
+	/** Fit the board inside its parent's height as well as its width (the landing demo); the replay still plays. */
+	contain?: boolean;
 	/** The proofs repo, for links before the live state has loaded. */
 	repo?: string;
 	fill?: boolean;
@@ -524,13 +526,17 @@ export function SwarmCanvas({ state, fill = false, title, actions, repo }: {
 		if (!el) return;
 		const observer = new ResizeObserver(([entry]) => {
 			const { width, height } = entry.contentRect;
+			if (!fill && contain) {
+				const next = Math.min(width / W, height / boardH);
+				return setFit({ scale: next, x: (width - W * next) / 2, y: Math.max(0, (height - boardH * next) / 2), w: width, h: height });
+			}
 			if (!fill) return setFit({ scale: width / W, x: 0, y: 0, w: width, h: height });
 			const next = Math.min(width / W, (height - PINNED) / boardH);
 			setFit({ scale: next, x: (width - W * next) / 2, y: PINNED + Math.max(0, (height - PINNED - boardH * next) / 2), w: width, h: height });
 		});
 		observer.observe(el);
 		return () => observer.disconnect();
-	}, [fill, boardH]);
+	}, [fill, contain, boardH]);
 
 	// The desktop popover closes on a press outside it (another card re-anchors it instead) or on Escape.
 	const popoverOpen = !isMobile && modal !== null;
@@ -704,11 +710,11 @@ export function SwarmCanvas({ state, fill = false, title, actions, repo }: {
 		modal ? <CardDetails card={modal.card} item={itemFor(modal.card)} repo={state?.repo ?? ""} inDialog={inDialog} /> : null;
 
 	return (
-		<div ref={wrapRef} className={`relative w-full ${fill ? "h-full" : ""}`}>
+		<div ref={wrapRef} className={`relative w-full ${fill || contain ? "h-full" : ""}`}>
 			<div
 				ref={frameRef}
-				className={`relative w-full overflow-hidden bg-card ${fill ? `h-full touch-none select-none ${panning ? "cursor-grabbing [&_*]:!cursor-grabbing" : panMode ? "cursor-grab [&_*]:!cursor-grab" : ""}` : "rounded-xl border"}`}
-				style={fill ? { ...DOTS, backgroundSize: `${20 * s}px ${20 * s}px`, backgroundPosition: `${ox}px ${oy}px` } : { height: boardH * scale }}
+				className={`relative w-full overflow-hidden bg-card ${fill ? `h-full touch-none select-none ${panning ? "cursor-grabbing [&_*]:!cursor-grabbing" : panMode ? "cursor-grab [&_*]:!cursor-grab" : ""}` : `rounded-xl border ${contain ? "h-full" : ""}`}`}
+				style={fill || contain ? { ...DOTS, backgroundSize: `${20 * s}px ${20 * s}px`, backgroundPosition: `${ox}px ${oy}px` } : { height: boardH * scale }}
 				onPointerDown={onPointerDown}
 				onPointerMove={onPointerMove}
 				onPointerUp={endDrag}
@@ -727,7 +733,7 @@ export function SwarmCanvas({ state, fill = false, title, actions, repo }: {
 						width: W,
 						height: boardH,
 						transform: `translate(${ox}px, ${oy}px) scale(${s})`,
-						...(fill ? {} : DOTS),
+						...(fill || contain ? {} : DOTS),
 					}}
 				>
 					{fill ? null : (
