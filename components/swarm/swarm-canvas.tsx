@@ -661,7 +661,7 @@ export function SwarmCanvas({ state, highlight, fill = false, title, actions }: 
 				</div>
 			</div>
 			<Dialog open={modal !== null} onOpenChange={(open) => !open && setModal(null)}>
-				<DialogContent className="max-h-[85vh] overflow-y-auto">
+				<DialogContent className={ISLAND} overlayClassName="bg-black/[0.06] backdrop-blur-[2px] dark:bg-black/30">
 					{modal && "card" in modal ? (
 						<CardDetails card={modal.card} item={itemFor(modal.card)} repo={state?.repo ?? ""} />
 					) : modal ? (
@@ -748,6 +748,14 @@ const MAX_ZOOM = 3;
 const PINNED = 100;
 
 const DOTS = { backgroundImage: "radial-gradient(hsl(var(--border)) 1px, transparent 1px)", backgroundSize: "20px 20px" };
+
+/** Apple-style floating island: frosted, translucent, rounded, a soft long shadow and a small round close button. */
+const ISLAND = [
+	"max-h-[85vh] w-[calc(100%-2rem)] max-w-md overflow-y-auto rounded-3xl border border-black/5 bg-background/75 p-5",
+	"shadow-[0_24px_64px_-16px_rgba(0,0,0,0.28),0_2px_8px_rgba(0,0,0,0.06)] backdrop-blur-2xl backdrop-saturate-150 sm:rounded-3xl dark:border-white/10",
+	"[&>button:last-child]:right-3.5 [&>button:last-child]:top-3.5 [&>button:last-child]:flex [&>button:last-child]:size-7 [&>button:last-child]:items-center [&>button:last-child]:justify-center",
+	"[&>button:last-child]:rounded-full [&>button:last-child]:bg-foreground/[0.06] [&>button:last-child]:opacity-80 [&>button:last-child]:ring-0 [&>button:last-child]:ring-offset-0",
+].join(" ");
 
 const PANEL_NAMES = { ledger: "#38 ledger", notebook: "#55 notebook", chief: "#53 chief updates" } as const;
 
