@@ -693,12 +693,9 @@ export function SwarmCanvas({ state, highlight, fill = false, title, actions }: 
 				<ItemHoverCard {...hover} repo={state?.repo ?? ""} onEnter={keepHover} onLeave={hideHover} />
 			) : null}
 			{fill ? (
-				<div className="pointer-events-none absolute inset-x-3 top-14 flex items-center justify-between gap-2 overflow-hidden">
-					<div className="pointer-events-auto flex min-w-0">
-						<DispatcherChip job={shown.job} pinned />
-					</div>
-					<div className="pointer-events-auto shrink-0">
-						<TurnChip turn={shown.turn} pinned />
+				<div className="pointer-events-none absolute inset-x-3 top-14 flex">
+					<div className="pointer-events-auto flex min-w-0 max-w-full">
+						<NowChip job={shown.job} turn={shown.turn} say={shown.turn ? shown.cursors[shown.turn].say : undefined} />
 					</div>
 				</div>
 			) : null}
@@ -978,12 +975,11 @@ function ItemPreview({ item, repo, full = false }: { item: SwarmItem; repo: stri
 }
 
 /** Whose turn it is; one role at a time, the way the workflow runs them. */
-/** `pinned` drops the board position so the chip can sit in the fixed row above a pannable board. */
-function TurnChip({ turn, pinned = false }: { turn: SwarmRole | null; pinned?: boolean }) {
+function TurnChip({ turn }: { turn: SwarmRole | null }) {
 	return (
 		<div
-			className={`${pinned ? "" : "absolute"} flex h-9 shrink-0 items-center gap-2 rounded-full border bg-background px-3 text-[13px] shadow-sm`}
-			style={pinned ? undefined : { right: 150, top: CHIP.y }}
+			className="absolute flex h-9 shrink-0 items-center gap-2 rounded-full border bg-background px-3 text-[13px] shadow-sm"
+			style={{ right: 150, top: CHIP.y }}
 		>
 			<span className="text-muted-foreground">Turn</span>
 			{turn ? (
@@ -996,23 +992,45 @@ function TurnChip({ turn, pinned = false }: { turn: SwarmRole | null; pinned?: b
 	);
 }
 
-function DispatcherChip({ job, pinned = false }: { job: string | null; pinned?: boolean }) {
-	// Pinned above the board, only the job in hand shows; the full order is on hover.
-	if (pinned) {
-		return (
-			<div
-				className="flex min-w-0 items-center gap-2 whitespace-nowrap rounded-full border bg-background px-3 py-1.5 text-[12px] shadow-sm"
-				title={`Every 30 min the dispatcher picks one job, in this order: ${JOBS.join(" › ")}`}
-			>
-				<span className="font-medium" style={{ color: ROLE_COLORS.dispatcher }}>dispatcher</span>
-				{job ? (
-					<span key={job} className="rounded bg-foreground px-1.5 py-px text-background animate-in fade-in-0 zoom-in-95 duration-200">{job}</span>
-				) : (
-					<span className="truncate text-muted-foreground">sweeps every 30 min</span>
-				)}
-			</div>
-		);
-	}
+/**
+ * Pinned above the full-page board: the dispatcher's job, whose turn it is and what they are saying, in one line.
+ * The full pick order and the whole line are on hover.
+ */
+function NowChip({ job, turn, say }: { job: string | null; turn: SwarmRole | null; say?: string }) {
+	return (
+		<div
+			className="flex min-w-0 items-center gap-2 whitespace-nowrap rounded-full border bg-background px-3 py-1.5 text-[12px] shadow-sm"
+			title={[`Every 30 min the dispatcher picks one job, in this order: ${JOBS.join(" › ")}`, turn && say ? `${turn}: ${say}` : ""].filter(Boolean).join("\n")}
+		>
+			<span className="font-medium" style={{ color: ROLE_COLORS.dispatcher }}>dispatcher</span>
+			{job ? (
+				<span key={job} className="rounded bg-foreground px-1.5 py-px text-background animate-in fade-in-0 zoom-in-95 duration-200">{job}</span>
+			) : (
+				<span className="text-muted-foreground">sweeps every 30 min</span>
+			)}
+			{turn === "dispatcher" ? (
+				// The dispatcher's own turn: its line follows its job, no second name.
+				say ? <span key={say} className="min-w-0 truncate text-muted-foreground animate-in fade-in-0 duration-300">{say}</span> : null
+			) : turn ? (
+				<>
+					<span className="text-muted-foreground/50">›</span>
+					<span key={turn} className="inline-flex shrink-0 items-center gap-1.5 font-medium animate-in fade-in-0 duration-200">
+						<span className="size-2 rounded-full" style={{ backgroundColor: ROLE_COLORS[turn] }} />
+						{turn}
+					</span>
+					{say ? <span key={say} className="min-w-0 truncate text-muted-foreground animate-in fade-in-0 duration-300">{say}</span> : null}
+				</>
+			) : (
+				<>
+					<span className="text-muted-foreground/50">›</span>
+					<span className="text-muted-foreground">between turns</span>
+				</>
+			)}
+		</div>
+	);
+}
+
+function DispatcherChip({ job }: { job: string | null }) {
 	return (
 		<div
 			className="absolute flex shrink-0 items-center gap-2 whitespace-nowrap rounded-full border bg-background px-3 py-1.5 text-[12px] shadow-sm"
