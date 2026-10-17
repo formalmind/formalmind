@@ -1,4 +1,4 @@
-import { GalleryVerticalEnd } from "lucide-react"
+import { LogoMark } from "@/components/logo"
 import { LoginForm } from "@/components/login-form"
 import YouTubeVideo from "@/components/youtube-video"
 
@@ -8,9 +8,7 @@ export default function LoginPage() {
 			<div className="flex flex-col gap-4 p-6 md:p-10">
 				<div className="flex justify-center gap-2 md:justify-start">
 					<a href="#" className="flex items-center gap-2 font-medium">
-						<div className="flex h-6 w-6 items-center justify-center rounded-md bg-primary text-primary-foreground">
-							<GalleryVerticalEnd className="size-4" />
-						</div>
+						<LogoMark size={24} />
 						Formal Mind.
 					</a>
 				</div>

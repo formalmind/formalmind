@@ -1,13 +1,13 @@
 "use client";
 
 import Link from "next/link";
+import { LogoMark } from "@/components/logo";
 import { MarkGithubIcon } from "@primer/octicons-react";
 import { useState } from "react";
 import { ArrowRight, CircleDollarSign, Loader2, ShieldCheck, Sparkles } from "lucide-react";
 import { STEP_COPY, TeamPicker } from "@/components/onboarding/steps";
 import { SwarmCanvas } from "@/components/swarm/swarm-canvas";
 import YouTubeVideo from "@/components/youtube-video";
-import { ROLE_COLORS } from "@/lib/swarm-roles";
 import { TEAM_PRESETS, type TeamPreset } from "@/lib/teams";
 import { PlanBoard } from "./plan-board";
 import { SetupPreview } from "./setup-preview";
@@ -40,9 +40,7 @@ export function Landing({ signedIn }: { signedIn: boolean }) {
 		<div className="min-h-dvh bg-background text-foreground">
 			<header className="mx-auto flex h-16 max-w-6xl items-center justify-between px-4 sm:px-6">
 				<Link href="/welcome" className="flex items-center gap-2 font-semibold tracking-tight">
-					<svg width="22" height="22" viewBox="0 0 24 24" aria-hidden>
-						<polygon points="7 20 7 4 19 16 12 16 7 21" fill={ROLE_COLORS.planner} stroke="white" strokeWidth="1.5" strokeLinejoin="round" />
-					</svg>
+					<LogoMark size={24} />
 					Formal Mind.
 				</Link>
 				<nav className="flex items-center gap-1 text-sm">
@@ -162,7 +160,7 @@ export function Landing({ signedIn }: { signedIn: boolean }) {
 
 			<footer className="border-t">
 				<div className="mx-auto flex max-w-6xl flex-wrap items-center justify-between gap-2 px-4 py-6 text-xs text-muted-foreground sm:px-6">
-					<span>Formal Mind.</span>
+					<span className="flex items-center gap-2"><LogoMark size={16} />Formal Mind.</span>
 					<a href="mailto:formalmindai@gmail.com" className="hover:text-foreground">formalmindai@gmail.com</a>
 				</div>
 			</footer>
