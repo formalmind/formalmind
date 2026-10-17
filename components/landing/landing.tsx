@@ -43,7 +43,8 @@ export function Landing({ signedIn }: { signedIn: boolean }) {
 				</nav>
 			</header>
 
-			<main>
+			{/* One page: no footer, and room at the bottom so the floating video never covers the end of the demo. */}
+			<main className="pb-32">
 				<section className="mx-auto max-w-6xl px-4 pb-10 pt-10 text-center sm:px-6 sm:pt-16">
 					<h1 className="mx-auto max-w-3xl text-balance text-4xl font-semibold tracking-tight sm:text-5xl">
 						A swarm of Lean4 agents for proving Solidity codebases
@@ -124,12 +125,6 @@ export function Landing({ signedIn }: { signedIn: boolean }) {
 				</aside>
 			) : null}
 
-			<footer className="mt-20 border-t">
-				<div className="mx-auto flex max-w-6xl flex-wrap items-center justify-between gap-2 px-4 py-6 text-xs text-muted-foreground sm:px-6">
-					<span className="flex items-center gap-2"><LogoMark size={16} />Formal Mind.</span>
-					<a href="mailto:formalmindai@gmail.com" className="hover:text-foreground">formalmindai@gmail.com</a>
-				</div>
-			</footer>
 		</div>
 	);
 }
