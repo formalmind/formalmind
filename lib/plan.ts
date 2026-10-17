@@ -52,7 +52,8 @@ const MAX_CHARS = 9_000;
 async function gh<T>(path: string): Promise<T> {
 	const token = process.env.GITHUB_TOKEN;
 	const res = await fetch(`https://api.github.com${path}`, {
-		headers: { Accept: "application/vnd.github+json", ...(token ? { Authorization: `Bearer ${token}` } : {}) },
+		// GitHub refuses requests without a User-Agent, and Workers' fetch doesn't send one.
+		headers: { Accept: "application/vnd.github+json", "User-Agent": "formalmind", ...(token ? { Authorization: `Bearer ${token}` } : {}) },
 		cache: "no-store",
 	});
 	if (res.status === 404) throw new Error("not-found");

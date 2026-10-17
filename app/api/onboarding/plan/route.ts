@@ -27,6 +27,7 @@ export async function POST(request: Request) {
 	try {
 		scan = await scanRepo(repo);
 	} catch (error) {
+		console.error("[plan] scan failed:", repo, error);
 		const missing = error instanceof Error && error.message === "not-found";
 		return Response.json({ error: missing ? `Couldn't find a public repository at ${repo}.` : "GitHub didn't answer just now. Try again in a minute." }, { status: missing ? 404 : 502 });
 	}

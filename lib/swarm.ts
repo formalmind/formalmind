@@ -133,6 +133,8 @@ export async function github<T>(path: string): Promise<T> {
 	const headers: Record<string, string> = {
 		Accept: "application/vnd.github+json",
 		"X-GitHub-Api-Version": "2022-11-28",
+		// GitHub refuses requests without a User-Agent, and Workers' fetch doesn't send one.
+		"User-Agent": "formalmind",
 	};
 	if (process.env.GITHUB_TOKEN) headers.Authorization = `Bearer ${process.env.GITHUB_TOKEN}`;
 	const res = await fetch(`https://api.github.com/repos/${SWARM_REPO}${path}`, { headers, cache: "no-store" });

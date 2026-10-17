@@ -128,7 +128,7 @@ export const swarmTools = {
 		execute: ({ query }) => safely(async () => {
 			const token = process.env.GITHUB_TOKEN;
 			const res = await fetch(`https://api.github.com/search/issues?per_page=15&q=${encodeURIComponent(`repo:${SWARM_REPO} ${query}`)}`, {
-				headers: { Accept: "application/vnd.github+json", ...(token ? { Authorization: `Bearer ${token}` } : {}) },
+				headers: { Accept: "application/vnd.github+json", "User-Agent": "formalmind", ...(token ? { Authorization: `Bearer ${token}` } : {}) },
 				cache: "no-store",
 			});
 			if (!res.ok) throw new Error(`GitHub search: ${res.status} ${res.statusText}`);
