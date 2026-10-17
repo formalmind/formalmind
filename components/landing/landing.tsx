@@ -35,8 +35,10 @@ export function Landing({ signedIn }: { signedIn: boolean }) {
 					Formal Mind.
 				</Link>
 				<nav className="flex items-center gap-1 text-sm">
-					<a href={signedIn ? "/" : "/login"} className="rounded-full px-3 py-1.5 text-muted-foreground hover:text-foreground">{signedIn ? "Open the app" : "Log in"}</a>
-					<a href={startHref} className="rounded-full bg-primary px-3.5 py-1.5 font-medium text-primary-foreground hover:opacity-90">Get started</a>
+					{/* One call to action: in for someone signed in, started for everyone else (login is on the way). */}
+					<a href={signedIn ? "/" : startHref} className="rounded-full bg-primary px-3.5 py-1.5 font-medium text-primary-foreground hover:opacity-90">
+						{signedIn ? "Open the app" : "Get started"}
+					</a>
 				</nav>
 			</header>
 
@@ -79,7 +81,8 @@ export function Landing({ signedIn }: { signedIn: boolean }) {
 				</section>
 
 				<section className="mx-auto max-w-6xl px-4 sm:px-6">
-					{repo ? (
+					{/* A plan that failed before anything arrived leaves the demo in place, with the error above. */}
+					{repo && !(error && !plan) ? (
 						<div aria-live="polite">
 							<SetupPreview repo={repo} plan={plan} done={done} failed={Boolean(error)} startHref={startHref} />
 						</div>

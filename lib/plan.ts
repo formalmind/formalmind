@@ -57,6 +57,8 @@ async function gh<T>(path: string): Promise<T> {
 		cache: "no-store",
 	});
 	if (res.status === 404) throw new Error("not-found");
+	// Out of requests for the hour (a server without GITHUB_TOKEN gets only 60).
+	if ((res.status === 403 || res.status === 429) && res.headers.get("x-ratelimit-remaining") === "0") throw new Error("rate-limited");
 	if (!res.ok) throw new Error(`GitHub ${res.status}`);
 	return res.json() as Promise<T>;
 }

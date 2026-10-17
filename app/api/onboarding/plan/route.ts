@@ -28,8 +28,10 @@ export async function POST(request: Request) {
 		scan = await scanRepo(repo);
 	} catch (error) {
 		console.error("[plan] scan failed:", repo, error);
-		const missing = error instanceof Error && error.message === "not-found";
-		return Response.json({ error: missing ? `Couldn't find a public repository at ${repo}.` : "GitHub didn't answer just now. Try again in a minute." }, { status: missing ? 404 : 502 });
+		const reason = error instanceof Error ? error.message : "";
+		if (reason === "not-found") return Response.json({ error: `Couldn't find a public repository at ${repo}.` }, { status: 404 });
+		if (reason === "rate-limited") return Response.json({ error: "We've used up GitHub's request limit for now. Try again in a few minutes." }, { status: 503 });
+		return Response.json({ error: "GitHub didn't answer just now. Try again in a minute." }, { status: 502 });
 	}
 	if (!scan.files.length) return Response.json({ error: `${scan.repo} has no Solidity contracts outside tests and libraries.` }, { status: 422 });
 
