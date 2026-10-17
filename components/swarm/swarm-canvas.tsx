@@ -60,7 +60,8 @@ const PAD = 24;
 const LANE_TOP = 64;
 const LANE_BOTTOM = 400;
 const CARD_TOP = 100;
-const CARD_STEP = 88;
+const CARD_MIN_H = 78;
+const CARD_GAP = 10;
 const CARD_W = 160;
 const PANEL_TOP = 420;
 const PANEL_W = 368;
@@ -329,11 +330,19 @@ function liveScene(state: SwarmState, run: SwarmRun): Scene {
 	};
 }
 
-function layout(cards: Card[]) {
+/** Stacks each lane's cards on their measured heights; a card that would run past the lane's bottom is hidden. */
+function layout(cards: Card[], heights: Map<string, number>) {
 	const positions = new Map<string, { x: number; y: number; hidden: boolean }>();
 	for (const lane of LANES) {
 		const inLane = cards.filter((c) => c.lane === lane.key).sort((a, b) => b.order - a.order);
-		inLane.forEach((c, i) => positions.set(c.id, { x: laneX(lane.key) + 8, y: CARD_TOP + i * CARD_STEP, hidden: i > 3 }));
+		let y = CARD_TOP;
+		let full = false;
+		for (const c of inLane) {
+			const h = heights.get(c.id) ?? CARD_MIN_H;
+			full ||= y + h > LANE_BOTTOM - 8;
+			positions.set(c.id, { x: laneX(lane.key) + 8, y, hidden: full });
+			y += h + CARD_GAP;
+		}
 	}
 	return positions;
 }
@@ -532,7 +541,11 @@ export function SwarmCanvas({ state, highlight, fill = false, title, actions }: 
 	const oy = fit.y + view.y;
 
 	const shown = live ?? scene;
-	const positions = layout(shown.cards);
+	// Cards grow to fit their label and title; the board stacks them on what they measure.
+	const [heights, setHeights] = useState(() => new Map<string, number>());
+	const measure = (id: string, h: number) =>
+		setHeights((prev) => (prev.get(id) === h ? prev : new Map(prev).set(id, h)));
+	const positions = layout(shown.cards, heights);
 
 	// Real issues and PRs behind the cards, for hover cards and links (replay-only cards have none).
 	const items = new Map<number, SwarmItem>([...(state?.work ?? []), ...(state?.merged ?? [])].map((item) => [item.number, item]));
@@ -640,6 +653,7 @@ export function SwarmCanvas({ state, highlight, fill = false, title, actions }: 
 								onEnter={(el) => showHover(c, el)}
 								onLeave={hideHover}
 								onOpen={fill ? () => setModal({ card: c }) : undefined}
+								onMeasure={(h) => measure(c.id, h)}
 							/>
 						);
 					})}
@@ -750,14 +764,20 @@ const DOTS = { backgroundImage: "radial-gradient(hsl(var(--border)) 1px, transpa
 /**
  * Apple-style bottom island: a card floating just above the bottom edge that slides up on the iOS sheet curve,
  * with a round close button top-left. `kicker` sits beside the close button and titles the island when given.
+ * It is not modal: the board stays usable, a click on another card or panel swaps what it shows, and a click
+ * on empty canvas or Escape closes it.
  */
 function BottomIsland({ open, onClose, kicker, children }: { open: boolean; onClose: () => void; kicker?: string; children: ReactNode }) {
 	return (
-		<DialogPrimitive.Root open={open} onOpenChange={(next) => !next && onClose()}>
+		<DialogPrimitive.Root open={open} onOpenChange={(next) => !next && onClose()} modal={false}>
 			<DialogPrimitive.Portal>
-				<DialogPrimitive.Overlay className="fixed inset-0 z-50 bg-black/20 duration-300 data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 dark:bg-black/50" />
 				<DialogPrimitive.Content
 					aria-describedby={undefined}
+					// Keep focus on the board so clicking from card to card feels like browsing, not opening dialogs.
+					onOpenAutoFocus={(e) => e.preventDefault()}
+					onInteractOutside={(e) => {
+						if ((e.target as HTMLElement | null)?.closest("[data-component], [data-canvas-ui]")) e.preventDefault();
+					}}
 					className="fixed inset-x-3 bottom-3 z-50 mx-auto flex max-h-[80vh] max-w-lg flex-col rounded-[2rem] border border-black/5 bg-background p-5 shadow-[0_-8px_40px_-12px_rgba(0,0,0,0.25)] duration-500 ease-[cubic-bezier(0.32,0.72,0,1)] focus:outline-none data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:duration-300 data-[state=closed]:slide-out-to-bottom-[110%] data-[state=open]:slide-in-from-bottom-[110%] dark:border-white/10 sm:bottom-4"
 				>
 					<div className="flex items-center gap-3">
@@ -831,7 +851,7 @@ export function SwarmCursor({ role, x, y, say, dim, turn, side }: { role: SwarmR
 }
 
 /** With `onOpen` the card is a button that opens its details; otherwise it links out and previews on hover. */
-function BoardCard({ card, x, y, hidden, href, onEnter, onLeave, onOpen }: {
+function BoardCard({ card, x, y, hidden, href, onEnter, onLeave, onOpen, onMeasure }: {
 	card: Card;
 	x: number;
 	y: number;
@@ -840,10 +860,25 @@ function BoardCard({ card, x, y, hidden, href, onEnter, onLeave, onOpen }: {
 	onEnter: (el: HTMLElement) => void;
 	onLeave: () => void;
 	onOpen?: () => void;
+	onMeasure: (height: number) => void;
 }) {
 	const Tag = onOpen ? "button" : href ? "a" : "div";
+	const ref = useRef<HTMLElement>(null);
+	const measureRef = useRef(onMeasure);
+	measureRef.current = onMeasure;
+	useEffect(() => {
+		const el = ref.current;
+		if (!el) return;
+		// offsetHeight is the card's own size, unaffected by the board's zoom.
+		const observer = new ResizeObserver(() => measureRef.current(el.offsetHeight));
+		observer.observe(el);
+		return () => observer.disconnect();
+	}, []);
 	return (
 		<Tag
+			ref={ref as never}
+			aria-hidden={hidden || undefined}
+			tabIndex={hidden ? -1 : undefined}
 			{...(onOpen
 				? { type: "button" as const, onClick: onOpen }
 				: {
@@ -855,13 +890,20 @@ function BoardCard({ card, x, y, hidden, href, onEnter, onLeave, onOpen }: {
 					})}
 			data-component
 			className={`absolute left-0 top-0 z-10 block rounded-lg border bg-background p-2.5 text-left shadow-sm ${MOVE} ${href || onOpen ? "cursor-pointer hover:border-foreground/30" : "cursor-default"}`}
-			style={{ width: CARD_W, height: 78, transform: `translate(${x}px, ${y}px)`, opacity: hidden ? 0 : 1, transitionProperty: "transform, opacity, border-color" }}
+			style={{
+				width: CARD_W,
+				minHeight: CARD_MIN_H,
+				transform: `translate(${x}px, ${y}px)`,
+				opacity: hidden ? 0 : 1,
+				pointerEvents: hidden ? "none" : undefined,
+				transitionProperty: "transform, opacity, border-color",
+			}}
 		>
 			<div className="flex items-center gap-1.5 text-[12px]">
 				{card.kind === "doc" ? null : <span className="font-mono text-muted-foreground">{card.kind === "pr" ? "PR" : "#"}{card.number}</span>}
 				<span className={`rounded px-1.5 py-px font-mono text-[10px] ${LABEL_STYLES[card.label] ?? LABEL_STYLES.README}`}>{card.label}</span>
 			</div>
-			<p className="mt-1 line-clamp-2 text-[13px] leading-snug text-foreground">{card.title}</p>
+			<p className="mt-1 text-[13px] leading-snug text-foreground">{card.title}</p>
 		</Tag>
 	);
 }
