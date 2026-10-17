@@ -1449,7 +1449,7 @@ function Panel({ index, title, repo, top = ONE.panelTop, onMeasure, children }: 
 
 function LedgerPanel({ spend, costs, ...mode }: PanelMode & { spend: number; costs: LedgerRow[] }) {
 	return (
-		<Panel index={0} title="#38 ledger" {...mode}>
+		<Panel index={0} title="#38 Ledger notebook" {...mode}>
 			<div className="flex items-baseline justify-between text-[12px]">
 				<span className="text-[13px] text-foreground">Spent today</span>
 				<span className="font-mono tabular-nums text-foreground">${spend.toFixed(2)} / $5.00</span>
@@ -1471,7 +1471,7 @@ function LedgerPanel({ spend, costs, ...mode }: PanelMode & { spend: number; cos
 
 function NotebookPanel({ notes, ...mode }: PanelMode & { notes: Note[] }) {
 	return (
-		<Panel index={1} title="#55 notebook" {...mode}>
+		<Panel index={1} title="#55 Swarm notebook" {...mode}>
 			<ul className="space-y-1 text-[13px]">
 				{notes.length === 0 ? <li className="text-muted-foreground">Each run opens a task list here first.</li> : null}
 				{notes.map((n, i) => (
@@ -1491,7 +1491,7 @@ function NotebookPanel({ notes, ...mode }: PanelMode & { notes: Note[] }) {
 
 function ChiefPanel({ headline, ...mode }: PanelMode & { headline: string }) {
 	return (
-		<Panel index={2} title="#53 chief updates" {...mode}>
+		<Panel index={2} title="#53 Chief notebook" {...mode}>
 			<p className="text-[13px] text-muted-foreground">Daily at 23:40 UTC, before the budget resets</p>
 			<p className="mt-2 text-[14px] font-medium leading-snug text-foreground">{headline}</p>
 		</Panel>

@@ -117,8 +117,8 @@ export function GetStarted() {
 					</ol>
 					<p className="mt-3 text-sm leading-6 text-muted-foreground">
 						The reviewer or merger can send a PR back as <Code>fm:changes</Code>, and anything that needs a human decision is parked as{" "}
-						<Code>fm:blocked</Code> and handed to the assistant, who asks you. Every run keeps a task list on the notebook issue and a cost
-						line on the ledger, so nothing it claims is unverifiable.
+						<Code>fm:blocked</Code> and handed to the assistant, who asks you. Every run keeps a task list in the Swarm notebook and a cost
+						line in the Ledger notebook, so nothing it claims is unverifiable.
 					</p>
 				</div>
 			</Section>
@@ -223,9 +223,9 @@ gh workflow run formalmind-swarm.yml -f role=editor`}</pre>
 							<Code>PROTOCOL_READ_TOKEN</Code> if the protocol repository is private.
 						</>,
 						<>
-							<span className="font-medium text-foreground">Four tracking issues.</span> A ledger, a notebook, a chief-updates issue and your
-							assistant&apos;s thread; put their numbers in the swarm workflow&apos;s <Code>LEDGER_ISSUE</Code>, <Code>NOTEBOOK_ISSUE</Code>,{" "}
-							<Code>CHIEF_ISSUE</Code> and <Code>ASSISTANT_ISSUE</Code>.
+							<span className="font-medium text-foreground">Four notebooks.</span> One issue each: the Ledger notebook, the Swarm notebook,
+							the Chief notebook and the Assistant notebook. Put their numbers in the swarm workflow&apos;s <Code>LEDGER_ISSUE</Code>,{" "}
+							<Code>NOTEBOOK_ISSUE</Code>, <Code>CHIEF_ISSUE</Code> and <Code>ASSISTANT_ISSUE</Code>.
 						</>,
 						<>
 							<span className="font-medium text-foreground">The relay.</span> Deploy the{" "}
