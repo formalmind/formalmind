@@ -2,6 +2,7 @@ import { streamText } from "ai";
 import { openAIModelNames, type OpenAIModel } from "@/lib/llm";
 import { openai } from "@/lib/openai";
 import { getSwarmState } from "@/lib/swarm";
+import { swarmTools } from "@/lib/tools/swarm-tools";
 
 const SWARM_RULES = `The formalmind swarm owns the Lean 4 specification in the proofs repository and works the roadmap in its README, hands off, within a budget.
 Roles (all post as formalmind[bot]; the bold word at the start of a comment names the role):
@@ -33,12 +34,15 @@ export async function POST(request: Request) {
 	const result = streamText({
 		model: model.startsWith("gpt-6") ? openai.responses(model) : openai(model),
 		system: `You answer questions about what the formalmind swarm agents are doing. Be concise and concrete: name issue and PR numbers, labels, roles and dollar amounts. Answer only from the live state below; if it does not say, say so. "work" (open items and their current labels) and "merged" are the present truth. Comments in "chief", "notebook" and "ledger" are history with timestamps: when an older comment disagrees with the current labels or the merged list, trust the current state and mention that the comment is out of date. Today is ${new Date().toISOString().slice(0, 10)} (UTC). Link issues as https://github.com/<repo>/issues/<n>.
+When the live state is not enough, use the tools to read an issue or PR thread, the files a PR changed, a run's steps, a file in the repository (README.md holds the decisions and roadmap, FORMAL_MIND.md the changelog), or to search issues. Prefer looking it up over guessing, and cite what you read.
 
 ${SWARM_RULES}
 
 Live state (JSON, fetched just now):
 ${state}`,
 		messages,
+		tools: swarmTools,
+		maxSteps: 6,
 	});
 
 	return result.toDataStreamResponse({

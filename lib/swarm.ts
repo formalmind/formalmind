@@ -119,7 +119,7 @@ type GitHubRun = { id: number; status: string; conclusion: string | null; run_st
 
 type GitHubJob = { name: string; status: string; steps?: { name: string; status: string }[] };
 
-async function github<T>(path: string): Promise<T> {
+export async function github<T>(path: string): Promise<T> {
 	const headers: Record<string, string> = {
 		Accept: "application/vnd.github+json",
 		"X-GitHub-Api-Version": "2022-11-28",

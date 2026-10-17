@@ -4,9 +4,10 @@ import { useEffect, useRef, useState } from "react";
 import { useChat } from "@ai-sdk/react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-import { Bot } from "lucide-react";
+import { Bot, Wrench } from "lucide-react";
 import { ChatComposer } from "@/components/chat-composer";
 import type { OpenAIModel } from "@/lib/llm";
+import type { UIMessage } from "ai";
 
 const SUGGESTIONS = [
 	"What is each agent doing right now?",
@@ -55,8 +56,11 @@ export function SwarmChat({ repo }: { repo: string }) {
 						{m.role === "user" ? (
 							<p className="max-w-[85%] rounded-2xl bg-secondary px-3.5 py-2 text-sm text-secondary-foreground">{m.content}</p>
 						) : (
-							<div className="prose prose-sm max-w-none leading-6 dark:prose-invert prose-p:my-2 prose-ul:my-2 prose-code:rounded prose-code:bg-muted prose-code:px-1 prose-code:py-0.5 prose-code:before:content-none prose-code:after:content-none">
+							<div>
+								<ToolCalls message={m} />
+								<div className="prose prose-sm max-w-none leading-6 dark:prose-invert prose-p:my-2 prose-ul:my-2 prose-code:rounded prose-code:bg-muted prose-code:px-1 prose-code:py-0.5 prose-code:before:content-none prose-code:after:content-none">
 								<ReactMarkdown remarkPlugins={[remarkGfm]}>{m.content}</ReactMarkdown>
+								</div>
 							</div>
 						)}
 					</div>
@@ -85,6 +89,31 @@ export function SwarmChat({ repo }: { repo: string }) {
 					}
 				/>
 			</div>
+		</div>
+	);
+}
+
+const TOOL_LABELS: Record<string, (args: Record<string, unknown>) => string> = {
+	getIssue: (a) => `Read #${a.number}`,
+	getPullRequestFiles: (a) => `Files in PR #${a.number}`,
+	getRun: (a) => `Run ${a.runId}`,
+	readFile: (a) => `Read ${a.path}`,
+	listFiles: (a) => `Listed ${a.path || "/"}`,
+	searchIssues: (a) => `Searched “${a.query}”`,
+};
+
+/** The lookups the model made for this answer, so it is clear where the answer came from. */
+function ToolCalls({ message }: { message: UIMessage }) {
+	const calls = (message.parts ?? []).flatMap((part) => (part.type === "tool-invocation" ? [part.toolInvocation] : []));
+	if (!calls.length) return null;
+	return (
+		<div className="mb-2 flex flex-wrap gap-1.5">
+			{calls.map((call) => (
+				<span key={call.toolCallId} className="inline-flex items-center gap-1 rounded-full border bg-muted/50 px-2 py-0.5 text-[11px] text-muted-foreground">
+					<Wrench className={`size-3 ${call.state === "result" ? "" : "animate-pulse"}`} />
+					{(TOOL_LABELS[call.toolName] ?? (() => call.toolName))(call.args as Record<string, unknown>)}
+				</span>
+			))}
 		</div>
 	);
 }
