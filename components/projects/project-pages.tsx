@@ -96,7 +96,7 @@ function ProjectPicker({ repo }: { repo: string }) {
 				<span className="max-w-[14rem] truncate">{repo}</span>
 				<ChevronDown className="size-3.5 text-muted-foreground" />
 			</DropdownMenuTrigger>
-			<DropdownMenuContent align="start">
+			<DropdownMenuContent side="top" align="start" sideOffset={6}>
 				{projects.map((p) => (
 					<DropdownMenuItem key={p.repo} onSelect={() => p.repo !== repo && navigate(projectPath(p.repo, "chat"))}>
 						{p.repo}
