@@ -75,7 +75,10 @@ export function Landing({ signedIn }: { signedIn: boolean }) {
 						Try{" "}
 						{EXAMPLES.map((example, i) => (
 							<span key={example}>
-								<button type="button" onClick={() => run(example)} disabled={isLoading} className="font-mono underline-offset-4 hover:text-foreground hover:underline">{example}</button>
+								<button type="button" onClick={() => run(example)} disabled={isLoading} className="inline-flex items-center gap-1 font-mono underline-offset-4 hover:text-foreground hover:underline">
+									<MarkGithubIcon size={12} className="shrink-0" />
+									{example}
+								</button>
 								{i < EXAMPLES.length - 1 ? ", " : ""}
 							</span>
 						))}
