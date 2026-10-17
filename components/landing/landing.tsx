@@ -72,7 +72,6 @@ export function Landing({ signedIn }: { signedIn: boolean }) {
 					</form>
 					{error ? <p role="alert" className="mt-3 text-sm text-red-600 dark:text-red-400">{error}</p> : null}
 					<p className="mt-3 text-xs text-muted-foreground">
-						Try{" "}
 						{EXAMPLES.map((example, i) => (
 							<span key={example}>
 								<button type="button" onClick={() => run(example)} disabled={isLoading} className="inline-flex items-center gap-1 font-mono underline-offset-4 hover:text-foreground hover:underline">
