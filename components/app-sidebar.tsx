@@ -2,7 +2,7 @@
 
 import Link from "next/link"
 import { usePathname } from "next/navigation"
-import { BookOpen, GanttChart, KanbanSquare, MessageCircle, Network, PanelLeftClose, PanelLeftOpen, Rocket } from "lucide-react"
+import { BookOpen, GanttChart, MessageCircle, Network, PanelLeftClose, PanelLeftOpen, Rocket } from "lucide-react"
 import {
 	Sidebar,
 	SidebarContent,
@@ -15,13 +15,13 @@ import {
 	useSidebar,
 } from "@/components/ui/sidebar"
 import { NavUser } from "@/components/nav-user"
+import { ROLE_COLORS } from "@/lib/swarm-roles"
 
 type NavItem = { title: string; url: string; icon: React.ElementType }
 
 const NAV: NavItem[] = [
 	{ title: "Swarm", url: "/", icon: Network },
 	{ title: "Chat", url: "/chat", icon: MessageCircle },
-	{ title: "Kanban", url: "/kanban", icon: KanbanSquare },
 	{ title: "Roadmap", url: "/roadmap", icon: GanttChart },
 ]
 
@@ -54,7 +54,13 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
 	return (
 		<Sidebar variant="inset" collapsible="icon" {...props}>
 			{/* The toggle sits at the top, the way macOS sidebars carry it. */}
-			<SidebarHeader className="flex-row justify-end group-data-[collapsible=icon]:justify-center">
+			<SidebarHeader className="flex-row items-center justify-between group-data-[collapsible=icon]:justify-center">
+				<Link href="/" className="flex items-center gap-2 px-1 text-sm font-semibold tracking-tight group-data-[collapsible=icon]:hidden">
+					<svg width="18" height="18" viewBox="0 0 24 24" aria-hidden>
+						<polygon points="7 20 7 4 19 16 12 16 7 21" fill={ROLE_COLORS.planner} stroke="white" strokeWidth="1.5" strokeLinejoin="round" />
+					</svg>
+					Formal Mind.
+				</Link>
 				<button
 					type="button"
 					onClick={toggleSidebar}

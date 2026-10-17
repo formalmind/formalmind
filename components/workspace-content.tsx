@@ -7,7 +7,7 @@ import BreadCrumbs from "@/components/bread-crumbs";
 
 export function WorkspaceContent({ children }: { children: React.ReactNode }) {
 	const pathname = usePathname();
-	const isChat = ["/", "/chat", "/kanban", "/roadmap", "/onboarding"].includes(pathname);
+	const isChat = ["/", "/chat", "/roadmap", "/onboarding"].includes(pathname);
 	// The landing page brings its own header and main.
 	if (pathname === "/welcome") return <div className="w-full">{children}</div>;
 	return (

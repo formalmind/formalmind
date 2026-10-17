@@ -2,25 +2,16 @@
 
 import { useEffect, useState } from "react";
 import { RefreshCw, X } from "lucide-react";
-import { FilterIcon, ProjectIcon, ProjectRoadmapIcon } from "@primer/octicons-react";
+import { FilterIcon } from "@primer/octicons-react";
 import { SidebarTrigger } from "@/components/ui/sidebar";
 import type { ProjectData } from "@/lib/project";
 import { matchesFilter } from "./project-meta";
-import { ProjectBoard } from "./project-board";
 import { ProjectRoadmap } from "./project-roadmap";
 
-export type ProjectViewName = "board" | "roadmap";
-
 const POLL_MS = 30_000;
-const VIEW_PATHS = ["/kanban", "/roadmap"];
-const VIEWS: { key: ProjectViewName; name: string; icon: React.ElementType }[] = [
-	{ key: "board", name: "Kanban", icon: ProjectIcon },
-	{ key: "roadmap", name: "Roadmap", icon: ProjectRoadmapIcon },
-];
 
-/** A GitHub Projects-style page over the proofs repository, with Board and Roadmap views. */
-export function ProjectView({ repo, initialView = "board", now }: { repo: string; initialView?: ProjectViewName; now?: number }) {
-	const [view, setView] = useState<ProjectViewName>(initialView);
+/** A GitHub Projects-style roadmap over the proofs repository. The swarm canvas is the board. */
+export function ProjectView({ repo, now }: { repo: string; now?: number }) {
 	const [data, setData] = useState<ProjectData | null>(null);
 	const [error, setError] = useState<string | null>(null);
 	const [loading, setLoading] = useState(false);
@@ -49,12 +40,6 @@ export function ProjectView({ repo, initialView = "board", now }: { repo: string
 		return () => clearInterval(timer);
 	}, []);
 
-	const choose = (next: ProjectViewName) => {
-		setView(next);
-		// Each view has its own page, so the side nav follows the tab. Elsewhere (Storybook) leave the URL alone.
-		if (VIEW_PATHS.includes(window.location.pathname)) window.history.replaceState(null, "", VIEW_PATHS[next === "board" ? 0 : 1]);
-	};
-
 	const items = data?.items.filter((item) => matchesFilter(item, query)) ?? [];
 	const open = data?.items.filter((item) => item.state === "open").length ?? 0;
 	const done = data?.milestones.filter((m) => m.done).length ?? 0;
@@ -77,23 +62,7 @@ export function ProjectView({ repo, initialView = "board", now }: { repo: string
 				</button>
 			</div>
 
-			<nav role="tablist" aria-label="Views" className="mt-4 flex gap-1 border-b">
-				{VIEWS.map(({ key, name, icon: Icon }) => (
-					<button
-						key={key}
-						type="button"
-						role="tab"
-						aria-selected={view === key}
-						onClick={() => choose(key)}
-						className={`-mb-px inline-flex h-9 items-center gap-2 rounded-t-md border px-3 text-sm transition-colors ${view === key ? "border-border border-b-background bg-background font-medium" : "border-transparent text-muted-foreground hover:text-foreground"}`}
-					>
-						<Icon size={16} />
-						{name}
-					</button>
-				))}
-			</nav>
-
-			<label className="mt-3 flex h-8 items-center gap-2 rounded-md border bg-background px-2.5 text-sm focus-within:ring-2 focus-within:ring-ring">
+			<label className="mt-4 flex h-8 items-center gap-2 rounded-md border bg-background px-2.5 text-sm focus-within:ring-2 focus-within:ring-ring">
 				<FilterIcon size={14} className="text-muted-foreground" />
 				<input
 					value={query}
@@ -111,9 +80,7 @@ export function ProjectView({ repo, initialView = "board", now }: { repo: string
 
 			<div className="mt-3 min-h-[480px] flex-1">
 				{data ? (
-					view === "board"
-						? <ProjectBoard repo={repo} items={items} milestones={data.milestones} />
-						: <ProjectRoadmap repo={repo} items={items} milestones={data.milestones} now={now} />
+					<ProjectRoadmap repo={repo} items={items} milestones={data.milestones} now={now} />
 				) : (
 					<div className="flex h-full gap-3">
 						{Array.from({ length: 4 }, (_, i) => <div key={i} className="h-64 w-[300px] shrink-0 animate-pulse rounded-lg bg-muted/60" />)}

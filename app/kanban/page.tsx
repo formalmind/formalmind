@@ -1,8 +1,6 @@
-import { ProjectView } from "@/components/project/project-view";
-import { SWARM_REPO } from "@/lib/swarm";
+import { redirect } from "next/navigation";
 
-export const metadata = { title: "Kanban · Formal Mind" };
-
+/** The Kanban view is gone; the swarm canvas is the board. Old links land on the roadmap. */
 export default function KanbanPage() {
-	return <ProjectView repo={SWARM_REPO} initialView="board" />;
+	redirect("/roadmap");
 }
