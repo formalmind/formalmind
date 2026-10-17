@@ -7,9 +7,6 @@ const meta = {
 	component: SwarmCanvas,
 	parameters: { layout: "fullscreen" },
 	decorators: [(Story) => <div className="p-6"><Story /></div>],
-	argTypes: {
-		highlight: { control: "select", options: [null, "dispatcher", "planner", "prover", "reviewer", "merger", "chief"] },
-	},
 } satisfies Meta<typeof SwarmCanvas>;
 
 export default meta;
@@ -36,9 +33,6 @@ export const QuestionWaiting: Story = { args: { state: askState() } };
 
 /** The chief's daily update finished two minutes ago and stays up until the live window closes. */
 export const JustFinished: Story = { args: { state: justFinishedState() } };
-
-/** One role's cursor stands out and the rest fade, as when a legend button is pressed. */
-export const HighlightedRole: Story = { args: { state: replayState(), highlight: "prover" } };
 
 /** Before the first poll answers. */
 export const Loading: Story = { args: { state: null } };
