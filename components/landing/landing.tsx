@@ -4,7 +4,7 @@ import Link from "next/link";
 import { LogoMark } from "@/components/logo";
 import { MarkGithubIcon } from "@primer/octicons-react";
 import { useState } from "react";
-import { ArrowRight, CircleDollarSign, Loader2, ShieldCheck, Sparkles } from "lucide-react";
+import { Loader2, X } from "lucide-react";
 import { SwarmCanvas } from "@/components/swarm/swarm-canvas";
 import YouTubeVideo from "@/components/youtube-video";
 import { SetupPreview } from "./setup-preview";
@@ -19,6 +19,7 @@ const EXAMPLES = ["Uniswap/v4-core", "morpho-org/morpho-blue", "transmissions11/
 export function Landing({ signedIn }: { signedIn: boolean }) {
 	const [input, setInput] = useState("");
 	const { repo, plan, start, isLoading, error, done } = usePlan();
+	const [showVideo, setShowVideo] = useState(true);
 	const startHref = signedIn ? "/onboarding" : "/auth/login?screen_hint=signup&returnTo=%2Fonboarding";
 
 	const run = (value: string) => {
@@ -90,23 +91,24 @@ export function Landing({ signedIn }: { signedIn: boolean }) {
 					)}
 				</section>
 
-				<section className="mx-auto grid max-w-6xl items-center gap-10 px-4 py-20 sm:px-6 lg:grid-cols-2">
-					<div>
-						<h2 className="text-2xl font-semibold tracking-tight">You set the budget. The swarm stops at it.</h2>
-						<ul className="mt-6 space-y-4 text-sm leading-6 text-muted-foreground">
-							<li className="flex gap-3"><CircleDollarSign className="mt-0.5 size-4 shrink-0 text-foreground" />Add prepaid credits with Stripe and choose a daily budget. When the day&apos;s budget is spent, the swarm pauses until tomorrow.</li>
-							<li className="flex gap-3"><ShieldCheck className="mt-0.5 size-4 shrink-0 text-foreground" />Nothing merges without a clean Lean build on the exact commit, and never with a sorry or a new axiom.</li>
-							<li className="flex gap-3"><Sparkles className="mt-0.5 size-4 shrink-0 text-foreground" />A daily report tells you what landed, what&apos;s in flight, and whether anything is waiting on you.</li>
-						</ul>
-						<a href={startHref} className="mt-8 inline-flex h-10 items-center gap-1.5 rounded-full bg-primary px-5 text-sm font-medium text-primary-foreground hover:opacity-90">
-							Get started <ArrowRight className="size-4" />
-						</a>
-					</div>
-					<YouTubeVideo videoId="xyZZqCQlmCE" title="Formal Mind quick intro" />
-				</section>
 			</main>
 
-			<footer className="border-t">
+			{showVideo ? (
+				// The intro floats bottom-right so it can play while the page is read.
+				<aside aria-label="Formal Mind quick intro" className="fixed bottom-4 right-4 z-40 w-[min(360px,calc(100vw-2rem))] overflow-hidden rounded-2xl border bg-black shadow-2xl animate-in fade-in-0 slide-in-from-bottom-4 duration-300">
+					<YouTubeVideo videoId="xyZZqCQlmCE" title="Formal Mind quick intro" />
+					<button
+						type="button"
+						onClick={() => setShowVideo(false)}
+						aria-label="Close video"
+						className="absolute right-2 top-2 z-10 flex size-7 items-center justify-center rounded-full bg-black/60 text-white backdrop-blur-sm transition-colors hover:bg-black/80"
+					>
+						<X className="size-3.5" />
+					</button>
+				</aside>
+			) : null}
+
+			<footer className="mt-20 border-t">
 				<div className="mx-auto flex max-w-6xl flex-wrap items-center justify-between gap-2 px-4 py-6 text-xs text-muted-foreground sm:px-6">
 					<span className="flex items-center gap-2"><LogoMark size={16} />Formal Mind.</span>
 					<a href="mailto:formalmindai@gmail.com" className="hover:text-foreground">formalmindai@gmail.com</a>
