@@ -1,9 +1,6 @@
-import Image from "next/image"
+import { redirect } from "next/navigation";
 
-export default function Page() {
-	return (
-		<div className="flex bg-muted flex-1 h-svh justify-center items-center">
-			<Image src="/NotFound.svg" width={250} height={250} alt="Page Not Found." />
-		</div>
-	)
+/** Pages that call notFound() send people home rather than showing a 404. */
+export default function NotFound() {
+	redirect("/");
 }

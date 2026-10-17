@@ -22,7 +22,7 @@ export default function LoginPage() {
 			</div>
 			<div className="relative hidden bg-muted lg:flex lg:items-center lg:justify-center lg:p-10">
 				<div className="w-full max-w-2xl overflow-hidden rounded-lg">
-					<YouTubeVideo videoId="H-neiYZJD5A" />
+					<YouTubeVideo videoId="xyZZqCQlmCE" title="Formal Mind quick intro" />
 				</div>
 			</div>
 		</div>

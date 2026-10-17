@@ -42,3 +42,11 @@ next-env.d.ts
 
 # playwright mcp debug output
 .playwright-mcp/
+
+# private grant notes
+GRANT.md
+
+# cloudflare (opennext build output, local worker secrets)
+.open-next/
+.wrangler/
+.dev.vars*

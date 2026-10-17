@@ -10,7 +10,7 @@ const nextConfig: NextConfig = {
 	pageExtensions: ['js', 'jsx', 'md', 'mdx', 'ts', 'tsx'],
 	experimental: {},
 	images: {
-		domains: ['avatars.githubusercontent.com', 'github.com', 'www.youtube.com'],
+		domains: ['avatars.githubusercontent.com', 'github.com', 'www.youtube.com', 'i.ytimg.com'],
 	},
 };
 

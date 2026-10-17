@@ -37,6 +37,8 @@ export interface ChatComposerProps {
 	onModelChange: (model: OpenAIModel) => void;
 	/** "owner/repo" the chat is scoped to, if any. */
 	repo?: { owner: string; name: string } | null;
+	/** Replaces the repo chip on the shelf. */
+	context?: React.ReactNode;
 	placeholder?: string;
 	textareaRef?: React.Ref<HTMLTextAreaElement>;
 }
@@ -50,6 +52,7 @@ export function ChatComposer({
 	model,
 	onModelChange,
 	repo,
+	context,
 	placeholder = "Ask about this repo…",
 	textareaRef,
 }: ChatComposerProps) {
@@ -96,7 +99,7 @@ export function ChatComposer({
 		>
 			{/* Shelf: context chips */}
 			<div className="flex items-center gap-2 px-3 pt-3">
-				{repo ? (
+				{context ?? (repo ? (
 					<Link href={`/github/${repo.owner}/${repo.name}`} className={cn(CHIP, "bg-secondary text-secondary-foreground")}>
 						<RepoIcon size={14} />
 						<span className="max-w-[12rem] truncate">{repo.owner}/{repo.name}</span>
@@ -106,7 +109,7 @@ export function ChatComposer({
 						<GitBranch className="h-3.5 w-3.5" />
 						Choose a repo
 					</Link>
-				)}
+				))}
 			</div>
 
 			<textarea

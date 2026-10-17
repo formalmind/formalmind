@@ -49,7 +49,7 @@ export default async function RootLayout({
 	// const expire = session?.exp
 	if (!session) {
 		return (
-			<html>
+			<html lang="en" suppressHydrationWarning>
 				<body className="text-sm" suppressHydrationWarning>
 					<ThemeProvider>
 						<LoginPage />

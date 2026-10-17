@@ -6,7 +6,9 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "next lint"
+    "lint": "next lint",
+    "preview:cf": "opennextjs-cloudflare build && opennextjs-cloudflare preview",
+    "deploy:cf": "opennextjs-cloudflare build && opennextjs-cloudflare deploy"
   },
   "dependencies": {
     "@ai-sdk/anthropic": "^1.2.12",
@@ -81,6 +83,7 @@
   },
   "devDependencies": {
     "@eslint/eslintrc": "^3",
+    "@opennextjs/cloudflare": "1.20.12",
     "@types/body-parser": "^1.19.5",
     "@types/bun": "^1.2.15",
     "@types/express": "^5.0.2",
@@ -94,6 +97,7 @@
     "remark-directive": "^4.0.0",
     "remark-mdx": "^3.1.0",
     "tailwindcss": "^3.4.1",
-    "typescript": "^5"
+    "typescript": "^5",
+    "wrangler": "4.151.1"
   }
 }
