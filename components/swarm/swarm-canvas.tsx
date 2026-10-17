@@ -997,13 +997,29 @@ function TurnChip({ turn, pinned = false }: { turn: SwarmRole | null; pinned?: b
 }
 
 function DispatcherChip({ job, pinned = false }: { job: string | null; pinned?: boolean }) {
+	// Pinned above the board, only the job in hand shows; the full order is on hover.
+	if (pinned) {
+		return (
+			<div
+				className="flex min-w-0 items-center gap-2 whitespace-nowrap rounded-full border bg-background px-3 py-1.5 text-[12px] shadow-sm"
+				title={`Every 30 min the dispatcher picks one job, in this order: ${JOBS.join(" › ")}`}
+			>
+				<span className="font-medium" style={{ color: ROLE_COLORS.dispatcher }}>dispatcher</span>
+				{job ? (
+					<span key={job} className="rounded bg-foreground px-1.5 py-px text-background animate-in fade-in-0 zoom-in-95 duration-200">{job}</span>
+				) : (
+					<span className="truncate text-muted-foreground">sweeps every 30 min</span>
+				)}
+			</div>
+		);
+	}
 	return (
 		<div
-			className={`${pinned ? "min-w-0 overflow-hidden" : "absolute shrink-0"} flex items-center gap-2 whitespace-nowrap rounded-full border bg-background px-3 py-1.5 text-[12px] shadow-sm`}
-			style={pinned ? undefined : { left: CHIP.x, top: CHIP.y }}
+			className="absolute flex shrink-0 items-center gap-2 whitespace-nowrap rounded-full border bg-background px-3 py-1.5 text-[12px] shadow-sm"
+			style={{ left: CHIP.x, top: CHIP.y }}
 		>
 			<span className="font-medium" style={{ color: ROLE_COLORS.dispatcher }}>dispatcher</span>
-			<span className={`text-muted-foreground ${pinned ? "hidden xl:inline" : ""}`}>every 30 min picks one job:</span>
+			<span className="text-muted-foreground">every 30 min picks one job:</span>
 			{JOBS.map((j, i) => (
 				<span key={j} className="flex items-center gap-2">
 					<span className={`rounded px-1.5 py-px transition-colors ${job === j ? "bg-foreground text-background" : "text-muted-foreground"}`}>{j}</span>
