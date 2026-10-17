@@ -68,7 +68,8 @@ export function ProjectRoadmap({ repo, items, milestones, now = Date.now() }: {
 	const ticks = useMemo(() => ticksFor(zoom, start, end), [zoom, start, end]);
 
 	const groups: Group[] = useMemo(() => {
-		const sorted = [...items].sort((a, b) => Date.parse(a.createdAt) - Date.parse(b.createdAt));
+		// Newest work first: the item touched most recently is on top, the oldest at the bottom.
+		const sorted = [...items].sort((a, b) => Date.parse(b.updatedAt) - Date.parse(a.updatedAt));
 		if (groupBy === "none") return [{ key: "all", title: "All items", count: sorted.length, items: sorted }];
 		if (groupBy === "status") {
 			return PROJECT_STATUSES.map((s) => {
@@ -91,7 +92,11 @@ export function ProjectRoadmap({ repo, items, milestones, now = Date.now() }: {
 			};
 		});
 		const rest = sorted.filter((i) => !milestones.some((m) => m.number === i.milestone));
-		return [...byMilestone.filter((g) => g.count), { key: "none", title: <span className="text-muted-foreground">No roadmap item</span>, count: rest.length, items: rest }].filter((g) => g.count);
+		// Groups follow their newest item, so the roadmap item worked on last comes first.
+		const latest = (g: Group) => Math.max(...g.items.map((i) => Date.parse(i.updatedAt)));
+		return [...byMilestone, { key: "none", title: <span className="text-muted-foreground">No roadmap item</span>, count: rest.length, items: rest }]
+			.filter((g) => g.count)
+			.sort((a, b) => latest(b) - latest(a));
 	}, [items, milestones, groupBy]);
 
 	const scrollToToday = () => {
