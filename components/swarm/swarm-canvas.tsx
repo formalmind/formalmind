@@ -67,6 +67,7 @@ const CARD_GAP = 10;
 const CARD_W = 160;
 const PANEL_TOP = 420;
 const PANEL_H = 136;
+
 const PANEL_W = 368;
 const PANEL_GAP = 24;
 const CHIP = { x: PAD, y: 14 };
@@ -96,7 +97,7 @@ type Scene = {
 	notes: Note[];
 	chief: string;
 	job: string | null;
-	costs: { role: SwarmRole; usd: number }[];
+	costs: LedgerRow[];
 	tick: number;
 	/** The one role holding the turn; the others wait (dimmed) unless they have something to say. */
 	turn: SwarmRole | null;
@@ -138,9 +139,27 @@ function home(scene: Scene, ...roles: SwarmRole[]) {
 	for (const role of roles) scene.cursors[role] = { at: HOME[role] };
 }
 
+/** Before the live state has loaded: an empty board, nothing scripted. */
+function emptyScene(): Scene {
+	return {
+		cards: [{ id: "roadmap", number: 0, title: "Roadmap and unproven gaps in FORMAL_MIND.md", kind: "doc", lane: "roadmap", order: 0, label: "README" }],
+		cursors: Object.fromEntries(ROLES.map((r) => [r, { at: HOME[r] }])) as Scene["cursors"],
+		spend: 0,
+		notes: [],
+		chief: "Working",
+		job: null,
+		costs: [],
+		tick: 1,
+		turn: null,
+	};
+}
+
+/** A ledger line: one run's cost (coloured by role), or an earlier day's total. */
+type LedgerRow = { label: string; usd: number; role?: SwarmRole };
+
 function spend(scene: Scene, role: SwarmRole, usd: number) {
 	scene.spend += usd;
-	scene.costs = [...scene.costs, { role, usd }].slice(-3);
+	scene.costs = [...scene.costs, { label: role, role, usd }].slice(-3);
 }
 
 function note(scene: Scene, role: SwarmRole, text: string) {
@@ -268,7 +287,32 @@ const PHASE_TEXT: Record<string, string> = {
 };
 
 /** The board as it really is, with the active run's role at the item it is working on. */
-function liveScene(state: SwarmState, run: SwarmRun): Scene {
+/** Today's runs one by one, newest first, then a total for each earlier day: every cost the ledger holds. */
+function ledgerRows(state: SwarmState): LedgerRow[] {
+	const today = state.fetchedAt.slice(0, 10);
+	const rows: LedgerRow[] = state.costs
+		.filter((c) => c.createdAt.startsWith(today))
+		.reverse()
+		.map((c) => {
+			const role = COST_ROLES[c.role] ?? "dispatcher";
+			return { role, label: `${role}${/^#?\d+$/.test(c.ref) ? ` #${c.ref.replace(/^#/, "")}` : ""}`, usd: c.usd };
+		});
+	const days = new Map<string, { usd: number; runs: number }>();
+	for (const c of state.costs) {
+		const day = c.createdAt.slice(0, 10);
+		if (day === today) continue;
+		const d = days.get(day) ?? { usd: 0, runs: 0 };
+		days.set(day, { usd: d.usd + c.usd, runs: d.runs + 1 });
+	}
+	for (const [day, d] of [...days].sort(([a], [b]) => b.localeCompare(a))) {
+		const date = new Date(`${day}T00:00:00Z`).toLocaleDateString("en", { month: "short", day: "numeric", timeZone: "UTC" });
+		rows.push({ label: `${date} · ${d.runs} run${d.runs === 1 ? "" : "s"}`, usd: d.usd });
+	}
+	return rows;
+}
+
+/** The board as the swarm has it, with nothing scripted. With no run in flight the cursors rest at home. */
+function liveScene(state: SwarmState, run: SwarmRun | null): Scene {
 	let order = 0;
 	const cards: Card[] = [
 		{ id: "roadmap", number: 0, title: "Roadmap and unproven gaps in FORMAL_MIND.md", kind: "doc", lane: "roadmap", order: order++, label: "README" },
@@ -277,6 +321,22 @@ function liveScene(state: SwarmState, run: SwarmRun): Scene {
 	for (const item of [...state.work].sort((a, b) => a.number - b.number)) {
 		const place = laneOf(item);
 		if (place) cards.push({ id: `w${item.number}`, number: item.number, title: item.title, kind: item.kind, lane: place.lane, order: order++, label: place.label });
+	}
+
+	const cursorsAtHome = Object.fromEntries(ROLES.map((r) => [r, { at: HOME[r] }])) as Scene["cursors"];
+	if (!run) {
+		const last = state.runs.find((r) => r.note)?.note;
+		return {
+			cards,
+			cursors: cursorsAtHome,
+			spend: state.spentToday,
+			notes: (last?.tasks ?? []).map((t) => ({ role: last!.role, text: t.text, done: t.done })),
+			chief: firstLine(state.chief?.body) ?? "Working",
+			job: null,
+			costs: ledgerRows(state),
+			tick: order,
+			turn: null,
+		};
 	}
 
 	const note = run.note;
@@ -288,7 +348,7 @@ function liveScene(state: SwarmState, run: SwarmRun): Scene {
 		? handoff ? `Next: ${handoff.to}${handoff.why ? ` — ${handoff.why}` : ""}` : note ? `Done${note.verified ? `: ${note.verified}` : ""}` : "Finished"
 		: current?.text ?? (note && run.phase === "working" ? "Wrapping up" : PHASE_TEXT[run.phase]));
 
-	const cursors = Object.fromEntries(ROLES.map((r) => [r, { at: HOME[r] }])) as Scene["cursors"];
+	const cursors = cursorsAtHome;
 	const target = cards.find((c) => c.number === note?.ref && c.kind !== "doc");
 	const spot = role === "chief" || note?.ref === 53 ? CHIEF_SPOT
 		: note?.ref === 38 ? LEDGER_SPOT
@@ -324,10 +384,10 @@ function liveScene(state: SwarmState, run: SwarmRun): Scene {
 		cards,
 		cursors,
 		spend: state.spentToday,
-		notes: (note?.tasks ?? []).slice(-4).map((t) => ({ role, text: t.text, done: t.done })),
+		notes: (note?.tasks ?? []).map((t) => ({ role, text: t.text, done: t.done })),
 		chief: firstLine(state.chief?.body) ?? "Working",
 		job,
-		costs: state.costs.slice(-3).map((c) => ({ role: COST_ROLES[c.role] ?? "dispatcher", usd: c.usd })),
+		costs: ledgerRows(state),
 		tick: order,
 		turn: done ? nextRole ?? role : role,
 	};
@@ -376,9 +436,10 @@ export function SwarmCanvas({ state, highlight, fill = false, title, actions, re
 	const frameRef = useRef<HTMLDivElement>(null);
 	const [fit, setFit] = useState({ scale: 1, x: 0, y: 0, w: 0, h: 0 });
 	const { scale } = fit;
-	// The ledger grows to list every cost; the board grows with it.
-	const [ledgerH, setLedgerH] = useState(PANEL_H);
-	const boardH = Math.max(H, PANEL_TOP + ledgerH + PAD);
+	// The panels grow with their text; the board grows with the tallest.
+	const [panelHs, setPanelHs] = useState([PANEL_H, PANEL_H, PANEL_H]);
+	const measurePanel = (i: number) => (h: number) => setPanelHs((prev) => (prev[i] === h ? prev : prev.map((v, j) => (j === i ? h : v))));
+	const boardH = Math.max(H, PANEL_TOP + Math.max(...panelHs) + PAD);
 	// In fill mode people can pan and zoom: `view` sits on top of the fitted placement.
 	const [view, setRawView] = useState({ k: 1, x: 0, y: 0 });
 	// The board can't be dragged away: smaller than the frame it stays inside it, larger it can't leave a gap past its edges.
@@ -442,7 +503,8 @@ export function SwarmCanvas({ state, highlight, fill = false, title, actions, re
 	const script = useMemo(() => buildScript(start), [start]);
 	const latest = state?.runs[0];
 	const run = isLiveRun(latest) ? latest : null;
-	const live = state && run ? liveScene(state, run) : null;
+	// The app shows only what is real; the scripted replay is the landing page's demo.
+	const live = fill ? (state ? liveScene(state, run) : emptyScene()) : state && run ? liveScene(state, run) : null;
 	const scene = useMemo(() => {
 		const s = cloneScene(start);
 		for (let i = 0; i < step; i++) script[i].apply(s);
@@ -708,9 +770,9 @@ export function SwarmCanvas({ state, highlight, fill = false, title, actions, re
 						);
 					})}
 
-					<LedgerPanel spend={shown.spend} costs={shown.costs} repo={state?.repo ?? repo} onMeasure={setLedgerH} />
-					<NotebookPanel notes={shown.notes} repo={state?.repo ?? repo} />
-					<ChiefPanel headline={shown.chief} repo={state?.repo ?? repo} />
+					<LedgerPanel spend={shown.spend} costs={shown.costs} repo={state?.repo ?? repo} onMeasure={measurePanel(0)} />
+					<NotebookPanel notes={shown.notes} repo={state?.repo ?? repo} onMeasure={measurePanel(1)} />
+					<ChiefPanel headline={shown.chief} repo={state?.repo ?? repo} onMeasure={measurePanel(2)} />
 
 					{ROLES.map((role) => (
 						<SwarmCursor
@@ -781,7 +843,7 @@ export function SwarmCanvas({ state, highlight, fill = false, title, actions, re
 					<span className={`size-2 rounded-full ${run.status === "completed" ? "bg-muted-foreground" : "animate-pulse bg-red-500"}`} />
 					{run.status === "completed" ? "Just finished" : "Live"}
 				</a>
-			) : (
+			) : fill ? null : (
 				<button
 					type="button"
 					onClick={() => setPlaying((p) => !p)}
@@ -1163,7 +1225,7 @@ function Panel({ index, title, repo, onMeasure, children }: PanelMode & { index:
 	);
 }
 
-function LedgerPanel({ spend, costs, ...mode }: PanelMode & { spend: number; costs: { role: SwarmRole; usd: number }[] }) {
+function LedgerPanel({ spend, costs, ...mode }: PanelMode & { spend: number; costs: LedgerRow[] }) {
 	return (
 		<Panel index={0} title="#38 ledger" {...mode}>
 			<div className="flex items-baseline justify-between text-[12px]">
@@ -1175,8 +1237,8 @@ function LedgerPanel({ spend, costs, ...mode }: PanelMode & { spend: number; cos
 			</div>
 			<ul className="mt-2 space-y-0.5 font-mono text-[12px] text-muted-foreground">
 				{costs.map((cost, i) => (
-					<li key={`${i}-${cost.role}-${cost.usd}`} className="flex justify-between">
-						<span style={{ color: ROLE_COLORS[cost.role] }}>{cost.role}</span>
+					<li key={`${i}-${cost.label}-${cost.usd}`} className="flex justify-between gap-3">
+						<span style={cost.role ? { color: ROLE_COLORS[cost.role] } : undefined}>{cost.label}</span>
 						<span className="tabular-nums">${cost.usd.toFixed(2)}</span>
 					</li>
 				))}
@@ -1188,14 +1250,14 @@ function LedgerPanel({ spend, costs, ...mode }: PanelMode & { spend: number; cos
 function NotebookPanel({ notes, ...mode }: PanelMode & { notes: Note[] }) {
 	return (
 		<Panel index={1} title="#55 notebook" {...mode}>
-			<ul data-scroll className="no-scrollbar min-h-0 flex-1 space-y-1 overflow-y-auto text-[13px]">
+			<ul className="space-y-1 text-[13px]">
 				{notes.length === 0 ? <li className="text-muted-foreground">Each run opens a task list here first.</li> : null}
 				{notes.map((n, i) => (
 					<li key={`${i}-${n.text}`} className="flex items-start gap-2">
 						<span className={`mt-0.5 inline-flex size-3.5 shrink-0 items-center justify-center rounded-sm border text-[9px] ${n.done ? "border-transparent text-white" : ""}`} style={n.done ? { backgroundColor: ROLE_COLORS[n.role] } : undefined}>
 							{n.done ? "✓" : ""}
 						</span>
-						<span className={`truncate ${n.done ? "text-muted-foreground line-through" : "text-foreground"}`}>
+						<span className={`min-w-0 ${n.done ? "text-muted-foreground line-through" : "text-foreground"}`}>
 							<span style={{ color: ROLE_COLORS[n.role] }}>{n.role}</span> {n.text}
 						</span>
 					</li>

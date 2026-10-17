@@ -91,6 +91,7 @@ export interface SwarmState {
 	work: SwarmItem[];
 	/** PRs merged most recently. */
 	merged: SwarmItem[];
+	/** Every cost line in the ledger issue, oldest first. */
 	costs: SwarmCost[];
 	spentToday: number;
 	chief: SwarmComment | null;
@@ -244,7 +245,59 @@ async function recentRuns(notes: SwarmNote[], costs: SwarmCost[]): Promise<Swarm
 	}));
 }
 
-const COST_MARKER = /<!-- fm-cost role=(\S+) ref=(\S+) usd=([\d.]+)(?: run=(\d+))?/;
+// `ref` can be empty: the planner works from the README, not an issue.
+const COST_MARKER = /<!-- fm-cost role=(\S+) ref=(\S*) usd=([\d.]+)(?: run=(\d+))?/;
+
+function parseCost(comment: GitHubComment): SwarmCost[] {
+	const match = comment.body.match(COST_MARKER);
+	return match ? [{ role: match[1], ref: match[2], usd: Number(match[3]), runId: match[4] ? Number(match[4]) : null, createdAt: comment.created_at }] : [];
+}
+
+/** What is known of the ledger so far: the costs on its full pages of 100 comments, which no longer change. */
+type LedgerCache = { fullPages: number; costs: SwarmCost[] };
+const LEDGER_KEY = `swarm:ledger:${SWARM_REPO}:v1`;
+let ledgerCache: LedgerCache | null = null;
+
+async function readLedgerCache(): Promise<LedgerCache> {
+	if (ledgerCache) return ledgerCache;
+	try {
+		const { getJSON } = await import("@/lib/kv");
+		ledgerCache = (await getJSON<LedgerCache>(LEDGER_KEY)) ?? { fullPages: 0, costs: [] };
+	} catch {
+		// No KV (Storybook, scripts): keep what this instance learns in memory.
+		ledgerCache = { fullPages: 0, costs: [] };
+	}
+	return ledgerCache;
+}
+
+async function writeLedgerCache(next: LedgerCache) {
+	ledgerCache = next;
+	try {
+		const { putJSON } = await import("@/lib/kv");
+		await putJSON(LEDGER_KEY, next);
+	} catch {}
+}
+
+/**
+ * Every cost line the swarm has written to the ledger issue, oldest first. Full pages come from the cache;
+ * only the pages after them (normally just the last, still filling up) are fetched.
+ */
+async function allCosts(): Promise<SwarmCost[]> {
+	const cache = await readLedgerCache();
+	const meta = await github<{ comments: number }>(`/issues/${LEDGER_ISSUE}`);
+	const pages = Math.max(1, Math.ceil(meta.comments / 100));
+	const fresh = await Promise.all(
+		Array.from({ length: Math.max(0, pages - cache.fullPages) }, (_, i) =>
+			github<GitHubComment[]>(`/issues/${LEDGER_ISSUE}/comments?per_page=100&page=${cache.fullPages + i + 1}`),
+		),
+	);
+	const full = fresh.filter((page) => page.length === 100);
+	if (full.length) {
+		await writeLedgerCache({ fullPages: cache.fullPages + full.length, costs: [...cache.costs, ...full.flat().flatMap(parseCost)] });
+	}
+	const partial = fresh.filter((page) => page.length < 100).flat();
+	return [...(ledgerCache ?? cache).costs, ...partial.flatMap(parseCost)];
+}
 
 let cached: { at: number; state: Promise<SwarmState> } | null = null;
 
@@ -257,19 +310,16 @@ export function getSwarmState(): Promise<SwarmState> {
 }
 
 async function loadSwarmState(): Promise<SwarmState> {
-	const [open, closed, ledger, rawNotebook, chief] = await Promise.all([
+	const [open, closed, ledger, rawNotebook, chief, costs] = await Promise.all([
 		github<GitHubIssue[]>("/issues?state=open&per_page=100"),
 		github<GitHubIssue[]>("/issues?state=closed&per_page=20&sort=updated"),
 		latestComments(LEDGER_ISSUE, 30),
 		latestRawComments(NOTEBOOK_ISSUE, 12),
 		latestComments(CHIEF_ISSUE, 1),
+		allCosts(),
 	]);
 	const notebook = rawNotebook.slice(-6).map(toComment);
 
-	const costs = ledger.flatMap((comment) => {
-		const match = comment.body.match(COST_MARKER);
-		return match ? [{ role: match[1], ref: match[2], usd: Number(match[3]), runId: match[4] ? Number(match[4]) : null, createdAt: comment.createdAt }] : [];
-	});
 	const runs = await recentRuns(rawNotebook.flatMap((comment) => parseNote(comment) ?? []), costs);
 	const today = new Date().toISOString().slice(0, 10);
 
