@@ -1,11 +1,32 @@
 import { streamObject } from "ai";
 import { openai } from "@/lib/openai";
 import { getJSON, kv, putJSON } from "@/lib/kv";
-import { PLANNER_SYSTEM, parseRepo, planPrompt, planSchema, scanRepo, type RepoPlan } from "@/lib/plan";
+import { EXAMPLE_REPOS, PLANNER_SYSTEM, parseRepo, planPrompt, planSchema, scanRepo, type RepoPlan } from "@/lib/plan";
 
 /** Plans per visitor per hour; each one runs on our key. */
 const PER_HOUR = 5;
-const CACHE_SECONDS = 12 * 3600;
+/** A plan made for one visitor serves everyone who asks for the same repository this week. */
+const CACHE_SECONDS = 7 * 24 * 3600;
+const isExample = (repo: string) => EXAMPLE_REPOS.some((example) => example.toLowerCase() === repo.toLowerCase());
+
+/**
+ * Plays a cached plan back as a stream, a few characters at a time, so the plan board fills in the way it does for a
+ * fresh plan, but in a couple of seconds and without a model call.
+ */
+function playBack(plan: RepoPlan) {
+	const text = JSON.stringify(plan);
+	const step = Math.max(24, Math.ceil(text.length / 120));
+	const encoder = new TextEncoder();
+	let at = 0;
+	return new ReadableStream<Uint8Array>({
+		async pull(controller) {
+			if (at >= text.length) return controller.close();
+			controller.enqueue(encoder.encode(text.slice(at, at + step)));
+			at += step;
+			await new Promise((resolve) => setTimeout(resolve, 18));
+		},
+	});
+}
 
 export async function POST(request: Request) {
 	const { repo: input } = (await request.json().catch(() => ({}))) as { repo?: string };
@@ -14,7 +35,7 @@ export async function POST(request: Request) {
 
 	const cacheKey = `plan:${repo.toLowerCase()}`;
 	const cached = await getJSON<RepoPlan>(cacheKey).catch(() => null);
-	if (cached) return new Response(JSON.stringify(cached), { headers: { "Content-Type": "text/plain; charset=utf-8", "X-Plan-Cache": "hit" } });
+	if (cached) return new Response(playBack(cached), { headers: { "Content-Type": "text/plain; charset=utf-8", "X-Plan-Cache": "hit" } });
 
 	const ip = request.headers.get("cf-connecting-ip") ?? request.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ?? "local";
 	const bucket = `ratelimit:plan:${ip}:${new Date().toISOString().slice(0, 13)}`;
@@ -42,7 +63,8 @@ export async function POST(request: Request) {
 		prompt: planPrompt(scan),
 		onError: ({ error }) => console.error("[plan] stream failed:", error),
 		onFinish: async ({ object }) => {
-			if (object) await putJSON(cacheKey, object, { expirationTtl: CACHE_SECONDS }).catch(() => {});
+			// The examples are kept for good; everything else for a week.
+			if (object) await putJSON(cacheKey, object, isExample(repo) ? undefined : { expirationTtl: CACHE_SECONDS }).catch(() => {});
 		},
 	});
 	return result.toTextStreamResponse({ headers: { "X-Plan-Repo": scan.repo } });

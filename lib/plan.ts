@@ -4,6 +4,9 @@
  */
 import { z } from "zod";
 
+/** The repositories the landing page offers to try; their plans are kept for good and shared with everyone. */
+export const EXAMPLE_REPOS = ["Uniswap/v4-core", "morpho-org/morpho-blue", "transmissions11/solmate"];
+
 export const planSchema = z.object({
 	summary: z.string().describe("Two sentences on what the protocol does, from the code"),
 	contracts: z.array(z.object({

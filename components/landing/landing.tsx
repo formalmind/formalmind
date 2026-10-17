@@ -9,8 +9,9 @@ import { SwarmCanvas } from "@/components/swarm/swarm-canvas";
 import YouTubeVideo from "@/components/youtube-video";
 import { SetupPreview } from "./setup-preview";
 import { usePlan } from "./use-plan";
+import { EXAMPLE_REPOS } from "@/lib/plan";
 
-const EXAMPLES = ["Uniswap/v4-core", "morpho-org/morpho-blue", "transmissions11/solmate"];
+const EXAMPLES = EXAMPLE_REPOS;
 
 /**
  * The public front door: paste a repository, watch the planner draft the swarm's first plan
