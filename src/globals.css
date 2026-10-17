@@ -269,6 +269,9 @@
 
 /* transitions.dev: text states swap. Old text exits up with blur, new text enters from below. */
 :root {
+  /* transitions.dev tabs sliding: the dispatcher's job pill. */
+  --tabs-dur: 250ms;
+  --tabs-ease: cubic-bezier(0.22, 1, 0.36, 1);
   --text-swap-dur: 150ms;
   --text-swap-translate-y: 4px;
   --text-swap-blur: 2px;

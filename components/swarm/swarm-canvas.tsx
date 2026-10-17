@@ -1,6 +1,6 @@
 "use client";
 
-import { type ReactNode, useEffect, useMemo, useRef, useState } from "react";
+import { type ReactNode, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { Hand, Maximize, Minus, Pause, Play, Plus, X } from "lucide-react";
 import * as DialogPrimitive from "@radix-ui/react-dialog";
 import { TextSwap } from "@/components/motion/text-swap";
@@ -1172,46 +1172,97 @@ function NowChip({ job, turn }: { job: string | null; turn: SwarmRole | null }) 
 			title={`Every 30 min the dispatcher picks one job, in this order: ${JOBS.join(" › ")}`}
 		>
 			<span className="font-medium" style={{ color: ROLE_COLORS.dispatcher }}>dispatcher</span>
-			<TextSwap value={job}>
-				{(j) => (j ? <span className="rounded bg-foreground px-1.5 py-px text-background">{j}</span> : <span className="text-muted-foreground">sweeps every 30 min</span>)}
-			</TextSwap>
+			<SmoothWidth>
+				<TextSwap value={job}>
+					{(j) => (j ? <span className="rounded bg-foreground px-1.5 py-px text-background">{j}</span> : <span className="text-muted-foreground">sweeps every 30 min</span>)}
+				</TextSwap>
+			</SmoothWidth>
 			{/* On the dispatcher's own turn nothing follows its job. */}
-			<TextSwap value={turn}>
-				{(t) =>
-					t === "dispatcher" ? null : (
-						<span className="inline-flex items-center gap-2">
-							<span className="text-muted-foreground/50">›</span>
-							{t ? (
-								<span className="inline-flex items-center gap-1.5 font-medium">
-									<span className="size-2 rounded-full" style={{ backgroundColor: ROLE_COLORS[t] }} />
-									{t}
-								</span>
-							) : (
-								<span className="text-muted-foreground">between turns</span>
-							)}
-						</span>
-					)
-				}
-			</TextSwap>
+			<SmoothWidth>
+				<TextSwap value={turn}>
+					{(t) =>
+						t === "dispatcher" ? null : (
+							<span className="inline-flex items-center gap-2">
+								<span className="text-muted-foreground/50">›</span>
+								{t ? (
+									<span className="inline-flex items-center gap-1.5 font-medium">
+										<span className="size-2 rounded-full" style={{ backgroundColor: ROLE_COLORS[t] }} />
+										{t}
+									</span>
+								) : (
+									<span className="text-muted-foreground">between turns</span>
+								)}
+							</span>
+						)
+					}
+				</TextSwap>
+			</SmoothWidth>
 		</div>
 	);
 }
 
+/** The job list with one pill that slides to the job in hand (transitions.dev tabs sliding). */
 function DispatcherChip({ job }: { job: string | null }) {
+	const items = useRef(new Map<string, HTMLSpanElement>());
+	const [pill, setPill] = useState<{ x: number; w: number } | null>(null);
+	useLayoutEffect(() => {
+		const el = job ? items.current.get(job) : undefined;
+		setPill(el ? { x: el.offsetLeft, w: el.offsetWidth } : null);
+	}, [job]);
 	return (
 		<div
 			className="absolute flex shrink-0 items-center gap-2 whitespace-nowrap rounded-full border bg-background px-3 py-1.5 text-[12px] shadow-sm"
 			style={{ left: CHIP.x, top: CHIP.y }}
 		>
+			<span
+				aria-hidden
+				className="absolute top-1/2 h-5 rounded bg-foreground motion-reduce:transition-none"
+				style={{
+					width: pill?.w ?? 0,
+					transform: `translate(${pill?.x ?? 0}px, -50%)`,
+					left: 0,
+					opacity: pill ? 1 : 0,
+					transition: "transform var(--tabs-dur) var(--tabs-ease), width var(--tabs-dur) var(--tabs-ease), opacity var(--tabs-dur) var(--tabs-ease)",
+				}}
+			/>
 			<span className="font-medium" style={{ color: ROLE_COLORS.dispatcher }}>dispatcher</span>
 			<span className="text-muted-foreground">every 30 min picks one job:</span>
 			{JOBS.map((j, i) => (
 				<span key={j} className="flex items-center gap-2">
-					<span className={`rounded px-1.5 py-px transition-colors ${job === j ? "bg-foreground text-background" : "text-muted-foreground"}`}>{j}</span>
+					<span
+						ref={(el) => {
+							if (el) items.current.set(j, el);
+						}}
+						className={`relative rounded px-1.5 py-px ${job === j ? "text-background" : "text-muted-foreground"}`}
+						style={{ transition: "color var(--tabs-dur) var(--tabs-ease)" }}
+					>
+						{j}
+					</span>
 					{i < JOBS.length - 1 ? <span className="text-muted-foreground/50">›</span> : null}
 				</span>
 			))}
 		</div>
+	);
+}
+
+/** Eases its width to whatever its content measures, so swapped text doesn't make the row snap. */
+function SmoothWidth({ children }: { children: ReactNode }) {
+	const inner = useRef<HTMLSpanElement>(null);
+	const [width, setWidth] = useState<number | null>(null);
+	useLayoutEffect(() => {
+		const el = inner.current;
+		if (!el) return;
+		const observer = new ResizeObserver(() => setWidth(el.offsetWidth));
+		observer.observe(el);
+		return () => observer.disconnect();
+	}, []);
+	return (
+		<span
+			className="inline-flex shrink-0 overflow-hidden motion-reduce:transition-none"
+			style={{ width: width ?? undefined, transition: "width var(--tabs-dur) var(--tabs-ease)" }}
+		>
+			<span ref={inner} className="inline-flex shrink-0 items-center">{children}</span>
+		</span>
 	);
 }
 
