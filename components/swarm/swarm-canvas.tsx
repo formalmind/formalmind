@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { type ReactNode, useEffect, useMemo, useRef, useState } from "react";
 import { Pause, Play } from "lucide-react";
 import type { SwarmItem, SwarmRole, SwarmRun, SwarmState } from "@/lib/swarm";
 import { ROLE_COLORS } from "@/lib/swarm-roles";
@@ -347,8 +347,17 @@ function cloneScene(scene: Scene): Scene {
 	};
 }
 
-/** `fill` makes the board fill its parent, scaled to fit both ways and centred; otherwise it scales to the width. */
-export function SwarmCanvas({ state, highlight, fill = false }: { state: SwarmState | null; highlight?: SwarmRole | null; fill?: boolean }) {
+/**
+ * `fill` makes the board fill its parent, scaled to fit both ways and centred, below a strip kept clear
+ * for the pinned controls; otherwise it scales to the width. `title` and `actions` are pinned top-left and top-right.
+ */
+export function SwarmCanvas({ state, highlight, fill = false, title, actions }: {
+	state: SwarmState | null;
+	highlight?: SwarmRole | null;
+	fill?: boolean;
+	title?: ReactNode;
+	actions?: ReactNode;
+}) {
 	const frameRef = useRef<HTMLDivElement>(null);
 	const [fit, setFit] = useState({ scale: 1, x: 0, y: 0 });
 	const { scale } = fit;
@@ -387,8 +396,8 @@ export function SwarmCanvas({ state, highlight, fill = false }: { state: SwarmSt
 		const observer = new ResizeObserver(([entry]) => {
 			const { width, height } = entry.contentRect;
 			if (!fill) return setFit({ scale: width / W, x: 0, y: 0 });
-			const next = Math.min(width / W, height / H);
-			setFit({ scale: next, x: (width - W * next) / 2, y: Math.max(0, (height - H * next) / 2) });
+			const next = Math.min(width / W, (height - PINNED) / H);
+			setFit({ scale: next, x: (width - W * next) / 2, y: PINNED + Math.max(0, (height - PINNED - H * next) / 2) });
 		});
 		observer.observe(el);
 		return () => observer.disconnect();
@@ -510,12 +519,15 @@ export function SwarmCanvas({ state, highlight, fill = false }: { state: SwarmSt
 			{hover ? (
 				<ItemHoverCard {...hover} repo={state?.repo ?? ""} onEnter={keepHover} onLeave={hideHover} />
 			) : null}
+			{title ? <div className="absolute left-3 top-3 flex min-w-0 max-w-[calc(100%-14rem)] items-center">{title}</div> : null}
+			<div className="absolute right-3 top-3 flex items-center gap-2">
+			{actions}
 			{live && run ? (
 				<a
 					href={run.url}
 					target="_blank"
 					rel="noreferrer"
-					className="absolute right-3 top-3 inline-flex h-8 items-center gap-2 rounded-full border bg-background/90 px-3 text-xs font-medium shadow-sm backdrop-blur"
+					className="inline-flex h-8 items-center gap-2 rounded-full border bg-background/90 px-3 text-xs font-medium shadow-sm backdrop-blur"
 				>
 					<span className={`size-2 rounded-full ${run.status === "completed" ? "bg-muted-foreground" : "animate-pulse bg-red-500"}`} />
 					{run.status === "completed" ? "Just finished" : "Live"}
@@ -524,16 +536,20 @@ export function SwarmCanvas({ state, highlight, fill = false }: { state: SwarmSt
 				<button
 					type="button"
 					onClick={() => setPlaying((p) => !p)}
-					className="absolute right-3 top-3 inline-flex h-8 items-center gap-1.5 rounded-full border bg-background/90 px-3 text-xs text-muted-foreground shadow-sm backdrop-blur transition-colors hover:text-foreground"
+					className="inline-flex size-8 items-center justify-center rounded-full border bg-background/90 text-muted-foreground shadow-sm backdrop-blur transition-colors hover:text-foreground"
 					aria-label={playing ? "Pause replay" : "Play replay"}
+					title={playing ? "Pause replay" : "Play replay"}
 				>
 					{playing ? <Pause className="size-3.5" /> : <Play className="size-3.5" />}
-					Replay
 				</button>
 			)}
+			</div>
 		</div>
 	);
 }
+
+/** Height kept clear above the board in fill mode for the pinned controls. */
+const PINNED = 56;
 
 const DOTS = { backgroundImage: "radial-gradient(hsl(var(--border)) 1px, transparent 1px)", backgroundSize: "20px 20px" };
 

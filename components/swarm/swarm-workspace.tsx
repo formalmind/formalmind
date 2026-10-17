@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { MessageSquare, RefreshCw } from "lucide-react";
+import { RefreshCw } from "lucide-react";
 import type { SwarmState } from "@/lib/swarm";
 import { Sheet, SheetContent, SheetDescription, SheetTitle, SheetTrigger } from "@/components/ui/sheet";
 import { SidebarTrigger } from "@/components/ui/sidebar";
@@ -65,60 +65,61 @@ export function SwarmWorkspace({ repo }: { repo: string }) {
 	const inFlight = state?.work.filter((item) => item.kind === "pr").length ?? 0;
 	const blocked = state?.work.filter((item) => item.labels.includes("fm:blocked")).length ?? 0;
 
+	const pill = "inline-flex h-8 items-center rounded-full border bg-background/90 shadow-sm backdrop-blur";
+	const status = state
+		? `${queued} queued · ${inFlight} PRs open · ${blocked} blocked · $${state.spentToday.toFixed(2)} spent today`
+		: error ?? "Loading the live queue…";
+	const synced = syncedAt ? `Synced ${Math.max(0, Math.round((now - syncedAt) / 1000))}s ago. ` : "";
+
 	return (
-		<div className="flex min-h-0 flex-1 flex-col">
-			<header className="flex shrink-0 flex-wrap items-center gap-x-3 gap-y-1 border-b px-4 py-2.5">
-				<SidebarTrigger className="-ml-1" />
-				<h1 className="text-base font-semibold">Swarm</h1>
-				<span className="text-sm text-muted-foreground">
-					{state
-						? `${queued} queued · ${inFlight} PRs open · ${blocked} blocked · $${state.spentToday.toFixed(2)} spent today`
-						: error ?? "Loading the live queue…"}
-				</span>
-				<span
-					className="flex min-w-0 items-center gap-2 text-xs text-muted-foreground"
-					title={run ? `The board shows ${repo} as it is right now.` : "Until a run starts, the cursors replay how one issue moves through the hand-off rules; moves and costs in the replay are illustrative."}
-				>
-					<span className={`size-1.5 shrink-0 rounded-full ${run && run.status !== "completed" ? "animate-pulse bg-red-500" : "bg-muted-foreground/50"}`} />
-					<span className="truncate">{activity}</span>
-				</span>
-				<div className="ml-auto flex items-center gap-3">
-					{syncedAt ? (
-						<span className="whitespace-nowrap text-xs tabular-nums text-muted-foreground" title="The board re-reads GitHub every 10 seconds while this tab is open">
-							Synced {Math.max(0, Math.round((now - syncedAt) / 1000))}s ago
+		<div className="min-h-0 flex-1">
+			<SwarmCanvas
+				state={state}
+				fill
+				title={
+					<>
+						<SidebarTrigger className={`${pill} size-8 shrink-0 justify-center`} />
+						<span
+							className={`${pill} ml-2 min-w-0 gap-2 px-3 text-xs text-muted-foreground`}
+							title={run ? `${status}. The board shows ${repo} as it is right now.` : `${status}. Until a run starts, the cursors replay how one issue moves through the hand-off rules; moves and costs in the replay are illustrative.`}
+						>
+							<span className={`size-1.5 shrink-0 rounded-full ${run && run.status !== "completed" ? "animate-pulse bg-red-500" : "bg-muted-foreground/50"}`} />
+							<span className="font-semibold text-foreground">Swarm</span>
+							<span className="hidden truncate sm:inline">{status}</span>
 						</span>
-					) : null}
-					<button
-						type="button"
-						onClick={() => void load()}
-						className="inline-flex h-8 items-center gap-1.5 rounded-full border px-3 text-xs text-muted-foreground transition-colors hover:text-foreground"
-					>
-						<RefreshCw className={`h-3.5 w-3.5 ${loading ? "animate-spin" : ""}`} />
-						Refresh
-					</button>
-					<Sheet>
-						<SheetTrigger asChild>
-							<button
-								type="button"
-								className="inline-flex h-8 items-center gap-1.5 rounded-full bg-foreground px-3 text-xs font-medium text-background transition-opacity hover:opacity-90"
-							>
-								<MessageSquare className="h-3.5 w-3.5" />
-								Ask the swarm
-							</button>
-						</SheetTrigger>
-						<SheetContent className="flex w-full flex-col gap-0 p-0 sm:max-w-[420px]">
-							<div className="flex h-14 shrink-0 items-center px-4">
-								<SheetTitle className="text-sm font-semibold">Ask the swarm</SheetTitle>
-								<SheetDescription className="sr-only">Ask what the agents are doing.</SheetDescription>
-							</div>
-							<SwarmChat repo={repo} />
-						</SheetContent>
-					</Sheet>
-				</div>
-			</header>
-			<div className="min-h-0 flex-1">
-				<SwarmCanvas state={state} fill />
-			</div>
+					</>
+				}
+				actions={
+					<>
+						<button
+							type="button"
+							onClick={() => void load()}
+							className={`${pill} size-8 justify-center text-muted-foreground transition-colors hover:text-foreground`}
+							aria-label="Refresh"
+							title={`${synced}${activity}. The board re-reads GitHub every 10 seconds while this tab is open.`}
+						>
+							<RefreshCw className={`size-3.5 ${loading ? "animate-spin" : ""}`} />
+						</button>
+						<Sheet>
+							<SheetTrigger asChild>
+								<button
+									type="button"
+									className="inline-flex h-8 items-center rounded-full bg-foreground px-3 text-xs font-medium text-background shadow-sm transition-opacity hover:opacity-90"
+								>
+									Ask the swarm
+								</button>
+							</SheetTrigger>
+							<SheetContent className="flex w-full flex-col gap-0 p-0 sm:max-w-[420px]">
+								<div className="flex h-14 shrink-0 items-center px-4">
+									<SheetTitle className="text-sm font-semibold">Ask the swarm</SheetTitle>
+									<SheetDescription className="sr-only">Ask what the agents are doing.</SheetDescription>
+								</div>
+								<SwarmChat repo={repo} />
+							</SheetContent>
+						</Sheet>
+					</>
+				}
+			/>
 		</div>
 	);
 }
