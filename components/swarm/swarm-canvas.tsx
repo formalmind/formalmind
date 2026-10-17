@@ -1,8 +1,8 @@
 "use client";
 
 import { type ReactNode, useEffect, useMemo, useRef, useState } from "react";
-import { Hand, Maximize, Minus, Pause, Play, Plus } from "lucide-react";
-import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Hand, Maximize, Minus, Pause, Play, Plus, X } from "lucide-react";
+import * as DialogPrimitive from "@radix-ui/react-dialog";
 import type { SwarmItem, SwarmRole, SwarmRun, SwarmState } from "@/lib/swarm";
 import { ROLE_COLORS } from "@/lib/swarm-roles";
 
@@ -660,23 +660,21 @@ export function SwarmCanvas({ state, highlight, fill = false, title, actions }: 
 					))}
 				</div>
 			</div>
-			<Dialog open={modal !== null} onOpenChange={(open) => !open && setModal(null)}>
-				<DialogContent className={ISLAND} overlayClassName="bg-black/[0.06] backdrop-blur-[2px] dark:bg-black/30">
-					{modal && "card" in modal ? (
-						<CardDetails card={modal.card} item={itemFor(modal.card)} repo={state?.repo ?? ""} />
-					) : modal ? (
-						<>
-							<DialogHeader>
-								<DialogTitle className="font-mono text-sm">{PANEL_NAMES[modal.panel]}</DialogTitle>
-								<DialogDescription className="sr-only">{PANEL_NAMES[modal.panel]}</DialogDescription>
-							</DialogHeader>
-							{modal.panel === "ledger" ? <LedgerPanel spend={shown.spend} costs={shown.costs} bare /> : null}
-							{modal.panel === "notebook" ? <NotebookPanel notes={shown.notes} bare /> : null}
-							{modal.panel === "chief" ? <ChiefPanel headline={shown.chief} bare /> : null}
-						</>
-					) : null}
-				</DialogContent>
-			</Dialog>
+			<BottomIsland
+				open={modal !== null}
+				onClose={() => setModal(null)}
+				kicker={modal && "panel" in modal ? PANEL_NAMES[modal.panel] : undefined}
+			>
+				{modal && "card" in modal ? (
+					<CardDetails card={modal.card} item={itemFor(modal.card)} repo={state?.repo ?? ""} />
+				) : modal ? (
+					<>
+						{modal.panel === "ledger" ? <LedgerPanel spend={shown.spend} costs={shown.costs} bare /> : null}
+						{modal.panel === "notebook" ? <NotebookPanel notes={shown.notes} bare /> : null}
+						{modal.panel === "chief" ? <ChiefPanel headline={shown.chief} bare /> : null}
+					</>
+				) : null}
+			</BottomIsland>
 			{hover ? (
 				<ItemHoverCard {...hover} repo={state?.repo ?? ""} onEnter={keepHover} onLeave={hideHover} />
 			) : null}
@@ -749,13 +747,32 @@ const PINNED = 100;
 
 const DOTS = { backgroundImage: "radial-gradient(hsl(var(--border)) 1px, transparent 1px)", backgroundSize: "20px 20px" };
 
-/** Apple-style floating island: frosted, translucent, rounded, a soft long shadow and a small round close button. */
-const ISLAND = [
-	"max-h-[85vh] w-[calc(100%-2rem)] max-w-md overflow-y-auto rounded-3xl border border-black/5 bg-background/75 p-5",
-	"shadow-[0_24px_64px_-16px_rgba(0,0,0,0.28),0_2px_8px_rgba(0,0,0,0.06)] backdrop-blur-2xl backdrop-saturate-150 sm:rounded-3xl dark:border-white/10",
-	"[&>button:last-child]:right-3.5 [&>button:last-child]:top-3.5 [&>button:last-child]:flex [&>button:last-child]:size-7 [&>button:last-child]:items-center [&>button:last-child]:justify-center",
-	"[&>button:last-child]:rounded-full [&>button:last-child]:bg-foreground/[0.06] [&>button:last-child]:opacity-80 [&>button:last-child]:ring-0 [&>button:last-child]:ring-offset-0",
-].join(" ");
+/**
+ * Apple-style bottom island: a card floating just above the bottom edge that slides up on the iOS sheet curve,
+ * with a round close button top-left. `kicker` sits beside the close button and titles the island when given.
+ */
+function BottomIsland({ open, onClose, kicker, children }: { open: boolean; onClose: () => void; kicker?: string; children: ReactNode }) {
+	return (
+		<DialogPrimitive.Root open={open} onOpenChange={(next) => !next && onClose()}>
+			<DialogPrimitive.Portal>
+				<DialogPrimitive.Overlay className="fixed inset-0 z-50 bg-black/20 duration-300 data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 dark:bg-black/50" />
+				<DialogPrimitive.Content
+					aria-describedby={undefined}
+					className="fixed inset-x-3 bottom-3 z-50 mx-auto flex max-h-[80vh] max-w-lg flex-col rounded-[2rem] border border-black/5 bg-background p-5 shadow-[0_-8px_40px_-12px_rgba(0,0,0,0.25)] duration-500 ease-[cubic-bezier(0.32,0.72,0,1)] focus:outline-none data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:duration-300 data-[state=closed]:slide-out-to-bottom-[110%] data-[state=open]:slide-in-from-bottom-[110%] dark:border-white/10 sm:bottom-4"
+				>
+					<div className="flex items-center gap-3">
+						<DialogPrimitive.Close className="flex size-10 shrink-0 items-center justify-center rounded-full border bg-background shadow-sm transition-colors hover:bg-muted focus:outline-none focus-visible:ring-2 focus-visible:ring-ring">
+							<X className="size-[18px]" />
+							<span className="sr-only">Close</span>
+						</DialogPrimitive.Close>
+						{kicker ? <DialogPrimitive.Title className="font-mono text-sm text-muted-foreground">{kicker}</DialogPrimitive.Title> : null}
+					</div>
+					<div className="no-scrollbar mt-4 min-h-0 overflow-y-auto">{children}</div>
+				</DialogPrimitive.Content>
+			</DialogPrimitive.Portal>
+		</DialogPrimitive.Root>
+	);
+}
 
 const PANEL_NAMES = { ledger: "#38 ledger", notebook: "#55 notebook", chief: "#53 chief updates" } as const;
 
@@ -763,23 +780,20 @@ const PANEL_NAMES = { ledger: "#38 ledger", notebook: "#55 notebook", chief: "#5
 function CardDetails({ card, item, repo }: { card: Card; item?: SwarmItem; repo: string }) {
 	if (!item) {
 		return (
-			<DialogHeader>
-				<DialogTitle className="text-base leading-snug">{card.title}</DialogTitle>
-				<DialogDescription>
-					<span className={`mr-1.5 rounded px-1.5 py-px font-mono text-[10px] ${LABEL_STYLES[card.label] ?? LABEL_STYLES.README}`}>{card.label}</span>
+			<div>
+				<span className={`rounded px-1.5 py-px font-mono text-[10px] ${LABEL_STYLES[card.label] ?? LABEL_STYLES.README}`}>{card.label}</span>
+				<DialogPrimitive.Title className="mt-2 text-lg font-semibold leading-snug">{card.title}</DialogPrimitive.Title>
+				<p className="mt-1 text-sm text-muted-foreground">
 					{card.kind === "doc" ? "The roadmap in the proofs repo's README." : "A card in the replay; it stands in for an issue and links nowhere."}
-				</DialogDescription>
-			</DialogHeader>
+				</p>
+			</div>
 		);
 	}
 	return (
 		<>
-			<DialogTitle className="sr-only">{item.title}</DialogTitle>
-			<DialogDescription className="sr-only">{`${item.kind === "pr" ? "PR" : "Issue"} #${item.number} in ${repo}`}</DialogDescription>
-			<div className="pr-6">
-				<ItemPreview item={item} repo={repo} full />
-			</div>
-			<a href={item.url} target="_blank" rel="noreferrer" className="inline-flex h-8 w-fit items-center rounded-full bg-foreground px-3 text-xs font-medium text-background transition-opacity hover:opacity-90">
+			<DialogPrimitive.Title className="sr-only">{item.title}</DialogPrimitive.Title>
+			<ItemPreview item={item} repo={repo} full />
+			<a href={item.url} target="_blank" rel="noreferrer" className="mt-5 flex h-12 w-full items-center justify-center rounded-full bg-foreground text-sm font-semibold text-background transition-opacity hover:opacity-90">
 				Open on GitHub
 			</a>
 		</>
