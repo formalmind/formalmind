@@ -1,6 +1,7 @@
 "use client"
 
 import {
+import { forgetLandingProgress } from "@/components/landing/use-plan";
 	BadgeCheck,
 	Bell,
 	ChevronsUpDown,
@@ -114,7 +115,8 @@ export function NavUser() {
 						</DropdownMenuGroup>
 						<DropdownMenuSeparator />
 						<DropdownMenuItem asChild>
-							<a href="/auth/logout" className="flex items-center gap-2">
+							{/* Logging out also resets the landing page to its demo. */}
+							<a href="/auth/logout" onClick={forgetLandingProgress} className="flex items-center gap-2">
 								<LogOut />
 								Log out
 							</a>

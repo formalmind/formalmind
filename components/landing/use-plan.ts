@@ -18,6 +18,16 @@ export function readDraft(): PlanDraft | null {
 	}
 }
 
+/** Forgets the landing page's progress (plan and setup), so the next visit starts from the demo. */
+export function forgetLandingProgress() {
+	clearDraft();
+	try {
+		localStorage.removeItem("fm-landing-setup");
+	} catch {
+		// Storage refused: nothing was kept.
+	}
+}
+
 export function clearDraft() {
 	try {
 		localStorage.removeItem(DRAFT_KEY);
