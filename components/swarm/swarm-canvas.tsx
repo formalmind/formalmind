@@ -3,6 +3,7 @@
 import { type ReactNode, useEffect, useMemo, useRef, useState } from "react";
 import { Hand, Maximize, Minus, Pause, Play, Plus, X } from "lucide-react";
 import * as DialogPrimitive from "@radix-ui/react-dialog";
+import { TextSwap } from "@/components/motion/text-swap";
 import type { SwarmItem, SwarmRole, SwarmRun, SwarmState } from "@/lib/swarm";
 import { ROLE_COLORS } from "@/lib/swarm-roles";
 
@@ -1003,25 +1004,27 @@ function NowChip({ job, turn }: { job: string | null; turn: SwarmRole | null }) 
 			title={`Every 30 min the dispatcher picks one job, in this order: ${JOBS.join(" › ")}`}
 		>
 			<span className="font-medium" style={{ color: ROLE_COLORS.dispatcher }}>dispatcher</span>
-			{job ? (
-				<span key={job} className="rounded bg-foreground px-1.5 py-px text-background animate-in fade-in-0 zoom-in-95 duration-200">{job}</span>
-			) : (
-				<span className="text-muted-foreground">sweeps every 30 min</span>
-			)}
-			{turn === "dispatcher" ? null : turn ? (
-				<>
-					<span className="text-muted-foreground/50">›</span>
-					<span key={turn} className="inline-flex shrink-0 items-center gap-1.5 font-medium animate-in fade-in-0 duration-200">
-						<span className="size-2 rounded-full" style={{ backgroundColor: ROLE_COLORS[turn] }} />
-						{turn}
-					</span>
-				</>
-			) : (
-				<>
-					<span className="text-muted-foreground/50">›</span>
-					<span className="text-muted-foreground">between turns</span>
-				</>
-			)}
+			<TextSwap value={job}>
+				{(j) => (j ? <span className="rounded bg-foreground px-1.5 py-px text-background">{j}</span> : <span className="text-muted-foreground">sweeps every 30 min</span>)}
+			</TextSwap>
+			{/* On the dispatcher's own turn nothing follows its job. */}
+			<TextSwap value={turn}>
+				{(t) =>
+					t === "dispatcher" ? null : (
+						<span className="inline-flex items-center gap-2">
+							<span className="text-muted-foreground/50">›</span>
+							{t ? (
+								<span className="inline-flex items-center gap-1.5 font-medium">
+									<span className="size-2 rounded-full" style={{ backgroundColor: ROLE_COLORS[t] }} />
+									{t}
+								</span>
+							) : (
+								<span className="text-muted-foreground">between turns</span>
+							)}
+						</span>
+					)
+				}
+			</TextSwap>
 		</div>
 	);
 }

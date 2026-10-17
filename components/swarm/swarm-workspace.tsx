@@ -7,6 +7,7 @@ import { Sheet, SheetContent, SheetDescription, SheetTitle, SheetTrigger } from 
 import { SidebarTrigger } from "@/components/ui/sidebar";
 import { isLiveRun, SwarmCanvas } from "./swarm-canvas";
 import { SwarmChat } from "./swarm-chat";
+import { TextSwap } from "@/components/motion/text-swap";
 
 const POLL_MS = 10_000;
 
@@ -85,7 +86,9 @@ export function SwarmWorkspace({ repo }: { repo: string }) {
 						>
 							<span className={`size-1.5 shrink-0 rounded-full ${run && run.status !== "completed" ? "animate-pulse bg-red-500" : "bg-muted-foreground/50"}`} />
 							<span className="font-semibold text-foreground">Swarm</span>
-							<span className="hidden truncate sm:inline">{status}</span>
+							<span className="hidden min-w-0 truncate sm:inline">
+								<TextSwap value={status} />
+							</span>
 						</span>
 					</>
 				}

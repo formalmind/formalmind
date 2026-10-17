@@ -54,10 +54,15 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
 	return (
 		<Sidebar variant="inset" collapsible="icon" {...props}>
 			{/* The toggle sits at the top, the way macOS sidebars carry it. */}
-			<SidebarHeader className="flex-row items-center justify-between group-data-[collapsible=icon]:justify-center">
-				<Link href="/" className="flex items-center gap-2 px-1 text-sm font-semibold tracking-tight group-data-[collapsible=icon]:hidden">
-					<LogoMark size={20} />
-					Formal Mind.
+			{/* Collapsed, the logo stays as the icon of the wordmark, and the toggle sits on its own below it.
+			    The logo keeps one inset in both states so it holds still while the wordmark fades off its right. */}
+			<SidebarHeader className="flex-row items-center justify-between group-data-[collapsible=icon]:flex-col group-data-[collapsible=icon]:items-start">
+				<Link href="/" aria-label="Formal Mind" className="flex h-8 items-center gap-2 px-1.5 text-sm font-semibold tracking-tight group-data-[collapsible=icon]:gap-0">
+					<LogoMark size={20} className="shrink-0" />
+					{/* Fades out with the transitions.dev text-swap timing as the rail narrows. */}
+					<span className="max-w-40 overflow-hidden whitespace-nowrap transition-[max-width,opacity,filter] duration-[var(--text-swap-dur)] ease-[var(--text-swap-ease)] group-data-[collapsible=icon]:max-w-0 group-data-[collapsible=icon]:opacity-0 group-data-[collapsible=icon]:blur-[var(--text-swap-blur)] motion-reduce:transition-none">
+						Formal Mind.
+					</span>
 				</Link>
 				<button
 					type="button"
