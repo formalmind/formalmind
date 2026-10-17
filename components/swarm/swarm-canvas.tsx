@@ -99,7 +99,7 @@ type Scene = {
 	job: string | null;
 	costs: LedgerRow[];
 	tick: number;
-	/** The one role holding the turn; the others wait (dimmed) unless they have something to say. */
+	/** The one role holding the turn; the others wait. */
 	turn: SwarmRole | null;
 };
 
@@ -424,11 +424,10 @@ function cloneScene(scene: Scene): Scene {
  * `fill` makes the board fill its parent, scaled to fit both ways and centred, below a strip kept clear
  * for the pinned controls; otherwise it scales to the width. `title` and `actions` are pinned top-left and top-right.
  */
-export function SwarmCanvas({ state, highlight, fill = false, title, actions, repo }: {
+export function SwarmCanvas({ state, fill = false, title, actions, repo }: {
 	state: SwarmState | null;
 	/** The proofs repo, for links before the live state has loaded. */
 	repo?: string;
-	highlight?: SwarmRole | null;
 	fill?: boolean;
 	title?: ReactNode;
 	actions?: ReactNode;
@@ -781,7 +780,6 @@ export function SwarmCanvas({ state, highlight, fill = false, title, actions, re
 							{...cursorPos(role)}
 							say={shown.cursors[role].say}
 							turn={shown.turn === role}
-							dim={highlight ? highlight !== role : Boolean(shown.turn && shown.turn !== role && !shown.cursors[role].say)}
 						/>
 					))}
 				</div>
@@ -962,14 +960,15 @@ function CardDetails({ card, item, repo, inDialog }: { card: Card; item?: SwarmI
 
 const MOVE = "transition-transform duration-700 ease-[cubic-bezier(0.22,1,0.36,1)] motion-reduce:transition-none";
 
-export function SwarmCursor({ role, x, y, say, dim, turn, side }: { role: SwarmRole; x: number; y: number; say?: string; dim: boolean; turn: boolean; side?: "left" }) {
+/** Every role's cursor stays at full strength; the turn pill says who is working. */
+export function SwarmCursor({ role, x, y, say, turn, side }: { role: SwarmRole; x: number; y: number; say?: string; turn: boolean; side?: "left" }) {
 	const color = ROLE_COLORS[role];
 	// Near the right edge, or when waiting beside another cursor, the label and bubble open to the left.
 	const flip = side === "left" || x > W - 260;
 	return (
 		<div
 			className={`pointer-events-none absolute left-0 top-0 z-20 ${MOVE}`}
-			style={{ transform: `translate(${x}px, ${y}px)`, opacity: dim ? 0.35 : 1, transitionProperty: "transform, opacity" }}
+			style={{ transform: `translate(${x}px, ${y}px)`, transitionProperty: "transform" }}
 		>
 			<svg width="28" height="28" viewBox="0 0 24 24" className="absolute -left-2 -top-[5px] drop-shadow-sm" aria-hidden>
 				<polygon points="7 20 7 4 19 16 12 16 7 21" fill={color} stroke="white" strokeWidth="1.5" strokeLinejoin="round" />

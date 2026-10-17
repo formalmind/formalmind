@@ -71,7 +71,7 @@ export function PlanBoard({ repo, plan, status }: { repo: string; plan: PartialP
 	const cursor = (role: SwarmRole, say: string | undefined, turn: boolean) => {
 		const spot = spots[role];
 		if (!spot) return null;
-		return <SwarmCursor key={role} role={role} x={spot.x} y={spot.y} say={say} turn={turn} dim={!turn && !say} side={spot.x > width - 260 ? "left" : undefined} />;
+		return <SwarmCursor key={role} role={role} x={spot.x} y={spot.y} say={say} turn={turn} side={spot.x > width - 260 ? "left" : undefined} />;
 	};
 
 	return (
