@@ -695,7 +695,7 @@ export function SwarmCanvas({ state, highlight, fill = false, title, actions }: 
 			{fill ? (
 				<div className="pointer-events-none absolute inset-x-3 top-14 flex">
 					<div className="pointer-events-auto flex min-w-0 max-w-full">
-						<NowChip job={shown.job} turn={shown.turn} say={shown.turn ? shown.cursors[shown.turn].say : undefined} />
+						<NowChip job={shown.job} turn={shown.turn} />
 					</div>
 				</div>
 			) : null}
@@ -993,14 +993,14 @@ function TurnChip({ turn }: { turn: SwarmRole | null }) {
 }
 
 /**
- * Pinned above the full-page board: the dispatcher's job, whose turn it is and what they are saying, in one line.
- * The full pick order and the whole line are on hover.
+ * Pinned above the full-page board: the dispatcher's job and whose turn it is, in one line.
+ * The full pick order is on hover.
  */
-function NowChip({ job, turn, say }: { job: string | null; turn: SwarmRole | null; say?: string }) {
+function NowChip({ job, turn }: { job: string | null; turn: SwarmRole | null }) {
 	return (
 		<div
 			className="flex min-w-0 items-center gap-2 whitespace-nowrap rounded-full border bg-background px-3 py-1.5 text-[12px] shadow-sm"
-			title={[`Every 30 min the dispatcher picks one job, in this order: ${JOBS.join(" › ")}`, turn && say ? `${turn}: ${say}` : ""].filter(Boolean).join("\n")}
+			title={`Every 30 min the dispatcher picks one job, in this order: ${JOBS.join(" › ")}`}
 		>
 			<span className="font-medium" style={{ color: ROLE_COLORS.dispatcher }}>dispatcher</span>
 			{job ? (
@@ -1008,17 +1008,13 @@ function NowChip({ job, turn, say }: { job: string | null; turn: SwarmRole | nul
 			) : (
 				<span className="text-muted-foreground">sweeps every 30 min</span>
 			)}
-			{turn === "dispatcher" ? (
-				// The dispatcher's own turn: its line follows its job, no second name.
-				say ? <span key={say} className="min-w-0 truncate text-muted-foreground animate-in fade-in-0 duration-300">{say}</span> : null
-			) : turn ? (
+			{turn === "dispatcher" ? null : turn ? (
 				<>
 					<span className="text-muted-foreground/50">›</span>
 					<span key={turn} className="inline-flex shrink-0 items-center gap-1.5 font-medium animate-in fade-in-0 duration-200">
 						<span className="size-2 rounded-full" style={{ backgroundColor: ROLE_COLORS[turn] }} />
 						{turn}
 					</span>
-					{say ? <span key={say} className="min-w-0 truncate text-muted-foreground animate-in fade-in-0 duration-300">{say}</span> : null}
 				</>
 			) : (
 				<>
