@@ -1,4 +1,4 @@
-import GetStarted from "@/app/documentation/get-started/page.md";
+import { GetStarted } from "@/components/get-started";
 
 export const metadata = { title: "Get Started · Formal Mind" };
 

@@ -3,6 +3,9 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Pause, Play } from "lucide-react";
 import type { SwarmItem, SwarmRole, SwarmRun, SwarmState } from "@/lib/swarm";
+import { ROLE_COLORS } from "@/lib/swarm-roles";
+
+export { ROLE_COLORS };
 
 /**
  * A replay of one trip through the swarm, acted out by one cursor per role on a board of
@@ -23,15 +26,6 @@ function clip(text: string, max = 120) {
 	return plain.length > max ? `${plain.slice(0, max - 1)}…` : plain;
 }
 const H = 580;
-
-export const ROLE_COLORS: Record<SwarmRole, string> = {
-	dispatcher: "#64748b",
-	planner: "#8b5cf6",
-	prover: "#3b82f6",
-	reviewer: "#f59e0b",
-	merger: "#10b981",
-	chief: "#f43f5e",
-};
 
 const ROLES = Object.keys(ROLE_COLORS) as SwarmRole[];
 
@@ -151,10 +145,13 @@ function tick(scene: Scene) {
 
 function initialScene(state: SwarmState | null): Scene {
 	const todo = (state?.work.filter((item) => item.kind === "issue" && item.labels.includes("fm:todo")) ?? []).sort((a, b) => a.number - b.number);
-	const queue: Pick<SwarmItem, "number" | "title">[] = todo.length >= 2 ? todo.slice(0, 2) : [
-		{ number: 60, title: "spec: wallet balances stay non-negative" },
-		{ number: 61, title: "spec: pool reserves stay non-negative" },
-	];
+	// The replay needs two queued issues; real ones first, then placeholders numbered past
+	// anything real so they never link to (or hover as) an unrelated issue.
+	const known = [...(state?.work ?? []), ...(state?.merged ?? [])].map((item) => item.number);
+	let next = Math.max(61, ...known) + 1;
+	const queue: Pick<SwarmItem, "number" | "title">[] = todo.slice(0, 2);
+	const placeholders = ["spec: the next gap the planner queues", "spec: another roadmap item"];
+	while (queue.length < 2) queue.push({ number: next++, title: placeholders[queue.length] });
 	const merged = (state?.merged ?? []).slice(0, 2).reverse();
 	let order = 0;
 	const cards: Card[] = [
@@ -311,6 +308,9 @@ export function SwarmCanvas({ state, highlight }: { state: SwarmState | null; hi
 	const [scale, setScale] = useState(1);
 	const [step, setStep] = useState(0);
 	const [playing, setPlaying] = useState(true);
+	const [hover, setHover] = useState<{ item: SwarmItem; left: number; top: number; below: boolean } | null>(null);
+	const hoverTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+	const wrapRef = useRef<HTMLDivElement>(null);
 
 	// The replay only restarts when the queue it starts from changes, not on every poll.
 	const replayKey = state ? [...state.work.map((i) => `${i.number}:${i.labels.join(",")}`), ...state.merged.map((i) => i.number)].join("|") : "";
@@ -345,13 +345,42 @@ export function SwarmCanvas({ state, highlight }: { state: SwarmState | null; hi
 
 	const shown = live ?? scene;
 	const positions = layout(shown.cards);
+
+	// Real issues and PRs behind the cards, for hover cards and links (replay-only cards have none).
+	const items = new Map<number, SwarmItem>([...(state?.work ?? []), ...(state?.merged ?? [])].map((item) => [item.number, item]));
+	const itemFor = (card: Card) => (card.kind === "doc" || card.id === "new" ? undefined : items.get(card.number));
+
+	const showHover = (card: Card, el: HTMLElement) => {
+		const item = itemFor(card);
+		const wrap = wrapRef.current;
+		if (!item || !wrap) return;
+		if (hoverTimer.current) clearTimeout(hoverTimer.current);
+		hoverTimer.current = setTimeout(() => {
+			const box = el.getBoundingClientRect();
+			const frame = wrap.getBoundingClientRect();
+			const below = box.top - frame.top < 200;
+			setHover({
+				item,
+				left: Math.min(Math.max(box.left - frame.left, 0), Math.max(frame.width - 320, 0)),
+				top: below ? box.bottom - frame.top + 6 : box.top - frame.top - 6,
+				below,
+			});
+		}, 200);
+	};
+	const hideHover = () => {
+		if (hoverTimer.current) clearTimeout(hoverTimer.current);
+		hoverTimer.current = setTimeout(() => setHover(null), 120);
+	};
+	const keepHover = () => {
+		if (hoverTimer.current) clearTimeout(hoverTimer.current);
+	};
 	const cursorPos = (cursor: Cursor) => {
 		const p = cursor.follow ? positions.get(cursor.follow) : undefined;
 		return p ? { x: p.x + CARD_W - 28, y: p.y + 46 } : cursor.at ?? { x: 0, y: 0 };
 	};
 
 	return (
-		<div className="relative w-full">
+		<div ref={wrapRef} className="relative w-full">
 			<div ref={frameRef} className="relative w-full overflow-hidden rounded-xl border bg-card" style={{ height: H * scale }}>
 				<div
 					className="absolute left-0 top-0 origin-top-left"
@@ -380,7 +409,19 @@ export function SwarmCanvas({ state, highlight }: { state: SwarmState | null; hi
 
 					{shown.cards.map((c) => {
 						const p = positions.get(c.id)!;
-						return <BoardCard key={c.id} card={c} x={p.x} y={p.y} hidden={p.hidden} />;
+						const item = itemFor(c);
+						return (
+							<BoardCard
+								key={c.id}
+								card={c}
+								x={p.x}
+								y={p.y}
+								hidden={p.hidden}
+								href={item?.url}
+								onEnter={(el) => showHover(c, el)}
+								onLeave={hideHover}
+							/>
+						);
 					})}
 
 					<LedgerPanel spend={shown.spend} costs={shown.costs} />
@@ -398,6 +439,9 @@ export function SwarmCanvas({ state, highlight }: { state: SwarmState | null; hi
 					))}
 				</div>
 			</div>
+			{hover ? (
+				<ItemHoverCard {...hover} repo={state?.repo ?? ""} onEnter={keepHover} onLeave={hideHover} />
+			) : null}
 			{live && run ? (
 				<a
 					href={run.url}
@@ -451,17 +495,86 @@ function SwarmCursor({ role, x, y, say, dim }: { role: SwarmRole; x: number; y: 
 	);
 }
 
-function BoardCard({ card, x, y, hidden }: { card: Card; x: number; y: number; hidden: boolean }) {
+function BoardCard({ card, x, y, hidden, href, onEnter, onLeave }: {
+	card: Card;
+	x: number;
+	y: number;
+	hidden: boolean;
+	href?: string;
+	onEnter: (el: HTMLElement) => void;
+	onLeave: () => void;
+}) {
+	const Tag = href ? "a" : "div";
 	return (
-		<div
-			className={`absolute left-0 top-0 z-10 rounded-lg border bg-background p-2.5 shadow-sm ${MOVE}`}
-			style={{ width: CARD_W, height: 78, transform: `translate(${x}px, ${y}px)`, opacity: hidden ? 0 : 1, transitionProperty: "transform, opacity" }}
+		<Tag
+			{...(href ? { href, target: "_blank", rel: "noreferrer" } : {})}
+			onMouseEnter={(e: React.MouseEvent<HTMLElement>) => onEnter(e.currentTarget)}
+			onMouseLeave={onLeave}
+			onFocus={(e: React.FocusEvent<HTMLElement>) => onEnter(e.currentTarget)}
+			onBlur={onLeave}
+			className={`absolute left-0 top-0 z-10 block rounded-lg border bg-background p-2.5 shadow-sm ${MOVE} ${href ? "cursor-pointer hover:border-foreground/30" : ""}`}
+			style={{ width: CARD_W, height: 78, transform: `translate(${x}px, ${y}px)`, opacity: hidden ? 0 : 1, transitionProperty: "transform, opacity, border-color" }}
 		>
 			<div className="flex items-center gap-1.5 text-[12px]">
 				{card.kind === "doc" ? null : <span className="font-mono text-muted-foreground">{card.kind === "pr" ? "PR" : "#"}{card.number}</span>}
 				<span className={`rounded px-1.5 py-px font-mono text-[10px] ${LABEL_STYLES[card.label] ?? LABEL_STYLES.README}`}>{card.label}</span>
 			</div>
 			<p className="mt-1 line-clamp-2 text-[13px] leading-snug text-foreground">{card.title}</p>
+		</Tag>
+	);
+}
+
+function timeAgo(iso: string) {
+	const minutes = Math.round((Date.now() - Date.parse(iso)) / 60_000);
+	if (minutes < 60) return `${Math.max(minutes, 1)} min ago`;
+	const hours = Math.round(minutes / 60);
+	return hours < 24 ? `${hours} h ago` : `${Math.round(hours / 24)} d ago`;
+}
+
+/** GitHub-style preview of the issue or PR behind a board card. */
+function ItemHoverCard({ item, repo, left, top, below, onEnter, onLeave }: {
+	item: SwarmItem;
+	repo: string;
+	left: number;
+	top: number;
+	below: boolean;
+	onEnter: () => void;
+	onLeave: () => void;
+}) {
+	const state = item.kind === "pr" ? (item.merged ? "merged" : "open") : "open";
+	const stateColor = state === "merged" ? "text-violet-600 dark:text-violet-400" : "text-emerald-600 dark:text-emerald-400";
+	return (
+		<div
+			role="tooltip"
+			onMouseEnter={onEnter}
+			onMouseLeave={onLeave}
+			className="absolute z-30 w-[320px] rounded-xl border bg-popover p-4 text-popover-foreground shadow-lg animate-in fade-in-0 zoom-in-95 duration-150"
+			style={{ left, top, transform: below ? undefined : "translateY(-100%)" }}
+		>
+			<p className="flex items-center gap-1.5 text-xs text-muted-foreground">
+				<span className={`font-medium ${stateColor}`}>{item.kind === "pr" ? (item.merged ? "Merged PR" : "Open PR") : "Open issue"}</span>
+				<span>· {repo}</span>
+				<span>· {timeAgo(item.createdAt)}</span>
+			</p>
+			<a href={item.url} target="_blank" rel="noreferrer" className="mt-1.5 block text-sm font-semibold leading-snug hover:underline">
+				{item.title} <span className="font-normal text-muted-foreground">#{item.number}</span>
+			</a>
+			{item.excerpt ? <p className="mt-2 line-clamp-3 text-xs leading-5 text-muted-foreground">{item.excerpt}</p> : null}
+			{item.labels.length ? (
+				<div className="mt-3 flex flex-wrap gap-1">
+					{item.labels.map((label) => (
+						<span key={label} className={`rounded px-1.5 py-px font-mono text-[10px] ${LABEL_STYLES[label] ?? LABEL_STYLES.README}`}>{label}</span>
+					))}
+				</div>
+			) : null}
+			<div className="mt-3 flex items-center gap-2 border-t pt-3 text-xs text-muted-foreground">
+				{item.authorAvatar ? (
+					// eslint-disable-next-line @next/next/no-img-element -- tiny GitHub avatar, not worth the image optimizer
+					<img src={`${item.authorAvatar}${item.authorAvatar.includes("?") ? "&" : "?"}s=40`} alt="" className="size-4 rounded-full" />
+				) : null}
+				<span className="font-medium text-foreground">{item.author}</span>
+				<span>opened · {item.comments} comment{item.comments === 1 ? "" : "s"}</span>
+			</div>
 		</div>
 	);
 }

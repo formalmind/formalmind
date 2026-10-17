@@ -21,6 +21,13 @@ export interface SwarmItem {
 	labels: string[];
 	url: string;
 	updatedAt: string;
+	createdAt: string;
+	author: string;
+	authorAvatar: string;
+	/** First paragraph or so of the body, markdown stripped down to plain text. */
+	excerpt: string;
+	comments: number;
+	merged: boolean;
 }
 
 export interface SwarmComment {
@@ -88,9 +95,23 @@ type GitHubIssue = {
 	title: string;
 	html_url: string;
 	updated_at: string;
+	created_at: string;
+	body: string | null;
+	comments: number;
+	user: { login: string; avatar_url: string } | null;
 	labels: { name: string }[];
 	pull_request?: { merged_at: string | null };
 };
+
+function excerptOf(body: string | null) {
+	const text = (body ?? "")
+		.replace(/<!--[\s\S]*?-->/g, "")
+		.replace(/```[\s\S]*?```/g, " ")
+		.replace(/[#>*_`]|\[(.*?)\]\(.*?\)/g, (match, linkText) => linkText ?? "")
+		.replace(/\s+/g, " ")
+		.trim();
+	return text.length > 240 ? `${text.slice(0, 239)}…` : text;
+}
 
 type GitHubComment = { body: string; created_at: string; updated_at: string; html_url: string };
 
@@ -117,6 +138,12 @@ function toItem(issue: GitHubIssue): SwarmItem {
 		labels: issue.labels.map((label) => label.name),
 		url: issue.html_url,
 		updatedAt: issue.updated_at,
+		createdAt: issue.created_at,
+		author: issue.user?.login ?? "ghost",
+		authorAvatar: issue.user?.avatar_url ?? "",
+		excerpt: excerptOf(issue.body),
+		comments: issue.comments,
+		merged: Boolean(issue.pull_request?.merged_at),
 	};
 }
 

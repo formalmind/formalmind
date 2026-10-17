@@ -31,6 +31,13 @@ export function SwarmWorkspace({ repo }: { repo: string }) {
 	const [error, setError] = useState<string | null>(null);
 	const [loading, setLoading] = useState(false);
 	const [highlight, setHighlight] = useState<SwarmRole | null>(null);
+	const [syncedAt, setSyncedAt] = useState<number | null>(null);
+	const [now, setNow] = useState(() => Date.now());
+
+	useEffect(() => {
+		const timer = setInterval(() => setNow(Date.now()), 1000);
+		return () => clearInterval(timer);
+	}, []);
 
 	const load = async (quiet = false) => {
 		if (!quiet) setLoading(true);
@@ -40,6 +47,7 @@ export function SwarmWorkspace({ repo }: { repo: string }) {
 			if (!res.ok) throw new Error(body.error ?? res.statusText);
 			setState(body);
 			setError(null);
+			setSyncedAt(Date.now());
 		} catch (err) {
 			setError(err instanceof Error ? err.message : "Could not load the swarm state.");
 		} finally {
@@ -77,14 +85,21 @@ export function SwarmWorkspace({ repo }: { repo: string }) {
 							? `${queued} queued · ${inFlight} PRs open · ${blocked} blocked · $${state.spentToday.toFixed(2)} spent today`
 							: error ?? "Loading the live queue…"}
 					</span>
+					<div className="ml-auto flex items-center gap-3">
+						{syncedAt ? (
+							<span className="whitespace-nowrap text-xs tabular-nums text-muted-foreground" title="The board re-reads GitHub every 10 seconds while this tab is open">
+								Synced {Math.max(0, Math.round((now - syncedAt) / 1000))}s ago
+							</span>
+						) : null}
 					<button
 						type="button"
 						onClick={() => void load()}
-						className="ml-auto inline-flex h-8 items-center gap-1.5 rounded-full border px-3 text-xs text-muted-foreground transition-colors hover:text-foreground"
+						className="inline-flex h-8 items-center gap-1.5 rounded-full border px-3 text-xs text-muted-foreground transition-colors hover:text-foreground"
 					>
 						<RefreshCw className={`h-3.5 w-3.5 ${loading ? "animate-spin" : ""}`} />
 						Refresh
 					</button>
+					</div>
 				</div>
 
 				<div className="mt-4">
