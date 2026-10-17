@@ -25,10 +25,11 @@ export const SETUP_STEPS: { key: StepKey; title: string; icon: React.ElementType
 	{ key: "start", title: "Start", icon: Rocket },
 ];
 
-export function StepList({ step, done, onSelect }: { step: StepKey; done: Partial<Record<StepKey, boolean>>; onSelect: (key: StepKey) => void }) {
+/** A column beside the step from lg up; `horizontal` keeps it a row above the step at every width. */
+export function StepList({ step, done, onSelect, horizontal = false }: { step: StepKey; done: Partial<Record<StepKey, boolean>>; onSelect: (key: StepKey) => void; horizontal?: boolean }) {
 	return (
 		<nav aria-label="Setup steps">
-			<ol className="flex gap-1 overflow-x-auto lg:flex-col">
+			<ol className={`flex gap-1 overflow-x-auto ${horizontal ? "" : "lg:flex-col"}`}>
 				{SETUP_STEPS.map((s, i) => (
 					<li key={s.key}>
 						<button

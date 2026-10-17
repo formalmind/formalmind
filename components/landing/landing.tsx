@@ -7,8 +7,6 @@ import { useState } from "react";
 import { ArrowRight, CircleDollarSign, Loader2, ShieldCheck, Sparkles } from "lucide-react";
 import { SwarmCanvas } from "@/components/swarm/swarm-canvas";
 import YouTubeVideo from "@/components/youtube-video";
-import { TEAM_PRESETS } from "@/lib/teams";
-import { PlanBoard } from "./plan-board";
 import { SetupPreview } from "./setup-preview";
 import { usePlan } from "./use-plan";
 
@@ -27,10 +25,6 @@ export function Landing({ signedIn }: { signedIn: boolean }) {
 		setInput(value);
 		start(value);
 	};
-	const planFromPreview = (value: string) => {
-		run(value);
-		window.scrollTo({ top: 0, behavior: "smooth" });
-	};
 
 	return (
 		<div className="min-h-dvh bg-background text-foreground">
@@ -40,7 +34,6 @@ export function Landing({ signedIn }: { signedIn: boolean }) {
 					Formal Mind.
 				</Link>
 				<nav className="flex items-center gap-1 text-sm">
-					<a href="#how" className="hidden rounded-full px-3 py-1.5 text-muted-foreground hover:text-foreground sm:inline">How it works</a>
 					<a href={signedIn ? "/" : "/login"} className="rounded-full px-3 py-1.5 text-muted-foreground hover:text-foreground">{signedIn ? "Open the app" : "Log in"}</a>
 					<a href={startHref} className="rounded-full bg-primary px-3.5 py-1.5 font-medium text-primary-foreground hover:opacity-90">Get started</a>
 				</nav>
@@ -54,10 +47,6 @@ export function Landing({ signedIn }: { signedIn: boolean }) {
 					<h1 className="mx-auto mt-5 max-w-3xl text-balance text-4xl font-semibold tracking-tight sm:text-5xl">
 						Prove your Solidity correct, one small pull request at a time
 					</h1>
-					<p className="mx-auto mt-4 max-w-2xl text-pretty text-base leading-7 text-muted-foreground">
-						Paste a repository. Watch the planner read your contracts and write the swarm&apos;s first issues, live.
-						Then the team proves them in Lean 4, reviews each other, and opens PRs, within a daily budget you set.
-					</p>
 
 					<form
 						onSubmit={(e) => {
@@ -94,21 +83,7 @@ export function Landing({ signedIn }: { signedIn: boolean }) {
 				<section className="mx-auto max-w-6xl px-4 sm:px-6">
 					{repo ? (
 						<div aria-live="polite">
-							<PlanBoard repo={repo} plan={plan} status={done ? "done" : "planning"} />
-							{done ? (
-								<div className="mt-4 flex flex-col items-start justify-between gap-3 rounded-2xl border bg-muted/40 p-4 sm:flex-row sm:items-center">
-									<p className="text-sm">
-										<span className="font-medium">Your plan is ready:</span>{" "}
-										<span className="text-muted-foreground">
-											{plan?.issues?.length ?? 0} issues and {plan?.invariants?.length ?? 0} invariants. The planner suggests a{" "}
-											<strong className="font-medium text-foreground">{TEAM_PRESETS.find((t) => t.key === plan?.team?.preset)?.name ?? "Pair"}</strong>.
-										</span>
-									</p>
-									<a href={startHref} className="inline-flex h-9 shrink-0 items-center gap-1.5 rounded-full bg-primary px-4 text-sm font-medium text-primary-foreground hover:opacity-90">
-										Start the swarm on it <ArrowRight className="size-4" />
-									</a>
-								</div>
-							) : null}
+							<SetupPreview repo={repo} plan={plan} done={done} failed={Boolean(error)} startHref={startHref} />
 						</div>
 					) : (
 						<div>
@@ -118,15 +93,7 @@ export function Landing({ signedIn }: { signedIn: boolean }) {
 					)}
 				</section>
 
-				<section id="how" className="mx-auto max-w-6xl px-4 py-20 sm:px-6">
-					<h2 className="text-2xl font-semibold tracking-tight">How it works</h2>
-					<p className="mt-2 max-w-2xl text-muted-foreground">Six steps from a repository to a running swarm. Click through them: this is the setup you&apos;ll see after signing up.</p>
-					<div className="mt-8">
-						<SetupPreview onPlan={planFromPreview} startHref={startHref} busy={isLoading} />
-					</div>
-				</section>
-
-				<section className="mx-auto grid max-w-6xl items-center gap-10 px-4 pb-20 sm:px-6 lg:grid-cols-2">
+				<section className="mx-auto grid max-w-6xl items-center gap-10 px-4 py-20 sm:px-6 lg:grid-cols-2">
 					<div>
 						<h2 className="text-2xl font-semibold tracking-tight">You set the budget. The swarm stops at it.</h2>
 						<ul className="mt-6 space-y-4 text-sm leading-6 text-muted-foreground">
