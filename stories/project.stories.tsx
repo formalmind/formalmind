@@ -1,4 +1,4 @@
-import type { Meta, StoryObj } from "@storybook/nextjs-vite";
+import type { Meta, StoryObj } from "@storybook/react-vite";
 import { ProjectRoadmap } from "@/components/project/project-roadmap";
 import { ProjectView } from "@/components/project/project-view";
 import { SidebarProvider } from "@/components/ui/sidebar";

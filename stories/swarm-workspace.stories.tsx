@@ -1,4 +1,4 @@
-import type { Meta, StoryObj } from "@storybook/nextjs-vite";
+import type { Meta, StoryObj } from "@storybook/react-vite";
 import { SwarmWorkspace } from "@/components/swarm/swarm-workspace";
 import { SidebarProvider } from "@/components/ui/sidebar";
 import { liveState, replayState } from "./fixtures/swarm";

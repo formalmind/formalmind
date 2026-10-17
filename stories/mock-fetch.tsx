@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import type { Decorator } from "@storybook/nextjs-vite";
+import type { Decorator } from "@storybook/react-vite";
 
 type Handler = (init?: RequestInit) => Response | Promise<Response>;
 

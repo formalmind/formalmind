@@ -1,4 +1,4 @@
-import { getCloudflareContext } from "@opennextjs/cloudflare";
+import { currentRequest } from "@/worker/context";
 
 /** The parts of a Workers KV namespace this app uses. */
 export interface KV {
@@ -8,10 +8,9 @@ export interface KV {
 	list<M = unknown>(options: { prefix: string; cursor?: string }): Promise<{ keys: { name: string; metadata?: M }[]; list_complete: boolean; cursor?: string }>;
 }
 
-/** The FORMALMIND namespace (wrangler.jsonc); wrangler's local copy under `next dev`. */
+/** The FORMALMIND namespace (wrangler.jsonc); wrangler's local copy under `wrangler dev`. */
 export async function kv(): Promise<KV> {
-	const { env } = await getCloudflareContext({ async: true });
-	const namespace = (env as unknown as { FORMALMIND?: KV }).FORMALMIND;
+	const namespace = currentRequest().env.FORMALMIND;
 	if (!namespace) throw new Error("The FORMALMIND KV binding is missing; see wrangler.jsonc.");
 	return namespace;
 }

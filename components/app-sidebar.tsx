@@ -1,7 +1,7 @@
 "use client"
 
-import Link from "next/link"
-import { usePathname } from "next/navigation"
+import { Link } from "react-router";
+import { useLocation } from "react-router";
 import { BookOpen, GanttChart, MessageCircle, Network, Rocket } from "lucide-react"
 import {
 	Sidebar,
@@ -34,7 +34,7 @@ function NavLink({ item, active }: { item: NavItem; active: boolean }) {
 		<SidebarMenuItem>
 			{active ? <span aria-hidden className="absolute -left-2 bottom-1.5 top-1.5 w-[3px] rounded-full bg-blue-600 dark:bg-blue-400" /> : null}
 			<SidebarMenuButton asChild isActive={active} tooltip={item.title}>
-				<Link href={item.url}>
+				<Link to={item.url}>
 					<item.icon />
 					<span>{item.title}</span>
 				</Link>
@@ -44,7 +44,7 @@ function NavLink({ item, active }: { item: NavItem; active: boolean }) {
 }
 
 export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
-	const pathname = usePathname()
+	const pathname = useLocation().pathname
 	// The landing page is a page of its own, even for someone signed in.
 	if (pathname === "/welcome") return null
 
@@ -54,10 +54,10 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
 			{/* Collapsed, the logo stays as the icon of the wordmark. It keeps one inset in both states so it holds
 			    still while the wordmark fades off its right. The toggle is on each page, just outside the sidebar. */}
 			<SidebarHeader className="flex-row items-center">
-				<Link href="/" aria-label="Formal Mind" className="flex h-8 items-center gap-2 px-1.5 text-sm font-semibold tracking-tight group-data-[collapsible=icon]:gap-0">
+				<Link to="/" aria-label="Formal Mind" className="flex h-8 items-center gap-2 px-1.5 text-sm font-semibold tracking-tight group-data-[collapsible=icon]:gap-0">
 					<LogoMark size={20} className="shrink-0" />
 					{/* Fades out with the transitions.dev text-swap timing as the rail narrows. */}
-					<span className="max-w-40 overflow-hidden whitespace-nowrap transition-[max-width,opacity,filter] duration-[var(--text-swap-dur)] ease-[var(--text-swap-ease)] group-data-[collapsible=icon]:max-w-0 group-data-[collapsible=icon]:opacity-0 group-data-[collapsible=icon]:blur-[var(--text-swap-blur)] motion-reduce:transition-none">
+					<span className="max-w-40 overflow-hidden whitespace-nowrap transition-[max-width,opacity,filter] [transition-duration:var(--text-swap-dur)] [transition-timing-function:var(--text-swap-ease)] group-data-[collapsible=icon]:max-w-0 group-data-[collapsible=icon]:opacity-0 group-data-[collapsible=icon]:blur-[var(--text-swap-blur)] motion-reduce:transition-none">
 						Formal Mind.
 					</span>
 				</Link>

@@ -1,6 +1,6 @@
 "use client";
 
-import Link from "next/link";
+import { Link } from "react-router";
 import { LogoMark } from "@/components/logo";
 import { MarkGithubIcon } from "@primer/octicons-react";
 import { useState } from "react";
@@ -31,7 +31,7 @@ export function Landing({ signedIn }: { signedIn: boolean }) {
 	return (
 		<div className="min-h-dvh bg-background text-foreground">
 			<header className="mx-auto flex h-16 max-w-6xl items-center justify-between px-4 sm:px-6">
-				<Link href="/welcome" className="flex items-center gap-2 font-semibold tracking-tight">
+				<Link to="/welcome" className="flex items-center gap-2 font-semibold tracking-tight">
 					<LogoMark size={24} />
 					Formal Mind.
 				</Link>
@@ -102,7 +102,7 @@ export function Landing({ signedIn }: { signedIn: boolean }) {
 				// The intro floats bottom-right, small until hovered (or focused), then grows on the card-resize curve.
 				<aside
 					aria-label="Formal Mind quick intro"
-					className={`fixed bottom-4 right-4 z-40 overflow-hidden ${bigVideo ? "w-[min(1100px,calc(100vw-2rem))]" : "w-48 focus-within:w-[min(360px,calc(100vw-2rem))] hover:w-[min(360px,calc(100vw-2rem))]"} rounded-2xl border bg-black shadow-2xl transition-[width] duration-300 ease-[cubic-bezier(0.22,1,0.36,1)] animate-in fade-in-0 slide-in-from-bottom-4 motion-reduce:transition-none`}
+					className={`fixed bottom-4 right-4 z-40 overflow-hidden ${bigVideo ? "w-[min(1100px,calc(100vw-2rem))]" : "w-48 focus-within:w-[min(360px,calc(100vw-2rem))] hover:w-[min(360px,calc(100vw-2rem))]"} rounded-2xl border bg-black shadow-2xl transition-[width] duration-300 [transition-timing-function:cubic-bezier(0.22,1,0.36,1)] animate-in fade-in-0 slide-in-from-bottom-4 motion-reduce:transition-none`}
 				>
 					<YouTubeVideo videoId="xyZZqCQlmCE" title="Formal Mind quick intro" />
 					<button

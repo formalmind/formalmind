@@ -5,7 +5,7 @@ import { Loader2, Rocket } from "lucide-react";
 import { SidebarTrigger } from "@/components/ui/sidebar";
 import { PlanBoard } from "@/components/landing/plan-board";
 import { readDraft, usePlan } from "@/components/landing/use-plan";
-import type { OnboardingState } from "@/app/api/onboarding/state/route";
+import type { OnboardingState } from "@/server/routes/onboarding/state/route";
 import { TEAM_PRESETS } from "@/lib/teams";
 import {
 	BudgetCard,

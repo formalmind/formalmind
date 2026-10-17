@@ -1,4 +1,4 @@
-import type { Meta, StoryObj } from "@storybook/nextjs-vite";
+import type { Meta, StoryObj } from "@storybook/react-vite";
 import { SwarmCanvas } from "@/components/swarm/swarm-canvas";
 import { askState, handoffState, justFinishedState, liveState, replayState } from "./fixtures/swarm";
 

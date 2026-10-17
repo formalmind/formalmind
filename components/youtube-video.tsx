@@ -1,7 +1,6 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import Image from "next/image";
 
 type VideoProps = {
 	videoId: string;
@@ -180,14 +179,7 @@ export default function YouTubeVideo({ videoId, title = "Formal Mind demo" }: Vi
 					aria-label={`Play video: ${title}`}
 					className="group absolute inset-0 flex items-center justify-center focus-visible:outline-none"
 				>
-					<Image
-						src={`https://i.ytimg.com/vi/${videoId}/maxresdefault.jpg`}
-						alt=""
-						fill
-						sizes="(min-width: 1024px) 50vw, 100vw"
-						className="object-cover"
-						priority
-					/>
+					<img src={`https://i.ytimg.com/vi/${videoId}/maxresdefault.jpg`} alt="" className="absolute inset-0 size-full object-cover" />
 					<span className="relative flex size-16 items-center justify-center rounded-full bg-black/60 text-white shadow-lg backdrop-blur-sm transition-transform duration-200 ease-out group-hover:scale-105 group-active:scale-95 group-focus-visible:ring-2 group-focus-visible:ring-white motion-reduce:transition-none">
 						<PlayIcon className="ml-1 size-7" />
 					</span>

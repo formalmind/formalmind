@@ -1,4 +1,4 @@
-import Link from "next/link";
+import { Link } from "react-router";
 import { ArrowRight, Bot, CircleDollarSign, Eye, GitPullRequest, MessageSquare, ShieldCheck, Tag, Terminal } from "lucide-react";
 import { ROLE_COLORS } from "@/lib/swarm-roles";
 import type { SwarmRole } from "@/lib/swarm";
@@ -66,7 +66,7 @@ export function GetStarted() {
 					swarm does the proving within a budget you set.
 				</p>
 				<div className="mt-6 flex flex-wrap gap-3">
-					<Link href="/" className="inline-flex h-9 items-center gap-2 rounded-full bg-primary px-4 text-sm font-medium text-primary-foreground transition-opacity hover:opacity-90">
+					<Link to="/" className="inline-flex h-9 items-center gap-2 rounded-full bg-primary px-4 text-sm font-medium text-primary-foreground transition-opacity hover:opacity-90">
 						Watch the swarm live <ArrowRight className="size-4" />
 					</Link>
 					<a href={SWARM_README} target="_blank" rel="noreferrer" className="inline-flex h-9 items-center gap-2 rounded-full border px-4 text-sm font-medium transition-colors hover:bg-muted">
@@ -113,7 +113,7 @@ export function GetStarted() {
 				<ol>
 					<Step n={1} icon={Eye} title="Watch it work">
 						<p>
-							The <Link href="/" className="text-foreground underline underline-offset-4">Swarm page</Link> shows the board as it is. When a run
+							The <Link to="/" className="text-foreground underline underline-offset-4">Swarm page</Link> shows the board as it is. When a run
 							starts, that role&apos;s cursor moves to the issue or PR it picked up and ticks off its task list live. Recent runs list what each
 							one did and what it cost.
 						</p>

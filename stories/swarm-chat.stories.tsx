@@ -1,4 +1,4 @@
-import type { Meta, StoryObj } from "@storybook/nextjs-vite";
+import type { Meta, StoryObj } from "@storybook/react-vite";
 import type { UIMessage } from "ai";
 import { SwarmChat, ToolCalls } from "@/components/swarm/swarm-chat";
 import { chatStream, withMockFetch } from "./mock-fetch";

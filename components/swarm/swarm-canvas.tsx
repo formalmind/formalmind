@@ -908,7 +908,7 @@ function BottomIsland({ open, onClose, children }: { open: boolean; onClose: () 
 					onInteractOutside={(e) => {
 						if ((e.target as HTMLElement | null)?.closest("[data-component], [data-canvas-ui]")) e.preventDefault();
 					}}
-					className="fixed inset-x-3 bottom-3 z-50 mx-auto flex max-h-[80vh] max-w-lg flex-col rounded-[2rem] border border-black/5 bg-background p-5 shadow-[0_-8px_40px_-12px_rgba(0,0,0,0.25)] duration-500 ease-[cubic-bezier(0.32,0.72,0,1)] focus:outline-none data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:duration-300 data-[state=closed]:slide-out-to-bottom-[110%] data-[state=open]:slide-in-from-bottom-[110%] dark:border-white/10 sm:bottom-4"
+					className="fixed inset-x-3 bottom-3 z-50 mx-auto flex max-h-[80vh] max-w-lg flex-col rounded-[2rem] border border-black/5 bg-background p-5 shadow-[0_-8px_40px_-12px_rgba(0,0,0,0.25)] duration-500 [animation-timing-function:cubic-bezier(0.32,0.72,0,1)] focus:outline-none data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:duration-300 data-[state=closed]:slide-out-to-bottom-[110%] data-[state=open]:slide-in-from-bottom-[110%] dark:border-white/10 sm:bottom-4"
 				>
 					<div className="flex items-center gap-3">
 						<DialogPrimitive.Close className="flex size-10 shrink-0 items-center justify-center rounded-full border bg-background shadow-sm transition-colors hover:bg-muted focus:outline-none focus-visible:ring-2 focus-visible:ring-ring">
@@ -958,7 +958,7 @@ function CardDetails({ card, item, repo, inDialog }: { card: Card; item?: SwarmI
 	);
 }
 
-const MOVE = "transition-transform duration-700 ease-[cubic-bezier(0.22,1,0.36,1)] motion-reduce:transition-none";
+const MOVE = "transition-transform duration-700 [transition-timing-function:cubic-bezier(0.22,1,0.36,1)] motion-reduce:transition-none";
 
 /** Every role's cursor stays at full strength; the turn pill says who is working. */
 export function SwarmCursor({ role, x, y, say, turn, side }: { role: SwarmRole; x: number; y: number; say?: string; turn: boolean; side?: "left" }) {
@@ -1102,7 +1102,6 @@ function ItemPreview({ item, repo, full = false }: { item: SwarmItem; repo: stri
 			) : null}
 			<div className="mt-3 flex items-center gap-2 border-t pt-3 text-xs text-muted-foreground">
 				{item.authorAvatar ? (
-					// eslint-disable-next-line @next/next/no-img-element -- tiny GitHub avatar, not worth the image optimizer
 					<img src={`${item.authorAvatar}${item.authorAvatar.includes("?") ? "&" : "?"}s=40`} alt="" className="size-4 rounded-full" />
 				) : null}
 				<span className="font-medium text-foreground">{item.author}</span>

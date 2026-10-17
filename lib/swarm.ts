@@ -4,7 +4,9 @@
  * `asyncswap/v2-proofs/.github/formalmind/README.md`), so this is everything it knows.
  */
 
-export const SWARM_REPO = process.env.SWARM_REPO || "asyncswap/v2-proofs";
+import { SWARM_REPO as DEFAULT_REPO } from "@/lib/swarm-repo";
+
+export const SWARM_REPO = process.env.SWARM_REPO || DEFAULT_REPO;
 export const LEDGER_ISSUE = 38;
 export const CHIEF_ISSUE = 53;
 export const NOTEBOOK_ISSUE = 55;

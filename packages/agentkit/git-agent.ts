@@ -3,7 +3,7 @@ import git, { HttpClient } from 'isomorphic-git'
 import pgp from "@isomorphic-git/pgp-plugin"
 import http from 'isomorphic-git/http/web'
 import LightningFS from '@isomorphic-git/lightning-fs'
-import { SessionData } from '@auth0/nextjs-auth0/types'
+import type { SessionData } from '@/lib/session'
 import { Octokit } from '@octokit/rest'
 
 export interface GitAgentOptions {

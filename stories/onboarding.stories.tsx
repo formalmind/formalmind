@@ -1,4 +1,4 @@
-import type { Meta, StoryObj } from "@storybook/nextjs-vite";
+import type { Meta, StoryObj } from "@storybook/react-vite";
 import { Landing } from "@/components/landing/landing";
 import { PlanBoard } from "@/components/landing/plan-board";
 import { Onboarding } from "@/components/onboarding/onboarding";

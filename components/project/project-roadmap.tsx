@@ -3,7 +3,8 @@
 import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 import { ChevronDown, ChevronRight } from "lucide-react";
 import { CheckCircleFillIcon, MilestoneIcon } from "@primer/octicons-react";
-import { PROJECT_STATUSES, type ProjectItem, type ProjectMilestone, type ProjectStatus } from "@/lib/project";
+import type { ProjectItem, ProjectMilestone } from "@/lib/project";
+import { PROJECT_STATUSES, type ProjectStatus } from "@/lib/project-statuses";
 import { ItemStateIcon, STATUS_STYLES, StatusDot, useItemHover } from "./project-meta";
 
 /**

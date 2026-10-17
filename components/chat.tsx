@@ -4,7 +4,7 @@ import { FederatedConnectionInterrupt } from "@auth0/ai/interrupts";
 import { EnsureAPIAccessPopup } from "@/components/auth0-ai/FederatedConnections/popup";
 import { Check, Copy, Share2 } from "lucide-react"
 import { Children, isValidElement, useEffect, useRef, useState } from "react"
-import { useParams } from "next/navigation"
+import { useParams } from "react-router"
 import { ChatComposer } from "@/components/chat-composer"
 import type { OpenAIModel } from "@/lib/llm"
 import { useChatWithInterruptions } from "@/hooks/useChatWithInterruptions";

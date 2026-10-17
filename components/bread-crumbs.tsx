@@ -1,7 +1,7 @@
 "use client";
 
 import React from 'react';
-import { usePathname } from 'next/navigation'
+import { useLocation } from "react-router";
 import { useMemo } from 'react'
 import {
 	Breadcrumb,
@@ -13,7 +13,7 @@ import {
 } from "@/components/ui/breadcrumb";
 
 export default function BreadCrumbs() {
-	const pathname = usePathname()
+	const pathname = useLocation().pathname
 
 	const breadcrumbs = useMemo(() => {
 		const segments = pathname

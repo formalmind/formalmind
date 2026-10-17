@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { usePathname, useRouter } from "next/navigation";
+import { useLocation, useNavigate } from "react-router";
 import { ChevronRight, FolderGit2 } from "lucide-react";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { useChatConversations, type RepoProject } from "@/components/chat-conversations";
@@ -21,8 +21,8 @@ export function NavProjects() {
 	const [isLoading, setIsLoading] = useState(true);
 	const [isDevPreview, setIsDevPreview] = useState(false);
 	const { conversations, activeConversation, createConversation, selectConversation, isReady } = useChatConversations();
-	const pathname = usePathname();
-	const router = useRouter();
+	const pathname = useLocation().pathname;
+	const navigate = useNavigate();
 
 	useEffect(() => {
 		let isCurrent = true;
@@ -46,12 +46,12 @@ export function NavProjects() {
 
 	const createProjectChat = (project: RepoProject) => {
 		createConversation(project);
-		router.push(`/github/${encodeURIComponent(project.owner)}/${encodeURIComponent(project.name)}`);
+		navigate(`/github/${encodeURIComponent(project.owner)}/${encodeURIComponent(project.name)}`);
 	};
 
 	const selectProjectChat = (conversationId: string, project: RepoProject) => {
 		selectConversation(conversationId);
-		router.push(`/github/${encodeURIComponent(project.owner)}/${encodeURIComponent(project.name)}`);
+		navigate(`/github/${encodeURIComponent(project.owner)}/${encodeURIComponent(project.name)}`);
 	};
 
 	return (

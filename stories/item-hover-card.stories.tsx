@@ -1,4 +1,4 @@
-import type { Meta, StoryObj } from "@storybook/nextjs-vite";
+import type { Meta, StoryObj } from "@storybook/react-vite";
 import { ItemHoverCard } from "@/components/swarm/swarm-canvas";
 import { mergedPr, openIssue } from "./fixtures/swarm";
 

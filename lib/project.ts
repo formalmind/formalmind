@@ -4,17 +4,9 @@
  */
 import { CHIEF_ISSUE, LEDGER_ISSUE, NOTEBOOK_ISSUE, SWARM_REPO, github, type SwarmItem } from "@/lib/swarm";
 
-export type ProjectStatus = "none" | "todo" | "in-progress" | "review" | "approved" | "blocked" | "done";
+import { PROJECT_STATUSES, type ProjectStatus } from "@/lib/project-statuses";
 
-export const PROJECT_STATUSES: { key: ProjectStatus; name: string; description: string }[] = [
-	{ key: "none", name: "No Status", description: "Open issues the swarm has not been asked to pick up" },
-	{ key: "todo", name: "Todo", description: "Queued with fm:todo for a prover" },
-	{ key: "in-progress", name: "In progress", description: "A prover is on it, or it went back for changes" },
-	{ key: "review", name: "In review", description: "Open PRs waiting for the reviewer" },
-	{ key: "approved", name: "Approved", description: "Reviewed; the merger checks and merges" },
-	{ key: "blocked", name: "Blocked", description: "Waiting on a human decision" },
-	{ key: "done", name: "Done", description: "Merged or closed as completed" },
-];
+export { PROJECT_STATUSES, type ProjectStatus };
 
 export interface ProjectItem extends SwarmItem {
 	state: "open" | "closed" | "merged";

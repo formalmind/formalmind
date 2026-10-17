@@ -57,3 +57,7 @@ storybook-static/
 
 # Solidity tooling cache (not part of the app)
 /cache/
+
+# Vite build
+/dist
+/storybook-static

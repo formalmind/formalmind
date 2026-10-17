@@ -1,7 +1,7 @@
 "use client";
 
 import { createContext, useContext } from 'react';
-import { SessionData } from '@auth0/nextjs-auth0/types';
+import type { SessionData } from '@/lib/session';
 
 const AuthContext = createContext<SessionData | null>(null);
 

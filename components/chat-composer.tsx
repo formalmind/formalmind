@@ -1,7 +1,7 @@
 "use client";
 
 import * as React from "react";
-import Link from "next/link";
+import { Link } from "react-router";
 import { ArrowUp, Square, ChevronDown, Sparkles, GitBranch } from "lucide-react";
 import { RepoIcon } from "@primer/octicons-react";
 import { cn } from "@/lib/utils";
@@ -100,12 +100,12 @@ export function ChatComposer({
 			{/* Shelf: context chips */}
 			<div className="flex items-center gap-2 px-3 pt-3">
 				{context ?? (repo ? (
-					<Link href={`/github/${repo.owner}/${repo.name}`} className={cn(CHIP, "bg-secondary text-secondary-foreground")}>
+					<Link to={`/github/${repo.owner}/${repo.name}`} className={cn(CHIP, "bg-secondary text-secondary-foreground")}>
 						<RepoIcon size={14} />
 						<span className="max-w-[12rem] truncate">{repo.owner}/{repo.name}</span>
 					</Link>
 				) : (
-					<Link href="/github" className={cn(CHIP, "bg-secondary text-muted-foreground hover:text-foreground")}>
+					<Link to="/github" className={cn(CHIP, "bg-secondary text-muted-foreground hover:text-foreground")}>
 						<GitBranch className="h-3.5 w-3.5" />
 						Choose a repo
 					</Link>

@@ -1,13 +1,13 @@
 "use client";
 
-import { usePathname } from "next/navigation";
+import { useLocation } from "react-router";
 import { SidebarInset, SidebarTrigger } from "@/components/ui/sidebar";
 import { Separator } from "@radix-ui/react-separator";
 import BreadCrumbs from "@/components/bread-crumbs";
 import { DesktopHint } from "@/components/desktop-hint";
 
 export function WorkspaceContent({ children }: { children: React.ReactNode }) {
-	const pathname = usePathname();
+	const pathname = useLocation().pathname;
 	const isChat = ["/", "/chat", "/roadmap", "/onboarding"].includes(pathname);
 	// The landing page brings its own header and main.
 	if (pathname === "/welcome") return <div className="w-full">{children}</div>;
