@@ -1,8 +1,8 @@
 "use client"
 
-import { Link } from "react-router";
-import { useLocation } from "react-router";
-import { BookOpen, GanttChart, Network, Plus } from "lucide-react"
+import { useEffect, useState } from "react";
+import { Link, useLocation } from "react-router";
+import { BookOpen, ChevronRight, Plus } from "lucide-react"
 import {
 	Sidebar,
 	SidebarContent,
@@ -13,32 +13,132 @@ import {
 	SidebarMenuButton,
 	SidebarMenuItem,
 } from "@/components/ui/sidebar"
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible"
 import { NavUser } from "@/components/nav-user"
 import { LogoMark } from "@/components/logo"
+import { projectPath, useProjectChats, useProjects, type Project } from "@/components/projects/use-projects"
 
 type NavItem = { title: string; url: string; icon: React.ElementType }
 
-const NAV: NavItem[] = [
-	{ title: "Swarm", url: "/", icon: Network },
-	{ title: "Roadmap", url: "/roadmap", icon: GanttChart },
-]
-
 const FOOTER: NavItem[] = [
-	{ title: "Add a project", url: "/onboarding", icon: Plus },
 	{ title: "Get started", url: "/github", icon: BookOpen },
 ]
+
+/* Plain text throughout, no bold: the current page gets a soft pill, everything else stays quiet. */
+const ROW = "flex h-8 w-full items-center gap-2 rounded-md px-2 text-left text-sm font-normal text-sidebar-foreground/90 outline-none transition-colors hover:bg-sidebar-accent focus-visible:ring-2 focus-visible:ring-sidebar-ring"
+const ACTIVE = "bg-sidebar-accent text-sidebar-foreground"
 
 function NavLink({ item, active }: { item: NavItem; active: boolean }) {
 	return (
 		<SidebarMenuItem>
-			{active ? <span aria-hidden className="absolute -left-2 bottom-1.5 top-1.5 w-[3px] rounded-full bg-blue-600 dark:bg-blue-400" /> : null}
-			<SidebarMenuButton asChild isActive={active} tooltip={item.title}>
+			<SidebarMenuButton asChild isActive={active} tooltip={item.title} className="font-normal data-[active=true]:font-normal">
 				<Link to={item.url}>
 					<item.icon />
 					<span>{item.title}</span>
 				</Link>
 			</SidebarMenuButton>
 		</SidebarMenuItem>
+	)
+}
+
+/** Which project folders are open, remembered in this browser. */
+function useOpenFolders() {
+	const [open, setOpen] = useState<Record<string, boolean>>(() => {
+		try {
+			return JSON.parse(localStorage.getItem("fm-open-projects") ?? "{}")
+		} catch {
+			return {}
+		}
+	})
+	const set = (repo: string, value: boolean) =>
+		setOpen((prev) => {
+			const next = { ...prev, [repo]: value }
+			try {
+				localStorage.setItem("fm-open-projects", JSON.stringify(next))
+			} catch {
+				// Storage refused: the folder state lasts for this visit.
+			}
+			return next
+		})
+	return [open, set] as const
+}
+
+/** One project as a folder: its name, a chevron, and a + for a new chat; inside, its pages and chats. */
+function ProjectFolder({ project, open, onOpenChange, pathname }: { project: Project; open: boolean; onOpenChange: (open: boolean) => void; pathname: string }) {
+	const chats = useProjectChats(project.repo)
+	const base = projectPath(project.repo)
+	const name = project.repo.split("/")[1] ?? project.repo
+	const pages = [
+		{ title: "Swarm", url: base },
+		{ title: "Roadmap", url: projectPath(project.repo, "roadmap") },
+		{ title: "Setup", url: `/onboarding?repo=${encodeURIComponent(project.repo)}` },
+	]
+	const current = (url: string) => pathname + (url.includes("?") ? window.location.search : "") === url
+
+	return (
+		<Collapsible open={open} onOpenChange={onOpenChange} asChild>
+			<li className="list-none">
+				<div className="group/folder flex h-8 items-center rounded-md pr-1">
+					<CollapsibleTrigger className="flex min-w-0 flex-1 items-center gap-1 px-2 text-left text-sm font-normal text-muted-foreground outline-none hover:text-sidebar-foreground focus-visible:ring-2 focus-visible:ring-sidebar-ring" title={project.repo}>
+						<span className="truncate">{name}</span>
+						<ChevronRight className={`size-3.5 shrink-0 transition-transform duration-150 ${open ? "rotate-90" : ""}`} aria-hidden />
+					</CollapsibleTrigger>
+					<Link
+						to={projectPath(project.repo, "chat")}
+						aria-label={`New chat in ${project.repo}`}
+						title="New chat"
+						className="flex size-6 shrink-0 items-center justify-center rounded-md text-muted-foreground opacity-70 hover:bg-sidebar-accent hover:text-sidebar-foreground hover:opacity-100 focus-visible:opacity-100"
+					>
+						<Plus className="size-3.5" />
+					</Link>
+				</div>
+				<CollapsibleContent>
+					<ul className="flex flex-col gap-0.5 pb-2">
+						{pages.map((p) => (
+							<li key={p.title}>
+								<Link to={p.url} className={`${ROW} ${current(p.url) ? ACTIVE : ""}`}>{p.title}</Link>
+							</li>
+						))}
+						{chats.map((c) => {
+							const url = projectPath(project.repo, `chat/${c.id}`)
+							return (
+								<li key={c.id}>
+									<Link to={url} title={c.title} className={`${ROW} ${pathname === url ? ACTIVE : ""}`}>
+										<span className="truncate">{c.title}</span>
+									</Link>
+								</li>
+							)
+						})}
+					</ul>
+				</CollapsibleContent>
+			</li>
+		</Collapsible>
+	)
+}
+
+function Projects({ pathname }: { pathname: string }) {
+	const projects = useProjects()
+	const [open, setOpen] = useOpenFolders()
+	// The folder holding the page you are on opens by itself.
+	const here = projects?.find((p) => pathname.startsWith(projectPath(p.repo)))?.repo
+	useEffect(() => {
+		if (here && open[here] === undefined) setOpen(here, true)
+	}, [here, open, setOpen])
+
+	if (!projects) return null
+	return (
+		<ul className="mt-2 flex flex-col gap-0.5 group-data-[collapsible=icon]:hidden">
+			{projects.map((p, i) => (
+				<ProjectFolder
+					key={p.repo}
+					project={p}
+					// Unseen folders: the one you are in, or else the first, starts open.
+					open={open[p.repo] ?? (here ? here === p.repo : i === 0)}
+					onOpenChange={(value) => setOpen(p.repo, value)}
+					pathname={pathname}
+				/>
+			))}
+		</ul>
 	)
 }
 
@@ -64,8 +164,16 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
 			<SidebarContent>
 				<SidebarGroup>
 					<SidebarMenu>
-						{NAV.map((item) => <NavLink key={item.url} item={item} active={pathname === item.url} />)}
+						<SidebarMenuItem>
+							<SidebarMenuButton asChild isActive={pathname === "/onboarding" && window.location.search.includes("new=1")} tooltip="Add a project" className="font-normal data-[active=true]:font-normal">
+								<Link to="/onboarding?new=1">
+									<span className="flex size-5 shrink-0 items-center justify-center rounded-full bg-sidebar-accent text-sidebar-foreground"><Plus className="size-3.5" /></span>
+									<span>Add a project</span>
+								</Link>
+							</SidebarMenuButton>
+						</SidebarMenuItem>
 					</SidebarMenu>
+					<Projects pathname={pathname} />
 				</SidebarGroup>
 			</SidebarContent>
 			<SidebarFooter>

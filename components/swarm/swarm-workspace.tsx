@@ -82,7 +82,7 @@ export function SwarmWorkspace({ repo }: { repo: string }) {
 					<>
 						<SidebarTrigger className={`${pill} size-8 shrink-0 justify-center`} />
 						<span
-							className={`${pill} min-w-0 gap-2 px-3 text-xs text-muted-foreground`}
+							className={`${pill} min-w-0 gap-2 px-3 text-sm text-muted-foreground`}
 							title={run ? `${status}. The board shows ${repo} as it is right now.` : `${status}. Until a run starts, the cursors replay how one issue moves through the hand-off rules; moves and costs in the replay are illustrative.`}
 						>
 							<span className={`size-1.5 shrink-0 rounded-full ${run && run.status !== "completed" ? "animate-pulse bg-red-500" : "bg-muted-foreground/50"}`} />
@@ -108,7 +108,7 @@ export function SwarmWorkspace({ repo }: { repo: string }) {
 							<SheetTrigger asChild>
 								<button
 									type="button"
-									className="inline-flex h-8 items-center rounded-full bg-foreground px-3 text-xs font-medium text-background shadow-sm transition-opacity hover:opacity-90"
+									className="inline-flex h-8 items-center rounded-full bg-foreground px-3 text-sm font-medium text-background shadow-sm transition-opacity hover:opacity-90"
 								>
 									Ask the swarm
 								</button>

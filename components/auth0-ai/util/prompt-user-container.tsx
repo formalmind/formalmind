@@ -38,11 +38,11 @@ export function PromptUserContainer({
       <div className="w-full flex flex-col sm:flex-row justify-start items-center gap-4">
         {icon}
         <div className="flex flex-col gap-1 sm:gap-1.5 items-start w-full">
-          <h2 className="grow text-sm sm:text-base leading-6 font-semibold">
+          <h2 className="grow text-sm leading-6 font-semibold">
             {title}
           </h2>
           {description && (
-            <p className="grow text-xs sm:text-sm leading-5 font-light text-gray-500">
+            <p className="grow text-sm leading-5 font-light text-gray-500">
               {description}
             </p>
           )}

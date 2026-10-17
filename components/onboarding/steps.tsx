@@ -29,7 +29,7 @@ export const SETUP_STEPS: { key: StepKey; title: string; icon: React.ElementType
 export function StepList({ step, done, onSelect, horizontal = false }: { step: StepKey; done: Partial<Record<StepKey, boolean>>; onSelect: (key: StepKey) => void; horizontal?: boolean }) {
 	return (
 		<nav aria-label="Setup steps">
-			<ol className={`flex gap-1 overflow-x-auto ${horizontal ? "" : "lg:flex-col"}`}>
+			<ol className={`flex flex-wrap gap-1 ${horizontal ? "" : "lg:flex-col lg:flex-nowrap"}`}>
 				{SETUP_STEPS.map((s, i) => (
 					<li key={s.key}>
 						<button
@@ -38,7 +38,7 @@ export function StepList({ step, done, onSelect, horizontal = false }: { step: S
 							aria-current={step === s.key ? "step" : undefined}
 							className={`flex w-full items-center gap-2.5 whitespace-nowrap rounded-lg px-3 py-2 text-left text-sm transition-colors ${step === s.key ? "bg-muted font-medium" : "text-muted-foreground hover:bg-muted/60 hover:text-foreground"}`}
 						>
-							<span className={`flex size-5 shrink-0 items-center justify-center rounded-full border text-[11px] tabular-nums ${done[s.key] ? "border-emerald-500 bg-emerald-500 text-white" : ""}`}>
+							<span className={`flex size-5 shrink-0 items-center justify-center rounded-full border text-sm tabular-nums ${done[s.key] ? "border-emerald-500 bg-emerald-500 text-white" : ""}`}>
 								{done[s.key] ? <Check className="size-3" /> : i + 1}
 							</span>
 							{s.title}
@@ -53,7 +53,7 @@ export function StepList({ step, done, onSelect, horizontal = false }: { step: S
 export function Panel({ title, lead, children }: { title: string; lead: string; children: React.ReactNode }) {
 	return (
 		<div>
-			<h2 className="text-xl font-semibold tracking-tight">{title}</h2>
+			<h2 className="text-sm font-semibold tracking-tight">{title}</h2>
 			<p className="mt-1 max-w-2xl text-sm leading-6 text-muted-foreground">{lead}</p>
 			<div className="mt-5">{children}</div>
 		</div>
@@ -122,10 +122,10 @@ export function TeamPicker({
 					>
 						<span className="flex items-center justify-between text-sm font-medium">
 							{team.name}
-							<span className="text-xs font-normal text-muted-foreground">{team.agents}</span>
+							<span className="text-sm font-normal text-muted-foreground">{team.agents}</span>
 						</span>
 						<span className="mt-2 block text-sm leading-6 text-muted-foreground">{team.split}</span>
-						<span className="mt-2 flex flex-wrap gap-1.5 text-xs">
+						<span className="mt-2 flex flex-wrap gap-1.5 text-sm">
 							<span>{team.bestFor}</span>
 							{plannerPick === team.key ? <span className="rounded-full bg-violet-500/15 px-2 text-violet-700 dark:text-violet-300">planner&apos;s pick</span> : null}
 						</span>
@@ -148,7 +148,7 @@ export function BudgetCard({ dailyUsd, onChange }: { dailyUsd: number; onChange:
 	return (
 		<div className="rounded-xl border p-5">
 			<div className="flex items-baseline justify-between">
-				<span className="text-3xl font-semibold tabular-nums">${dailyUsd}</span>
+				<span className="text-sm font-semibold tabular-nums">${dailyUsd}</span>
 				<span className="text-sm text-muted-foreground">a day · at most ${dailyUsd * 30} a month</span>
 			</div>
 			<input type="range" min={2} max={50} step={1} value={dailyUsd} onChange={(e) => onChange(Number(e.target.value))} className="mt-4 w-full" aria-label="Daily budget in dollars" />
@@ -178,7 +178,7 @@ export function CreditsCard({
 	return (
 		<div className="rounded-xl border p-5">
 			<p className="text-sm text-muted-foreground">Balance</p>
-			<p className="mt-1 text-3xl font-semibold tabular-nums">{cents != null ? `$${(cents / 100).toFixed(2)}` : "…"}</p>
+			<p className="mt-1 text-sm font-semibold tabular-nums">{cents != null ? `$${(cents / 100).toFixed(2)}` : "…"}</p>
 			{cents != null && cents > 0 ? (
 				<p className="mt-1 text-sm text-muted-foreground">About {Math.floor(cents / 100 / dailyUsd)} days at ${dailyUsd} a day.</p>
 			) : null}

@@ -84,28 +84,28 @@ export function PlanBoard({ repo, plan, status }: { repo: string; plan: PartialP
 				<Column title="Contracts read" count={contracts.length}>
 					{contracts.map((c, i) => (
 						<li key={i} ref={ref(`contract-${i}`)} className="rounded-lg border bg-background p-3 shadow-sm animate-in fade-in-0 slide-in-from-bottom-1">
-							<p className="flex items-center gap-1.5 font-mono text-[11px] text-muted-foreground"><FileCode2 className="size-3.5 shrink-0" /><span className="truncate">{c?.path}</span></p>
-							{c?.role ? <p className="mt-1 text-[13px] leading-snug">{c.role}</p> : null}
+							<p className="flex items-center gap-1.5 font-mono text-sm text-muted-foreground"><FileCode2 className="size-3.5 shrink-0" /><span className="truncate">{c?.path}</span></p>
+							{c?.role ? <p className="mt-1 text-sm leading-snug">{c.role}</p> : null}
 						</li>
 					))}
 				</Column>
 				<Column title="Invariants" count={invariants.length}>
 					{invariants.map((inv, i) => (
 						<li key={i} ref={ref(`inv-${i}`)} className="rounded-lg border bg-background p-3 shadow-sm animate-in fade-in-0 slide-in-from-bottom-1">
-							<p className="text-[13px] leading-snug">{inv?.statement}</p>
-							{inv?.why ? <p className="mt-1 text-[11px] leading-snug text-muted-foreground">{inv.why}</p> : null}
+							<p className="text-sm leading-snug">{inv?.statement}</p>
+							{inv?.why ? <p className="mt-1 text-sm leading-snug text-muted-foreground">{inv.why}</p> : null}
 						</li>
 					))}
 				</Column>
 				<Column title="fm:todo" count={issues.length} mono>
 					{issues.map((issue, i) => (
 						<li key={i} ref={ref(`issue-${i}`)} className="rounded-lg border bg-background p-3 shadow-sm animate-in fade-in-0 slide-in-from-bottom-1">
-							<p className="flex items-center gap-1.5 text-[11px] text-muted-foreground">
+							<p className="flex items-center gap-1.5 text-sm text-muted-foreground">
 								<span className="font-mono">#{i + 1}</span>
-								{issue?.size ? <span className={`rounded px-1.5 py-px font-mono text-[10px] ${SIZE_STYLES[issue.size]}`}>{issue.size}</span> : null}
+								{issue?.size ? <span className={`rounded px-1.5 py-px font-mono text-sm ${SIZE_STYLES[issue.size]}`}>{issue.size}</span> : null}
 							</p>
-							<p className="mt-1 text-[13px] font-medium leading-snug">{issue?.title}</p>
-							{issue?.scope ? <p className="mt-1 text-[11px] leading-snug text-muted-foreground">{issue.scope}</p> : null}
+							<p className="mt-1 text-sm font-medium leading-snug">{issue?.title}</p>
+							{issue?.scope ? <p className="mt-1 text-sm leading-snug text-muted-foreground">{issue.scope}</p> : null}
 						</li>
 					))}
 				</Column>
@@ -120,7 +120,7 @@ export function PlanBoard({ repo, plan, status }: { repo: string; plan: PartialP
 function Column({ title, count, mono, children }: { title: string; count: number; mono?: boolean; children: React.ReactNode }) {
 	return (
 		<section className="min-w-0 rounded-xl border border-dashed bg-muted/40 p-2.5">
-			<h3 className={`flex items-center justify-between px-1 pb-2 text-xs font-medium text-muted-foreground ${mono ? "font-mono" : ""}`}>
+			<h3 className={`flex items-center justify-between px-1 pb-2 text-sm font-medium text-muted-foreground ${mono ? "font-mono" : ""}`}>
 				{title}
 				<span className="tabular-nums">{count}</span>
 			</h3>

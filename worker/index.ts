@@ -12,6 +12,7 @@ import * as onboardingInstall from "@/server/routes/onboarding/install/route";
 import * as onboardingPlan from "@/server/routes/onboarding/plan/route";
 import * as onboardingState from "@/server/routes/onboarding/state/route";
 import * as project from "@/server/routes/project/route";
+import * as projects from "@/server/routes/projects/route";
 import * as swarmChat from "@/server/routes/swarm/chat/route";
 import * as swarmState from "@/server/routes/swarm/state/route";
 import * as tooltip from "@/server/routes/tooltip/route";
@@ -31,6 +32,7 @@ const ROUTES: Record<string, { module: RouteModule; open?: boolean }> = {
 	"/api/onboarding/plan": { module: onboardingPlan, open: true },
 	"/api/onboarding/state": { module: onboardingState },
 	"/api/project": { module: project },
+	"/api/projects": { module: projects },
 	"/api/swarm/chat": { module: swarmChat },
 	"/api/swarm/state": { module: swarmState },
 	"/api/tooltip": { module: tooltip },

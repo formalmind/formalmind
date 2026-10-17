@@ -18,7 +18,7 @@ import { openAIModelNames, type OpenAIModel } from "@/lib/models";
  * Concentric corners, same rule as the Mike composer: chips are 32px tall
  * (radius 16) and sit 12px inside the shell, so the shell corner is 28px.
  */
-const CHIP = "h-8 rounded-full px-3 text-xs font-medium inline-flex items-center gap-1.5 whitespace-nowrap no-underline";
+const CHIP = "h-8 rounded-full px-3 text-sm font-medium inline-flex items-center gap-1.5 whitespace-nowrap no-underline";
 const MAX_LINES = 6;
 
 export const MODEL_LABELS: Record<OpenAIModel, string> = {

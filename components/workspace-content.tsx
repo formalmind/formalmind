@@ -8,7 +8,8 @@ import { DesktopHint } from "@/components/desktop-hint";
 
 export function WorkspaceContent({ children }: { children: React.ReactNode }) {
 	const pathname = useLocation().pathname;
-	const isChat = ["/", "/chat", "/roadmap", "/onboarding"].includes(pathname);
+	// App pages fill the window; anything else is a document page with a breadcrumb.
+	const isChat = ["/", "/chat", "/roadmap", "/onboarding"].includes(pathname) || pathname.startsWith("/projects/");
 	// The landing page brings its own header and main.
 	if (pathname === "/welcome") return <div className="w-full">{children}</div>;
 	return (

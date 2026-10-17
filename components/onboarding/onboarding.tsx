@@ -5,6 +5,8 @@ import { Loader2, Rocket } from "lucide-react";
 import { SidebarTrigger } from "@/components/ui/sidebar";
 import { PlanBoard } from "@/components/landing/plan-board";
 import { forgetLandingProgress, readDraft, usePlan } from "@/components/landing/use-plan";
+import { refreshProjects } from "@/components/projects/use-projects";
+import { useSearchParams } from "react-router";
 import type { OnboardingState } from "@/server/routes/onboarding/state/route";
 import { TEAM_PRESETS } from "@/lib/teams";
 import {
@@ -41,7 +43,10 @@ export function Onboarding() {
 			const next = { ...prev, ...patch };
 			if (saveTimer.current) clearTimeout(saveTimer.current);
 			saveTimer.current = setTimeout(() => {
-				void fetch("/api/onboarding/state", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(next) });
+				// A saved plan makes its repository a project, so the sidebar's folders are read again.
+				void fetch("/api/onboarding/state", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(next) }).then(() => {
+					if (next.repo && next.plan) refreshProjects();
+				});
 			}, 500);
 			return next;
 		});
@@ -117,16 +122,20 @@ export function Onboarding() {
 	const index = STEPS.findIndex((s) => s.key === step);
 	const go = (offset: number) => setStep(STEPS[Math.min(STEPS.length - 1, Math.max(0, index + offset))].key);
 	const plan = planner.plan ?? state.plan ?? undefined;
+	// "+ Add a project" opens an empty box; a project's Setup link names its repository.
+	const [params] = useSearchParams();
+	const asked = params.get("repo");
+	const boxRepo = params.get("new") === "1" && !planner.repo ? "" : asked ?? state.repo ?? "";
 
 	return (
 		<div className="flex min-h-0 flex-1 flex-col overflow-y-auto p-4 sm:p-6">
 			<div className="flex items-center gap-3">
 				<SidebarTrigger className="-ml-1" />
-				<h1 className="text-base font-semibold">Set up your swarm</h1>
-				{state.repo ? <span className="font-mono text-sm text-muted-foreground">{state.repo}</span> : null}
+				<h1 className="text-sm font-semibold">Set up your swarm</h1>
+				{boxRepo ? <span className="font-mono text-sm text-muted-foreground">{boxRepo}</span> : null}
 			</div>
 
-			<div className="mt-6 grid gap-6 lg:grid-cols-[220px_minmax(0,1fr)]">
+			<div className="mt-6 grid grid-cols-[minmax(0,1fr)] gap-6 lg:grid-cols-[220px_minmax(0,1fr)]">
 				<StepList step={step} done={done} onSelect={setStep} />
 
 				<section className="min-w-0 max-w-4xl">
@@ -134,14 +143,14 @@ export function Onboarding() {
 						<div className="flex items-center gap-2 text-sm text-muted-foreground"><Loader2 className="size-4 animate-spin" /> Loading your setup…</div>
 					) : step === "plan" ? (
 						<Panel {...STEP_COPY.plan}>
-							<RepoForm initial={state.repo ?? ""} busy={planner.isLoading} onPlan={planner.start} onContinue={state.plan ? () => go(1) : undefined} />
+							<RepoForm initial={boxRepo} busy={planner.isLoading} onPlan={planner.start} onContinue={state.plan && boxRepo === state.repo ? () => go(1) : undefined} />
 							{planner.error ? <p role="alert" className="mt-2 text-sm text-red-600 dark:text-red-400">{planner.error}</p> : null}
-							{planner.repo || state.repo ? (
+							{planner.repo || (state.repo && boxRepo === state.repo) ? (
 								<div className="mt-5">
 									<PlanBoard repo={planner.repo ?? state.repo ?? ""} plan={plan} status={planner.isLoading ? "planning" : "done"} />
 								</div>
 							) : null}
-							{state.repo && state.plan && !planner.isLoading ? (
+							{state.repo && state.plan && boxRepo === state.repo && !planner.isLoading ? (
 								<button type="button" onClick={() => planner.start(state.repo ?? "")} className="mt-4 text-sm text-muted-foreground underline-offset-4 hover:text-foreground hover:underline">
 									Plan this repository again
 								</button>

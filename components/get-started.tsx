@@ -41,8 +41,8 @@ function Code({ children }: { children: React.ReactNode }) {
 function Section({ eyebrow, title, children }: { eyebrow: string; title: string; children: React.ReactNode }) {
 	return (
 		<section className="border-t py-10 first:border-t-0 first:pt-0">
-			<p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">{eyebrow}</p>
-			<h2 className="mt-1 text-xl font-semibold tracking-tight text-foreground">{title}</h2>
+			<p className="text-sm font-medium uppercase tracking-wide text-muted-foreground">{eyebrow}</p>
+			<h2 className="mt-1 text-sm font-semibold tracking-tight text-foreground">{title}</h2>
 			<div className="mt-5">{children}</div>
 		</section>
 	);
@@ -56,7 +56,7 @@ function Step({ n, icon: Icon, title, children }: { n: number; icon: React.Eleme
 				<span className="mt-2 w-px flex-1 bg-border" aria-hidden />
 			</div>
 			<div className="min-w-0 pb-8">
-				<h3 className="flex items-center gap-2 text-base font-medium text-foreground">
+				<h3 className="flex items-center gap-2 text-sm font-medium text-foreground">
 					<Icon className="size-4 text-muted-foreground" />
 					{title}
 				</h3>
@@ -71,10 +71,10 @@ export function GetStarted() {
 		<div className="not-prose mx-auto w-full max-w-3xl pb-16 pt-4 text-foreground">
 			<header className="pb-10">
 				<p className="text-sm text-muted-foreground">Get started</p>
-				<h1 className="mt-2 text-balance text-3xl font-semibold tracking-tight sm:text-4xl">
+				<h1 className="mt-2 text-balance text-sm font-semibold tracking-tight">
 					A swarm of agents that keeps your Lean spec in step with your Solidity
 				</h1>
-				<p className="mt-4 max-w-2xl text-pretty text-base leading-7 text-muted-foreground">
+				<p className="mt-4 max-w-2xl text-pretty text-sm leading-7 text-muted-foreground">
 					Formal Mind works where your code already lives. Issues are the task queue, <Code>fm:</Code> labels are the state,
 					pull requests are the work, and every agent posts as <Code>formalmind[bot]</Code>. You watch, steer and decide; the
 					swarm does the proving within a budget you set.
@@ -107,7 +107,7 @@ export function GetStarted() {
 
 				<div className="mt-6 rounded-xl border bg-muted/40 p-4">
 					<p className="text-sm font-medium">One issue&apos;s trip</p>
-					<ol className="mt-3 flex flex-wrap items-center gap-2 text-xs">
+					<ol className="mt-3 flex flex-wrap items-center gap-2 text-sm">
 						{FLOW.map((label, i) => (
 							<li key={label} className="flex items-center gap-2">
 								<span className="rounded-md border bg-background px-2 py-1 font-mono">{label}</span>
@@ -133,9 +133,9 @@ export function GetStarted() {
 					{CYCLE_PHASES.map(({ phase, who, what }, i) => (
 						<li key={phase} className="rounded-xl border bg-card p-4">
 							<div className="flex items-baseline gap-2">
-								<span className="text-xs tabular-nums text-muted-foreground">{i + 1}</span>
+								<span className="text-sm tabular-nums text-muted-foreground">{i + 1}</span>
 								<span className="font-mono text-sm font-medium">{phase}</span>
-								<span className="truncate text-xs text-muted-foreground">· {who}</span>
+								<span className="truncate text-sm text-muted-foreground">· {who}</span>
 							</div>
 							<p className="mt-2 text-sm leading-6 text-muted-foreground">{what}</p>
 						</li>
@@ -184,7 +184,7 @@ export function GetStarted() {
 					</Step>
 					<Step n={5} icon={Terminal} title="Drive it by hand">
 						<p>The dispatcher decides on its own, but you can start any role now:</p>
-						<pre className="overflow-x-auto rounded-lg border bg-muted/50 p-3 font-mono text-xs leading-5 text-foreground">{`gh workflow run formalmind-swarm.yml -f role=plan
+						<pre className="overflow-x-auto rounded-lg border bg-muted/50 p-3 font-mono text-sm leading-5 text-foreground">{`gh workflow run formalmind-swarm.yml -f role=plan
 gh workflow run formalmind-swarm.yml -f role=prove -f number=12
 gh workflow run formalmind-swarm.yml -f role=review -f number=40
 gh workflow run formalmind-swarm.yml -f role=editor`}</pre>
@@ -235,7 +235,7 @@ gh workflow run formalmind-swarm.yml -f role=editor`}</pre>
 						</>,
 					].map((body, i) => (
 						<li key={i} className="flex gap-3">
-							<span className="mt-0.5 flex size-6 shrink-0 items-center justify-center rounded-full bg-muted text-xs font-medium tabular-nums text-foreground">{i + 1}</span>
+							<span className="mt-0.5 flex size-6 shrink-0 items-center justify-center rounded-full bg-muted text-sm font-medium tabular-nums text-foreground">{i + 1}</span>
 							<p>{body}</p>
 						</li>
 					))}

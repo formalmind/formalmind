@@ -17,7 +17,7 @@ export function HoverExplain({ term }: { term: string }) {
 			<TooltipTrigger className="underline decoration-dotted cursor-help text-blue-600">
 				{term}
 			</TooltipTrigger>
-			<TooltipContent className="max-w-sm text-xs bg-muted text-foreground">
+			<TooltipContent className="max-w-sm text-sm bg-muted text-foreground">
 				{text}
 			</TooltipContent>
 		</Tooltip>

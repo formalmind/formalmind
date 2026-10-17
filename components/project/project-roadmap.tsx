@@ -111,7 +111,7 @@ export function ProjectRoadmap({ repo, items, milestones, now = Date.now() }: {
 
 	return (
 		<div className="flex h-full min-h-0 flex-col">
-			<div className="flex flex-wrap items-center gap-2 pb-3 text-xs">
+			<div className="flex flex-wrap items-center gap-2 pb-3 text-sm">
 				<Segmented label="Group by" value={groupBy} onChange={setGroupBy} options={[["milestone", "Roadmap item"], ["status", "Status"], ["none", "None"]]} />
 				<Segmented label="Zoom" value={zoom} onChange={setZoom} options={[["day", "Day"], ["week", "Week"], ["month", "Month"]]} />
 				<button type="button" onClick={scrollToToday} className="h-7 rounded-md border px-2.5 font-medium transition-colors hover:bg-muted">Today</button>
@@ -121,15 +121,15 @@ export function ProjectRoadmap({ repo, items, milestones, now = Date.now() }: {
 			<div ref={scrollRef} className="relative min-h-0 flex-1 overflow-auto rounded-lg border">
 				<div style={{ width: LEFT + width }} className="relative">
 					<div className="sticky top-0 z-20 flex border-b bg-background">
-						<div style={{ width: LEFT }} className="sticky left-0 z-10 flex shrink-0 items-end border-r bg-background px-3 pb-1.5 text-xs font-medium text-muted-foreground">Title</div>
-						<div style={{ width }} className="relative h-12 shrink-0 text-[11px] text-muted-foreground">
+						<div style={{ width: LEFT }} className="sticky left-0 z-10 flex shrink-0 items-end border-r bg-background px-3 pb-1.5 text-sm font-medium text-muted-foreground">Title</div>
+						<div style={{ width }} className="relative h-12 shrink-0 text-sm text-muted-foreground">
 							{ticks.major.map((t) => (
 								<span key={`M${t.at}`} style={{ left: x(t.at) }} className="absolute top-1 whitespace-nowrap border-l pl-1.5 font-medium text-foreground">{t.label}</span>
 							))}
 							{ticks.minor.map((t) => (
 								<span key={`m${t.at}`} style={{ left: x(t.at) }} className="absolute bottom-1 whitespace-nowrap pl-1 tabular-nums">{t.label}</span>
 							))}
-							<span style={{ left: x(now) }} className="absolute top-1 -translate-x-1/2 rounded bg-red-500 px-1.5 text-[10px] font-medium text-white">Today</span>
+							<span style={{ left: x(now) }} className="absolute top-1 -translate-x-1/2 rounded bg-red-500 px-1.5 text-sm font-medium text-white">Today</span>
 						</div>
 					</div>
 
@@ -151,7 +151,7 @@ export function ProjectRoadmap({ repo, items, milestones, now = Date.now() }: {
 											onClick={() => toggle(group.key)}
 											aria-expanded={open}
 											style={{ width: LEFT }}
-											className="sticky left-0 z-10 flex shrink-0 items-center gap-2 border-r bg-muted px-2 text-left text-xs font-semibold"
+											className="sticky left-0 z-10 flex shrink-0 items-center gap-2 border-r bg-muted px-2 text-left text-sm font-semibold"
 										>
 											{open ? <ChevronDown className="size-3.5 shrink-0" /> : <ChevronRight className="size-3.5 shrink-0" />}
 											{group.title}
@@ -199,7 +199,7 @@ function RoadmapRow({ item, from, to, width, ongoing, bind }: {
 			>
 				<ItemStateIcon item={item} size={14} />
 				<span className="truncate">{item.title}</span>
-				<span className="ml-auto shrink-0 text-xs tabular-nums text-muted-foreground">#{item.number}</span>
+				<span className="ml-auto shrink-0 text-sm tabular-nums text-muted-foreground">#{item.number}</span>
 			</a>
 			<div className="relative shrink-0" style={{ width }}>
 				<a
@@ -209,13 +209,13 @@ function RoadmapRow({ item, from, to, width, ongoing, bind }: {
 					tabIndex={-1}
 					aria-label={`${item.title} #${item.number}`}
 					style={{ left: from, width: barWidth }}
-					className={`absolute top-1.5 flex h-6 items-center overflow-hidden rounded-md border px-2 text-xs ${style.bar} ${ongoing ? "rounded-r-none border-r-2 border-dashed" : ""}`}
+					className={`absolute top-1.5 flex h-6 items-center overflow-hidden rounded-md border px-2 text-sm ${style.bar} ${ongoing ? "rounded-r-none border-r-2 border-dashed" : ""}`}
 					{...bind}
 				>
 					{inside ? <span className="truncate">{item.title}</span> : null}
 				</a>
 				{!inside ? (
-					<span style={{ left: from + barWidth + 6 }} className="pointer-events-none absolute top-1/2 max-w-[360px] -translate-y-1/2 truncate whitespace-nowrap text-xs text-muted-foreground">
+					<span style={{ left: from + barWidth + 6 }} className="pointer-events-none absolute top-1/2 max-w-[360px] -translate-y-1/2 truncate whitespace-nowrap text-sm text-muted-foreground">
 						{item.title}
 					</span>
 				) : null}

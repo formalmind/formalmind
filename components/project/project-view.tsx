@@ -48,14 +48,14 @@ export function ProjectView({ repo, now }: { repo: string; now?: number }) {
 		<div className="flex min-h-0 flex-1 flex-col p-4 sm:p-6">
 			<div className="flex flex-wrap items-center gap-x-3 gap-y-1">
 				<SidebarTrigger className="-ml-1" />
-				<h1 className="text-base font-semibold">{repo}</h1>
+				<h1 className="text-sm font-semibold">{repo}</h1>
 				<span className="text-sm text-muted-foreground">
 					{data ? `${data.items.length} items · ${open} open · roadmap ${done}/${data.milestones.length} done` : error ?? "Loading the project…"}
 				</span>
 				<button
 					type="button"
 					onClick={() => void load()}
-					className="ml-auto inline-flex h-8 items-center gap-1.5 rounded-full border px-3 text-xs text-muted-foreground transition-colors hover:text-foreground"
+					className="ml-auto inline-flex h-8 items-center gap-1.5 rounded-full border px-3 text-sm text-muted-foreground transition-colors hover:text-foreground"
 				>
 					<RefreshCw className={`h-3.5 w-3.5 ${loading ? "animate-spin" : ""}`} />
 					Refresh

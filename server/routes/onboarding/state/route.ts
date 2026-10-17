@@ -1,5 +1,6 @@
 import { auth0 } from "@/lib/auth0";
 import { getJSON, putJSON } from "@/lib/kv";
+import { addProject } from "@/lib/projects";
 import type { RepoPlan } from "@/lib/plan";
 import type { TeamPreset } from "@/lib/teams";
 
@@ -35,5 +36,7 @@ export async function PUT(request: Request) {
 		updatedAt: new Date().toISOString(),
 	};
 	await putJSON(key(session.user.sub), next);
+	// A planned repository becomes one of the account's projects (a folder in the sidebar).
+	if (next.repo && next.plan) await addProject(session.user.sub, next.repo);
 	return Response.json(next);
 }

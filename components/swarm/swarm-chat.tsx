@@ -16,15 +16,37 @@ const SUGGESTIONS = [
 	"What did the chief say last?",
 ];
 
-export function SwarmChat({ repo }: { repo: string }) {
+/**
+ * A chat with one project's swarm. `chatId` and `initialMessages` load a saved conversation, and
+ * `onMessagesChange` hears each settled turn so the caller can keep it.
+ */
+export function SwarmChat({
+	repo,
+	chatId = "swarm-chat",
+	initialMessages,
+	onMessagesChange,
+}: {
+	repo: string;
+	chatId?: string;
+	initialMessages?: UIMessage[];
+	onMessagesChange?: (messages: UIMessage[]) => void;
+}) {
 	const [model, setModel] = useState<OpenAIModel>("gpt-6-luna");
 	const { messages, input, setInput, handleInputChange, handleSubmit, append, stop, isLoading, error } = useChat({
 		// A fixed id keeps the conversation when the sheet closes and opens again.
-		id: "swarm-chat",
+		id: chatId,
 		api: "/api/swarm/chat",
 		body: { model },
+		initialMessages,
 	});
 	const scrollRef = useRef<HTMLDivElement>(null);
+	const onChange = useRef(onMessagesChange);
+	onChange.current = onMessagesChange;
+
+	// Save once a turn has settled, not on every streamed token.
+	useEffect(() => {
+		if (!isLoading && messages.length > 0) onChange.current?.(messages);
+	}, [isLoading, messages]);
 
 	useEffect(() => {
 		scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight });
@@ -45,7 +67,7 @@ export function SwarmChat({ repo }: { repo: string }) {
 									key={s}
 									type="button"
 									onClick={() => append({ role: "user", content: s })}
-									className="rounded-full border bg-background px-3 py-1.5 text-left text-xs text-foreground transition-colors hover:bg-secondary"
+									className="rounded-full border bg-background px-3 py-1.5 text-left text-sm text-foreground transition-colors hover:bg-secondary"
 								>
 									{s}
 								</button>
@@ -84,7 +106,7 @@ export function SwarmChat({ repo }: { repo: string }) {
 					onModelChange={setModel}
 					placeholder="Ask about the agents…"
 					context={
-						<span className="inline-flex h-8 items-center gap-1.5 rounded-full bg-secondary px-3 text-xs font-medium text-secondary-foreground">
+						<span className="inline-flex h-8 items-center gap-1.5 rounded-full bg-secondary px-3 text-sm font-medium text-secondary-foreground">
 							<Bot className="h-3.5 w-3.5" />
 							{repo} swarm
 						</span>
@@ -111,7 +133,7 @@ export function ToolCalls({ message }: { message: UIMessage }) {
 	return (
 		<div className="mb-2 flex flex-wrap gap-1.5">
 			{calls.map((call) => (
-				<span key={call.toolCallId} className="inline-flex items-center gap-1 rounded-full border bg-muted/50 px-2 py-0.5 text-[11px] text-muted-foreground">
+				<span key={call.toolCallId} className="inline-flex items-center gap-1 rounded-full border bg-muted/50 px-2 py-0.5 text-sm text-muted-foreground">
 					<Wrench className={`size-3 ${call.state === "result" ? "" : "animate-pulse"}`} />
 					{(TOOL_LABELS[call.toolName] ?? (() => call.toolName))(call.args as Record<string, unknown>)}
 				</span>
