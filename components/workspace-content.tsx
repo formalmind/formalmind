@@ -4,6 +4,7 @@ import { usePathname } from "next/navigation";
 import { SidebarInset, SidebarTrigger } from "@/components/ui/sidebar";
 import { Separator } from "@radix-ui/react-separator";
 import BreadCrumbs from "@/components/bread-crumbs";
+import { DesktopHint } from "@/components/desktop-hint";
 
 export function WorkspaceContent({ children }: { children: React.ReactNode }) {
 	const pathname = usePathname();
@@ -28,6 +29,7 @@ export function WorkspaceContent({ children }: { children: React.ReactNode }) {
 					</div>
 				)}
 			</SidebarInset>
+			<DesktopHint />
 		</div>
 	);
 }

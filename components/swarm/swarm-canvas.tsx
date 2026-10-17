@@ -4,6 +4,7 @@ import { type ReactNode, useEffect, useMemo, useRef, useState } from "react";
 import { Hand, Maximize, Minus, Pause, Play, Plus, X } from "lucide-react";
 import * as DialogPrimitive from "@radix-ui/react-dialog";
 import { TextSwap } from "@/components/motion/text-swap";
+import { useIsMobile } from "@/hooks/use-mobile";
 import type { SwarmItem, SwarmRole, SwarmRun, SwarmState } from "@/lib/swarm";
 import { ROLE_COLORS } from "@/lib/swarm-roles";
 
@@ -407,7 +408,23 @@ export function SwarmCanvas({ state, highlight, fill = false, title, actions }: 
 	zoomAtRef.current = zoomAt;
 	const [step, setStep] = useState(0);
 	const [playing, setPlaying] = useState(true);
-	const [modal, setModal] = useState<{ card: Card } | { panel: "ledger" | "notebook" | "chief" } | null>(null);
+	// What a click on a card or panel opened: a bottom island on phones, a popover anchored to it elsewhere.
+	const [modal, setModal] = useState<({ card: Card } | { panel: "ledger" | "notebook" | "chief" }) & { anchor?: Anchor } | null>(null);
+	const isMobile = useIsMobile();
+	const popoverRef = useRef<HTMLDivElement>(null);
+	const anchorFor = (el: HTMLElement): Anchor | undefined => {
+		const wrap = wrapRef.current;
+		if (!wrap) return undefined;
+		const box = el.getBoundingClientRect();
+		const frame = wrap.getBoundingClientRect();
+		const below = frame.bottom - box.bottom > 300;
+		return {
+			left: Math.min(Math.max(box.left - frame.left, 12), Math.max(frame.width - POPOVER_W - 12, 12)),
+			top: below ? box.bottom - frame.top + 8 : box.top - frame.top - 8,
+			below,
+		};
+	};
+	const open = (what: { card: Card } | { panel: "ledger" | "notebook" | "chief" }, el: HTMLElement) => setModal({ ...what, anchor: anchorFor(el) });
 	const [hover, setHover] = useState<{ item: SwarmItem; left: number; top: number; below: boolean } | null>(null);
 	const hoverTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 	const wrapRef = useRef<HTMLDivElement>(null);
@@ -447,6 +464,29 @@ export function SwarmCanvas({ state, highlight, fill = false, title, actions }: 
 		observer.observe(el);
 		return () => observer.disconnect();
 	}, [fill]);
+
+	// The desktop popover closes on a press outside it (another card or panel re-anchors it instead) or on Escape.
+	const popoverOpen = !isMobile && modal !== null;
+	useEffect(() => {
+		if (!popoverOpen) return;
+		const down = (e: PointerEvent) => {
+			const t = e.target as HTMLElement | null;
+			if (popoverRef.current?.contains(t) || t?.closest("[data-component]")) return;
+			setModal(null);
+		};
+		const key = (e: KeyboardEvent) => e.key === "Escape" && setModal(null);
+		document.addEventListener("pointerdown", down, true);
+		document.addEventListener("keydown", key);
+		return () => {
+			document.removeEventListener("pointerdown", down, true);
+			document.removeEventListener("keydown", key);
+		};
+	}, [popoverOpen]);
+	// It is anchored where the card was, so moving the board closes it.
+	useEffect(() => {
+		if (!isMobile) setModal(null);
+		// eslint-disable-next-line react-hooks/exhaustive-deps
+	}, [view.k, view.x, view.y]);
 
 	// Trackpad pinch and ctrl/cmd + wheel zoom at the pointer; a plain wheel or two-finger swipe pans.
 	useEffect(() => {
@@ -593,6 +633,17 @@ export function SwarmCanvas({ state, highlight, fill = false, title, actions }: 
 		return slot ? { x: p.x + 14, y: p.y + 60 + (slot - 1) * 56, side: "left" as const } : { x: p.x + CARD_W - 28, y: p.y + 46, side: undefined };
 	};
 
+	const details = (inDialog: boolean) =>
+		modal && "card" in modal ? (
+			<CardDetails card={modal.card} item={itemFor(modal.card)} repo={state?.repo ?? ""} inDialog={inDialog} />
+		) : modal ? (
+			<>
+				{modal.panel === "ledger" ? <LedgerPanel spend={shown.spend} costs={shown.costs} bare /> : null}
+				{modal.panel === "notebook" ? <NotebookPanel notes={shown.notes} bare /> : null}
+				{modal.panel === "chief" ? <ChiefPanel headline={shown.chief} bare /> : null}
+			</>
+		) : null;
+
 	return (
 		<div ref={wrapRef} className={`relative w-full ${fill ? "h-full" : ""}`}>
 			<div
@@ -653,15 +704,15 @@ export function SwarmCanvas({ state, highlight, fill = false, title, actions }: 
 								href={item?.url}
 								onEnter={(el) => showHover(c, el)}
 								onLeave={hideHover}
-								onOpen={fill ? () => setModal({ card: c }) : undefined}
+								onOpen={fill ? (el) => open({ card: c }, el) : undefined}
 								onMeasure={(h) => measure(c.id, h)}
 							/>
 						);
 					})}
 
-					<LedgerPanel spend={shown.spend} costs={shown.costs} onOpen={fill ? () => setModal({ panel: "ledger" }) : undefined} />
-					<NotebookPanel notes={shown.notes} onOpen={fill ? () => setModal({ panel: "notebook" }) : undefined} />
-					<ChiefPanel headline={shown.chief} onOpen={fill ? () => setModal({ panel: "chief" }) : undefined} />
+					<LedgerPanel spend={shown.spend} costs={shown.costs} onOpen={fill ? (el) => open({ panel: "ledger" }, el) : undefined} />
+					<NotebookPanel notes={shown.notes} onOpen={fill ? (el) => open({ panel: "notebook" }, el) : undefined} />
+					<ChiefPanel headline={shown.chief} onOpen={fill ? (el) => open({ panel: "chief" }, el) : undefined} />
 
 					{ROLES.map((role) => (
 						<SwarmCursor
@@ -675,21 +726,44 @@ export function SwarmCanvas({ state, highlight, fill = false, title, actions }: 
 					))}
 				</div>
 			</div>
-			<BottomIsland
-				open={modal !== null}
-				onClose={() => setModal(null)}
-				kicker={modal && "panel" in modal ? PANEL_NAMES[modal.panel] : undefined}
-			>
-				{modal && "card" in modal ? (
-					<CardDetails card={modal.card} item={itemFor(modal.card)} repo={state?.repo ?? ""} />
-				) : modal ? (
-					<>
-						{modal.panel === "ledger" ? <LedgerPanel spend={shown.spend} costs={shown.costs} bare /> : null}
-						{modal.panel === "notebook" ? <NotebookPanel notes={shown.notes} bare /> : null}
-						{modal.panel === "chief" ? <ChiefPanel headline={shown.chief} bare /> : null}
-					</>
-				) : null}
-			</BottomIsland>
+			{isMobile ? (
+				<BottomIsland
+					open={modal !== null}
+					onClose={() => setModal(null)}
+					kicker={modal && "panel" in modal ? PANEL_NAMES[modal.panel] : undefined}
+				>
+					{details(true)}
+				</BottomIsland>
+			) : modal?.anchor ? (
+				<div
+					ref={popoverRef}
+					role="dialog"
+					aria-label={"panel" in modal ? PANEL_NAMES[modal.panel] : modal.card.title}
+					data-canvas-ui
+					// The phone island's look, anchored: same corners, padding, close button and shadow.
+					className="absolute z-40 flex max-h-[min(60vh,480px)] flex-col rounded-[2rem] border border-black/5 bg-background p-5 shadow-[0_16px_48px_-12px_rgba(0,0,0,0.28)] animate-in fade-in-0 zoom-in-[0.97] duration-200 dark:border-white/10"
+					style={{
+						width: POPOVER_W,
+						left: modal.anchor.left,
+						top: modal.anchor.top,
+						transform: modal.anchor.below ? undefined : "translateY(-100%)",
+						transformOrigin: modal.anchor.below ? "top left" : "bottom left",
+					}}
+				>
+					<div className="flex items-center gap-3">
+						<button
+							type="button"
+							onClick={() => setModal(null)}
+							className="flex size-10 shrink-0 items-center justify-center rounded-full border bg-background shadow-sm transition-colors hover:bg-muted"
+							aria-label="Close"
+						>
+							<X className="size-[18px]" />
+						</button>
+						{"panel" in modal ? <p className="font-mono text-sm text-muted-foreground">{PANEL_NAMES[modal.panel]}</p> : null}
+					</div>
+					<div className="no-scrollbar mt-4 min-h-0 overflow-y-auto">{details(false)}</div>
+				</div>
+			) : null}
 			{hover ? (
 				<ItemHoverCard {...hover} repo={state?.repo ?? ""} onEnter={keepHover} onLeave={hideHover} />
 			) : null}
@@ -796,15 +870,20 @@ function BottomIsland({ open, onClose, kicker, children }: { open: boolean; onCl
 	);
 }
 
+type Anchor = { left: number; top: number; below: boolean };
+const POPOVER_W = 400;
+
 const PANEL_NAMES = { ledger: "#38 ledger", notebook: "#55 notebook", chief: "#53 chief updates" } as const;
 
 /** Modal body for a clicked card: the real issue or PR when there is one, else what the replay card stands for. */
-function CardDetails({ card, item, repo }: { card: Card; item?: SwarmItem; repo: string }) {
+function CardDetails({ card, item, repo, inDialog }: { card: Card; item?: SwarmItem; repo: string; inDialog: boolean }) {
+	// Inside the phone island the title must be the dialog's; in the desktop popover it is a plain heading.
+	const Title = inDialog ? DialogPrimitive.Title : "h3";
 	if (!item) {
 		return (
 			<div>
 				<span className={`rounded px-1.5 py-px font-mono text-[10px] ${LABEL_STYLES[card.label] ?? LABEL_STYLES.README}`}>{card.label}</span>
-				<DialogPrimitive.Title className="mt-2 text-lg font-semibold leading-snug">{card.title}</DialogPrimitive.Title>
+				<Title className="mt-2 text-lg font-semibold leading-snug">{card.title}</Title>
 				<p className="mt-1 text-sm text-muted-foreground">
 					{card.kind === "doc" ? "The roadmap in the proofs repo's README." : "A card in the replay; it stands in for an issue and links nowhere."}
 				</p>
@@ -813,7 +892,7 @@ function CardDetails({ card, item, repo }: { card: Card; item?: SwarmItem; repo:
 	}
 	return (
 		<>
-			<DialogPrimitive.Title className="sr-only">{item.title}</DialogPrimitive.Title>
+			{inDialog ? <DialogPrimitive.Title className="sr-only">{item.title}</DialogPrimitive.Title> : null}
 			<ItemPreview item={item} repo={repo} full />
 			<a href={item.url} target="_blank" rel="noreferrer" className="mt-5 flex h-12 w-full items-center justify-center rounded-full bg-foreground text-sm font-semibold text-background transition-opacity hover:opacity-90">
 				Open on GitHub
@@ -862,7 +941,7 @@ function BoardCard({ card, x, y, hidden, href, onEnter, onLeave, onOpen, onMeasu
 	href?: string;
 	onEnter: (el: HTMLElement) => void;
 	onLeave: () => void;
-	onOpen?: () => void;
+	onOpen?: (el: HTMLElement) => void;
 	onMeasure: (height: number) => void;
 }) {
 	const Tag = onOpen ? "button" : href ? "a" : "div";
@@ -883,7 +962,7 @@ function BoardCard({ card, x, y, hidden, href, onEnter, onLeave, onOpen, onMeasu
 			aria-hidden={hidden || undefined}
 			tabIndex={hidden ? -1 : undefined}
 			{...(onOpen
-				? { type: "button" as const, onClick: onOpen }
+				? { type: "button" as const, onClick: (e: React.MouseEvent<HTMLElement>) => onOpen(e.currentTarget) }
 				: {
 						...(href ? { href, target: "_blank", rel: "noreferrer" } : {}),
 						onMouseEnter: (e: React.MouseEvent<HTMLElement>) => onEnter(e.currentTarget),
@@ -1048,7 +1127,7 @@ function DispatcherChip({ job }: { job: string | null }) {
 }
 
 /** `onOpen` makes the panel open in a modal on click; `bare` renders only the contents, for that modal. */
-type PanelMode = { onOpen?: () => void; bare?: boolean };
+type PanelMode = { onOpen?: (el: HTMLElement) => void; bare?: boolean };
 
 function Panel({ index, title, onOpen, bare, children }: PanelMode & { index: number; title: string; children: React.ReactNode }) {
 	if (bare) return <div className="flex flex-col">{children}</div>;
@@ -1058,8 +1137,8 @@ function Panel({ index, title, onOpen, bare, children }: PanelMode & { index: nu
 			role={onOpen ? "button" : undefined}
 			tabIndex={onOpen ? 0 : undefined}
 			aria-label={onOpen ? `Open ${title}` : undefined}
-			onClick={onOpen}
-			onKeyDown={onOpen ? (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onOpen(); } } : undefined}
+			onClick={onOpen ? (e) => onOpen(e.currentTarget) : undefined}
+			onKeyDown={onOpen ? (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onOpen(e.currentTarget); } } : undefined}
 			className={`absolute flex flex-col rounded-lg border bg-background p-3 ${onOpen ? "cursor-pointer transition-colors hover:border-foreground/30" : "cursor-default"}`}
 			style={{ left: panelX(index), top: PANEL_TOP, width: PANEL_W, height: 136 }}
 		>
