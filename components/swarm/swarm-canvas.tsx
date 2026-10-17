@@ -40,7 +40,7 @@ const LANES: { key: Lane; title: string }[] = [
 	{ key: "progress", title: "fm:in-progress" },
 	{ key: "review", title: "fm:review" },
 	{ key: "approved", title: "fm:approved" },
-	{ key: "dev", title: "Merged to dev" },
+	{ key: "dev", title: "Done" },
 ];
 
 export const LABEL_STYLES: Record<string, string> = {
