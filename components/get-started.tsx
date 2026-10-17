@@ -1,24 +1,33 @@
+import { useState } from "react";
 import { Link } from "react-router";
+import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
+import { HoverCard, HoverCardContent, HoverCardTrigger } from "@/components/ui/hover-card";
 import { ArrowRight, Bot, CircleDollarSign, Eye, GitPullRequest, MessageSquare, ShieldCheck, Tag, Terminal } from "lucide-react";
 import { ROLE_COLORS } from "@/lib/swarm-roles";
 import type { SwarmRole } from "@/lib/swarm";
 
 const PROOFS_REPO = "https://github.com/asyncswap/v2-proofs";
-const SWARM_README = `${PROOFS_REPO}/blob/dev/.github/formalmind/README.md`;
-const CYCLE = `${PROOFS_REPO}/blob/dev/.github/formalmind/cycle.md`;
+/** Where the role prompts live until the swarm PRs merge into dev; switch this to "dev" then. */
+const PROMPTS_REF = "fm/multi-project";
+const CYCLE = `${PROOFS_REPO}/blob/${PROMPTS_REF}/.github/formalmind/cycle.md`;
+const SWARM_README = `${PROOFS_REPO}/blob/${PROMPTS_REF}/.github/formalmind/README.md`;
+const promptUrl = (file: string) => `https://raw.githubusercontent.com/asyncswap/v2-proofs/${PROMPTS_REF}/.github/formalmind/${file}`;
 const ASSISTANT_THREAD = `${PROOFS_REPO}/issues/69`;
 const RELAY = "https://github.com/formalmind/webhook-redis/tree/main/worker";
 
-const ROLES: { role: SwarmRole; job: string; detail: string }[] = [
+/** Each agent with its prompt file in .github/formalmind/ (the dispatcher is not a model, so it has none). */
+const ROLES: { role: SwarmRole | "consolidator"; job: string; detail: string; prompt?: string }[] = [
 	{ role: "dispatcher", job: "Picks one job", detail: "Every 30 minutes, or when an fm: label changes. Order: answer, merge, review, revise, resume, new issue, edit, plan. Not a model." },
-	{ role: "planner", job: "Scopes the work", detail: "Reads the roadmap and the gaps the changelog left, and writes small, disjoint issues labelled fm:todo." },
-	{ role: "prover", job: "Writes the Lean", detail: "Takes one issue on its own branch, pushes as it goes, and opens a PR once lake build is clean." },
-	{ role: "rebuilder", job: "Rebuilds from the proofs", detail: "Writes a polished, simplified Solidity version of your protocol from the Lean alone, never your code, and lists every guess it had to make." },
-	{ role: "reviewer", job: "First pair of eyes", detail: "Reads the whole diff against the Solidity, leaves inline suggestions, then approves or bounces." },
-	{ role: "merger", job: "Verifies and merges", detail: "Builds the exact head, checks every claim in the thread against the code, then merges or holds it for you." },
-	{ role: "editor", job: "Compares and polishes", detail: "Holds your code, the rebuild and the proofs side by side, classifies every difference, and runs the cycle until they agree." },
-	{ role: "chief", job: "Audits the day", detail: "At 23:40 UTC checks every run's claims against what landed, with a headline: Done, Working, Waiting on you or Paused on budget." },
-	{ role: "assistant", job: "Talks to you", detail: "The only agent that does. Asks you one precise question at a time with a recommendation, and carries out your answer." },
+	{ role: "planner", job: "Scopes the work", detail: "Reads the roadmap and the gaps the changelog left, and writes small, disjoint issues labelled fm:todo.", prompt: "plan.md" },
+	{ role: "prover", job: "Writes the Lean", detail: "Takes one issue on its own branch, pushes as it goes, and opens a PR once lake build is clean.", prompt: "prove.md" },
+	{ role: "rebuilder", job: "Rebuilds from the proofs", detail: "Writes a polished, simplified Solidity version of your protocol from the Lean alone, never your code, and lists every guess it had to make.", prompt: "rebuild.md" },
+	{ role: "reviewer", job: "First pair of eyes", detail: "Reads the whole diff against the Solidity, leaves inline suggestions, then approves or bounces.", prompt: "review.md" },
+	{ role: "merger", job: "Verifies and merges", detail: "Builds the exact head, checks every claim in the thread against the code, then merges or holds it for you.", prompt: "merge.md" },
+	{ role: "editor", job: "Compares and polishes", detail: "Holds your code, the rebuild and the proofs side by side, classifies every difference, and runs the cycle until they agree.", prompt: "editor.md" },
+	{ role: "consolidator", job: "Keeps the official protocol", detail: "Carries every decision into one official version, then rewrites its state machine, diagrams and docs, in that order.", prompt: "consolidate.md" },
+	{ role: "chief", job: "Audits the day", detail: "At 23:40 UTC checks every run's claims against what landed, with a headline: Done, Working, Waiting on you or Paused on budget.", prompt: "chief.md" },
+	{ role: "assistant", job: "Talks to you", detail: "The only agent that does. Asks you one precise question at a time with a recommendation, and carries out your answer.", prompt: "assistant.md" },
 ];
 
 const FLOW = ["fm:todo", "fm:in-progress", "fm:review", "fm:approved", "merged"];
@@ -38,11 +47,10 @@ function Code({ children }: { children: React.ReactNode }) {
 	return <code className={CHIP}>{children}</code>;
 }
 
-function Section({ eyebrow, title, children }: { eyebrow: string; title: string; children: React.ReactNode }) {
+function Section({ title, children }: { title: string; children: React.ReactNode }) {
 	return (
 		<section className="border-t py-10 first:border-t-0 first:pt-0">
-			<p className="text-sm font-medium uppercase tracking-wide text-muted-foreground">{eyebrow}</p>
-			<h2 className="mt-1 text-sm font-semibold tracking-tight text-foreground">{title}</h2>
+			<h2 className="text-sm font-semibold tracking-tight text-foreground">{title}</h2>
 			<div className="mt-5">{children}</div>
 		</section>
 	);
@@ -66,15 +74,57 @@ function Step({ n, icon: Icon, title, children }: { n: number; icon: React.Eleme
 	);
 }
 
+/** A role's card; hovering it shows the role's prompt, read from the swarm's repository. */
+function RoleCard({ role, job, detail, prompt }: (typeof ROLES)[number]) {
+	const [text, setText] = useState<string | null>(null);
+	const color = role === "consolidator" ? "#0ea5e9" : ROLE_COLORS[role];
+	const card = (
+		<li className="rounded-xl border bg-card p-4">
+			<div className="flex items-center gap-2">
+				<svg width="16" height="16" viewBox="0 0 24 24" aria-hidden>
+					<polygon points="7 20 7 4 19 16 12 16 7 21" fill={color} stroke="white" strokeWidth="1.5" strokeLinejoin="round" />
+				</svg>
+				<span className="text-sm font-medium">{role}</span>
+				<span className="text-sm text-muted-foreground">· {job}</span>
+			</div>
+			<p className="mt-2 text-sm leading-6 text-muted-foreground">{detail}</p>
+		</li>
+	);
+	if (!prompt) return card;
+	return (
+		<HoverCard
+			openDelay={250}
+			onOpenChange={(open) => {
+				if (open && text === null) {
+					fetch(promptUrl(prompt))
+						.then((res) => (res.ok ? res.text() : Promise.reject()))
+						.then(setText)
+						.catch(() => setText("Couldn't load this prompt."));
+				}
+			}}
+		>
+			<HoverCardTrigger asChild>{card}</HoverCardTrigger>
+			<HoverCardContent side="right" align="start" className="max-h-[28rem] w-[28rem] max-w-[90vw] overflow-y-auto">
+				<p className="mb-2 font-mono text-sm text-muted-foreground">.github/formalmind/{prompt}</p>
+				{text === null ? (
+					<p className="text-sm text-muted-foreground">Loading the prompt…</p>
+				) : (
+					<div className="prose prose-sm max-w-none dark:prose-invert prose-headings:text-sm prose-p:my-2 prose-ul:my-2 prose-pre:text-sm">
+						<ReactMarkdown remarkPlugins={[remarkGfm]}>{text}</ReactMarkdown>
+					</div>
+				)}
+			</HoverCardContent>
+		</HoverCard>
+	);
+}
+
 export function GetStarted() {
 	return (
 		<div className="not-prose mx-auto w-full max-w-3xl pb-16 pt-4 text-foreground">
 			<header className="pb-10">
-				<p className="text-sm text-muted-foreground">Get started</p>
-				<h1 className="mt-2 text-balance text-sm font-semibold tracking-tight">
-					A swarm of agents that keeps your Lean spec in step with your Solidity
-				</h1>
+				<h1 className="text-sm font-semibold tracking-tight">Get started</h1>
 				<p className="mt-4 max-w-2xl text-pretty text-sm leading-7 text-muted-foreground">
+					A swarm of agents builds your Lean spec and your Solidity in parallel, together, and keeps them in step.
 					Formal Mind works where your code already lives. Issues are the task queue, <Code>fm:</Code> labels are the state,
 					pull requests are the work, and every agent posts as <Code>formalmind[bot]</Code>. You watch, steer and decide; the
 					swarm does the proving within a budget you set.
@@ -89,20 +139,9 @@ export function GetStarted() {
 				</div>
 			</header>
 
-			<Section eyebrow="How it works" title="Nine roles, one board">
+			<Section title="Ten roles, one board">
 				<ul className="grid gap-3 sm:grid-cols-2">
-					{ROLES.map(({ role, job, detail }) => (
-						<li key={role} className="rounded-xl border bg-card p-4">
-							<div className="flex items-center gap-2">
-								<svg width="16" height="16" viewBox="0 0 24 24" aria-hidden>
-									<polygon points="7 20 7 4 19 16 12 16 7 21" fill={ROLE_COLORS[role]} stroke="white" strokeWidth="1.5" strokeLinejoin="round" />
-								</svg>
-								<span className="text-sm font-medium">{role}</span>
-								<span className="text-sm text-muted-foreground">· {job}</span>
-							</div>
-							<p className="mt-2 text-sm leading-6 text-muted-foreground">{detail}</p>
-						</li>
-					))}
+					{ROLES.map((r) => <RoleCard key={r.role} {...r} />)}
 				</ul>
 
 				<div className="mt-6 rounded-xl border bg-muted/40 p-4">
@@ -123,7 +162,7 @@ export function GetStarted() {
 				</div>
 			</Section>
 
-			<Section eyebrow="The rebuild cycle" title="Prove it, rebuild it, compare, repeat">
+			<Section title="Prove it, rebuild it, compare, repeat">
 				<p className="max-w-2xl text-sm leading-6 text-muted-foreground">
 					Proving your code is the first half. Then the swarm rebuilds the protocol from the proofs alone and compares the rebuild with
 					what you wrote. Wherever the two differ, either the proofs are missing something or one version is better, and you decide
@@ -148,7 +187,7 @@ export function GetStarted() {
 				</p>
 			</Section>
 
-			<Section eyebrow="Working with it" title="Five things you do">
+			<Section title="Five things you do">
 				<ol>
 					<Step n={1} icon={Eye} title="Watch it work">
 						<p>
@@ -192,7 +231,7 @@ gh workflow run formalmind-swarm.yml -f role=editor`}</pre>
 				</ol>
 			</Section>
 
-			<Section eyebrow="Budget and safety" title="It cannot run away">
+			<Section title="It cannot run away">
 				<div className="grid gap-3 sm:grid-cols-3">
 					{[
 						{ icon: CircleDollarSign, title: "$5 a day, $150 a month", body: "Enforced from the ledger. Per-run caps: $3 to prove or rebuild, $1 to review, merge or edit, $0.40 to plan or report. When spent, it posts one pause note and waits for the reset." },
@@ -208,7 +247,7 @@ gh workflow run formalmind-swarm.yml -f role=editor`}</pre>
 				</div>
 			</Section>
 
-			<Section eyebrow="Your repositories" title="Set it up on your own protocol">
+			<Section title="Set it up on your own protocol">
 				<ol className="space-y-4 text-sm leading-6 text-muted-foreground">
 					{[
 						<>
