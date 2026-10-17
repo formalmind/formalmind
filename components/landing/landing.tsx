@@ -46,7 +46,7 @@ export function Landing({ signedIn }: { signedIn: boolean }) {
 			<main>
 				<section className="mx-auto max-w-6xl px-4 pb-10 pt-10 text-center sm:px-6 sm:pt-16">
 					<h1 className="mx-auto max-w-3xl text-balance text-4xl font-semibold tracking-tight sm:text-5xl">
-						Prove your Solidity code correct, using a swarm of agents for formal verification
+						Formal proofs for your Solidity, written by a swarm of agents
 					</h1>
 
 					<form
