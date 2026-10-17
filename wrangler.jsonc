@@ -13,6 +13,11 @@
 		"not_found_handling": "single-page-application",
 		"run_worker_first": ["/api/*", "/auth/*", "/assets/*"]
 	},
+	// The production domain. workers.dev and preview URLs stay on as well (wrangler turns them off
+	// once a route exists unless they are set explicitly).
+	"routes": [{ "pattern": "formal.team", "custom_domain": true }],
+	"workers_dev": true,
+	"preview_urls": true,
 	"observability": {
 		"enabled": true
 	},
