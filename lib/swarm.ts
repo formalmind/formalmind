@@ -10,11 +10,20 @@ export const SWARM_REPO = process.env.SWARM_REPO || DEFAULT_REPO;
 export const LEDGER_ISSUE = 38;
 export const CHIEF_ISSUE = 53;
 export const NOTEBOOK_ISSUE = 55;
+/** The maintainer's thread with the assistant, the one role that talks to them. */
+export const ASSISTANT_ISSUE = 69;
 const SWARM_WORKFLOW = "formalmind-swarm.yml";
 /** Shared by every request in this server instance, so polling clients don't multiply GitHub calls. */
 const CACHE_MS = 10_000;
 
-export type SwarmRole = "dispatcher" | "planner" | "prover" | "reviewer" | "merger" | "chief";
+export type SwarmRole = "dispatcher" | "planner" | "prover" | "rebuilder" | "reviewer" | "merger" | "editor" | "chief" | "assistant";
+
+/** Where the rebuild cycle stands, from the editor's `<!-- fm-cycle n=<k> phase=<phase> -->` ledger marker. */
+export interface SwarmCycle {
+	n: number;
+	phase: string;
+	createdAt: string;
+}
 
 export interface SwarmItem {
 	number: number;
@@ -97,6 +106,10 @@ export interface SwarmState {
 	costs: SwarmCost[];
 	spentToday: number;
 	chief: SwarmComment | null;
+	/** The assistant's latest comment on the maintainer's thread. */
+	assistant: SwarmComment | null;
+	/** The rebuild cycle, or null before the editor has run. */
+	cycle: SwarmCycle | null;
 	notebook: SwarmComment[];
 	ledger: SwarmComment[];
 	/** The latest swarm workflow runs, newest first. */
@@ -179,9 +192,9 @@ async function latestComments(issue: number, count: number): Promise<SwarmCommen
 }
 
 const NOTE_MARKER = /<!-- fm-note role=(\S+) ref=#?(\S+) run=(\d+) -->/;
-const ROLE_NAMES: Record<string, SwarmRole> = { plan: "planner", prove: "prover", review: "reviewer", merge: "merger", chief: "chief" };
+const ROLE_NAMES: Record<string, SwarmRole> = { plan: "planner", prove: "prover", rebuild: "rebuilder", review: "reviewer", merge: "merger", editor: "editor", chief: "chief", assistant: "assistant" };
 
-const HANDOFF_ROLES: Record<string, SwarmRole> = { ...ROLE_NAMES, planner: "planner", prover: "prover", reviewer: "reviewer", merger: "merger", dispatcher: "dispatcher" };
+const HANDOFF_ROLES: Record<string, SwarmRole> = { ...ROLE_NAMES, planner: "planner", prover: "prover", rebuilder: "rebuilder", reviewer: "reviewer", merger: "merger", dispatcher: "dispatcher" };
 
 /** "reviewer — check the swap case first" → { to: "reviewer", why: "check the swap case first" }. */
 export function parseHandoff(line: string | null): SwarmHandoff | null {
@@ -224,7 +237,7 @@ function phaseOf(run: GitHubRun, jobs: GitHubJob[]): SwarmRunPhase {
 	if (!job || job.name === "dispatch") return "dispatching";
 	const step = job.steps?.find((s) => s.status === "in_progress")?.name ?? "";
 	if (step.includes("claude-code-action")) return "working";
-	if (step.includes("lake") || step.includes("build")) return "building";
+	if (step.includes("lake") || step.includes("build") || step.includes("forge")) return "building";
 	if (step.includes("cost")) return "recording cost";
 	return "setting up";
 }
@@ -249,6 +262,7 @@ async function recentRuns(notes: SwarmNote[], costs: SwarmCost[]): Promise<Swarm
 
 // `ref` can be empty: the planner works from the README, not an issue.
 const COST_MARKER = /<!-- fm-cost role=(\S+) ref=(\S*) usd=([\d.]+)(?: run=(\d+))?/;
+const CYCLE_MARKER = /<!-- fm-cycle n=(\d+) phase=(\w+) -->/;
 
 function parseCost(comment: GitHubComment): SwarmCost[] {
 	const match = comment.body.match(COST_MARKER);
@@ -312,16 +326,21 @@ export function getSwarmState(): Promise<SwarmState> {
 }
 
 async function loadSwarmState(): Promise<SwarmState> {
-	const [open, closed, ledger, rawNotebook, chief, costs] = await Promise.all([
+	const [open, closed, ledger, rawNotebook, chief, assistant, costs] = await Promise.all([
 		github<GitHubIssue[]>("/issues?state=open&per_page=100"),
 		github<GitHubIssue[]>("/issues?state=closed&per_page=20&sort=updated"),
 		latestComments(LEDGER_ISSUE, 30),
 		latestRawComments(NOTEBOOK_ISSUE, 12),
 		latestComments(CHIEF_ISSUE, 1),
+		latestComments(ASSISTANT_ISSUE, 1),
 		allCosts(),
 	]);
 	const notebook = rawNotebook.slice(-6).map(toComment);
 
+	const cycle = ledger.flatMap((comment) => {
+		const match = comment.body.match(CYCLE_MARKER);
+		return match ? [{ n: Number(match[1]), phase: match[2], createdAt: comment.createdAt }] : [];
+	}).at(-1) ?? null;
 	const runs = await recentRuns(rawNotebook.flatMap((comment) => parseNote(comment) ?? []), costs);
 	const today = new Date().toISOString().slice(0, 10);
 
@@ -333,6 +352,8 @@ async function loadSwarmState(): Promise<SwarmState> {
 		costs,
 		spentToday: costs.filter((cost) => cost.createdAt.startsWith(today)).reduce((sum, cost) => sum + cost.usd, 0),
 		chief: chief[0] ?? null,
+		assistant: assistant[0] ?? null,
+		cycle,
 		notebook,
 		ledger: ledger.filter((comment) => !COST_MARKER.test(comment.body)).slice(-5),
 		runs,

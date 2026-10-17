@@ -51,8 +51,12 @@ export const LABEL_STYLES: Record<string, string> = {
 	"fm:approved": "bg-emerald-500/15 text-emerald-700 dark:text-emerald-300",
 	"fm:blocked": "bg-red-500/15 text-red-600 dark:text-red-300",
 	"fm:needs-rebase": "bg-orange-500/15 text-orange-700 dark:text-orange-300",
+	"fm:rebuild": "bg-cyan-500/15 text-cyan-700 dark:text-cyan-300",
+	"fm:rebuilding": "bg-cyan-500/15 text-cyan-700 dark:text-cyan-300",
+	"fm:finding": "bg-fuchsia-500/15 text-fuchsia-700 dark:text-fuchsia-300",
+	"fm:intent": "bg-yellow-500/15 text-yellow-700 dark:text-yellow-300",
 	merged: "bg-violet-500/15 text-violet-700 dark:text-violet-300",
-	...Object.fromEntries(["planner", "prover", "reviewer", "merger", "chief"].map((r) => [`fm:ask-${r}`, "bg-fuchsia-500/15 text-fuchsia-700 dark:text-fuchsia-300"])),
+	...Object.fromEntries(["planner", "prover", "rebuilder", "reviewer", "merger", "editor", "chief", "assistant"].map((r) => [`fm:ask-${r}`, "bg-fuchsia-500/15 text-fuchsia-700 dark:text-fuchsia-300"])),
 	README: "bg-muted text-muted-foreground",
 };
 
@@ -106,17 +110,20 @@ type Scene = {
 const HOME: Record<SwarmRole, { x: number; y: number }> = {
 	dispatcher: { x: 640, y: 34 },
 	planner: { x: 120, y: 360 },
-	prover: { x: 330, y: 360 },
-	reviewer: { x: 700, y: 360 },
-	merger: { x: 900, y: 360 },
-	chief: { x: 1080, y: 360 },
+	prover: { x: 290, y: 360 },
+	rebuilder: { x: 460, y: 360 },
+	editor: { x: 590, y: 360 },
+	reviewer: { x: 720, y: 360 },
+	merger: { x: 860, y: 360 },
+	assistant: { x: 980, y: 360 },
+	chief: { x: 1110, y: 360 },
 };
 
 const ROADMAP_SPOT = { x: laneX("roadmap") + 120, y: CARD_TOP + 44 };
 const CHIEF_SPOT = { x: panelX(2) + 300, y: PANEL_TOP + 70 };
 const LEDGER_SPOT = { x: panelX(0) + 300, y: PANEL_TOP + 70 };
 const NOTEBOOK_SPOT = { x: panelX(1) + 300, y: PANEL_TOP + 70 };
-const JOBS = ["answer", "merge", "review", "revise", "resume", "new issue", "plan"];
+const JOBS = ["answer", "merge", "review", "revise", "resume", "new issue", "edit", "plan"];
 
 type Step = { hold: number; apply: (scene: Scene) => void };
 
@@ -240,12 +247,16 @@ function buildScript(start: Scene): Step[] {
 		{ hold: 1700, apply: (s) => { home(s, "dispatcher"); say(s, "planner", "Reading the roadmap and the gaps the changelog left", ROADMAP_SPOT); note(s, "planner", "queue small, disjoint issues; post digest"); } },
 		{ hold: 300, apply: (s) => { s.cards.push({ id: "new", number: next, title: "spec: next unproven gap from the changelog", kind: "issue", lane: "roadmap", order: s.tick++, label: "fm:todo" }); } },
 		{ hold: 1800, apply: (s) => { move(s, "new", "todo"); say(s, "planner", `Wrote #${next}. Next: prover — #${next} first`, "new"); tick(s); spend(s, "planner", 0.3); } },
-		{ hold: 2600, apply: (s) => { home(s, "planner"); s.job = null; s.chief = "Working: 1 merged, 2 queued, nothing waiting on you"; say(s, "chief", "Posted the daily update on #53. Next: @mmsaki — nothing needs you", CHIEF_SPOT); } },
+		{ hold: 1500, apply: (s) => { home(s, "planner"); s.job = "edit"; say(s, "dispatcher", "The spec moved since the editor last compared: editor's turn"); } },
+		{ hold: 2200, apply: (s) => { home(s, "dispatcher"); say(s, "editor", "Cycle 1, compare: the rebuild only takes USDC as currency1, the draft takes either. Filed as fm:finding", ROADMAP_SPOT); note(s, "editor", "draft vs rebuild vs proofs; classify; file"); spend(s, "editor", 0.45); } },
+		{ hold: 2000, apply: (s) => { say(s, "editor", "/ask assistant Partial fills: keep their place, or re-queue like the draft? Next: assistant", ROADMAP_SPOT); } },
+		{ hold: 2200, apply: (s) => { home(s, "editor"); s.job = "answer"; say(s, "assistant", "Asked you on #69, recommendation first: re-queue, like the draft", CHIEF_SPOT); spend(s, "assistant", 0.1); } },
+		{ hold: 2600, apply: (s) => { s.job = null; s.chief = "Working: 1 merged, 2 queued, 1 question for you"; say(s, "chief", "Audited the day on #53. Next: assistant — one question is with the maintainer", CHIEF_SPOT); home(s, "assistant"); } },
 		{ hold: 1600, apply: (s) => { home(s, "chief"); s.turn = null; } },
 	];
 }
 
-const COST_ROLES: Record<string, SwarmRole> = { plan: "planner", prove: "prover", review: "reviewer", merge: "merger", chief: "chief" };
+const COST_ROLES: Record<string, SwarmRole> = { plan: "planner", prove: "prover", rebuild: "rebuilder", review: "reviewer", merge: "merger", editor: "editor", chief: "chief", assistant: "assistant" };
 
 /** Lane an open item sits in, from its fm: labels. */
 /** The role an open question on this item is waiting for, from its fm:ask-<role> label. */
@@ -266,8 +277,12 @@ function jobLaneOf(item: SwarmItem): { lane: Lane; label: string } | null {
 	const has = (l: string) => item.labels.includes(l);
 	if (item.kind === "issue") {
 		if (has("fm:in-progress")) return { lane: "progress", label: "fm:in-progress" };
+		if (has("fm:rebuilding")) return { lane: "progress", label: "fm:rebuilding" };
 		if (has("fm:blocked")) return { lane: "progress", label: "fm:blocked" };
 		if (has("fm:todo")) return { lane: "todo", label: "fm:todo" };
+		if (has("fm:rebuild")) return { lane: "todo", label: "fm:rebuild" };
+		if (has("fm:finding")) return { lane: "todo", label: "fm:finding" };
+		if (has("fm:intent")) return { lane: "todo", label: "fm:intent" };
 		return null;
 	}
 	if (has("fm:approved")) return { lane: "approved", label: "fm:approved" };
@@ -281,7 +296,7 @@ const PHASE_TEXT: Record<string, string> = {
 	queued: "Queued, waiting for a runner",
 	dispatching: "Checking the budget and picking one job",
 	"setting up": "Checking out the repos",
-	building: "lake build on the exact head",
+	building: "lake build (and forge for the rebuild) on the exact head",
 	working: "Thinking…",
 	"recording cost": "Recording the cost on the ledger",
 };
@@ -350,10 +365,10 @@ function liveScene(state: SwarmState, run: SwarmRun | null): Scene {
 
 	const cursors = cursorsAtHome;
 	const target = cards.find((c) => c.number === note?.ref && c.kind !== "doc");
-	const spot = role === "chief" || note?.ref === 53 ? CHIEF_SPOT
+	const spot = role === "chief" || role === "assistant" || note?.ref === 53 || note?.ref === 69 ? CHIEF_SPOT
 		: note?.ref === 38 ? LEDGER_SPOT
 		: note?.ref === 55 ? NOTEBOOK_SPOT
-		: role === "planner" ? ROADMAP_SPOT
+		: role === "planner" || role === "editor" ? ROADMAP_SPOT
 		: undefined;
 	cursors[role] = target ? { follow: target.id, say } : { at: spot ?? HOME[role], say };
 
@@ -377,7 +392,8 @@ function liveScene(state: SwarmState, run: SwarmRun | null): Scene {
 		: role === "merger" ? "merge"
 		: role === "reviewer" ? "review"
 		: role === "planner" ? "plan"
-		: role === "prover" ? (label === "fm:changes" || label === "fm:needs-rebase" ? "revise" : label === "fm:in-progress" ? "resume" : "new issue")
+		: role === "editor" ? "edit"
+		: role === "prover" || role === "rebuilder" ? (label === "fm:changes" || label === "fm:needs-rebase" ? "revise" : label === "fm:in-progress" || label === "fm:rebuilding" ? "resume" : "new issue")
 		: null;
 
 	return {

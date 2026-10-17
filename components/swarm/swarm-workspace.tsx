@@ -62,13 +62,13 @@ export function SwarmWorkspace({ repo }: { repo: string }) {
 		? `${run.status === "completed" ? "Just finished" : "Live"}: ${run.note ? `${run.note.role}${run.note.ref ? ` on #${run.note.ref}` : ""}` : "dispatcher"} · ${run.status === "completed" ? "done" : run.phase} · started ${minutesAgo(run.startedAt)}`
 		: "Idle. The dispatcher sweeps every 30 minutes";
 
-	const queued = state?.work.filter((item) => item.labels.includes("fm:todo")).length ?? 0;
+	const queued = state?.work.filter((item) => item.labels.includes("fm:todo") || item.labels.includes("fm:rebuild")).length ?? 0;
 	const inFlight = state?.work.filter((item) => item.kind === "pr").length ?? 0;
 	const blocked = state?.work.filter((item) => item.labels.includes("fm:blocked")).length ?? 0;
 
 	const pill = "inline-flex h-8 items-center rounded-full border bg-background/90 shadow-sm backdrop-blur";
 	const status = state
-		? `${queued} queued · ${inFlight} PRs open · ${blocked} blocked · $${state.spentToday.toFixed(2)} spent today`
+		? `${state.cycle ? `Cycle ${state.cycle.n}: ${state.cycle.phase} · ` : ""}${queued} queued · ${inFlight} PRs open · ${blocked} blocked · $${state.spentToday.toFixed(2)} spent today`
 		: error ?? "Loading the live queue…";
 	const synced = syncedAt ? `Synced ${Math.max(0, Math.round((now - syncedAt) / 1000))}s ago. ` : "";
 

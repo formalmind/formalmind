@@ -2,7 +2,7 @@
  * The proofs repository laid out as a GitHub-style project: every issue and pull request with a
  * Status derived from its `fm:` labels, plus the README's numbered Roadmap as milestones.
  */
-import { CHIEF_ISSUE, LEDGER_ISSUE, NOTEBOOK_ISSUE, SWARM_REPO, github, type SwarmItem } from "@/lib/swarm";
+import { ASSISTANT_ISSUE, CHIEF_ISSUE, LEDGER_ISSUE, NOTEBOOK_ISSUE, SWARM_REPO, github, type SwarmItem } from "@/lib/swarm";
 
 import { PROJECT_STATUSES, type ProjectStatus } from "@/lib/project-statuses";
 
@@ -47,7 +47,7 @@ type GitHubIssue = {
 };
 
 /** The swarm's own bookkeeping issues are not work items. */
-const PINNED = new Set([LEDGER_ISSUE, NOTEBOOK_ISSUE, CHIEF_ISSUE]);
+const PINNED = new Set([LEDGER_ISSUE, NOTEBOOK_ISSUE, CHIEF_ISSUE, ASSISTANT_ISSUE]);
 const CACHE_MS = 10_000;
 
 function statusOf(issue: GitHubIssue, labels: string[]): ProjectStatus {
@@ -55,9 +55,9 @@ function statusOf(issue: GitHubIssue, labels: string[]): ProjectStatus {
 	const has = (l: string) => labels.includes(l);
 	if (has("fm:blocked")) return "blocked";
 	if (has("fm:approved")) return "approved";
-	if (has("fm:in-progress") || has("fm:changes") || has("fm:needs-rebase")) return "in-progress";
+	if (has("fm:in-progress") || has("fm:rebuilding") || has("fm:changes") || has("fm:needs-rebase")) return "in-progress";
 	if (issue.pull_request) return "review";
-	return has("fm:todo") ? "todo" : "none";
+	return has("fm:todo") || has("fm:rebuild") || has("fm:finding") || has("fm:intent") ? "todo" : "none";
 }
 
 function plain(body: string | null) {
