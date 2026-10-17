@@ -16,14 +16,15 @@ import {
 	type StepKey,
 } from "@/components/onboarding/steps";
 import { PlanBoard, type PartialPlan } from "./plan-board";
+import { LANDING_KEEP_MS } from "./use-plan";
 
 const SETUP_KEY = "fm-landing-setup";
-type SavedSetup = { repo: string; step: StepKey; team: TeamPreset; squadSize: number; dailyUsd: number; chosen: { team?: boolean; budget?: boolean } };
+type SavedSetup = { savedAt?: number; repo: string; step: StepKey; team: TeamPreset; squadSize: number; dailyUsd: number; chosen: { team?: boolean; budget?: boolean } };
 
 function readSetup(repo: string): SavedSetup | null {
 	try {
 		const saved = JSON.parse(localStorage.getItem(SETUP_KEY) ?? "null") as SavedSetup | null;
-		return saved?.repo === repo ? saved : null;
+		return saved?.repo === repo && Date.now() - (saved.savedAt ?? 0) <= LANDING_KEEP_MS ? saved : null;
 	} catch {
 		return null;
 	}
@@ -31,7 +32,7 @@ function readSetup(repo: string): SavedSetup | null {
 
 function writeSetup(setup: SavedSetup) {
 	try {
-		localStorage.setItem(SETUP_KEY, JSON.stringify(setup));
+		localStorage.setItem(SETUP_KEY, JSON.stringify({ ...setup, savedAt: Date.now() }));
 	} catch {
 		// Storage refused (private window): the setup just won't be resumed.
 	}

@@ -5,6 +5,8 @@ import { experimental_useObject as useObject } from "@ai-sdk/react";
 import { parseRepo, planSchema, type RepoPlan } from "@/lib/plan";
 
 const DRAFT_KEY = "fm-onboarding-draft";
+/** A visitor's landing progress is kept for three days, then the page goes back to its demo. */
+export const LANDING_KEEP_MS = 3 * 24 * 3600 * 1000;
 
 export type PlanDraft = { repo: string; plan: RepoPlan };
 
@@ -12,7 +14,12 @@ export type PlanDraft = { repo: string; plan: RepoPlan };
 export function readDraft(): PlanDraft | null {
 	try {
 		const raw = localStorage.getItem(DRAFT_KEY);
-		return raw ? (JSON.parse(raw) as PlanDraft) : null;
+		const draft = raw ? (JSON.parse(raw) as PlanDraft & { savedAt?: number }) : null;
+		if (draft && Date.now() - (draft.savedAt ?? 0) > LANDING_KEEP_MS) {
+			forgetLandingProgress();
+			return null;
+		}
+		return draft;
 	} catch {
 		return null;
 	}
@@ -38,7 +45,7 @@ export function clearDraft() {
 
 function saveDraft(draft: PlanDraft) {
 	try {
-		localStorage.setItem(DRAFT_KEY, JSON.stringify(draft));
+		localStorage.setItem(DRAFT_KEY, JSON.stringify({ ...draft, savedAt: Date.now() }));
 	} catch {
 		// Private windows can refuse storage; the plan is also saved after sign-up.
 	}

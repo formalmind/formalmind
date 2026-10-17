@@ -4,7 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { Loader2, Rocket } from "lucide-react";
 import { SidebarTrigger } from "@/components/ui/sidebar";
 import { PlanBoard } from "@/components/landing/plan-board";
-import { readDraft, usePlan } from "@/components/landing/use-plan";
+import { forgetLandingProgress, readDraft, usePlan } from "@/components/landing/use-plan";
 import type { OnboardingState } from "@/server/routes/onboarding/state/route";
 import { TEAM_PRESETS } from "@/lib/teams";
 import {
@@ -61,6 +61,8 @@ export function Onboarding() {
 			} else {
 				setState(merged);
 			}
+			// Signed in, the account holds the progress now: the landing page goes back to its demo.
+			if (draft) forgetLandingProgress();
 			setLoaded(true);
 		})();
 	}, [update]);
