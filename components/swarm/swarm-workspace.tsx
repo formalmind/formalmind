@@ -4,8 +4,18 @@ import { useEffect, useState } from "react";
 import { RefreshCw } from "lucide-react";
 import type { SwarmRole, SwarmState } from "@/lib/swarm";
 import { SidebarTrigger } from "@/components/ui/sidebar";
-import { ROLE_COLORS, SwarmCanvas } from "./swarm-canvas";
+import { isLiveRun, ROLE_COLORS, SwarmCanvas } from "./swarm-canvas";
 import { SwarmChat } from "./swarm-chat";
+
+const POLL_MS = 10_000;
+
+function minutesAgo(iso: string) {
+	const minutes = Math.round((Date.now() - Date.parse(iso)) / 60_000);
+	if (minutes < 1) return "just now";
+	if (minutes < 60) return `${minutes} min ago`;
+	const hours = Math.round(minutes / 60);
+	return hours < 24 ? `${hours} h ago` : `${Math.round(hours / 24)} d ago`;
+}
 
 const ROLE_JOBS: Record<SwarmRole, string> = {
 	dispatcher: "picks one job per sweep",
@@ -22,8 +32,8 @@ export function SwarmWorkspace({ repo }: { repo: string }) {
 	const [loading, setLoading] = useState(false);
 	const [highlight, setHighlight] = useState<SwarmRole | null>(null);
 
-	const load = async () => {
-		setLoading(true);
+	const load = async (quiet = false) => {
+		if (!quiet) setLoading(true);
 		try {
 			const res = await fetch("/api/swarm/state");
 			const body = await res.json();
@@ -39,7 +49,18 @@ export function SwarmWorkspace({ repo }: { repo: string }) {
 
 	useEffect(() => {
 		void load();
+		// Poll while the tab is visible so the board follows the swarm as it works.
+		const timer = setInterval(() => {
+			if (document.visibilityState === "visible") void load(true);
+		}, POLL_MS);
+		return () => clearInterval(timer);
 	}, []);
+
+	const latest = state?.runs[0];
+	const run = isLiveRun(latest) ? latest : null;
+	const activity = run
+		? `${run.status === "completed" ? "Just finished" : "Live"}: ${run.note ? `${run.note.role}${run.note.ref ? ` on #${run.note.ref}` : ""}` : "dispatcher"} · ${run.status === "completed" ? "done" : run.phase} · started ${minutesAgo(run.startedAt)}`
+		: "Idle. The dispatcher sweeps every 30 minutes";
 
 	const queued = state?.work.filter((item) => item.labels.includes("fm:todo")).length ?? 0;
 	const inFlight = state?.work.filter((item) => item.kind === "pr").length ?? 0;
@@ -69,9 +90,38 @@ export function SwarmWorkspace({ repo }: { repo: string }) {
 				<div className="mt-4">
 					<SwarmCanvas state={state} highlight={highlight} />
 				</div>
-				<p className="mt-2 text-xs text-muted-foreground">
-					The board starts from the live queue in {repo}. The cursors replay how one issue moves through the hand-off rules; the moves and costs in the replay are illustrative.
+				<p className="mt-2 flex items-center gap-2 text-xs text-muted-foreground">
+					<span className={`size-1.5 shrink-0 rounded-full ${run && run.status !== "completed" ? "animate-pulse bg-red-500" : "bg-muted-foreground/50"}`} />
+					{run
+						? <span>{activity}. The board shows {repo} as it is right now; it refreshes every 10 seconds.</span>
+						: <span>{activity}. Until a run starts, the cursors replay how one issue moves through the hand-off rules; moves and costs in the replay are illustrative.</span>}
 				</p>
+
+				{state?.runs.length ? (
+					<div className="mt-5">
+						<h2 className="text-xs font-medium text-muted-foreground">Recent runs</h2>
+						<ol className="mt-2 divide-y rounded-lg border">
+							{state.runs.map((r) => {
+								const role = r.note?.role ?? "dispatcher";
+								return (
+									<li key={r.id}>
+										<a href={r.url} target="_blank" rel="noreferrer" className="flex items-center gap-3 px-3 py-2 text-sm transition-colors hover:bg-muted/50">
+											<span className="size-2 shrink-0 rounded-full" style={{ backgroundColor: ROLE_COLORS[role] }} />
+											<span className="w-20 shrink-0 font-medium">{role}</span>
+											<span className="min-w-0 flex-1 truncate text-muted-foreground">
+												{r.note ? `${r.note.ref ? `#${r.note.ref} · ` : ""}${r.note.title}` : r.status === "completed" ? "nothing to do this sweep" : "picking a job"}
+											</span>
+											<span className="shrink-0 text-xs text-muted-foreground">
+												{r.status === "completed" ? r.conclusion : r.phase}
+												{r.usd != null ? ` · $${r.usd.toFixed(2)}` : ""} · {minutesAgo(r.startedAt)}
+											</span>
+										</a>
+									</li>
+								);
+							})}
+						</ol>
+					</div>
+				) : null}
 
 				<ul className="mt-4 flex flex-wrap gap-2">
 					{(Object.keys(ROLE_COLORS) as SwarmRole[]).map((role) => (

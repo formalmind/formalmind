@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Pause, Play } from "lucide-react";
-import type { SwarmItem, SwarmRole, SwarmState } from "@/lib/swarm";
+import type { SwarmItem, SwarmRole, SwarmRun, SwarmState } from "@/lib/swarm";
 
 /**
  * A replay of one trip through the swarm, acted out by one cursor per role on a board of
@@ -11,6 +11,17 @@ import type { SwarmItem, SwarmRole, SwarmState } from "@/lib/swarm";
  */
 
 const W = 1200;
+/** A finished run stays on the board this long before the replay takes over again. */
+export const LIVE_WINDOW_MS = 10 * 60_000;
+
+export function isLiveRun(run: SwarmRun | null | undefined): run is SwarmRun {
+	return Boolean(run && (run.status !== "completed" || Date.now() - Date.parse(run.updatedAt) < LIVE_WINDOW_MS));
+}
+
+function clip(text: string, max = 120) {
+	const plain = text.replace(/`/g, "");
+	return plain.length > max ? `${plain.slice(0, max - 1)}…` : plain;
+}
 const H = 580;
 
 export const ROLE_COLORS: Record<SwarmRole, string> = {
@@ -41,6 +52,8 @@ const LABEL_STYLES: Record<string, string> = {
 	"fm:review": "bg-amber-500/15 text-amber-700 dark:text-amber-300",
 	"fm:changes": "bg-red-500/15 text-red-600 dark:text-red-300",
 	"fm:approved": "bg-emerald-500/15 text-emerald-700 dark:text-emerald-300",
+	"fm:blocked": "bg-red-500/15 text-red-600 dark:text-red-300",
+	"fm:needs-rebase": "bg-orange-500/15 text-orange-700 dark:text-orange-300",
 	merged: "bg-violet-500/15 text-violet-700 dark:text-violet-300",
 	README: "bg-muted text-muted-foreground",
 };
@@ -98,6 +111,8 @@ const HOME: Record<SwarmRole, { x: number; y: number }> = {
 
 const ROADMAP_SPOT = { x: laneX("roadmap") + 120, y: CARD_TOP + 44 };
 const CHIEF_SPOT = { x: panelX(2) + 300, y: PANEL_TOP + 70 };
+const LEDGER_SPOT = { x: panelX(0) + 300, y: PANEL_TOP + 70 };
+const NOTEBOOK_SPOT = { x: panelX(1) + 300, y: PANEL_TOP + 70 };
 const JOBS = ["merge", "review", "revise", "resume", "new issue", "plan"];
 
 type Step = { hold: number; apply: (scene: Scene) => void };
@@ -198,6 +213,80 @@ function buildScript(start: Scene): Step[] {
 	];
 }
 
+const COST_ROLES: Record<string, SwarmRole> = { plan: "planner", prove: "prover", review: "reviewer", merge: "merger", chief: "chief" };
+
+/** Lane an open item sits in, from its fm: labels. */
+function laneOf(item: SwarmItem): { lane: Lane; label: string } | null {
+	const has = (l: string) => item.labels.includes(l);
+	if (item.kind === "issue") {
+		if (has("fm:in-progress")) return { lane: "progress", label: "fm:in-progress" };
+		if (has("fm:blocked")) return { lane: "progress", label: "fm:blocked" };
+		if (has("fm:todo")) return { lane: "todo", label: "fm:todo" };
+		return null;
+	}
+	if (has("fm:approved")) return { lane: "approved", label: "fm:approved" };
+	if (has("fm:changes")) return { lane: "progress", label: "fm:changes" };
+	if (has("fm:needs-rebase")) return { lane: "progress", label: "fm:needs-rebase" };
+	if (has("fm:blocked")) return { lane: "review", label: "fm:blocked" };
+	return { lane: "review", label: "fm:review" };
+}
+
+const PHASE_TEXT: Record<string, string> = {
+	queued: "Queued, waiting for a runner",
+	dispatching: "Checking the budget and picking one job",
+	"setting up": "Checking out the repos",
+	building: "lake build on the exact head",
+	working: "Thinking…",
+	"recording cost": "Recording the cost on the ledger",
+};
+
+/** The board as it really is, with the active run's role at the item it is working on. */
+function liveScene(state: SwarmState, run: SwarmRun): Scene {
+	let order = 0;
+	const cards: Card[] = [
+		{ id: "roadmap", number: 0, title: "Roadmap and unproven gaps in FORMAL_MIND.md", kind: "doc", lane: "roadmap", order: order++, label: "README" },
+		...state.merged.slice(0, 2).reverse().map((item) => ({ id: `m${item.number}`, number: item.number, title: item.title, kind: "pr" as const, lane: "dev" as Lane, order: order++, label: "merged" })),
+	];
+	for (const item of [...state.work].sort((a, b) => a.number - b.number)) {
+		const place = laneOf(item);
+		if (place) cards.push({ id: `w${item.number}`, number: item.number, title: item.title, kind: item.kind, lane: place.lane, order: order++, label: place.label });
+	}
+
+	const note = run.note;
+	const role: SwarmRole = note?.role ?? "dispatcher";
+	const current = note?.tasks.find((t) => !t.done && !t.dropped);
+	const say = clip(run.status === "completed"
+		? note ? `Done${note.verified ? `: ${note.verified}` : ""}` : "Finished"
+		: current?.text ?? (note && run.phase === "working" ? "Wrapping up" : PHASE_TEXT[run.phase]));
+
+	const cursors = Object.fromEntries(ROLES.map((r) => [r, { at: HOME[r] }])) as Scene["cursors"];
+	const target = cards.find((c) => c.number === note?.ref && c.kind !== "doc");
+	const spot = role === "chief" || note?.ref === 53 ? CHIEF_SPOT
+		: note?.ref === 38 ? LEDGER_SPOT
+		: note?.ref === 55 ? NOTEBOOK_SPOT
+		: role === "planner" ? ROADMAP_SPOT
+		: undefined;
+	cursors[role] = target ? { follow: target.id, say } : { at: spot ?? HOME[role], say };
+
+	const label = target?.label;
+	const job = role === "merger" ? "merge"
+		: role === "reviewer" ? "review"
+		: role === "planner" ? "plan"
+		: role === "prover" ? (label === "fm:changes" || label === "fm:needs-rebase" ? "revise" : label === "fm:in-progress" ? "resume" : "new issue")
+		: null;
+
+	return {
+		cards,
+		cursors,
+		spend: state.spentToday,
+		notes: (note?.tasks ?? []).slice(-4).map((t) => ({ role, text: t.text, done: t.done })),
+		chief: firstLine(state.chief?.body) ?? "Working",
+		job,
+		costs: state.costs.slice(-3).map((c) => ({ role: COST_ROLES[c.role] ?? "dispatcher", usd: c.usd })),
+		tick: order,
+	};
+}
+
 function layout(cards: Card[]) {
 	const positions = new Map<string, { x: number; y: number; hidden: boolean }>();
 	for (const lane of LANES) {
@@ -223,8 +312,14 @@ export function SwarmCanvas({ state, highlight }: { state: SwarmState | null; hi
 	const [step, setStep] = useState(0);
 	const [playing, setPlaying] = useState(true);
 
-	const start = useMemo(() => initialScene(state), [state]);
+	// The replay only restarts when the queue it starts from changes, not on every poll.
+	const replayKey = state ? [...state.work.map((i) => `${i.number}:${i.labels.join(",")}`), ...state.merged.map((i) => i.number)].join("|") : "";
+	// eslint-disable-next-line react-hooks/exhaustive-deps
+	const start = useMemo(() => initialScene(state), [replayKey]);
 	const script = useMemo(() => buildScript(start), [start]);
+	const latest = state?.runs[0];
+	const run = isLiveRun(latest) ? latest : null;
+	const live = state && run ? liveScene(state, run) : null;
 	const scene = useMemo(() => {
 		const s = cloneScene(start);
 		for (let i = 0; i < step; i++) script[i].apply(s);
@@ -234,11 +329,11 @@ export function SwarmCanvas({ state, highlight }: { state: SwarmState | null; hi
 	useEffect(() => setStep(0), [script]);
 
 	useEffect(() => {
-		if (!playing) return;
+		if (!playing || live) return;
 		const hold = step === 0 ? 1200 : script[step - 1].hold;
 		const timer = setTimeout(() => setStep((i) => (i >= script.length ? 0 : i + 1)), hold);
 		return () => clearTimeout(timer);
-	}, [playing, step, script]);
+	}, [playing, step, script, live]);
 
 	useEffect(() => {
 		const el = frameRef.current;
@@ -248,7 +343,8 @@ export function SwarmCanvas({ state, highlight }: { state: SwarmState | null; hi
 		return () => observer.disconnect();
 	}, []);
 
-	const positions = layout(scene.cards);
+	const shown = live ?? scene;
+	const positions = layout(shown.cards);
 	const cursorPos = (cursor: Cursor) => {
 		const p = cursor.follow ? positions.get(cursor.follow) : undefined;
 		return p ? { x: p.x + CARD_W - 28, y: p.y + 46 } : cursor.at ?? { x: 0, y: 0 };
@@ -267,7 +363,7 @@ export function SwarmCanvas({ state, highlight }: { state: SwarmState | null; hi
 						backgroundSize: "20px 20px",
 					}}
 				>
-					<DispatcherChip job={scene.job} />
+					<DispatcherChip job={shown.job} />
 
 					{LANES.map((lane) => (
 						<div
@@ -277,39 +373,52 @@ export function SwarmCanvas({ state, highlight }: { state: SwarmState | null; hi
 						>
 							<div className="flex items-center justify-between px-3 pt-2.5 font-mono text-[12px] font-medium text-muted-foreground">
 								<span>{lane.title}</span>
-								<span>{scene.cards.filter((c) => c.lane === lane.key).length}</span>
+								<span>{shown.cards.filter((c) => c.lane === lane.key).length}</span>
 							</div>
 						</div>
 					))}
 
-					{scene.cards.map((c) => {
+					{shown.cards.map((c) => {
 						const p = positions.get(c.id)!;
 						return <BoardCard key={c.id} card={c} x={p.x} y={p.y} hidden={p.hidden} />;
 					})}
 
-					<LedgerPanel spend={scene.spend} costs={scene.costs} />
-					<NotebookPanel notes={scene.notes} />
-					<ChiefPanel headline={scene.chief} />
+					<LedgerPanel spend={shown.spend} costs={shown.costs} />
+					<NotebookPanel notes={shown.notes} />
+					<ChiefPanel headline={shown.chief} />
 
 					{ROLES.map((role) => (
 						<SwarmCursor
 							key={role}
 							role={role}
-							{...cursorPos(scene.cursors[role])}
-							say={scene.cursors[role].say}
+							{...cursorPos(shown.cursors[role])}
+							say={shown.cursors[role].say}
 							dim={Boolean(highlight && highlight !== role)}
 						/>
 					))}
 				</div>
 			</div>
-			<button
-				type="button"
-				onClick={() => setPlaying((p) => !p)}
-				className="absolute right-3 top-3 inline-flex size-8 items-center justify-center rounded-full border bg-background/90 text-muted-foreground shadow-sm backdrop-blur transition-colors hover:text-foreground"
-				aria-label={playing ? "Pause replay" : "Play replay"}
-			>
-				{playing ? <Pause className="size-3.5" /> : <Play className="size-3.5" />}
-			</button>
+			{live && run ? (
+				<a
+					href={run.url}
+					target="_blank"
+					rel="noreferrer"
+					className="absolute right-3 top-3 inline-flex h-8 items-center gap-2 rounded-full border bg-background/90 px-3 text-xs font-medium shadow-sm backdrop-blur"
+				>
+					<span className={`size-2 rounded-full ${run.status === "completed" ? "bg-muted-foreground" : "animate-pulse bg-red-500"}`} />
+					{run.status === "completed" ? "Just finished" : "Live"}
+				</a>
+			) : (
+				<button
+					type="button"
+					onClick={() => setPlaying((p) => !p)}
+					className="absolute right-3 top-3 inline-flex h-8 items-center gap-1.5 rounded-full border bg-background/90 px-3 text-xs text-muted-foreground shadow-sm backdrop-blur transition-colors hover:text-foreground"
+					aria-label={playing ? "Pause replay" : "Play replay"}
+				>
+					{playing ? <Pause className="size-3.5" /> : <Play className="size-3.5" />}
+					Replay
+				</button>
+			)}
 		</div>
 	);
 }
@@ -318,6 +427,8 @@ const MOVE = "transition-transform duration-700 ease-[cubic-bezier(0.22,1,0.36,1
 
 function SwarmCursor({ role, x, y, say, dim }: { role: SwarmRole; x: number; y: number; say?: string; dim: boolean }) {
 	const color = ROLE_COLORS[role];
+	// Near the right edge the label and bubble open to the left so they stay on the board.
+	const flip = x > W - 260;
 	return (
 		<div
 			className={`pointer-events-none absolute left-0 top-0 z-20 ${MOVE}`}
@@ -326,7 +437,7 @@ function SwarmCursor({ role, x, y, say, dim }: { role: SwarmRole; x: number; y: 
 			<svg width="28" height="28" viewBox="0 0 24 24" className="absolute -left-2 -top-[5px] drop-shadow-sm" aria-hidden>
 				<polygon points="7 20 7 4 19 16 12 16 7 21" fill={color} stroke="white" strokeWidth="1.5" strokeLinejoin="round" />
 			</svg>
-			<div className="absolute left-4 top-5 flex flex-col items-start gap-1">
+			<div className={`absolute top-5 flex flex-col gap-1 ${flip ? "right-1 items-end" : "left-4 items-start"}`}>
 				<span className="whitespace-nowrap rounded-full px-2 py-0.5 text-[12px] font-medium text-white shadow-sm" style={{ backgroundColor: color }}>
 					{role}
 				</span>
