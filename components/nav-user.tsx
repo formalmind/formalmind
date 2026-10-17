@@ -1,7 +1,7 @@
 "use client"
 
-import {
 import { forgetLandingProgress } from "@/components/landing/use-plan";
+import {
 	BadgeCheck,
 	Bell,
 	ChevronsUpDown,
