@@ -1,0 +1,499 @@
+{
+    "repo": "asyncswap/v2-proofs",
+    "fetchedAt": "2026-10-17T03:11:33.740Z",
+    "work": [
+        {
+            "number": 61,
+            "title": "spec: pool reserves and claim supply stay non-negative across every v2 entry point",
+            "kind": "issue",
+            "labels": [
+                "fm:todo"
+            ],
+            "url": "https://github.com/asyncswap/v2-proofs/issues/61",
+            "updatedAt": "2026-10-16T06:24:59Z",
+            "createdAt": "2026-10-16T06:24:59Z",
+            "author": "formalmind[bot]",
+            "authorAvatar": "https://avatars.githubusercontent.com/in/1319020?v=4",
+            "excerpt": "Goal. Prove that pool reserves and the ERC-6909 claim supply stay non-negative across every v2 entry point. These are the PoolManager-side totals that the 52 changelog lists as still open. claimsSupply c should follow from ClaimsNonNeg onc\u2026",
+            "comments": 0,
+            "merged": false
+        }
+    ],
+    "merged": [
+        {
+            "number": 63,
+            "title": "spec: wallet balances outside the PoolManager stay non-negative across every v2 entry point",
+            "kind": "pr",
+            "labels": [],
+            "url": "https://github.com/asyncswap/v2-proofs/pull/63",
+            "updatedAt": "2026-10-17T01:10:06Z",
+            "createdAt": "2026-10-17T01:04:30Z",
+            "author": "formalmind[bot]",
+            "authorAvatar": "https://avatars.githubusercontent.com/in/1319020?v=4",
+            "excerpt": "Proves that wallet balances outside the PoolManager stay non-negative across every v2 entry point. One buy-side swap case has no guard in the model, so the theorem leaves it out (see below). - New AsyncSwapProtocol/V2/BalNonNeg.lean: BalNo\u2026",
+            "comments": 3,
+            "merged": true
+        },
+        {
+            "number": 62,
+            "title": "ci: allow 'gh api' as a whole; the path-qualified allowlist entry never matched",
+            "kind": "pr",
+            "labels": [],
+            "url": "https://github.com/asyncswap/v2-proofs/pull/62",
+            "updatedAt": "2026-10-16T07:28:53Z",
+            "createdAt": "2026-10-16T06:41:57Z",
+            "author": "mmsaki",
+            "authorAvatar": "https://avatars.githubusercontent.com/u/98189596?v=4",
+            "excerpt": "The merger could not land 59 on two tries: gh api repos/asyncswap/v2-proofs/pulls/59/merge -X PUT ... came back \"This command requires approval\" even with the path first. Claude Code matches Bash allowlist prefixes word by word, so Bash(gh\u2026",
+            "comments": 0,
+            "merged": true
+        },
+        {
+            "number": 59,
+            "title": "spec: user claim balances stay non-negative across every v2 entry point",
+            "kind": "pr",
+            "labels": [
+                "fm:blocked"
+            ],
+            "url": "https://github.com/asyncswap/v2-proofs/pull/59",
+            "updatedAt": "2026-10-16T06:30:12Z",
+            "createdAt": "2026-10-16T06:18:07Z",
+            "author": "formalmind[bot]",
+            "authorAvatar": "https://avatars.githubusercontent.com/in/1319020?v=4",
+            "excerpt": "New AsyncSwapProtocol/V2/ClaimsNonNeg.lean, imported from the root: - ClaimsNonNeg cfg w := \u2200 c a, 0 \u2264 w.claims c a - stepclaimsnonneg: every v2 entry point preserves ClaimsNonNeg, under Escrow and the same environment hypotheses as stepes\u2026",
+            "comments": 4,
+            "merged": true
+        },
+        {
+            "number": 58,
+            "title": "swarm: budget $5 a day, $150 a month",
+            "kind": "pr",
+            "labels": [],
+            "url": "https://github.com/asyncswap/v2-proofs/pull/58",
+            "updatedAt": "2026-10-16T06:07:00Z",
+            "createdAt": "2026-10-16T06:05:10Z",
+            "author": "mmsaki",
+            "authorAvatar": "https://avatars.githubusercontent.com/u/98189596?v=4",
+            "excerpt": "Raises the swarm's daily cap from $2 to $5. The monthly cap goes from $50 to $150 to match, since $5 a day would otherwise hit the $50 month on day 10. At about $1.15 per full cycle this allows roughly three to four issues a day. If $50 a \u2026",
+            "comments": 0,
+            "merged": true
+        },
+        {
+            "number": 56,
+            "title": "swarm: gh api examples put the path before the flags",
+            "kind": "pr",
+            "labels": [],
+            "url": "https://github.com/asyncswap/v2-proofs/pull/56",
+            "updatedAt": "2026-10-16T06:02:51Z",
+            "createdAt": "2026-10-16T05:59:29Z",
+            "author": "mmsaki",
+            "authorAvatar": "https://avatars.githubusercontent.com/u/98189596?v=4",
+            "excerpt": "The chief's dry run (run 38858441621) ended with four permission denials. The tool allowlist is a prefix match on gh api repos/<repo, so any example written as gh api -X PATCH repos/... or gh api --paginate repos/... is refused. That affec\u2026",
+            "comments": 0,
+            "merged": true
+        }
+    ],
+    "costs": [
+        {
+            "role": "prove",
+            "ref": "#45",
+            "usd": 0.46,
+            "runId": 38854728723,
+            "createdAt": "2026-10-16T05:18:27Z"
+        },
+        {
+            "role": "review",
+            "ref": "#47",
+            "usd": 0.15,
+            "runId": 38855066921,
+            "createdAt": "2026-10-16T05:19:38Z"
+        },
+        {
+            "role": "review",
+            "ref": "#51",
+            "usd": 0.13,
+            "runId": 38855636870,
+            "createdAt": "2026-10-16T05:25:44Z"
+        },
+        {
+            "role": "merge",
+            "ref": "#51",
+            "usd": 0.17,
+            "runId": 38855715542,
+            "createdAt": "2026-10-16T05:28:41Z"
+        },
+        {
+            "role": "merge",
+            "ref": "#51",
+            "usd": 0.15,
+            "runId": 38857135088,
+            "createdAt": "2026-10-16T05:44:51Z"
+        },
+        {
+            "role": "prove",
+            "ref": "#52",
+            "usd": 1.15,
+            "runId": 38859418133,
+            "createdAt": "2026-10-16T06:14:55Z"
+        },
+        {
+            "role": "prove",
+            "ref": "#52",
+            "usd": 0.44,
+            "runId": 38859439188,
+            "createdAt": "2026-10-16T06:18:30Z"
+        },
+        {
+            "role": "review",
+            "ref": "#59",
+            "usd": 0.29,
+            "runId": 38860438301,
+            "createdAt": "2026-10-16T06:20:13Z"
+        },
+        {
+            "role": "merge",
+            "ref": "#59",
+            "usd": 0.3,
+            "runId": 38860603133,
+            "createdAt": "2026-10-16T06:23:32Z"
+        },
+        {
+            "role": "merge",
+            "ref": "#59",
+            "usd": 0.25,
+            "runId": 38861233814,
+            "createdAt": "2026-10-16T06:29:52Z"
+        },
+        {
+            "role": "prove",
+            "ref": "#60",
+            "usd": 1.07,
+            "runId": 38988481038,
+            "createdAt": "2026-10-17T01:00:14Z"
+        },
+        {
+            "role": "prove",
+            "ref": "#60",
+            "usd": 0.64,
+            "runId": 38988494952,
+            "createdAt": "2026-10-17T01:05:07Z"
+        },
+        {
+            "role": "review",
+            "ref": "#63",
+            "usd": 0.3,
+            "runId": 38989301923,
+            "createdAt": "2026-10-17T01:06:39Z"
+        },
+        {
+            "role": "merge",
+            "ref": "#63",
+            "usd": 0.3,
+            "runId": 38989427643,
+            "createdAt": "2026-10-17T01:10:15Z"
+        }
+    ],
+    "spentToday": 2.3099999999999996,
+    "chief": {
+        "body": "**chief** 2026-10-17 \u2014 **Working**\n@mmsaki\n\n**Landed today**\n- #63 (issue #60): `step_bal_nonneg` in `AsyncSwapProtocol/V2/BalNonNeg.lean` shows that every wallet balance outside the PoolManager stays non-negative across `step`. One case is left out: a buy-side `swap` with a non-zero bid, excluded by the `hgap` hypothesis (`BalNonNeg.lean:160`). The reason is that `swapGuard` (`Model.lean:341-343`) never checks `amountIn + priorityFee \u2264 bal`. On chain the second `safeTransferFrom` in `Router._settlePriorityFee` (`Router.sol:351`) reverts in that situation, so this is a gap in the model, not in the protocol.\n\n**Notes vs reality**\nAll 4 runs' claims checked out: `BalNonNeg` and `step_bal_nonneg` are on `dev` with no `sorry`, #63 is merged as 8153ac3, and the `FORMAL_MIND.md` entry names the gap. Nothing was left unticked; the first prove run's open boxes were finished by the resume run.\n\n**In flight**\n- #61 `fm:todo`: pool reserves and claim supply stay non-negative. Not started yet.\n- Not filed yet: tighten `swapGuard` so `hgap` can be dropped. The prover, reviewer and merger all flagged it. The planner hasn't run since then.\n\n**Needs you**\nNothing is blocking. If you'd rather keep `swapGuard` as it is and live with `hgap`, say so on #60 before the planner files the follow-up.\n\n**Spend**\n| | spent | cap |\n| --- | --- | --- |\n| today | $2.31 | $5.00 |\n| month | $7.09 | $150.00 |\n\nEvery run today finished with a result.\n\n**Notes**\nThe first prove run on #60 used its whole cap and stopped with 3 build errors; the resume fixed them. That's 2 of the 2 runs allowed per issue per day. Expect #61 and the `swapGuard` follow-up to take about a day each at the current budget.\n",
+        "createdAt": "2026-10-17T01:34:31Z",
+        "url": "https://github.com/asyncswap/v2-proofs/issues/53#issuecomment-6228011260"
+    },
+    "notebook": [
+        {
+            "body": "<!-- fm-note role=plan ref=#38 run=38860919901 -->\n**plan** #38 \u2014 scope the queue and post a digest\n- [x] Read roadmap, changelog, open work and ledger\n- [x] Handle fm:blocked items (PR #59): no re-scope needed, merge permission problem raised with maintainer\n- [x] Queue new issues if fewer than two fm:todo\n- [x] Post digest on ledger\n- [ ] ~~Open note first via gh api~~ dropped: sandbox refused the POST, posted once at the end via `gh issue comment`\n\n**Verified:** issues #60 and #61 are open with `fm:todo`; PR #59 is still `fm:blocked`; digest posted on #38 with `<!-- fm-plan busy -->`.\n**Left:** #59 needs a manual merge or an allowlist fix for `gh api` writes.\n",
+            "createdAt": "2026-10-16T06:25:11Z",
+            "url": "https://github.com/asyncswap/v2-proofs/issues/55#issuecomment-6209491748"
+        },
+        {
+            "body": "<!-- fm-note role=prove ref=#60 run=38988481038 -->\n**prove** #60 \u2014 wallet balances outside the PoolManager stay non-negative across `step`\n- [x] read `Model.lean` ledger ops and `ClaimsNonNeg.lean`\n- [x] define `BalNonNeg` in `V2/BalNonNeg.lean` (per-op preservation lemmas instead of a `Grows` relation)\n- [x] per-op and per-hook lemmas (written, not all checked)\n- [ ] `step_bal_nonneg`, `lake build` clean \u2014 3 errors left, see issue comment\n- [ ] changelog entry in `FORMAL_MIND.md` (root import done)\n- [ ] open PR with `fm:review`\n\n**Verified:** branch `fm/issue-60` has `AsyncSwapProtocol/V2/BalNonNeg.lean` and the root import; the file does not build yet.\n**Left:** fix `BalNonNeg.transfer` (line 41) and the zero-bid / `hne` guard goals in the swap case of `step_bal_nonneg`; changelog; PR. Model gap: buy-side swap with a bid has no combined `amountIn + priorityFee \u2264 bal` guard (`Model.lean:341-343`).\n",
+            "createdAt": "2026-10-17T00:55:41Z",
+            "url": "https://github.com/asyncswap/v2-proofs/issues/55#issuecomment-6227639572"
+        },
+        {
+            "body": "<!-- fm-note role=prove ref=#60 run=38988494952 -->\n**prove** #60 \u2014 resume: get `BalNonNeg.lean` building, changelog, PR\n- [x] fix `BalNonNeg.transfer` and the swap-case guard goals in `step_bal_nonneg`\n- [x] `lake build` clean, no `sorry`\n- [x] changelog entry in `FORMAL_MIND.md`\n- [x] open PR with `fm:review`\n\n**Verified:** `step_bal_nonneg` and `BalNonNeg` are in `AsyncSwapProtocol/V2/BalNonNeg.lean` on `fm/issue-60` @ febf78e, with no `sorry`. Full `lake build` passed (3171 jobs). PR #63 is open against `dev` with label `fm:review`, and the `FORMAL_MIND.md` entry is at the top.\n**Left:** `hgap` leaves out the buy-side swap with a non-zero bid, because `swapGuard` has no combined `amountIn + priorityFee` guard (`Model.lean:341-343`). That needs either a model fix or a decision from @mmsaki.\n",
+            "createdAt": "2026-10-17T01:02:03Z",
+            "url": "https://github.com/asyncswap/v2-proofs/issues/55#issuecomment-6227701002"
+        },
+        {
+            "body": "<!-- fm-note role=review ref=#63 run=38989301923 -->\n**review** #63 \u2014 review BalNonNeg PR (issue #60)\n- [x] Read issue #60 and the PR diff\n- [x] Grep diff for sorry/admit/axiom/native_decide\n- [x] Compare definitions with protocol Solidity\n- [x] Check scope, changelog, style\n- [x] Post verdict\n\n**Verified:** `BalNonNeg` and `step_bal_nonneg` exist in `AsyncSwapProtocol/V2/BalNonNeg.lean`; the diff adds no `sorry`/`admit`/`axiom`/`native_decide` lines (the only match is changelog prose); the root import is at `AsyncSwapProtocol.lean:12`; the FORMAL_MIND.md entry names the `hgap` gap; PR #63 is labelled `fm:approved`.\n**Left:** The merger still has to build it. Follow-up for the planner: `swapGuard` (`Model.lean:341-343`) is weaker than the Solidity. On chain, the second `safeTransferFrom` in `Router._settlePriorityFee` (`Router.sol:351`) reverts if the owner's balance runs short, so the guard could check `amountIn + priorityFee` when `o.input = numeraire`, and `hgap` could then go away.\n",
+            "createdAt": "2026-10-17T01:05:53Z",
+            "url": "https://github.com/asyncswap/v2-proofs/issues/55#issuecomment-6227737744"
+        },
+        {
+            "body": "<!-- fm-note role=merge ref=#63 run=38989427643 -->\n**merge** #63 \u2014 second look at BalNonNeg (#60), then merge or hold\n- [x] Read the diff fresh (no sorry/axiom, scope, files, changelog)\n- [x] Check prover/reviewer claims against code and Model.lean/Router.sol\n- [x] Decide whether a human needs to see it: no (new module only, 3 files, round 1, claims hold)\n- [x] Merge, delete branch, comment\n\n**Verified:** PR #63 squash-merged into `dev` as 8153ac3; `step_bal_nonneg` and `BalNonNeg` are in `AsyncSwapProtocol/V2/BalNonNeg.lean` with no `sorry`; the `swapGuard` gap matches `Model.lean:341-343`; `Router.sol:351` is the second `safeTransferFrom` for the bid; branch `fm/issue-60` deleted.\n**Left:** a follow-up to tighten `swapGuard` (`amountIn + priorityFee \u2264 bal` on buy orders) so `hgap` can go away. That is for the planner.\n",
+            "createdAt": "2026-10-17T01:09:42Z",
+            "url": "https://github.com/asyncswap/v2-proofs/issues/55#issuecomment-6227777084"
+        },
+        {
+            "body": "<!-- fm-note role=chief ref=#53 run=38991341516 -->\n**chief** #53 \u2014 daily update for 2026-10-17\n- [x] Gather notebook, ledger, merged PRs, open work\n- [x] Verify today's claims on origin/dev\n- [x] Post update on #53\n\n**Verified:** `step_bal_nonneg` is at `AsyncSwapProtocol/V2/BalNonNeg.lean:155` on `dev` with no `sorry`; #63 is MERGED as 8153ac3; today's spend is $2.31 and the month's is $7.09.\n**Left:** #61 is queued but not started. The `swapGuard` follow-up is not filed yet; that's for the planner.\n",
+            "createdAt": "2026-10-17T01:33:48Z",
+            "url": "https://github.com/asyncswap/v2-proofs/issues/55#issuecomment-6228004975"
+        }
+    ],
+    "ledger": [
+        {
+            "body": "<!-- fm-cost role=plan ref= usd=0.34 run=38855960551 -->\n**plan** \u2014 $0.34, success ([run](https://github.com/asyncswap/v2-proofs/actions/runs/38855960551))\n",
+            "createdAt": "2026-10-16T05:30:41Z",
+            "url": "https://github.com/asyncswap/v2-proofs/issues/38#issuecomment-6208805634"
+        },
+        {
+            "body": "<!-- fm-cost role=chief ref= usd=0.28 run=38858441621 -->\n**chief** \u2014 $0.28, success ([run](https://github.com/asyncswap/v2-proofs/actions/runs/38858441621))\n",
+            "createdAt": "2026-10-16T05:58:20Z",
+            "url": "https://github.com/asyncswap/v2-proofs/issues/38#issuecomment-6209136281"
+        },
+        {
+            "body": "**planner** digest, run [38860919901](https://github.com/asyncswap/v2-proofs/actions/runs/38860919901)\n\n- Merged since last digest: #51 (`NonNeg.lean`, hook claims non-negative under `Escrow`).\n- Blocked: #59 (`step_claims_nonneg`, issue #52). Both review passes approved it, but the sandbox refused the merger's `gh api .../pulls/59/merge` call. The notebook POSTs on #55 are refused the same way, and this run also lost its note. Nothing in the PR needs a decision.\n- Queued: #60 wallet `bal` non-negativity (`V2/BalNonNeg.lean`) and #61 reserves and claim-supply non-negativity (`V2/SupplyNonNeg.lean`). The two touch disjoint files, and neither overlaps #59. Both close the gaps the #52 changelog leaves open. @fm-prover\n- @mmsaki: please merge #59 by hand, or allow `gh api repos/asyncswap/v2-proofs/... -X PUT/POST/PATCH` in the tool allowlist. Until then, merges and notebook notes fail silently.\n\n<!-- fm-plan busy -->\n",
+            "createdAt": "2026-10-16T06:25:06Z",
+            "url": "https://github.com/asyncswap/v2-proofs/issues/38#issuecomment-6209490480"
+        },
+        {
+            "body": "<!-- fm-cost role=plan ref= usd=0.32 run=38860919901 -->\n**plan** \u2014 $0.32, success ([run](https://github.com/asyncswap/v2-proofs/actions/runs/38860919901))\n",
+            "createdAt": "2026-10-16T06:25:18Z",
+            "url": "https://github.com/asyncswap/v2-proofs/issues/38#issuecomment-6209493182"
+        },
+        {
+            "body": "<!-- fm-cost role=chief ref= usd=0.26 run=38991341516 -->\n**chief** \u2014 $0.26, success ([run](https://github.com/asyncswap/v2-proofs/actions/runs/38991341516))\n",
+            "createdAt": "2026-10-17T01:34:39Z",
+            "url": "https://github.com/asyncswap/v2-proofs/issues/38#issuecomment-6228012311"
+        }
+    ],
+    "runs": [
+        {
+            "id": 38991341516,
+            "status": "completed",
+            "conclusion": "success",
+            "phase": "done",
+            "startedAt": "2026-10-17T01:33:02Z",
+            "updatedAt": "2026-10-17T01:34:44Z",
+            "url": "https://github.com/asyncswap/v2-proofs/actions/runs/38991341516",
+            "note": {
+                "role": "chief",
+                "ref": 53,
+                "runId": 38991341516,
+                "title": "daily update for 2026-10-17",
+                "tasks": [
+                    {
+                        "text": "Gather notebook, ledger, merged PRs, open work",
+                        "done": true,
+                        "dropped": false
+                    },
+                    {
+                        "text": "Verify today's claims on origin/dev",
+                        "done": true,
+                        "dropped": false
+                    },
+                    {
+                        "text": "Post update on #53",
+                        "done": true,
+                        "dropped": false
+                    }
+                ],
+                "verified": "`step_bal_nonneg` is at `AsyncSwapProtocol/V2/BalNonNeg.lean:155` on `dev` with no `sorry`; #63 is MERGED as 8153ac3; today's spend is $2.31 and the month's is $7.09.",
+                "left": "#61 is queued but not started. The `swapGuard` follow-up is not filed yet; that's for the planner.",
+                "createdAt": "2026-10-17T01:33:48Z",
+                "updatedAt": "2026-10-17T01:34:22Z",
+                "url": "https://github.com/asyncswap/v2-proofs/issues/55#issuecomment-6228004975"
+            },
+            "usd": null
+        },
+        {
+            "id": 38989427643,
+            "status": "completed",
+            "conclusion": "success",
+            "phase": "done",
+            "startedAt": "2026-10-17T01:06:31Z",
+            "updatedAt": "2026-10-17T01:10:21Z",
+            "url": "https://github.com/asyncswap/v2-proofs/actions/runs/38989427643",
+            "note": {
+                "role": "merger",
+                "ref": 63,
+                "runId": 38989427643,
+                "title": "second look at BalNonNeg (#60), then merge or hold",
+                "tasks": [
+                    {
+                        "text": "Read the diff fresh (no sorry/axiom, scope, files, changelog)",
+                        "done": true,
+                        "dropped": false
+                    },
+                    {
+                        "text": "Check prover/reviewer claims against code and Model.lean/Router.sol",
+                        "done": true,
+                        "dropped": false
+                    },
+                    {
+                        "text": "Decide whether a human needs to see it: no (new module only, 3 files, round 1, claims hold)",
+                        "done": true,
+                        "dropped": false
+                    },
+                    {
+                        "text": "Merge, delete branch, comment",
+                        "done": true,
+                        "dropped": false
+                    }
+                ],
+                "verified": "PR #63 squash-merged into `dev` as 8153ac3; `step_bal_nonneg` and `BalNonNeg` are in `AsyncSwapProtocol/V2/BalNonNeg.lean` with no `sorry`; the `swapGuard` gap matches `Model.lean:341-343`; `Router.sol:351` is the second `safeTransferFrom` for the bid; branch `fm/issue-60` deleted.",
+                "left": "a follow-up to tighten `swapGuard` (`amountIn + priorityFee \u2264 bal` on buy orders) so `hgap` can go away. That is for the planner.",
+                "createdAt": "2026-10-17T01:09:42Z",
+                "updatedAt": "2026-10-17T01:10:04Z",
+                "url": "https://github.com/asyncswap/v2-proofs/issues/55#issuecomment-6227777084"
+            },
+            "usd": 0.3
+        },
+        {
+            "id": 38989301923,
+            "status": "completed",
+            "conclusion": "success",
+            "phase": "done",
+            "startedAt": "2026-10-17T01:04:52Z",
+            "updatedAt": "2026-10-17T01:06:44Z",
+            "url": "https://github.com/asyncswap/v2-proofs/actions/runs/38989301923",
+            "note": {
+                "role": "reviewer",
+                "ref": 63,
+                "runId": 38989301923,
+                "title": "review BalNonNeg PR (issue #60)",
+                "tasks": [
+                    {
+                        "text": "Read issue #60 and the PR diff",
+                        "done": true,
+                        "dropped": false
+                    },
+                    {
+                        "text": "Grep diff for sorry/admit/axiom/native_decide",
+                        "done": true,
+                        "dropped": false
+                    },
+                    {
+                        "text": "Compare definitions with protocol Solidity",
+                        "done": true,
+                        "dropped": false
+                    },
+                    {
+                        "text": "Check scope, changelog, style",
+                        "done": true,
+                        "dropped": false
+                    },
+                    {
+                        "text": "Post verdict",
+                        "done": true,
+                        "dropped": false
+                    }
+                ],
+                "verified": "`BalNonNeg` and `step_bal_nonneg` exist in `AsyncSwapProtocol/V2/BalNonNeg.lean`; the diff adds no `sorry`/`admit`/`axiom`/`native_decide` lines (the only match is changelog prose); the root import is at `AsyncSwapProtocol.lean:12`; the FORMAL_MIND.md entry names the `hgap` gap; PR #63 is labelled `fm:approved`.",
+                "left": "The merger still has to build it. Follow-up for the planner: `swapGuard` (`Model.lean:341-343`) is weaker than the Solidity. On chain, the second `safeTransferFrom` in `Router._settlePriorityFee` (`Router.sol:351`) reverts if the owner's balance runs short, so the guard could check `amountIn + priorityFee` when `o.input = numeraire`, and `hgap` could then go away.",
+                "createdAt": "2026-10-17T01:05:53Z",
+                "updatedAt": "2026-10-17T01:06:30Z",
+                "url": "https://github.com/asyncswap/v2-proofs/issues/55#issuecomment-6227737744"
+            },
+            "usd": 0.3
+        },
+        {
+            "id": 38989279155,
+            "status": "completed",
+            "conclusion": "cancelled",
+            "phase": "done",
+            "startedAt": "2026-10-17T01:04:34Z",
+            "updatedAt": "2026-10-17T01:04:53Z",
+            "url": "https://github.com/asyncswap/v2-proofs/actions/runs/38989279155",
+            "note": null,
+            "usd": null
+        },
+        {
+            "id": 38988494952,
+            "status": "completed",
+            "conclusion": "success",
+            "phase": "done",
+            "startedAt": "2026-10-17T00:54:14Z",
+            "updatedAt": "2026-10-17T01:05:11Z",
+            "url": "https://github.com/asyncswap/v2-proofs/actions/runs/38988494952",
+            "note": {
+                "role": "prover",
+                "ref": 60,
+                "runId": 38988494952,
+                "title": "resume: get `BalNonNeg.lean` building, changelog, PR",
+                "tasks": [
+                    {
+                        "text": "fix `BalNonNeg.transfer` and the swap-case guard goals in `step_bal_nonneg`",
+                        "done": true,
+                        "dropped": false
+                    },
+                    {
+                        "text": "`lake build` clean, no `sorry`",
+                        "done": true,
+                        "dropped": false
+                    },
+                    {
+                        "text": "changelog entry in `FORMAL_MIND.md`",
+                        "done": true,
+                        "dropped": false
+                    },
+                    {
+                        "text": "open PR with `fm:review`",
+                        "done": true,
+                        "dropped": false
+                    }
+                ],
+                "verified": "`step_bal_nonneg` and `BalNonNeg` are in `AsyncSwapProtocol/V2/BalNonNeg.lean` on `fm/issue-60` @ febf78e, with no `sorry`. Full `lake build` passed (3171 jobs). PR #63 is open against `dev` with label `fm:review`, and the `FORMAL_MIND.md` entry is at the top.",
+                "left": "`hgap` leaves out the buy-side swap with a non-zero bid, because `swapGuard` has no combined `amountIn + priorityFee` guard (`Model.lean:341-343`). That needs either a model fix or a decision from @mmsaki.",
+                "createdAt": "2026-10-17T01:02:03Z",
+                "updatedAt": "2026-10-17T01:04:59Z",
+                "url": "https://github.com/asyncswap/v2-proofs/issues/55#issuecomment-6227701002"
+            },
+            "usd": 0.64
+        },
+        {
+            "id": 38988481038,
+            "status": "completed",
+            "conclusion": "success",
+            "phase": "done",
+            "startedAt": "2026-10-17T00:54:03Z",
+            "updatedAt": "2026-10-17T01:00:18Z",
+            "url": "https://github.com/asyncswap/v2-proofs/actions/runs/38988481038",
+            "note": {
+                "role": "prover",
+                "ref": 60,
+                "runId": 38988481038,
+                "title": "wallet balances outside the PoolManager stay non-negative across `step`",
+                "tasks": [
+                    {
+                        "text": "read `Model.lean` ledger ops and `ClaimsNonNeg.lean`",
+                        "done": true,
+                        "dropped": false
+                    },
+                    {
+                        "text": "define `BalNonNeg` in `V2/BalNonNeg.lean` (per-op preservation lemmas instead of a `Grows` relation)",
+                        "done": true,
+                        "dropped": false
+                    },
+                    {
+                        "text": "per-op and per-hook lemmas (written, not all checked)",
+                        "done": true,
+                        "dropped": false
+                    },
+                    {
+                        "text": "`step_bal_nonneg`, `lake build` clean \u2014 3 errors left, see issue comment",
+                        "done": false,
+                        "dropped": false
+                    },
+                    {
+                        "text": "changelog entry in `FORMAL_MIND.md` (root import done)",
+                        "done": false,
+                        "dropped": false
+                    },
+                    {
+                        "text": "open PR with `fm:review`",
+                        "done": false,
+                        "dropped": false
+                    }
+                ],
+                "verified": "branch `fm/issue-60` has `AsyncSwapProtocol/V2/BalNonNeg.lean` and the root import; the file does not build yet.",
+                "left": "fix `BalNonNeg.transfer` (line 41) and the zero-bid / `hne` guard goals in the swap case of `step_bal_nonneg`; changelog; PR. Model gap: buy-side swap with a bid has no combined `amountIn + priorityFee \u2264 bal` guard (`Model.lean:341-343`).",
+                "createdAt": "2026-10-17T00:55:41Z",
+                "updatedAt": "2026-10-17T01:00:03Z",
+                "url": "https://github.com/asyncswap/v2-proofs/issues/55#issuecomment-6227639572"
+            },
+            "usd": 1.07
+        }
+    ]
+}

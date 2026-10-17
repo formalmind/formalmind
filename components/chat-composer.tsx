@@ -12,7 +12,7 @@ import {
 	DropdownMenuRadioItem,
 	DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { openAIModelNames, type OpenAIModel } from "@/lib/llm";
+import { openAIModelNames, type OpenAIModel } from "@/lib/models";
 
 /**
  * Concentric corners, same rule as the Mike composer: chips are 32px tall

@@ -6,7 +6,7 @@ import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { Bot, Wrench } from "lucide-react";
 import { ChatComposer } from "@/components/chat-composer";
-import type { OpenAIModel } from "@/lib/llm";
+import type { OpenAIModel } from "@/lib/models";
 import type { UIMessage } from "ai";
 
 const SUGGESTIONS = [
@@ -103,7 +103,7 @@ const TOOL_LABELS: Record<string, (args: Record<string, unknown>) => string> = {
 };
 
 /** The lookups the model made for this answer, so it is clear where the answer came from. */
-function ToolCalls({ message }: { message: UIMessage }) {
+export function ToolCalls({ message }: { message: UIMessage }) {
 	const calls = (message.parts ?? []).flatMap((part) => (part.type === "tool-invocation" ? [part.toolInvocation] : []));
 	if (!calls.length) return null;
 	return (

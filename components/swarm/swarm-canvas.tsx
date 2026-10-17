@@ -40,7 +40,7 @@ const LANES: { key: Lane; title: string }[] = [
 	{ key: "dev", title: "Merged to dev" },
 ];
 
-const LABEL_STYLES: Record<string, string> = {
+export const LABEL_STYLES: Record<string, string> = {
 	"fm:todo": "bg-slate-500/15 text-slate-600 dark:text-slate-300",
 	"fm:in-progress": "bg-blue-500/15 text-blue-600 dark:text-blue-300",
 	"fm:review": "bg-amber-500/15 text-amber-700 dark:text-amber-300",
@@ -532,7 +532,7 @@ function timeAgo(iso: string) {
 }
 
 /** GitHub-style preview of the issue or PR behind a board card. */
-function ItemHoverCard({ item, repo, left, top, below, onEnter, onLeave }: {
+export function ItemHoverCard({ item, repo, left, top, below, onEnter, onLeave }: {
 	item: SwarmItem;
 	repo: string;
 	left: number;
@@ -541,8 +541,8 @@ function ItemHoverCard({ item, repo, left, top, below, onEnter, onLeave }: {
 	onEnter: () => void;
 	onLeave: () => void;
 }) {
-	const state = item.kind === "pr" ? (item.merged ? "merged" : "open") : "open";
-	const stateColor = state === "merged" ? "text-violet-600 dark:text-violet-400" : "text-emerald-600 dark:text-emerald-400";
+	const state = item.merged ? "merged" : item.state ?? "open";
+	const stateColor = state === "open" ? "text-emerald-600 dark:text-emerald-400" : "text-violet-600 dark:text-violet-400";
 	return (
 		<div
 			role="tooltip"
@@ -552,7 +552,7 @@ function ItemHoverCard({ item, repo, left, top, below, onEnter, onLeave }: {
 			style={{ left, top, transform: below ? undefined : "translateY(-100%)" }}
 		>
 			<p className="flex items-center gap-1.5 text-xs text-muted-foreground">
-				<span className={`font-medium ${stateColor}`}>{item.kind === "pr" ? (item.merged ? "Merged PR" : "Open PR") : "Open issue"}</span>
+				<span className={`font-medium ${stateColor}`}>{`${state[0].toUpperCase()}${state.slice(1)} ${item.kind === "pr" ? "PR" : "issue"}`}</span>
 				<span>· {repo}</span>
 				<span>· {timeAgo(item.createdAt)}</span>
 			</p>

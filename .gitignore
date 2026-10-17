@@ -50,3 +50,7 @@ GRANT.md
 .open-next/
 .wrangler/
 .dev.vars*
+
+# storybook
+storybook-static/
+*storybook.log

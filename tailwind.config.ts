@@ -6,6 +6,8 @@ export default {
 		"./pages/**/*.{js,ts,jsx,tsx,mdx,md}",
 		"./components/**/*.{js,ts,jsx,tsx,mdx,md}",
 		"./app/**/*.{js,ts,jsx,tsx,mdx,md}",
+		"./stories/**/*.{ts,tsx}",
+		"./.storybook/**/*.{ts,tsx}",
 	],
 	theme: {
 		extend: {

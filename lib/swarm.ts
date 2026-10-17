@@ -5,9 +5,9 @@
  */
 
 export const SWARM_REPO = process.env.SWARM_REPO || "asyncswap/v2-proofs";
-const LEDGER_ISSUE = 38;
-const CHIEF_ISSUE = 53;
-const NOTEBOOK_ISSUE = 55;
+export const LEDGER_ISSUE = 38;
+export const CHIEF_ISSUE = 53;
+export const NOTEBOOK_ISSUE = 55;
 const SWARM_WORKFLOW = "formalmind-swarm.yml";
 /** Shared by every request in this server instance, so polling clients don't multiply GitHub calls. */
 const CACHE_MS = 10_000;
@@ -28,6 +28,8 @@ export interface SwarmItem {
 	excerpt: string;
 	comments: number;
 	merged: boolean;
+	/** Set when closed items are included; the swarm's live queue only holds open ones. */
+	state?: "open" | "closed" | "merged";
 }
 
 export interface SwarmComment {
