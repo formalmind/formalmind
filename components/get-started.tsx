@@ -151,7 +151,7 @@ gh workflow run formalmind-swarm.yml -f role=review -f number=40`}</pre>
 			<Section eyebrow="Budget and safety" title="It cannot run away">
 				<div className="grid gap-3 sm:grid-cols-3">
 					{[
-						{ icon: CircleDollarSign, title: "$5 a day, $150 a month", body: "Enforced from the ledger. Per-run caps: $1.20 to prove, $0.40 to plan, review or merge. When spent, it posts one pause note and waits for the reset." },
+						{ icon: CircleDollarSign, title: "$5 a day, $150 a month", body: "Enforced from the ledger. Per-run caps: $3 to prove, $1 to review or merge, $0.40 to plan or report. When spent, it posts one pause note and waits for the reset." },
 						{ icon: GitPullRequest, title: "Nothing unchecked merges", body: "A clean lake build on the exact head, and never a sorry, admit or new axiom. A false claim in the thread is a bounce." },
 						{ icon: Bot, title: "Bounded retries", body: "One model job per sweep. A prover gets two runs per issue a day and a reviewer bounces twice before the work is parked for you." },
 					].map(({ icon: Icon, title, body }) => (

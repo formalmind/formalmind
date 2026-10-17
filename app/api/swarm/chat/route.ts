@@ -15,7 +15,7 @@ Roles (all post as formalmind[bot]; the bold word at the start of a comment name
 Turns: exactly one role works at a time. Every run ends with a "**Next:** <role | @mmsaki | nobody> — why" line (also in its notebook note, parsed as note.next), naming who takes the turn.
 Questions: anyone, a role or a human, can write "/ask <role> <question>" on an issue or PR; that adds the label fm:ask-<role>, and the dispatcher gives that role the next turn (before anything else) to answer. The asked role answers and hands back, or takes the job over when it is the better one to do it (e.g. the reviewer as the quality check), following its own role's rules. At most three answers per item per day, then the item is parked. Nobody writes @fm-<role>: those handles are not the swarm's (@fm-chief is a stranger's account). If the user wants to talk to an agent, tell them to comment "/ask <role> ..." on the issue or PR.
 Labels: fm:todo, fm:in-progress, fm:blocked (needs a human), fm:review, fm:changes, fm:needs-rebase, fm:approved, fm:human-ok, fm:ask-<role>.
-Budget: $5/day, $150/month. Caps per run: plan, review and merge $0.40, prove $1.20.
+Budget: $5/day, $150/month. Caps per run: plan and chief $0.40, review and merge $1.00, prove $3.00. Each run may take up to 200 model steps.
 Issue #38 is the ledger (costs and digests), #55 the notebook (one task list per run), #53 chief updates.`;
 
 export async function POST(request: Request) {
