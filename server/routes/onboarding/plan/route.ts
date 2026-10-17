@@ -11,11 +11,12 @@ const isExample = (repo: string) => EXAMPLE_REPOS.some((example) => example.toLo
 
 /**
  * Plays a cached plan back as a stream, a few characters at a time, so the plan board fills in the way it does for a
- * fresh plan, but in a couple of seconds and without a model call.
+ * fresh plan, at a readable pace and without a model call.
  */
 function playBack(plan: RepoPlan) {
 	const text = JSON.stringify(plan);
-	const step = Math.max(24, Math.ceil(text.length / 120));
+	// About 250 small chunks, 32ms apart: a cached plan unfolds over roughly eight seconds, readable as it lands.
+	const step = Math.max(12, Math.ceil(text.length / 250));
 	const encoder = new TextEncoder();
 	let at = 0;
 	return new ReadableStream<Uint8Array>({
@@ -23,7 +24,7 @@ function playBack(plan: RepoPlan) {
 			if (at >= text.length) return controller.close();
 			controller.enqueue(encoder.encode(text.slice(at, at + step)));
 			at += step;
-			await new Promise((resolve) => setTimeout(resolve, 18));
+			await new Promise((resolve) => setTimeout(resolve, 32));
 		},
 	});
 }
