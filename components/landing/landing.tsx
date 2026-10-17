@@ -89,11 +89,8 @@ export function Landing({ signedIn }: { signedIn: boolean }) {
 							<SetupPreview repo={repo} plan={plan} done={done} failed={Boolean(error)} startHref={startHref} />
 						</div>
 					) : (
-						// Tilted back a little, like a screen on a desk.
-						<div className="h-full [perspective:2400px]">
-							<div className="h-full origin-bottom [transform:rotateX(10deg)_rotateZ(-0.6deg)] motion-reduce:[transform:none]">
-								<SwarmCanvas state={null} contain />
-							</div>
+						<div className="h-full">
+							<SwarmCanvas state={null} contain />
 						</div>
 					)}
 				</section>
