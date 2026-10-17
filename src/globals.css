@@ -301,3 +301,17 @@
 @media (prefers-reduced-motion: reduce) {
   .t-text-swap { transition: none !important; }
 }
+
+
+/* Landing sky: a cloud strip twice the width slides left by half, so it loops without a seam. */
+@keyframes sky-drift {
+  from { transform: translateX(0); }
+  to { transform: translateX(-50%); }
+}
+.sky-drift {
+  animation: sky-drift linear infinite;
+  will-change: transform;
+}
+@media (prefers-reduced-motion: reduce) {
+  .sky-drift { animation: none; }
+}

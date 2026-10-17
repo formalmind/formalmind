@@ -522,13 +522,14 @@ export function SwarmCanvas({ state, fill = false, contain = false, title, actio
 	}, [playing, step, script, live]);
 
 	useEffect(() => {
-		const el = frameRef.current;
+		// Contained, the frame is sized from the scale, so the space around it is what gets measured.
+		const el = contain && !fill ? wrapRef.current : frameRef.current;
 		if (!el) return;
 		const observer = new ResizeObserver(([entry]) => {
 			const { width, height } = entry.contentRect;
 			if (!fill && contain) {
 				const next = Math.min(width / W, height / boardH);
-				return setFit({ scale: next, x: (width - W * next) / 2, y: Math.max(0, (height - boardH * next) / 2), w: width, h: height });
+				return setFit({ scale: next, x: 0, y: 0, w: W * next, h: boardH * next });
 			}
 			if (!fill) return setFit({ scale: width / W, x: 0, y: 0, w: width, h: height });
 			const next = Math.min(width / W, (height - PINNED) / boardH);
@@ -710,11 +711,19 @@ export function SwarmCanvas({ state, fill = false, contain = false, title, actio
 		modal ? <CardDetails card={modal.card} item={itemFor(modal.card)} repo={state?.repo ?? ""} inDialog={inDialog} /> : null;
 
 	return (
-		<div ref={wrapRef} className={`relative w-full ${fill || contain ? "h-full" : ""}`}>
+		<div ref={wrapRef} className={`relative w-full ${fill ? "h-full" : contain ? "flex h-full items-center justify-center" : ""}`}>
+		{/* Contained, the controls must sit on the board-sized frame, not on the space around it. */}
+		<div className={contain && !fill ? "relative" : "contents"}>
 			<div
 				ref={frameRef}
-				className={`relative w-full overflow-hidden bg-card ${fill ? `h-full touch-none select-none ${panning ? "cursor-grabbing [&_*]:!cursor-grabbing" : panMode ? "cursor-grab [&_*]:!cursor-grab" : ""}` : `rounded-xl border ${contain ? "h-full" : ""}`}`}
-				style={fill || contain ? { ...DOTS, backgroundSize: `${20 * s}px ${20 * s}px`, backgroundPosition: `${ox}px ${oy}px` } : { height: boardH * scale }}
+				className={`relative overflow-hidden bg-card ${contain && !fill ? "" : "w-full"} ${fill ? `h-full touch-none select-none ${panning ? "cursor-grabbing [&_*]:!cursor-grabbing" : panMode ? "cursor-grab [&_*]:!cursor-grab" : ""}` : `rounded-xl border ${contain ? "shrink-0" : ""}`}`}
+				style={
+					fill
+						? { ...DOTS, backgroundSize: `${20 * s}px ${20 * s}px`, backgroundPosition: `${ox}px ${oy}px` }
+						: contain
+							? { width: W * scale, height: boardH * scale }
+							: { height: boardH * scale }
+				}
 				onPointerDown={onPointerDown}
 				onPointerMove={onPointerMove}
 				onPointerUp={endDrag}
@@ -733,7 +742,7 @@ export function SwarmCanvas({ state, fill = false, contain = false, title, actio
 						width: W,
 						height: boardH,
 						transform: `translate(${ox}px, ${oy}px) scale(${s})`,
-						...(fill || contain ? {} : DOTS),
+						...(fill ? {} : DOTS),
 					}}
 				>
 					{fill ? null : (
@@ -883,6 +892,7 @@ export function SwarmCanvas({ state, fill = false, contain = false, title, actio
 					</button>
 				</div>
 			) : null}
+		</div>
 		</div>
 	);
 }

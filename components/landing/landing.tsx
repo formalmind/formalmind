@@ -7,6 +7,7 @@ import { useState } from "react";
 import { Loader2, Maximize2, Minimize2, Play, X } from "lucide-react";
 import { SwarmCanvas } from "@/components/swarm/swarm-canvas";
 import YouTubeVideo from "@/components/youtube-video";
+import { SkyBackdrop } from "./sky-backdrop";
 import { SetupPreview } from "./setup-preview";
 import { usePlan } from "./use-plan";
 
@@ -30,7 +31,8 @@ export function Landing({ signedIn }: { signedIn: boolean }) {
 
 	return (
 		// One screen: header and hero at the top, the demo (or the setup steps) taking every pixel left.
-		<div className="flex h-dvh flex-col bg-background text-foreground">
+		<div className="relative isolate flex h-dvh flex-col text-foreground">
+			<SkyBackdrop />
 			<header className="mx-auto flex h-16 w-full max-w-6xl shrink-0 items-center justify-between px-4 sm:px-6">
 				<Link to="/welcome" className="flex items-center gap-2 font-semibold tracking-tight">
 					<LogoMark size={24} />
