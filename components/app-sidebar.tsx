@@ -2,7 +2,7 @@
 
 import Link from "next/link"
 import { usePathname } from "next/navigation"
-import { BookOpen, GanttChart, MessageCircle, Network, PanelLeftClose, PanelLeftOpen, Rocket } from "lucide-react"
+import { BookOpen, GanttChart, MessageCircle, Network, Rocket } from "lucide-react"
 import {
 	Sidebar,
 	SidebarContent,
@@ -12,7 +12,6 @@ import {
 	SidebarMenu,
 	SidebarMenuButton,
 	SidebarMenuItem,
-	useSidebar,
 } from "@/components/ui/sidebar"
 import { NavUser } from "@/components/nav-user"
 import { LogoMark } from "@/components/logo"
@@ -46,17 +45,15 @@ function NavLink({ item, active }: { item: NavItem; active: boolean }) {
 
 export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
 	const pathname = usePathname()
-	const { state, toggleSidebar } = useSidebar()
-	const collapsed = state === "collapsed"
 	// The landing page is a page of its own, even for someone signed in.
 	if (pathname === "/welcome") return null
 
 	return (
 		<Sidebar variant="inset" collapsible="icon" {...props}>
 			{/* The toggle sits at the top, the way macOS sidebars carry it. */}
-			{/* Collapsed, the logo stays as the icon of the wordmark, and the toggle sits on its own below it.
-			    The logo keeps one inset in both states so it holds still while the wordmark fades off its right. */}
-			<SidebarHeader className="flex-row items-center justify-between group-data-[collapsible=icon]:flex-col group-data-[collapsible=icon]:items-start">
+			{/* Collapsed, the logo stays as the icon of the wordmark. It keeps one inset in both states so it holds
+			    still while the wordmark fades off its right. The toggle is on each page, just outside the sidebar. */}
+			<SidebarHeader className="flex-row items-center">
 				<Link href="/" aria-label="Formal Mind" className="flex h-8 items-center gap-2 px-1.5 text-sm font-semibold tracking-tight group-data-[collapsible=icon]:gap-0">
 					<LogoMark size={20} className="shrink-0" />
 					{/* Fades out with the transitions.dev text-swap timing as the rail narrows. */}
@@ -64,15 +61,6 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
 						Formal Mind.
 					</span>
 				</Link>
-				<button
-					type="button"
-					onClick={toggleSidebar}
-					aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"}
-					title={collapsed ? "Expand sidebar" : "Collapse sidebar"}
-					className="inline-flex size-8 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-sidebar-accent hover:text-sidebar-accent-foreground [&>svg]:size-4"
-				>
-					{collapsed ? <PanelLeftOpen /> : <PanelLeftClose />}
-				</button>
 			</SidebarHeader>
 			<SidebarContent>
 				<SidebarGroup>
