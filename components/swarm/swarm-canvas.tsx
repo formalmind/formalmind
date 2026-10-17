@@ -347,9 +347,11 @@ function cloneScene(scene: Scene): Scene {
 	};
 }
 
-export function SwarmCanvas({ state, highlight }: { state: SwarmState | null; highlight?: SwarmRole | null }) {
+/** `fill` makes the board fill its parent, scaled to fit both ways and centred; otherwise it scales to the width. */
+export function SwarmCanvas({ state, highlight, fill = false }: { state: SwarmState | null; highlight?: SwarmRole | null; fill?: boolean }) {
 	const frameRef = useRef<HTMLDivElement>(null);
-	const [scale, setScale] = useState(1);
+	const [fit, setFit] = useState({ scale: 1, x: 0, y: 0 });
+	const { scale } = fit;
 	const [step, setStep] = useState(0);
 	const [playing, setPlaying] = useState(true);
 	const [hover, setHover] = useState<{ item: SwarmItem; left: number; top: number; below: boolean } | null>(null);
@@ -382,10 +384,15 @@ export function SwarmCanvas({ state, highlight }: { state: SwarmState | null; hi
 	useEffect(() => {
 		const el = frameRef.current;
 		if (!el) return;
-		const observer = new ResizeObserver(([entry]) => setScale(entry.contentRect.width / W));
+		const observer = new ResizeObserver(([entry]) => {
+			const { width, height } = entry.contentRect;
+			if (!fill) return setFit({ scale: width / W, x: 0, y: 0 });
+			const next = Math.min(width / W, height / H);
+			setFit({ scale: next, x: (width - W * next) / 2, y: Math.max(0, (height - H * next) / 2) });
+		});
 		observer.observe(el);
 		return () => observer.disconnect();
-	}, []);
+	}, [fill]);
 
 	const shown = live ?? scene;
 	const positions = layout(shown.cards);
@@ -436,16 +443,19 @@ export function SwarmCanvas({ state, highlight }: { state: SwarmState | null; hi
 	};
 
 	return (
-		<div ref={wrapRef} className="relative w-full">
-			<div ref={frameRef} className="relative w-full overflow-hidden rounded-xl border bg-card" style={{ height: H * scale }}>
+		<div ref={wrapRef} className={`relative w-full ${fill ? "h-full" : ""}`}>
+			<div
+				ref={frameRef}
+				className={`relative w-full overflow-hidden bg-card ${fill ? "h-full" : "rounded-xl border"}`}
+				style={fill ? { ...DOTS, backgroundSize: `${20 * scale}px ${20 * scale}px`, backgroundPosition: `${fit.x}px ${fit.y}px` } : { height: H * scale }}
+			>
 				<div
 					className="absolute left-0 top-0 origin-top-left"
 					style={{
 						width: W,
 						height: H,
-						transform: `scale(${scale})`,
-						backgroundImage: "radial-gradient(hsl(var(--border)) 1px, transparent 1px)",
-						backgroundSize: "20px 20px",
+						transform: `translate(${fit.x}px, ${fit.y}px) scale(${scale})`,
+						...(fill ? {} : DOTS),
 					}}
 				>
 					<DispatcherChip job={shown.job} />
@@ -524,6 +534,8 @@ export function SwarmCanvas({ state, highlight }: { state: SwarmState | null; hi
 		</div>
 	);
 }
+
+const DOTS = { backgroundImage: "radial-gradient(hsl(var(--border)) 1px, transparent 1px)", backgroundSize: "20px 20px" };
 
 const MOVE = "transition-transform duration-700 ease-[cubic-bezier(0.22,1,0.36,1)] motion-reduce:transition-none";
 

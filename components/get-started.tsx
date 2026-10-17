@@ -127,7 +127,7 @@ export function GetStarted() {
 					</Step>
 					<Step n={3} icon={MessageSquare} title="Ask questions">
 						<p>
-							Use <strong className="font-medium text-foreground">Ask the swarm</strong> beside the board for what is running, what it spent
+							Use <strong className="font-medium text-foreground">Ask the swarm</strong> above the board for what is running, what it spent
 							and what is waiting on you. On GitHub, tag <Code>@formalmind</Code> in any issue, PR or comment: chat gets an answer in seconds,
 							and a question that needs the repo or the Lean toolchain starts a real run.
 						</p>

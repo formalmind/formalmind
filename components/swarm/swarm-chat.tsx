@@ -19,6 +19,8 @@ const SUGGESTIONS = [
 export function SwarmChat({ repo }: { repo: string }) {
 	const [model, setModel] = useState<OpenAIModel>("gpt-6-luna");
 	const { messages, input, setInput, handleInputChange, handleSubmit, append, stop, isLoading, error } = useChat({
+		// A fixed id keeps the conversation when the sheet closes and opens again.
+		id: "swarm-chat",
 		api: "/api/swarm/chat",
 		body: { model },
 	});
