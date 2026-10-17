@@ -94,8 +94,11 @@ export function Landing({ signedIn }: { signedIn: boolean }) {
 			</main>
 
 			{showVideo ? (
-				// The intro floats bottom-right so it can play while the page is read.
-				<aside aria-label="Formal Mind quick intro" className="fixed bottom-4 right-4 z-40 w-[min(360px,calc(100vw-2rem))] overflow-hidden rounded-2xl border bg-black shadow-2xl animate-in fade-in-0 slide-in-from-bottom-4 duration-300">
+				// The intro floats bottom-right, small until hovered (or focused), then grows on the card-resize curve.
+				<aside
+					aria-label="Formal Mind quick intro"
+					className="fixed bottom-4 right-4 z-40 w-48 overflow-hidden rounded-2xl border bg-black shadow-2xl transition-[width] duration-300 ease-[cubic-bezier(0.22,1,0.36,1)] animate-in fade-in-0 slide-in-from-bottom-4 focus-within:w-[min(360px,calc(100vw-2rem))] hover:w-[min(360px,calc(100vw-2rem))] motion-reduce:transition-none"
+				>
 					<YouTubeVideo videoId="xyZZqCQlmCE" title="Formal Mind quick intro" />
 					<button
 						type="button"
