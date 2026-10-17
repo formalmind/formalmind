@@ -694,8 +694,12 @@ export function SwarmCanvas({ state, highlight, fill = false, title, actions }: 
 			) : null}
 			{fill ? (
 				<div className="pointer-events-none absolute inset-x-3 top-14 flex items-center justify-between gap-2 overflow-hidden">
-					<DispatcherChip job={shown.job} pinned />
-					<TurnChip turn={shown.turn} pinned />
+					<div className="pointer-events-auto flex min-w-0">
+						<DispatcherChip job={shown.job} pinned />
+					</div>
+					<div className="pointer-events-auto shrink-0">
+						<TurnChip turn={shown.turn} pinned />
+					</div>
 				</div>
 			) : null}
 			{title ? <div className="absolute left-3 top-3 flex min-w-0 max-w-[calc(100%-14rem)] items-center gap-2">{title}</div> : null}
@@ -835,13 +839,14 @@ export function SwarmCursor({ role, x, y, say, dim, turn, side }: { role: SwarmR
 				<polygon points="7 20 7 4 19 16 12 16 7 21" fill={color} stroke="white" strokeWidth="1.5" strokeLinejoin="round" />
 			</svg>
 			<div className={`absolute top-5 flex flex-col gap-1 ${flip ? "right-1 items-end" : "left-4 items-start"}`}>
-				<span className="inline-flex items-center gap-1 whitespace-nowrap rounded-full px-2 py-0.5 text-[12px] font-medium text-white shadow-sm" style={{ backgroundColor: color }}>
+				{/* The arrow lets clicks through; the pill and bubble take them, so what you see is what you point at. */}
+				<span className="pointer-events-auto inline-flex cursor-default items-center gap-1 whitespace-nowrap rounded-full px-2 py-0.5 text-[12px] font-medium text-white shadow-sm" style={{ backgroundColor: color }}>
 					{turn ? <span className="size-1.5 animate-pulse rounded-full bg-white" aria-hidden /> : null}
 					{role}
 					{turn ? <span className="font-normal opacity-80">· turn</span> : null}
 				</span>
 				{say ? (
-					<span key={say} className="w-max max-w-[240px] rounded-lg border bg-popover px-2.5 py-1.5 text-[13px] leading-snug text-popover-foreground shadow-md animate-in fade-in-0 zoom-in-95 duration-200">
+					<span key={say} className="pointer-events-auto w-max max-w-[240px] cursor-default rounded-lg border bg-popover px-2.5 py-1.5 text-[13px] leading-snug text-popover-foreground shadow-md animate-in fade-in-0 zoom-in-95 duration-200">
 						{say}
 					</span>
 				) : null}
