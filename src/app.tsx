@@ -12,11 +12,29 @@ import { WorkspaceContent } from "@/components/workspace-content";
 import { SWARM_REPO } from "@/lib/swarm-repo";
 import type { SessionData } from "@/lib/session";
 
-// Pages beyond the swarm load on first visit, so the landing page and the board ship only what they use.
-const ChatPage = lazy(() => import("@/components/chat").then((m) => ({ default: m.ChatPage })));
-const GetStarted = lazy(() => import("@/components/get-started").then((m) => ({ default: m.GetStarted })));
-const Onboarding = lazy(() => import("@/components/onboarding/onboarding").then((m) => ({ default: m.Onboarding })));
-const ProjectView = lazy(() => import("@/components/project/project-view").then((m) => ({ default: m.ProjectView })));
+/**
+ * Pages beyond the swarm load on first visit, so the landing page and the board ship only what they use. A chunk
+ * that fails to load belongs to an older deploy: reload once to get the new build instead of crashing.
+ */
+function page<T, P extends object>(load: () => Promise<T>, pick: (m: T) => React.ComponentType<P>) {
+	return lazy(() =>
+		load().then(
+			(m) => ({ default: pick(m) }),
+			(error) => {
+				if (!sessionStorage.getItem("fm:reloaded-for-chunk")) {
+					sessionStorage.setItem("fm:reloaded-for-chunk", "1");
+					window.location.reload();
+					return new Promise<never>(() => {});
+				}
+				throw error;
+			},
+		),
+	);
+}
+const ChatPage = page(() => import("@/components/chat"), (m) => m.ChatPage);
+const GetStarted = page(() => import("@/components/get-started"), (m) => m.GetStarted);
+const Onboarding = page(() => import("@/components/onboarding/onboarding"), (m) => m.Onboarding);
+const ProjectView = page(() => import("@/components/project/project-view"), (m) => m.ProjectView);
 
 type User = SessionData["user"];
 

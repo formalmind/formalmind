@@ -6,12 +6,12 @@
 	"compatibility_date": "2026-10-01",
 	"compatibility_flags": ["nodejs_compat", "global_fetch_strictly_public"],
 	// The Vite build. Files are served straight from the edge; unknown paths get index.html (the app routes them),
-	// and only /api and /auth wake the Worker.
+	// and only /api, /auth and /assets (so a missing chunk is a 404, not index.html) wake the Worker.
 	"assets": {
 		"directory": "dist",
 		"binding": "ASSETS",
 		"not_found_handling": "single-page-application",
-		"run_worker_first": ["/api/*", "/auth/*"]
+		"run_worker_first": ["/api/*", "/auth/*", "/assets/*"]
 	},
 	"observability": {
 		"enabled": true

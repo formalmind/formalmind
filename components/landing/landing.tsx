@@ -45,7 +45,7 @@ export function Landing({ signedIn }: { signedIn: boolean }) {
 			</header>
 
 			<main className="flex min-h-0 flex-1 flex-col overflow-y-auto">
-				<section className="mx-auto w-full max-w-6xl shrink-0 px-4 pb-8 pt-8 text-center sm:px-6 sm:pt-12">
+				<section className="mx-auto w-full max-w-6xl shrink-0 px-4 pb-10 pt-16 text-center sm:px-6 sm:pt-24">
 					<h1 className="mx-auto max-w-3xl text-balance text-4xl font-semibold tracking-tight sm:text-5xl">
 						A swarm of Lean4 agents for proving Solidity codebases
 					</h1>

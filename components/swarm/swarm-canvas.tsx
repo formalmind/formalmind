@@ -459,20 +459,8 @@ export function SwarmCanvas({ state, fill = false, contain = false, title, actio
 	const boardH = Math.max(H, PANEL_TOP + Math.max(...panelHs) + PAD);
 	// In fill mode people can pan and zoom: `view` sits on top of the fitted placement.
 	const [view, setRawView] = useState({ k: 1, x: 0, y: 0 });
-	// The board can't be dragged away: smaller than the frame it stays inside it, larger it can't leave a gap past its edges.
-	const bound = (v: { k: number; x: number; y: number }) => {
-		const s = fit.scale * v.k;
-		const clamp = (offset: number, size: number, frame: number, lead: number) => {
-			const far = frame - size - EDGE;
-			return Math.min(Math.max(offset, Math.min(lead, far)), Math.max(lead, far));
-		};
-		return {
-			k: v.k,
-			x: clamp(fit.x + v.x, W * s, fit.w, EDGE) - fit.x,
-			y: clamp(fit.y + v.y, boardH * s, fit.h, PINNED) - fit.y,
-		};
-	};
-	const setView = (next: (v: { k: number; x: number; y: number }) => { k: number; x: number; y: number }) => setRawView((v) => bound(next(v)));
+	// The canvas is unbounded: pan anywhere; the fit button in the zoom pill brings the board back.
+	const setView = (next: (v: { k: number; x: number; y: number }) => { k: number; x: number; y: number }) => setRawView(next);
 	const setViewRef = useRef(setView);
 	setViewRef.current = setView;
 	const [panning, setPanning] = useState(false);
@@ -914,8 +902,6 @@ export function SwarmCanvas({ state, fill = false, contain = false, title, actio
 }
 
 const MIN_ZOOM = 0.5;
-/** Margin the board keeps from the frame's edges when panned. */
-const EDGE = 24;
 const MAX_ZOOM = 3;
 
 /** Height kept clear above the board in fill mode for the pinned controls and the dispatcher row under them. */

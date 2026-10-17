@@ -54,6 +54,13 @@ app.all("/api/*", async (c) => {
 	return handler(c.req.raw);
 });
 
+// Built files. A chunk from an older deploy is gone: answer 404 rather than the app's index.html, which a browser
+// would try to run as a script.
+app.get("/assets/*", async (c) => {
+	const res = await c.env.ASSETS.fetch(c.req.raw);
+	return res.headers.get("content-type")?.includes("text/html") ? c.text("Not found", 404) : res;
+});
+
 // Everything else is the single-page app (wrangler serves files and falls back to index.html first).
 app.all("*", (c) => c.env.ASSETS.fetch(c.req.raw));
 
