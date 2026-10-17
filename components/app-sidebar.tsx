@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { Link, useLocation } from "react-router";
-import { BookOpen, ChevronRight, Plus } from "lucide-react"
+import { BookOpen, ChevronRight, Network, Plus } from "lucide-react"
 import {
 	Sidebar,
 	SidebarContent,
@@ -63,13 +63,11 @@ function useOpenFolders() {
 	return [open, set] as const
 }
 
-/** One project as a folder: its name, a chevron, and a + for a new chat; inside, its pages and chats. */
+/** One project as a folder: its name, a chevron, and a + for a new chat; inside, its roadmap, setup and chats. */
 function ProjectFolder({ project, open, onOpenChange, pathname }: { project: Project; open: boolean; onOpenChange: (open: boolean) => void; pathname: string }) {
 	const chats = useProjectChats(project.repo)
-	const base = projectPath(project.repo)
 	const name = project.repo.split("/")[1] ?? project.repo
 	const pages = [
-		{ title: "Swarm", url: base },
 		{ title: "Roadmap", url: projectPath(project.repo, "roadmap") },
 		{ title: "Setup", url: `/onboarding?repo=${encodeURIComponent(project.repo)}` },
 	]
@@ -164,6 +162,8 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
 			<SidebarContent>
 				<SidebarGroup>
 					<SidebarMenu>
+						{/* One swarm, one budget, working across every project: the home page. */}
+						<NavLink item={{ title: "Swarm", url: "/", icon: Network }} active={pathname === "/" || pathname === "/swarm/chat"} />
 						<SidebarMenuItem>
 							<SidebarMenuButton asChild isActive={pathname === "/onboarding" && window.location.search.includes("new=1")} tooltip="New project" className="font-normal data-[active=true]:font-normal">
 								<Link to="/onboarding?new=1">

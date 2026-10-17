@@ -5,6 +5,8 @@ import { AuthProvider } from "@/components/auth-context";
 import { ChatConversationsProvider } from "@/components/chat-conversations";
 import { Landing } from "@/components/landing/landing";
 import LoginPage from "@/components/login";
+import { SwarmWorkspace } from "@/components/swarm/swarm-workspace";
+import { SWARM_REPO } from "@/lib/swarm-repo";
 import { ThemeProvider } from "@/components/theme-provider";
 import { SidebarProvider } from "@/components/ui/sidebar";
 import { WorkspaceContent } from "@/components/workspace-content";
@@ -32,7 +34,8 @@ function page<T, P extends object>(load: () => Promise<T>, pick: (m: T) => React
 const ChatPage = page(() => import("@/components/chat"), (m) => m.ChatPage);
 const GetStarted = page(() => import("@/components/get-started"), (m) => m.GetStarted);
 const Onboarding = page(() => import("@/components/onboarding/onboarding"), (m) => m.Onboarding);
-const ProjectSwarmPage = page(() => import("@/components/projects/project-pages"), (m) => m.ProjectSwarmPage);
+const ProjectHomePage = page(() => import("@/components/projects/project-pages"), (m) => m.ProjectHomePage);
+const SwarmChatPage = page(() => import("@/components/projects/project-pages"), (m) => m.SwarmChatPage);
 const ProjectRoadmapPage = page(() => import("@/components/projects/project-pages"), (m) => m.ProjectRoadmapPage);
 const ProjectChatPage = page(() => import("@/components/projects/project-pages"), (m) => m.ProjectChatPage);
 const FirstProject = page(() => import("@/components/projects/project-pages"), (m) => m.FirstProject);
@@ -105,9 +108,10 @@ export function App() {
 				<Route element={<RequireUser user={user} />}>
 					{user ? (
 						<Route element={<SignedInLayout user={user} />}>
-							<Route path="/" element={<Title text="Formal Mind"><FirstProject /></Title>} />
+							<Route path="/" element={<Title text="Swarm · Formal Mind"><SwarmWorkspace repo={SWARM_REPO} /></Title>} />
+							<Route path="/swarm/chat" element={<Title text="Ask the swarm · Formal Mind"><SwarmChatPage /></Title>} />
 							<Route path="/roadmap" element={<Title text="Roadmap · Formal Mind"><FirstProject page="roadmap" /></Title>} />
-							<Route path="/projects/:owner/:name" element={<Title text="Swarm · Formal Mind"><ProjectSwarmPage /></Title>} />
+							<Route path="/projects/:owner/:name" element={<ProjectHomePage />} />
 							<Route path="/projects/:owner/:name/roadmap" element={<Title text="Roadmap · Formal Mind"><ProjectRoadmapPage /></Title>} />
 							<Route path="/projects/:owner/:name/chat" element={<Title text="Chat · Formal Mind"><ProjectChatPage /></Title>} />
 							<Route path="/projects/:owner/:name/chat/:chatId" element={<Title text="Chat · Formal Mind"><ProjectChatPage /></Title>} />

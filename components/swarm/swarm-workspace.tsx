@@ -3,10 +3,9 @@
 import { useEffect, useState } from "react";
 import { RefreshCw } from "lucide-react";
 import type { SwarmState } from "@/lib/swarm";
-import { Sheet, SheetContent, SheetDescription, SheetTitle, SheetTrigger } from "@/components/ui/sheet";
+import { Link } from "react-router";
 import { SidebarTrigger } from "@/components/ui/sidebar";
 import { isLiveRun, SwarmCanvas } from "./swarm-canvas";
-import { SwarmChat } from "./swarm-chat";
 import { TextSwap } from "@/components/motion/text-swap";
 
 const POLL_MS = 10_000;
@@ -104,23 +103,13 @@ export function SwarmWorkspace({ repo }: { repo: string }) {
 						>
 							<RefreshCw className={`size-3.5 ${loading ? "animate-spin" : ""}`} />
 						</button>
-						<Sheet>
-							<SheetTrigger asChild>
-								<button
-									type="button"
-									className="inline-flex h-8 items-center rounded-full bg-foreground px-3 text-sm font-medium text-background shadow-sm transition-opacity hover:opacity-90"
-								>
-									Ask the swarm
-								</button>
-							</SheetTrigger>
-							<SheetContent className="flex w-full flex-col gap-0 p-0 sm:max-w-[420px]">
-								<div className="flex h-14 shrink-0 items-center px-4">
-									<SheetTitle className="text-sm font-semibold">Ask the swarm</SheetTitle>
-									<SheetDescription className="sr-only">Ask what the agents are doing.</SheetDescription>
-								</div>
-								<SwarmChat repo={repo} />
-							</SheetContent>
-						</Sheet>
+						{/* The swarm's chat is a page of its own, not a side panel. */}
+						<Link
+							to="/swarm/chat"
+							className="inline-flex h-8 items-center rounded-full bg-foreground px-3 text-sm font-medium text-background shadow-sm transition-opacity hover:opacity-90"
+						>
+							Ask the swarm
+						</Link>
 					</>
 				}
 			/>

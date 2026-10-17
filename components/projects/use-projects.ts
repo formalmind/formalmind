@@ -1,5 +1,5 @@
 import { useEffect, useSyncExternalStore } from "react";
-import type { UIMessage } from "ai";
+import type { Message } from "ai";
 import type { Project } from "@/lib/projects";
 
 export type { Project };
@@ -46,7 +46,7 @@ export const projectPath = (repo: string, page = "") => `/projects/${repo}${page
 
 /* ── Chats: each project's swarm chats, kept in this browser ── */
 
-export type ProjectChat = { id: string; title: string; messages: UIMessage[]; updatedAt: number };
+export type ProjectChat = { id: string; title: string; messages: Message[]; updatedAt: number };
 
 const CHATS_KEY = "fm-project-chats";
 const chatListeners = new Set<() => void>();
@@ -88,7 +88,7 @@ export function getProjectChat(repo: string, id: string): ProjectChat | undefine
 }
 
 /** Saves a chat's messages; the first question becomes its title. Newest chats come first. */
-export function saveProjectChat(repo: string, id: string, messages: UIMessage[]) {
+export function saveProjectChat(repo: string, id: string, messages: Message[]) {
 	if (messages.length === 0) return;
 	const all = readChats();
 	const list = all[repo] ?? [];

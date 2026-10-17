@@ -1,8 +1,15 @@
-import { Suspense, lazy, useEffect, useMemo } from "react";
+import { Suspense, lazy, useEffect, useMemo, useRef, useState } from "react";
 import { Link, Navigate, useNavigate, useParams } from "react-router";
-import { Loader2 } from "lucide-react";
-import { SwarmWorkspace } from "@/components/swarm/swarm-workspace";
+import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
+import type { UIMessage } from "ai";
+import { ChevronDown, FolderGit2, Loader2 } from "lucide-react";
 import { SwarmChat } from "@/components/swarm/swarm-chat";
+import { ChatComposer } from "@/components/chat-composer";
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
+import { useChatWithInterruptions } from "@/hooks/useChatWithInterruptions";
+import type { OpenAIModel } from "@/lib/llm";
+import { SWARM_REPO } from "@/lib/swarm-repo";
 import { SidebarTrigger } from "@/components/ui/sidebar";
 import {
 	getProjectChat,
@@ -13,6 +20,9 @@ import {
 	useProjects,
 	type Project,
 } from "@/components/projects/use-projects";
+
+/** The swarm's own conversation is kept beside the project chats, under this key. */
+const SWARM_CHAT_KEY = "swarm";
 
 const ProjectView = lazy(() => import("@/components/project/project-view").then((m) => ({ default: m.ProjectView })));
 
@@ -57,12 +67,10 @@ function Unknown() {
 	return <Navigate to="/" replace />;
 }
 
-export function ProjectSwarmPage() {
-	const { project, repo, loading } = useRouteProject();
-	if (loading) return <Loading />;
-	if (!project || !repo) return <Unknown />;
-	if (!project.proofsRepo) return <NotStarted repo={repo} what="board" />;
-	return <SwarmWorkspace repo={project.proofsRepo} />;
+/** A project's own page is its roadmap; the swarm is one board across every project, on the home page. */
+export function ProjectHomePage() {
+	const { owner, name } = useParams<{ owner: string; name: string }>();
+	return <Navigate to={`/projects/${owner}/${name}/roadmap`} replace />;
 }
 
 export function ProjectRoadmapPage() {
@@ -77,6 +85,90 @@ export function ProjectRoadmapPage() {
 	);
 }
 
+/** The project picker on a chat's shelf: which project the chat is about. Picking another starts a chat there. */
+function ProjectPicker({ repo }: { repo: string }) {
+	const projects = useProjects() ?? [];
+	const navigate = useNavigate();
+	return (
+		<DropdownMenu>
+			<DropdownMenuTrigger className="inline-flex h-8 items-center gap-1.5 rounded-full bg-secondary px-3 text-sm text-secondary-foreground outline-none hover:bg-secondary/80">
+				<FolderGit2 className="size-3.5" />
+				<span className="max-w-[14rem] truncate">{repo}</span>
+				<ChevronDown className="size-3.5 text-muted-foreground" />
+			</DropdownMenuTrigger>
+			<DropdownMenuContent align="start">
+				{projects.map((p) => (
+					<DropdownMenuItem key={p.repo} onSelect={() => p.repo !== repo && navigate(projectPath(p.repo, "chat"))}>
+						{p.repo}
+					</DropdownMenuItem>
+				))}
+				<DropdownMenuItem onSelect={() => navigate("/onboarding?new=1")}>New project…</DropdownMenuItem>
+			</DropdownMenuContent>
+		</DropdownMenu>
+	);
+}
+
+/** A normal chat about one project. Its messages are kept in this browser and listed in the project's folder. */
+function ProjectChat({ repo, chatId }: { repo: string; chatId: string }) {
+	const saved = useMemo(() => getProjectChat(repo, chatId), [repo, chatId]);
+	const [model, setModel] = useState<OpenAIModel>("gpt-6-luna");
+	const { messages, input, setInput, handleInputChange, handleSubmit, stop, isLoading, error } = useChatWithInterruptions({
+		model,
+		id: `${repo}:${chatId}`,
+		initialMessages: saved?.messages ?? [],
+		project: repo,
+	});
+	const scrollRef = useRef<HTMLDivElement>(null);
+	useEffect(() => {
+		scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight });
+	}, [messages]);
+	useEffect(() => {
+		if (!isLoading && messages.length > 0) saveProjectChat(repo, chatId, messages);
+	}, [isLoading, messages, repo, chatId]);
+
+	return (
+		<div className="flex min-h-0 flex-1 flex-col">
+			<div className="flex items-center gap-3 p-4 pb-0 sm:px-6 sm:pt-6">
+				<SidebarTrigger className="-ml-1" />
+				<h1 className="min-w-0 truncate text-sm">{saved?.title ?? "New chat"}</h1>
+			</div>
+			<div className="mx-auto flex min-h-0 w-full max-w-3xl flex-1 flex-col">
+				<div ref={scrollRef} className="min-h-0 flex-1 space-y-5 overflow-y-auto px-4 py-4">
+					{messages.length === 0 ? <p className="text-sm text-muted-foreground">Ask anything about {repo}.</p> : null}
+					{messages.map((m) => (
+						<div key={m.id} className={m.role === "user" ? "flex justify-end" : ""}>
+							{m.role === "user" ? (
+								<p className="max-w-[85%] rounded-2xl bg-secondary px-3.5 py-2 text-sm text-secondary-foreground">{m.content}</p>
+							) : (
+								<div className="prose prose-sm max-w-none leading-6 dark:prose-invert prose-p:my-2 prose-ul:my-2">
+									<ReactMarkdown remarkPlugins={[remarkGfm]}>{m.content}</ReactMarkdown>
+								</div>
+							)}
+						</div>
+					))}
+					{error ? <p className="text-sm text-destructive">{error.message}</p> : null}
+				</div>
+				<div className="p-3 pt-0">
+					<ChatComposer
+						value={input}
+						onChange={handleInputChange}
+						onSubmit={() => {
+							handleSubmit();
+							setInput("");
+						}}
+						onStop={stop}
+						isLoading={isLoading}
+						model={model}
+						onModelChange={setModel}
+						placeholder={`Ask about ${repo}…`}
+						context={<ProjectPicker repo={repo} />}
+					/>
+				</div>
+			</div>
+		</div>
+	);
+}
+
 /** `/projects/:owner/:name/chat` starts a new chat; `/chat/:chatId` opens a saved one. */
 export function ProjectChatPage() {
 	const { project, repo, loading } = useRouteProject();
@@ -84,30 +176,32 @@ export function ProjectChatPage() {
 	const navigate = useNavigate();
 
 	useEffect(() => {
-		if (repo && project?.proofsRepo && !chatId) navigate(projectPath(repo, `chat/${newChatId()}`), { replace: true });
+		if (repo && project && !chatId) navigate(projectPath(repo, `chat/${newChatId()}`), { replace: true });
 	}, [repo, project, chatId, navigate]);
-
-	const saved = useMemo(() => (repo && chatId ? getProjectChat(repo, chatId) : undefined), [repo, chatId]);
 
 	if (loading) return <Loading />;
 	if (!project || !repo) return <Unknown />;
-	if (!project.proofsRepo) return <NotStarted repo={repo} what="chat" />;
 	if (!chatId) return <Loading />;
+	// Keyed by chat so switching chats starts from that chat's own messages.
+	return <ProjectChat key={`${repo}:${chatId}`} repo={repo} chatId={chatId} />;
+}
+
+/** "Ask the swarm": one conversation with the swarm, as a page of its own. */
+export function SwarmChatPage() {
+	const saved = useMemo(() => getProjectChat(SWARM_CHAT_KEY, "main"), []);
 	return (
 		<div className="flex min-h-0 flex-1 flex-col">
 			<div className="flex items-center gap-3 p-4 pb-0 sm:px-6 sm:pt-6">
 				<SidebarTrigger className="-ml-1" />
-				<h1 className="min-w-0 truncate text-sm">{saved?.title ?? "New chat"}</h1>
-				<span className="shrink-0 text-sm text-muted-foreground">{repo}</span>
+				<h1 className="text-sm">Ask the swarm</h1>
+				<Link to="/" className="text-sm text-muted-foreground hover:text-foreground">Back to the swarm</Link>
 			</div>
 			<div className="mx-auto flex min-h-0 w-full max-w-3xl flex-1 flex-col">
-				{/* Keyed by chat so switching chats starts from that chat's own messages. */}
 				<SwarmChat
-					key={chatId}
-					repo={project.proofsRepo}
-					chatId={`${repo}:${chatId}`}
-					initialMessages={saved?.messages}
-					onMessagesChange={(messages) => saveProjectChat(repo, chatId, messages)}
+					repo={SWARM_REPO}
+					chatId="swarm-chat"
+					initialMessages={saved?.messages as UIMessage[] | undefined}
+					onMessagesChange={(messages) => saveProjectChat(SWARM_CHAT_KEY, "main", messages)}
 				/>
 			</div>
 		</div>
