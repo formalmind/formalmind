@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { MarkGithubIcon } from "@primer/octicons-react";
 import { useState } from "react";
-import { ArrowRight, CircleDollarSign, Loader2, ShieldCheck, Sparkles, Users } from "lucide-react";
+import { ArrowRight, CircleDollarSign, Loader2, ShieldCheck, Sparkles } from "lucide-react";
 import { STEP_COPY, TeamPicker } from "@/components/onboarding/steps";
 import { SwarmCanvas } from "@/components/swarm/swarm-canvas";
 import YouTubeVideo from "@/components/youtube-video";
@@ -134,7 +134,7 @@ export function Landing({ signedIn }: { signedIn: boolean }) {
 				</section>
 
 				<section id="teams" className="mx-auto max-w-6xl px-4 pb-20 sm:px-6">
-					<h2 className="flex items-center gap-2 text-2xl font-semibold tracking-tight"><Users className="size-5" /> Pick your team size</h2>
+					<h2 className="text-2xl font-semibold tracking-tight">Pick your team size</h2>
 					<p className="mt-2 max-w-2xl text-muted-foreground">{STEP_COPY.team.lead}</p>
 					<div className="mt-8 max-w-4xl">
 						<TeamPicker value={team} onChange={setTeam} plannerPick={plan?.team?.preset ?? "pair"} squadSize={squadSize} onSquadSize={setSquadSize} />
