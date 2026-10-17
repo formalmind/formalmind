@@ -27,11 +27,20 @@ export function SetupPreview({ repo, plan, done, failed, startHref }: { repo: st
 	const [team, setTeam] = useState<TeamPreset>(plannerPick);
 	const [squadSize, setSquadSize] = useState(4);
 	const [dailyUsd, setDailyUsd] = useState(5);
+	// A choice turns its step green: picking a team (or continuing past the planner's pick), setting a budget.
+	const [chosen, setChosen] = useState<{ team?: boolean; budget?: boolean }>({});
 	// A new repository starts over at its plan, with the planner's team suggestion.
-	useEffect(() => setStep("plan"), [repo]);
+	useEffect(() => {
+		setStep("plan");
+		setChosen({});
+	}, [repo]);
 	useEffect(() => setTeam(plannerPick), [plannerPick]);
 	const index = SETUP_STEPS.findIndex((s) => s.key === step);
-	const go = (offset: number) => setStep(SETUP_STEPS[Math.min(SETUP_STEPS.length - 1, Math.max(0, index + offset))].key);
+	const go = (offset: number) => {
+		if (offset > 0 && (step === "team" || step === "budget")) setChosen((c) => ({ ...c, [step]: true }));
+		goTo(offset);
+	};
+	const goTo = (offset: number) => setStep(SETUP_STEPS[Math.min(SETUP_STEPS.length - 1, Math.max(0, index + offset))].key);
 	const signUp = () => {
 		window.location.href = startHref;
 	};
@@ -41,7 +50,7 @@ export function SetupPreview({ repo, plan, done, failed, startHref }: { repo: st
 			{/* Steps and the way forward stay at the top, pinned while the step below scrolls. */}
 			<div className="sticky top-0 z-10 -mx-4 -mt-4 flex flex-wrap items-center gap-2 rounded-t-2xl border-b bg-card/95 px-4 py-3 backdrop-blur sm:-mx-6 sm:-mt-6 sm:px-6">
 				<div className="min-w-0 flex-1">
-					<StepList step={step} done={{ plan: done }} onSelect={setStep} horizontal />
+					<StepList step={step} done={{ plan: done, team: chosen.team, budget: chosen.budget }} onSelect={setStep} horizontal />
 				</div>
 				<div className="flex shrink-0 gap-2">
 					{index > 0 ? (
@@ -63,11 +72,22 @@ export function SetupPreview({ repo, plan, done, failed, startHref }: { repo: st
 					</Panel>
 				) : step === "team" ? (
 					<Panel {...STEP_COPY.team}>
-						<TeamPicker value={team} onChange={setTeam} plannerPick={plannerPick} squadSize={squadSize} onSquadSize={setSquadSize} />
+						<TeamPicker
+							value={team}
+							onChange={(next) => {
+								setTeam(next);
+								setChosen((c) => ({ ...c, team: true }));
+							}} plannerPick={plannerPick} squadSize={squadSize} onSquadSize={setSquadSize} />
 					</Panel>
 				) : step === "budget" ? (
 					<Panel {...STEP_COPY.budget}>
-						<BudgetCard dailyUsd={dailyUsd} onChange={setDailyUsd} />
+						<BudgetCard
+							dailyUsd={dailyUsd}
+							onChange={(usd) => {
+								setDailyUsd(usd);
+								setChosen((c) => ({ ...c, budget: true }));
+							}}
+						/>
 					</Panel>
 				) : step === "credits" ? (
 					<Panel {...STEP_COPY.credits}>
