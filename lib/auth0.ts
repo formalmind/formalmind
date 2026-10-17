@@ -71,6 +71,19 @@ async function getAccessTokenForConnection({ connection }: { connection: string 
 
 export const auth0 = { getSession, getAccessTokenForConnection };
 
+/** A small page saying why sign-in failed, with a way to try again. */
+function authError(reason: string) {
+	const escape = (s: string) => s.replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]!);
+	console.error("[auth] sign-in failed:", reason);
+	const html = `<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Sign-in failed · Formal Mind</title>
+<body style="font:15px/1.5 system-ui,sans-serif;display:grid;place-items:center;min-height:100vh;margin:0;color:#0c0a09">
+<main style="max-width:420px;padding:24px;text-align:center"><h1 style="font-size:20px">Sign-in didn't go through</h1>
+<p style="color:#78716c">${escape(reason)}</p>
+<p><a href="/auth/login" style="display:inline-block;margin-top:8px;padding:8px 16px;border-radius:999px;background:#0c0a09;color:#fff;text-decoration:none">Try again</a>
+<a href="/welcome" style="margin-left:12px;color:#78716c">Back home</a></p></main></body>`;
+	return new Response(html, { status: 400, headers: { "Content-Type": "text/html; charset=utf-8", "Set-Cookie": cookie(TX_COOKIE, "", { maxAge: 0 }) } });
+}
+
 const redirect = (location: string, cookies: string[] = []) => {
 	const headers = new Headers({ Location: location });
 	for (const c of cookies) headers.append("Set-Cookie", c);
@@ -99,13 +112,15 @@ export async function handleAuth(path: string): Promise<Response> {
 			state,
 			code_challenge: challenge,
 			code_challenge_method: "S256",
-			...(url.searchParams.get("screen_hint") ? { screen_hint: url.searchParams.get("screen_hint")! } : {}),
 		}).toString();
 		return redirect(authorize.toString(), [cookie(TX_COOKIE, tx, { maxAge: 600 })]);
 	}
 
 	if (path === "/auth/callback") {
 		const tx = JSON.parse(readCookie(TX_COOKIE) ?? "null") as { state: string; verifier: string; returnTo: string } | null;
+		// Auth0 sends failures back here too; show them instead of starting the login again (which loops).
+		const failure = url.searchParams.get("error_description") ?? url.searchParams.get("error");
+		if (failure) return authError(failure);
 		const code = url.searchParams.get("code");
 		if (!tx || !code || url.searchParams.get("state") !== tx.state) return redirect("/auth/login");
 		const tokens = await tokenRequest({ grant_type: "authorization_code", code, code_verifier: tx.verifier, redirect_uri: `${baseUrl}/auth/callback` });

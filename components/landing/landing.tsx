@@ -33,7 +33,7 @@ export function Landing({ signedIn }: { signedIn: boolean }) {
 	const locked = Boolean(repo) && !(error && !plan);
 	// The intro starts as an icon, opens small, and can expand to most of the page.
 	const [video, setVideo] = useState<"icon" | "small" | "big">("icon");
-	const startHref = signedIn ? "/onboarding" : "/auth/login?screen_hint=signup&returnTo=%2Fonboarding";
+	const startHref = signedIn ? "/onboarding" : "/auth/login?returnTo=%2Fonboarding";
 
 	const run = (value: string) => {
 		setInput(value);
