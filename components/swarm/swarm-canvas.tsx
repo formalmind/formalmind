@@ -359,10 +359,26 @@ export function SwarmCanvas({ state, highlight, fill = false, title, actions }: 
 	actions?: ReactNode;
 }) {
 	const frameRef = useRef<HTMLDivElement>(null);
-	const [fit, setFit] = useState({ scale: 1, x: 0, y: 0 });
+	const [fit, setFit] = useState({ scale: 1, x: 0, y: 0, w: 0, h: 0 });
 	const { scale } = fit;
 	// In fill mode people can pan and zoom: `view` sits on top of the fitted placement.
-	const [view, setView] = useState({ k: 1, x: 0, y: 0 });
+	const [view, setRawView] = useState({ k: 1, x: 0, y: 0 });
+	// The board can't be dragged away: smaller than the frame it stays inside it, larger it can't leave a gap past its edges.
+	const bound = (v: { k: number; x: number; y: number }) => {
+		const s = fit.scale * v.k;
+		const clamp = (offset: number, size: number, frame: number, lead: number) => {
+			const far = frame - size - EDGE;
+			return Math.min(Math.max(offset, Math.min(lead, far)), Math.max(lead, far));
+		};
+		return {
+			k: v.k,
+			x: clamp(fit.x + v.x, W * s, fit.w, EDGE) - fit.x,
+			y: clamp(fit.y + v.y, H * s, fit.h, PINNED) - fit.y,
+		};
+	};
+	const setView = (next: (v: { k: number; x: number; y: number }) => { k: number; x: number; y: number }) => setRawView((v) => bound(next(v)));
+	const setViewRef = useRef(setView);
+	setViewRef.current = setView;
 	const [panning, setPanning] = useState(false);
 	const drag = useRef<{ id: number; x: number; y: number; moved: boolean } | null>(null);
 	const zoomAt = (factor: number, px: number, py: number) =>
@@ -408,9 +424,9 @@ export function SwarmCanvas({ state, highlight, fill = false, title, actions }: 
 		if (!el) return;
 		const observer = new ResizeObserver(([entry]) => {
 			const { width, height } = entry.contentRect;
-			if (!fill) return setFit({ scale: width / W, x: 0, y: 0 });
+			if (!fill) return setFit({ scale: width / W, x: 0, y: 0, w: width, h: height });
 			const next = Math.min(width / W, (height - PINNED) / H);
-			setFit({ scale: next, x: (width - W * next) / 2, y: PINNED + Math.max(0, (height - PINNED - H * next) / 2) });
+			setFit({ scale: next, x: (width - W * next) / 2, y: PINNED + Math.max(0, (height - PINNED - H * next) / 2), w: width, h: height });
 		});
 		observer.observe(el);
 		return () => observer.disconnect();
@@ -421,12 +437,19 @@ export function SwarmCanvas({ state, highlight, fill = false, title, actions }: 
 		const el = frameRef.current;
 		if (!el || !fill) return;
 		const onWheel = (e: WheelEvent) => {
+			const list = (e.target as HTMLElement).closest<HTMLElement>("[data-scroll]");
+			// A list that can still scroll this way takes the wheel; at its end the board pans.
+			if (list && !e.ctrlKey && !e.metaKey && e.deltaY !== 0) {
+				const atTop = list.scrollTop <= 0;
+				const atEnd = list.scrollTop + list.clientHeight >= list.scrollHeight - 1;
+				if ((e.deltaY < 0 && !atTop) || (e.deltaY > 0 && !atEnd)) return;
+			}
 			e.preventDefault();
 			if (e.ctrlKey || e.metaKey) {
 				const box = el.getBoundingClientRect();
 				zoomAtRef.current(Math.exp(-e.deltaY * 0.01), e.clientX - box.left, e.clientY - box.top);
 			} else {
-				setView((v) => ({ ...v, x: v.x - e.deltaX, y: v.y - e.deltaY }));
+				setViewRef.current((v) => ({ ...v, x: v.x - e.deltaX, y: v.y - e.deltaY }));
 			}
 		};
 		el.addEventListener("wheel", onWheel, { passive: false });
@@ -642,7 +665,7 @@ export function SwarmCanvas({ state, highlight, fill = false, title, actions }: 
 					<button type="button" onClick={() => zoomCentre(1.25)} className="flex size-8 items-center justify-center rounded-full transition-colors hover:text-foreground" aria-label="Zoom in" title="Zoom in">
 						<Plus className="size-3.5" />
 					</button>
-					<button type="button" onClick={() => setView({ k: 1, x: 0, y: 0 })} className="flex size-8 items-center justify-center rounded-full border-l transition-colors hover:text-foreground" aria-label="Fit to screen" title="Fit to screen">
+					<button type="button" onClick={() => setRawView({ k: 1, x: 0, y: 0 })} className="flex size-8 items-center justify-center rounded-full border-l transition-colors hover:text-foreground" aria-label="Fit to screen" title="Fit to screen">
 						<Maximize className="size-3.5" />
 					</button>
 				</div>
@@ -652,6 +675,8 @@ export function SwarmCanvas({ state, highlight, fill = false, title, actions }: 
 }
 
 const MIN_ZOOM = 0.5;
+/** Margin the board keeps from the frame's edges when panned. */
+const EDGE = 24;
 const MAX_ZOOM = 3;
 
 /** Height kept clear above the board in fill mode for the pinned controls and the dispatcher row under them. */
@@ -812,9 +837,9 @@ function DispatcherChip({ job, pinned = false }: { job: string | null; pinned?: 
 
 function Panel({ index, title, children }: { index: number; title: string; children: React.ReactNode }) {
 	return (
-		<div className="absolute rounded-lg border bg-background p-3" style={{ left: panelX(index), top: PANEL_TOP, width: PANEL_W, height: 136 }}>
+		<div className="absolute flex flex-col rounded-lg border bg-background p-3" style={{ left: panelX(index), top: PANEL_TOP, width: PANEL_W, height: 136 }}>
 			<p className="font-mono text-[12px] font-medium text-muted-foreground">{title}</p>
-			<div className="mt-2">{children}</div>
+			<div className="mt-2 flex min-h-0 flex-1 flex-col">{children}</div>
 		</div>
 	);
 }
@@ -829,7 +854,7 @@ function LedgerPanel({ spend, costs }: { spend: number; costs: { role: SwarmRole
 			<div className="mt-1.5 h-1.5 overflow-hidden rounded-full bg-muted">
 				<div className="h-full rounded-full bg-foreground/70 transition-[width] duration-700" style={{ width: `${Math.min(100, (spend / 5) * 100)}%` }} />
 			</div>
-			<ul className="mt-2 space-y-0.5 font-mono text-[12px] text-muted-foreground">
+			<ul data-scroll className="no-scrollbar mt-2 min-h-0 flex-1 space-y-0.5 overflow-y-auto font-mono text-[12px] text-muted-foreground">
 				{costs.map((cost, i) => (
 					<li key={`${i}-${cost.role}-${cost.usd}`} className="flex justify-between">
 						<span style={{ color: ROLE_COLORS[cost.role] }}>{cost.role}</span>
@@ -844,7 +869,7 @@ function LedgerPanel({ spend, costs }: { spend: number; costs: { role: SwarmRole
 function NotebookPanel({ notes }: { notes: Note[] }) {
 	return (
 		<Panel index={1} title="#55 notebook">
-			<ul className="space-y-1 text-[13px]">
+			<ul data-scroll className="no-scrollbar min-h-0 flex-1 space-y-1 overflow-y-auto text-[13px]">
 				{notes.length === 0 ? <li className="text-muted-foreground">Each run opens a task list here first.</li> : null}
 				{notes.map((n, i) => (
 					<li key={`${i}-${n.text}`} className="flex items-start gap-2">
