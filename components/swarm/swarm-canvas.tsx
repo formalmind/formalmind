@@ -686,7 +686,7 @@ export function SwarmCanvas({ state, highlight, fill = false, title, actions }: 
 					<TurnChip turn={shown.turn} pinned />
 				</div>
 			) : null}
-			{title ? <div className="absolute left-3 top-3 flex min-w-0 max-w-[calc(100%-14rem)] items-center">{title}</div> : null}
+			{title ? <div className="absolute left-3 top-3 flex min-w-0 max-w-[calc(100%-14rem)] items-center gap-2">{title}</div> : null}
 			<div className="absolute right-3 top-3 flex items-center gap-2">
 			{actions}
 			{live && run ? (
