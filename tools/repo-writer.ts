@@ -1,5 +1,5 @@
 import { Octokit } from "octokit";
-import simpleGit from "simple-git";
+import { simpleGit } from "simple-git";
 import fs, { rm, mkdir } from "fs/promises";
 import { existsSync } from "fs";
 import path from "path";
