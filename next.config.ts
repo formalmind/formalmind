@@ -1,4 +1,5 @@
 import type { NextConfig } from "next";
+import { initOpenNextCloudflareForDev } from "@opennextjs/cloudflare";
 import remarkGfm from 'remark-gfm'
 import rehypeHighlight from 'rehype-highlight'
 import rehypeCallouts from 'rehype-callouts'
@@ -24,6 +25,9 @@ const withMDX = createMDX({
 			rehypePlugins: [rehypeCallouts, [rehypeHighlight, { plainText: ['mermaid'] }]],
 	},
 })
+
+// Cloudflare bindings (the FORMALMIND KV namespace) in `next dev`, backed by wrangler's local state.
+initOpenNextCloudflareForDev();
 
 // Merge MDX config with Next.js config
 export default withMDX(nextConfig)

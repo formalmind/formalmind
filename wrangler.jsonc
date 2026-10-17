@@ -11,9 +11,14 @@
 	},
 	"observability": {
 		"enabled": true
-	}
+	},
+	// Onboarding drafts, credit balances and applied Stripe payments (lib/kv.ts).
+	"kv_namespaces": [
+		{ "binding": "FORMALMIND", "id": "9d16b5c66b4645cb9ac59e8b1d81d0c8" }
+	]
 	// Secrets (set with `npx wrangler secret put <NAME>`, or `.dev.vars` for local preview):
 	//   OPENAI_API_KEY, AUTH0_SECRET, AUTH0_DOMAIN, AUTH0_CLIENT_ID, AUTH0_CLIENT_SECRET,
 	//   AUTH0_M2M_CLIENT_ID, AUTH0_M2M_CLIENT_SECRET, APP_BASE_URL,
-	//   GITHUB_APP_ID, GITHUB_APP_PRIVATE_KEY, GITHUB_WEBHOOK_SECRET
+	//   GITHUB_APP_ID, GITHUB_APP_PRIVATE_KEY, GITHUB_WEBHOOK_SECRET, GITHUB_TOKEN,
+	//   STRIPE_SECRET_KEY, STRIPE_WEBHOOK_SECRET
 }

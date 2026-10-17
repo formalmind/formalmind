@@ -7,7 +7,6 @@ import "./globals.css";
 import { SidebarProvider } from "@/components/ui/sidebar";
 import { AppSidebar } from "@/components/app-sidebar";
 import { auth0 } from "@/lib/auth0"
-import LoginPage from "@/components/login"
 import { AuthProvider } from "@/components/auth-context";
 import { WorkspaceContent } from "@/components/workspace-content";
 import { ThemeProvider } from "@/components/theme-provider";
@@ -53,10 +52,10 @@ export default async function RootLayout({
 	if (!session) {
 		return (
 			<html lang="en" suppressHydrationWarning>
-				<body className="text-sm" suppressHydrationWarning>
-					<ThemeProvider>
-						<LoginPage />
-					</ThemeProvider>
+				<body className={`${geistSans.variable} ${geistMono.variable} antialiased`} suppressHydrationWarning>
+					{/* Signed out, only the public pages render (the landing page and /login); the
+					    middleware sends every other route to Auth0 first. */}
+					<ThemeProvider>{children}</ThemeProvider>
 				</body>
 			</html>
 		)

@@ -54,3 +54,6 @@ GRANT.md
 # storybook
 storybook-static/
 *storybook.log
+
+# Solidity tooling cache (not part of the app)
+/cache/

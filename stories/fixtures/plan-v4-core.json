@@ -1,0 +1,113 @@
+{
+  "summary": "Uniswap v4 Core manages pool state in the singleton `PoolManager` and supports pool initialization, swaps, liquidity changes, donations, and token settlement. Pool actions run within an `unlock` callback, where currency deltas must be settled before the unlock ends, and initialized pools can invoke callbacks selected by their hook address.",
+  "contracts": [
+    {
+      "name": "PoolManager",
+      "path": "src/PoolManager.sol",
+      "role": "Owns pool state and coordinates initialization, pool actions, hooks, and unlock settlement."
+    },
+    {
+      "name": "Pool",
+      "path": "src/libraries/Pool.sol",
+      "role": "Implements pool initialization, liquidity changes, and swap state transitions."
+    },
+    {
+      "name": "Hooks",
+      "path": "src/libraries/Hooks.sol",
+      "role": "Validates hook permissions and dispatches callbacks for pool actions."
+    },
+    {
+      "name": "TickMath",
+      "path": "src/libraries/TickMath.sol",
+      "role": "Converts between ticks and square-root prices while enforcing protocol bounds."
+    },
+    {
+      "name": "Position",
+      "path": "src/libraries/Position.sol",
+      "role": "Tracks position liquidity and fees owed as positions are updated."
+    },
+    {
+      "name": "ProtocolFees",
+      "path": "src/ProtocolFees.sol",
+      "role": "Manages protocol fee configuration and collection."
+    }
+  ],
+  "invariants": [
+    {
+      "statement": "`PoolManager.unlock` returns only when `NonzeroDeltaCount.read()` is zero.",
+      "why": "An unlock with unsettled currency deltas could leave obligations unpaid."
+    },
+    {
+      "statement": "`PoolManager.initialize` accepts a `PoolKey` only when `currency0 < currency1` and `MIN_TICK_SPACING <= tickSpacing <= MAX_TICK_SPACING`.",
+      "why": "Invalid currency ordering or tick spacing can break pool identity and tick operations."
+    },
+    {
+      "statement": "`Pool.initialize` succeeds only when `slot0.sqrtPriceX96()` is zero, and the resulting price is valid for `TickMath.getTickAtSqrtPrice`.",
+      "why": "Reinitialization or an invalid starting price can corrupt the pool's initial state."
+    },
+    {
+      "statement": "`Pool.checkTicks` requires `tickLower < tickUpper`, `tickLower >= TickMath.MIN_TICK`, and `tickUpper <= TickMath.MAX_TICK`.",
+      "why": "Misordered or out-of-range position ticks invalidate liquidity and fee calculations."
+    },
+    {
+      "statement": "`Hooks.isValidHookAddress` rejects each return-delta permission unless its corresponding action permission is also set.",
+      "why": "A pool could otherwise be configured to accept a hook delta for a callback that never runs."
+    },
+    {
+      "statement": "`TickMath.getTickAtSqrtPrice` returns a tick whose square-root price is no greater than the input price, for every accepted input price.",
+      "why": "Incorrect price-to-tick ordering can make swaps cross ticks at the wrong price."
+    }
+  ],
+  "issues": [
+    {
+      "title": "spec: prove unlock requires all currency deltas to be settled",
+      "scope": "Model `PoolManager.unlock` opening the lock, running `IUnlockCallback.unlockCallback`, and checking `NonzeroDeltaCount.read()`. Prove that it relocks successfully only when the count is zero, and otherwise reverts without completing the unlock.",
+      "files": [
+        "src/PoolManager.sol",
+        "src/libraries/Lock.sol",
+        "src/libraries/NonzeroDeltaCount.sol"
+      ],
+      "size": "M"
+    },
+    {
+      "title": "spec: prove PoolKey initialization bounds and currency ordering",
+      "scope": "Model the validation checks in `PoolManager.initialize` for `currency0`, `currency1`, and `tickSpacing`. Prove that only ordered currencies and spacing within `MIN_TICK_SPACING` and `MAX_TICK_SPACING` reach pool initialization.",
+      "files": [
+        "src/PoolManager.sol",
+        "src/libraries/TickMath.sol"
+      ],
+      "size": "S"
+    },
+    {
+      "title": "spec: prove Pool initialization is single-use and price-bounded",
+      "scope": "Model `Pool.initialize` and its call to `TickMath.getTickAtSqrtPrice`. Prove that an already initialized pool cannot be initialized again and that successful initialization stores a price in the valid range with its corresponding tick.",
+      "files": [
+        "src/libraries/Pool.sol",
+        "src/libraries/TickMath.sol",
+        "src/types/Slot0.sol"
+      ],
+      "size": "M"
+    },
+    {
+      "title": "spec: prove liquidity tick ranges are ordered and in bounds",
+      "scope": "Model `Pool.checkTicks`, which is called by `Pool.modifyLiquidity` for a position's lower and upper ticks. Prove that the function accepts only `tickLower < tickUpper` with both ticks within `TickMath.MIN_TICK` and `TickMath.MAX_TICK`.",
+      "files": [
+        "src/libraries/Pool.sol",
+        "src/libraries/TickMath.sol"
+      ],
+      "size": "S"
+    },
+    {
+      "title": "spec: prove hook return-delta permissions require action permissions",
+      "scope": "Model the permission checks in `Hooks.isValidHookAddress` for before-swap, after-swap, after-add-liquidity, and after-remove-liquidity return deltas. Prove that a hook address is rejected whenever a return-delta flag is set without its corresponding action flag.",
+      "files": [
+        "src/libraries/Hooks.sol"
+      ],
+      "size": "S"
+    }
+  ],
+  "team": {
+    "preset": "trio",
+    "why": "The singleton accounting, concentrated-liquidity math, and configurable hooks make this a high-stakes and intricate protocol."
+  }
+}

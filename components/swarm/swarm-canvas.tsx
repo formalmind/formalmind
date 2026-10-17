@@ -527,7 +527,7 @@ export function SwarmCanvas({ state, highlight }: { state: SwarmState | null; hi
 
 const MOVE = "transition-transform duration-700 ease-[cubic-bezier(0.22,1,0.36,1)] motion-reduce:transition-none";
 
-function SwarmCursor({ role, x, y, say, dim, turn, side }: { role: SwarmRole; x: number; y: number; say?: string; dim: boolean; turn: boolean; side?: "left" }) {
+export function SwarmCursor({ role, x, y, say, dim, turn, side }: { role: SwarmRole; x: number; y: number; say?: string; dim: boolean; turn: boolean; side?: "left" }) {
 	const color = ROLE_COLORS[role];
 	// Near the right edge, or when waiting beside another cursor, the label and bubble open to the left.
 	const flip = side === "left" || x > W - 260;
@@ -642,14 +642,14 @@ export function ItemHoverCard({ item, repo, left, top, below, onEnter, onLeave }
 /** Whose turn it is; one role at a time, the way the workflow runs them. */
 function TurnChip({ turn }: { turn: SwarmRole | null }) {
 	return (
-		<div className="absolute flex h-9 items-center gap-2 rounded-full border bg-background px-3 text-[13px] shadow-sm" style={{ right: 132, top: CHIP.y }}>
+		<div className="absolute flex h-9 items-center gap-2 rounded-full border bg-background px-3 text-[13px] shadow-sm" style={{ right: 150, top: CHIP.y }}>
 			<span className="text-muted-foreground">Turn</span>
 			{turn ? (
 				<span className="inline-flex items-center gap-1.5 font-medium">
 					<span className="size-2 rounded-full" style={{ backgroundColor: ROLE_COLORS[turn] }} />
 					{turn}
 				</span>
-			) : <span className="text-muted-foreground">waiting for the next sweep</span>}
+			) : <span className="text-muted-foreground">between turns</span>}
 		</div>
 	);
 }

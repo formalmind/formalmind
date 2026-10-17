@@ -2,7 +2,7 @@
 
 import Link from "next/link"
 import { usePathname } from "next/navigation"
-import { BookOpen, GanttChart, KanbanSquare, MessageCircle, Network, PanelLeftClose, PanelLeftOpen } from "lucide-react"
+import { BookOpen, GanttChart, KanbanSquare, MessageCircle, Network, PanelLeftClose, PanelLeftOpen, Rocket } from "lucide-react"
 import {
 	Sidebar,
 	SidebarContent,
@@ -30,7 +30,10 @@ const NAV: NavItem[][] = [
 	],
 ]
 
-const FOOTER: NavItem[] = [{ title: "Get started", url: "/github", icon: BookOpen }]
+const FOOTER: NavItem[] = [
+	{ title: "Set up a repo", url: "/onboarding", icon: Rocket },
+	{ title: "Get started", url: "/github", icon: BookOpen },
+]
 
 function NavLink({ item, active }: { item: NavItem; active: boolean }) {
 	return (
@@ -50,6 +53,8 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
 	const pathname = usePathname()
 	const { state, toggleSidebar } = useSidebar()
 	const collapsed = state === "collapsed"
+	// The landing page is a page of its own, even for someone signed in.
+	if (pathname === "/welcome") return null
 
 	return (
 		<Sidebar variant="inset" collapsible="icon" {...props}>

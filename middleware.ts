@@ -26,8 +26,9 @@ export const config = {
 		 * - _next/static (static files)
 		 * - _next/image, images (image optimization files)
 		 * - favicon.ico, sitemap.xml, robots.txt (metadata files)
+		 * - public pages: the landing page (/ and /welcome), /login, the live plan demo and the Stripe webhook
 		 * - $ (root)
 		 */
-		'/((?!_next/static|_next/image|images|favicon.[ico|png]|sitemap.xml|robots.txt|api/github/webhook|$).*)',
+		'/((?!_next/static|_next/image|images|favicon.[ico|png]|sitemap.xml|robots.txt|api/github/webhook|api/billing/webhook|api/onboarding/plan|welcome|login|$).*)',
 	],
 };
