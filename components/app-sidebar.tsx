@@ -2,7 +2,7 @@
 
 import Link from "next/link"
 import { usePathname } from "next/navigation"
-import { BookOpen, MessageCircle, Network } from "lucide-react"
+import { BookOpen, GanttChart, KanbanSquare, MessageCircle, Network } from "lucide-react"
 import {
 	Sidebar,
 	SidebarContent,
@@ -16,6 +16,8 @@ import { NavUser } from "@/components/nav-user"
 
 const NAV = [
 	{ title: "Swarm", url: "/", icon: Network },
+	{ title: "Board", url: "/project", icon: KanbanSquare },
+	{ title: "Roadmap", url: "/roadmap", icon: GanttChart },
 	{ title: "Chat", url: "/chat", icon: MessageCircle },
 	{ title: "Get started", url: "/github", icon: BookOpen },
 ]
