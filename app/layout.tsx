@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import { cookies } from "next/headers";
 import localFont from "next/font/local";
 import "katex/dist/katex.min.css";
 import "highlight.js/styles/atom-one-light.css";
@@ -34,6 +35,8 @@ export default async function RootLayout({
 	children: React.ReactNode;
 }>) {
 	const session = await auth0.getSession()
+	// The sidebar remembers collapsed/expanded in a cookie; read it here so the first paint matches.
+	const sidebarOpen = (await cookies()).get("sidebar_state")?.value !== "false"
 	// const nickname = session?.user?.nickname
 	// const name = session?.user?.name
 	// const pic = session?.user?.picture
@@ -67,7 +70,7 @@ export default async function RootLayout({
 				<ThemeProvider>
 					<AuthProvider value={session}>
 						<ChatConversationsProvider>
-							<SidebarProvider>
+							<SidebarProvider defaultOpen={sidebarOpen}>
 								<AppSidebar />
 								<WorkspaceContent>{children}</WorkspaceContent>
 							</SidebarProvider >
