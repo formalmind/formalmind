@@ -3,12 +3,12 @@
 import { Link } from "react-router";
 import { LogoMark } from "@/components/logo";
 import { MarkGithubIcon } from "@primer/octicons-react";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Loader2, Lock, Maximize2, Minimize2, Play, X } from "lucide-react";
 import { SwarmCanvas } from "@/components/swarm/swarm-canvas";
 import YouTubeVideo from "@/components/youtube-video";
 import { SetupPreview } from "./setup-preview";
-import { usePlan } from "./use-plan";
+import { readDraft, usePlan } from "./use-plan";
 import { EXAMPLE_REPOS } from "@/lib/plan";
 
 const EXAMPLES = EXAMPLE_REPOS;
@@ -19,7 +19,16 @@ const EXAMPLES = EXAMPLE_REPOS;
  */
 export function Landing({ signedIn }: { signedIn: boolean }) {
 	const [input, setInput] = useState("");
-	const { repo, plan, start, reset, isLoading, error, done } = usePlan();
+	const { repo, plan, start, reset, resume, isLoading, error, done } = usePlan();
+	// Coming back to the page picks up the last plan where it was left.
+	useEffect(() => {
+		const draft = readDraft();
+		if (draft) {
+			resume(draft);
+			setInput(draft.repo);
+		}
+		// eslint-disable-next-line react-hooks/exhaustive-deps
+	}, []);
 	// Once a repository is being planned the box locks, so the next step is the setup below; Change unlocks it.
 	const locked = Boolean(repo) && !(error && !plan);
 	// The intro starts as an icon, opens small, and can expand to most of the page.

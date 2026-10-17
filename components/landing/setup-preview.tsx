@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Rocket } from "lucide-react";
 import { TEAM_PRESETS, type TeamPreset } from "@/lib/teams";
 import {
@@ -17,24 +17,56 @@ import {
 } from "@/components/onboarding/steps";
 import { PlanBoard, type PartialPlan } from "./plan-board";
 
+const SETUP_KEY = "fm-landing-setup";
+type SavedSetup = { repo: string; step: StepKey; team: TeamPreset; squadSize: number; dailyUsd: number; chosen: { team?: boolean; budget?: boolean } };
+
+function readSetup(repo: string): SavedSetup | null {
+	try {
+		const saved = JSON.parse(localStorage.getItem(SETUP_KEY) ?? "null") as SavedSetup | null;
+		return saved?.repo === repo ? saved : null;
+	} catch {
+		return null;
+	}
+}
+
+function writeSetup(setup: SavedSetup) {
+	try {
+		localStorage.setItem(SETUP_KEY, JSON.stringify(setup));
+	} catch {
+		// Storage refused (private window): the setup just won't be resumed.
+	}
+}
+
 /**
  * The landing page's setup, picked up as soon as a repository is chosen: the live plan is step one, and the
  * rest are onboarding's own steps. Money and GitHub steps lead to sign-up.
  */
 export function SetupPreview({ repo, plan, done, failed, startHref }: { repo: string; plan: PartialPlan | undefined; done: boolean; failed: boolean; startHref: string }) {
-	const [step, setStep] = useState<StepKey>("plan");
+	// Where the visitor was and what they picked, kept per repository so leaving the site and coming back resumes it.
+	const saved = readSetup(repo);
+	const [step, setStep] = useState<StepKey>(saved?.step ?? "plan");
 	const plannerPick = plan?.team?.preset ?? "pair";
-	const [team, setTeam] = useState<TeamPreset>(plannerPick);
-	const [squadSize, setSquadSize] = useState(4);
-	const [dailyUsd, setDailyUsd] = useState(5);
+	const [team, setTeam] = useState<TeamPreset>(saved?.team ?? plannerPick);
+	const [squadSize, setSquadSize] = useState(saved?.squadSize ?? 4);
+	const [dailyUsd, setDailyUsd] = useState(saved?.dailyUsd ?? 5);
 	// A choice turns its step green: picking a team (or continuing past the planner's pick), setting a budget.
-	const [chosen, setChosen] = useState<{ team?: boolean; budget?: boolean }>({});
-	// A new repository starts over at its plan, with the planner's team suggestion.
+	const [chosen, setChosen] = useState<{ team?: boolean; budget?: boolean }>(saved?.chosen ?? {});
 	useEffect(() => {
+		writeSetup({ repo, step, team, squadSize, dailyUsd, chosen });
+	}, [repo, step, team, squadSize, dailyUsd, chosen]);
+	// A new repository starts over at its plan, with the planner's team suggestion.
+	const firstRepo = useRef(repo);
+	useEffect(() => {
+		if (firstRepo.current === repo) return;
+		firstRepo.current = repo;
 		setStep("plan");
 		setChosen({});
 	}, [repo]);
-	useEffect(() => setTeam(plannerPick), [plannerPick]);
+	// The planner's pick fills in the team until the visitor chooses one.
+	useEffect(() => {
+		if (!chosen.team) setTeam(plannerPick);
+		// eslint-disable-next-line react-hooks/exhaustive-deps
+	}, [plannerPick]);
 	const index = SETUP_STEPS.findIndex((s) => s.key === step);
 	const go = (offset: number) => {
 		if (offset > 0 && (step === "team" || step === "budget")) setChosen((c) => ({ ...c, [step]: true }));

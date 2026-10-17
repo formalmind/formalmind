@@ -18,6 +18,14 @@ export function readDraft(): PlanDraft | null {
 	}
 }
 
+export function clearDraft() {
+	try {
+		localStorage.removeItem(DRAFT_KEY);
+	} catch {
+		// Nothing stored, or storage refused: nothing to clear.
+	}
+}
+
 function saveDraft(draft: PlanDraft) {
 	try {
 		localStorage.setItem(DRAFT_KEY, JSON.stringify(draft));
@@ -34,6 +42,8 @@ export function usePlan(onDone?: (draft: PlanDraft) => void) {
 	const onDoneRef = useRef(onDone);
 	onDoneRef.current = onDone;
 	const [inputError, setInputError] = useState<string | null>(null);
+	// A plan brought back from an earlier visit; a new plan replaces it.
+	const [resumed, setResumed] = useState<RepoPlan | null>(null);
 	const { object, submit, isLoading, error, stop } = useObject({
 		api: "/api/onboarding/plan",
 		schema: planSchema,
@@ -53,9 +63,17 @@ export function usePlan(onDone?: (draft: PlanDraft) => void) {
 			return;
 		}
 		setInputError(null);
+		setResumed(null);
 		setRepo(parsed);
 		repoRef.current = parsed;
 		submit({ repo: parsed });
+	};
+
+	/** Picks up a plan finished on an earlier visit, without planning again. */
+	const resume = (draft: PlanDraft) => {
+		setRepo(draft.repo);
+		repoRef.current = draft.repo;
+		setResumed(draft.plan);
 	};
 
 	// The route answers errors as JSON; show its message rather than the raw body.
@@ -72,10 +90,13 @@ export function usePlan(onDone?: (draft: PlanDraft) => void) {
 	/** Back to no repository: stops a plan in flight and unlocks the repository box. */
 	const reset = () => {
 		stop();
+		clearDraft();
+		setResumed(null);
 		setRepo(null);
 		repoRef.current = null;
 		setInputError(null);
 	};
 
-	return { repo, plan: object, start, stop, reset, isLoading, error: message, done: Boolean(repo && object && !isLoading && !error) };
+	const plan = resumed ?? object;
+	return { repo, plan, start, stop, reset, resume, isLoading, error: message, done: Boolean(repo && plan && !isLoading && !error) };
 }
