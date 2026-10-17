@@ -4,22 +4,16 @@ import Link from "next/link";
 import { MarkGithubIcon } from "@primer/octicons-react";
 import { useState } from "react";
 import { ArrowRight, CircleDollarSign, Loader2, ShieldCheck, Sparkles, Users } from "lucide-react";
+import { STEP_COPY, TeamPicker } from "@/components/onboarding/steps";
 import { SwarmCanvas } from "@/components/swarm/swarm-canvas";
 import YouTubeVideo from "@/components/youtube-video";
 import { ROLE_COLORS } from "@/lib/swarm-roles";
-import { TEAM_PRESETS } from "@/lib/teams";
-import type { SwarmRole } from "@/lib/swarm";
+import { TEAM_PRESETS, type TeamPreset } from "@/lib/teams";
 import { PlanBoard } from "./plan-board";
+import { SetupPreview } from "./setup-preview";
 import { usePlan } from "./use-plan";
 
 const EXAMPLES = ["Uniswap/v4-core", "morpho-org/morpho-blue", "transmissions11/solmate"];
-
-const STEPS: { role: SwarmRole; title: string; body: string }[] = [
-	{ role: "planner", title: "Plan", body: "Reads your contracts and the roadmap, picks the invariants worth proving, and writes small issues." },
-	{ role: "prover", title: "Prove", body: "Models the Solidity in Lean 4 and proves each invariant on its own branch, until lake build is clean." },
-	{ role: "reviewer", title: "Review", body: "A fresh pair of eyes reads every diff against the Solidity and pushes back, or takes the job over." },
-	{ role: "merger", title: "Verify and merge", body: "Rebuilds the exact head, checks every claim in the thread, and merges, or asks you." },
-];
 
 /**
  * The public front door: paste a repository, watch the planner draft the swarm's first plan
@@ -30,9 +24,16 @@ export function Landing({ signedIn }: { signedIn: boolean }) {
 	const { repo, plan, start, isLoading, error, done } = usePlan();
 	const startHref = signedIn ? "/onboarding" : "/auth/login?screen_hint=signup&returnTo=%2Fonboarding";
 
+	const [team, setTeam] = useState<TeamPreset>("pair");
+	const [squadSize, setSquadSize] = useState(4);
+
 	const run = (value: string) => {
 		setInput(value);
 		start(value);
+	};
+	const planFromPreview = (value: string) => {
+		run(value);
+		window.scrollTo({ top: 0, behavior: "smooth" });
 	};
 
 	return (
@@ -42,7 +43,7 @@ export function Landing({ signedIn }: { signedIn: boolean }) {
 					<svg width="22" height="22" viewBox="0 0 24 24" aria-hidden>
 						<polygon points="7 20 7 4 19 16 12 16 7 21" fill={ROLE_COLORS.planner} stroke="white" strokeWidth="1.5" strokeLinejoin="round" />
 					</svg>
-					Formal Mind
+					Formal Mind.
 				</Link>
 				<nav className="flex items-center gap-1 text-sm">
 					<a href="#how" className="hidden rounded-full px-3 py-1.5 text-muted-foreground hover:text-foreground sm:inline">How it works</a>
@@ -126,35 +127,20 @@ export function Landing({ signedIn }: { signedIn: boolean }) {
 
 				<section id="how" className="mx-auto max-w-6xl px-4 py-20 sm:px-6">
 					<h2 className="text-2xl font-semibold tracking-tight">How it works</h2>
-					<p className="mt-2 max-w-2xl text-muted-foreground">Agents take turns on your repository like a small team: issues are the queue, labels are the state, and every claim is checked before it merges.</p>
-					<ol className="mt-8 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-						{STEPS.map((step, i) => (
-							<li key={step.role} className="rounded-2xl border bg-card p-5">
-								<div className="flex items-center gap-2 text-sm">
-									<span className="flex size-6 items-center justify-center rounded-full bg-muted text-xs font-medium tabular-nums">{i + 1}</span>
-									<span className="font-medium">{step.title}</span>
-									<span className="ml-auto inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-medium text-white" style={{ backgroundColor: ROLE_COLORS[step.role] }}>{step.role}</span>
-								</div>
-								<p className="mt-3 text-sm leading-6 text-muted-foreground">{step.body}</p>
-							</li>
-						))}
-					</ol>
+					<p className="mt-2 max-w-2xl text-muted-foreground">Six steps from a repository to a running swarm. Click through them: this is the setup you&apos;ll see after signing up.</p>
+					<div className="mt-8">
+						<SetupPreview onPlan={planFromPreview} startHref={startHref} busy={isLoading} />
+					</div>
 				</section>
 
 				<section id="teams" className="mx-auto max-w-6xl px-4 pb-20 sm:px-6">
 					<h2 className="flex items-center gap-2 text-2xl font-semibold tracking-tight"><Users className="size-5" /> Pick your team size</h2>
-					<p className="mt-2 max-w-2xl text-muted-foreground">One agent is cheapest. Two that review each other catch the most. More agents work disjoint issues in parallel. The planner and the chief are on call in every team.</p>
-					<div className="mt-8 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-						{TEAM_PRESETS.map((team) => (
-							<div key={team.key} className={`rounded-2xl border p-5 ${team.key === "pair" ? "border-foreground/30 bg-card shadow-sm" : "bg-card"}`}>
-								<p className="flex items-center justify-between text-sm font-medium">
-									{team.name}
-									<span className="text-xs font-normal text-muted-foreground">{team.agents}</span>
-								</p>
-								<p className="mt-3 text-sm leading-6 text-muted-foreground">{team.split}</p>
-								<p className="mt-3 text-xs text-foreground">{team.bestFor}{team.key === "pair" ? " · recommended" : ""}</p>
-							</div>
-						))}
+					<p className="mt-2 max-w-2xl text-muted-foreground">{STEP_COPY.team.lead}</p>
+					<div className="mt-8 max-w-4xl">
+						<TeamPicker value={team} onChange={setTeam} plannerPick={plan?.team?.preset ?? "pair"} squadSize={squadSize} onSquadSize={setSquadSize} />
+						<a href={startHref} className="mt-6 inline-flex h-9 items-center gap-1.5 rounded-full bg-primary px-4 text-sm font-medium text-primary-foreground hover:opacity-90">
+							Start with a {TEAM_PRESETS.find((t) => t.key === team)?.name}{team === "squad" ? ` of ${squadSize}` : ""} <ArrowRight className="size-4" />
+						</a>
 					</div>
 				</section>
 
@@ -176,7 +162,7 @@ export function Landing({ signedIn }: { signedIn: boolean }) {
 
 			<footer className="border-t">
 				<div className="mx-auto flex max-w-6xl flex-wrap items-center justify-between gap-2 px-4 py-6 text-xs text-muted-foreground sm:px-6">
-					<span>Formal Mind</span>
+					<span>Formal Mind.</span>
 					<a href="mailto:formalmindai@gmail.com" className="hover:text-foreground">formalmindai@gmail.com</a>
 				</div>
 			</footer>
