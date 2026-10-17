@@ -21,9 +21,12 @@ const ROLE_JOBS: Record<SwarmRole, string> = {
 	dispatcher: "picks one job per sweep",
 	planner: "scopes issues",
 	prover: "writes the Lean",
+	rebuilder: "rebuilds from the proofs",
 	reviewer: "first pair of eyes",
 	merger: "verifies and merges",
-	chief: "daily report",
+	editor: "compares draft and rebuild",
+	chief: "daily audit",
+	assistant: "talks to you",
 };
 
 export function SwarmWorkspace({ repo }: { repo: string }) {
@@ -70,7 +73,7 @@ export function SwarmWorkspace({ repo }: { repo: string }) {
 		? `${run.status === "completed" ? "Just finished" : "Live"}: ${run.note ? `${run.note.role}${run.note.ref ? ` on #${run.note.ref}` : ""}` : "dispatcher"} · ${run.status === "completed" ? "done" : run.phase} · started ${minutesAgo(run.startedAt)}`
 		: "Idle. The dispatcher sweeps every 30 minutes";
 
-	const queued = state?.work.filter((item) => item.labels.includes("fm:todo")).length ?? 0;
+	const queued = state?.work.filter((item) => item.labels.includes("fm:todo") || item.labels.includes("fm:rebuild")).length ?? 0;
 	const inFlight = state?.work.filter((item) => item.kind === "pr").length ?? 0;
 	const blocked = state?.work.filter((item) => item.labels.includes("fm:blocked")).length ?? 0;
 
@@ -82,7 +85,7 @@ export function SwarmWorkspace({ repo }: { repo: string }) {
 					<h1 className="text-base font-semibold">Swarm</h1>
 					<span className="text-sm text-muted-foreground">
 						{state
-							? `${queued} queued · ${inFlight} PRs open · ${blocked} blocked · $${state.spentToday.toFixed(2)} spent today`
+							? `${state.cycle ? `Cycle ${state.cycle.n}: ${state.cycle.phase} · ` : ""}${queued} queued · ${inFlight} PRs open · ${blocked} blocked · $${state.spentToday.toFixed(2)} spent today`
 							: error ?? "Loading the live queue…"}
 					</span>
 					<div className="ml-auto flex items-center gap-3">

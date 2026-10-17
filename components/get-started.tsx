@@ -5,18 +5,32 @@ import type { SwarmRole } from "@/lib/swarm";
 
 const PROOFS_REPO = "https://github.com/asyncswap/v2-proofs";
 const SWARM_README = `${PROOFS_REPO}/blob/dev/.github/formalmind/README.md`;
+const CYCLE = `${PROOFS_REPO}/blob/dev/.github/formalmind/cycle.md`;
+const ASSISTANT_THREAD = `${PROOFS_REPO}/issues/69`;
 const RELAY = "https://github.com/formalmind/webhook-redis/tree/main/worker";
 
 const ROLES: { role: SwarmRole; job: string; detail: string }[] = [
-	{ role: "dispatcher", job: "Picks one job", detail: "Every 30 minutes, or when an fm: label changes. Order: merge, review, revise, resume, new issue, plan. Not a model." },
+	{ role: "dispatcher", job: "Picks one job", detail: "Every 30 minutes, or when an fm: label changes. Order: answer, merge, review, revise, resume, new issue, edit, plan. Not a model." },
 	{ role: "planner", job: "Scopes the work", detail: "Reads the roadmap and the gaps the changelog left, and writes small, disjoint issues labelled fm:todo." },
 	{ role: "prover", job: "Writes the Lean", detail: "Takes one issue on its own branch, pushes as it goes, and opens a PR once lake build is clean." },
+	{ role: "rebuilder", job: "Rebuilds from the proofs", detail: "Writes a polished, simplified Solidity version of your protocol from the Lean alone, never your code, and lists every guess it had to make." },
 	{ role: "reviewer", job: "First pair of eyes", detail: "Reads the whole diff against the Solidity, leaves inline suggestions, then approves or bounces." },
 	{ role: "merger", job: "Verifies and merges", detail: "Builds the exact head, checks every claim in the thread against the code, then merges or holds it for you." },
-	{ role: "chief", job: "Reports daily", detail: "At 23:40 UTC posts one update: Done, Working, Waiting on you or Paused on budget." },
+	{ role: "editor", job: "Compares and polishes", detail: "Holds your code, the rebuild and the proofs side by side, classifies every difference, and runs the cycle until they agree." },
+	{ role: "chief", job: "Audits the day", detail: "At 23:40 UTC checks every run's claims against what landed, with a headline: Done, Working, Waiting on you or Paused on budget." },
+	{ role: "assistant", job: "Talks to you", detail: "The only agent that does. Asks you one precise question at a time with a recommendation, and carries out your answer." },
 ];
 
 const FLOW = ["fm:todo", "fm:in-progress", "fm:review", "fm:approved", "merged"];
+
+const CYCLE_PHASES: { phase: string; who: string; what: string }[] = [
+	{ phase: "spec", who: "planner, prover", what: "Formalize your code, and any behaviour you described in words, until the spec is near complete." },
+	{ phase: "rebuild", who: "rebuilder", what: "Rebuild the protocol in Solidity from the proofs alone. Every guess is a place the proofs are silent." },
+	{ phase: "compare", who: "editor", what: "Put the rebuild next to your code. Each difference is a gap, an improvement, a divergence or a bug." },
+	{ phase: "polish", who: "rebuilder, prover", what: "Fix what you decided, prove what the spec missed, compare again." },
+	{ phase: "reprove", who: "prover, editor", what: "Prove the rebuild as its own spec and compare the two specs theorem by theorem." },
+	{ phase: "close", who: "editor", what: "Summary and confidence. Start again when your code or your intent changes." },
+];
 
 const CHIP = "rounded bg-muted px-1.5 py-0.5 font-mono text-[0.8em] text-foreground";
 
@@ -75,7 +89,7 @@ export function GetStarted() {
 				</div>
 			</header>
 
-			<Section eyebrow="How it works" title="Six roles, one board">
+			<Section eyebrow="How it works" title="Nine roles, one board">
 				<ul className="grid gap-3 sm:grid-cols-2">
 					{ROLES.map(({ role, job, detail }) => (
 						<li key={role} className="rounded-xl border bg-card p-4">
@@ -103,10 +117,35 @@ export function GetStarted() {
 					</ol>
 					<p className="mt-3 text-sm leading-6 text-muted-foreground">
 						The reviewer or merger can send a PR back as <Code>fm:changes</Code>, and anything that needs a human decision is parked as{" "}
-						<Code>fm:blocked</Code> with the question asked in one comment. Every run keeps a task list on the notebook issue and a cost
+						<Code>fm:blocked</Code> and handed to the assistant, who asks you. Every run keeps a task list on the notebook issue and a cost
 						line on the ledger, so nothing it claims is unverifiable.
 					</p>
 				</div>
+			</Section>
+
+			<Section eyebrow="The rebuild cycle" title="Prove it, rebuild it, compare, repeat">
+				<p className="max-w-2xl text-sm leading-6 text-muted-foreground">
+					Proving your code is the first half. Then the swarm rebuilds the protocol from the proofs alone and compares the rebuild with
+					what you wrote. Wherever the two differ, either the proofs are missing something or one version is better, and you decide
+					which. Two to five cycles, until both versions and both specs agree and a cycle finds nothing new.
+				</p>
+				<ol className="mt-5 grid gap-3 sm:grid-cols-3">
+					{CYCLE_PHASES.map(({ phase, who, what }, i) => (
+						<li key={phase} className="rounded-xl border bg-card p-4">
+							<div className="flex items-baseline gap-2">
+								<span className="text-xs tabular-nums text-muted-foreground">{i + 1}</span>
+								<span className="font-mono text-sm font-medium">{phase}</span>
+								<span className="truncate text-xs text-muted-foreground">· {who}</span>
+							</div>
+							<p className="mt-2 text-sm leading-6 text-muted-foreground">{what}</p>
+						</li>
+					))}
+				</ol>
+				<p className="mt-4 text-sm leading-6 text-muted-foreground">
+					New behaviour you describe in words counts as a change too: it is specified first, the rebuild implements it, and the
+					comparison tells you whether your code does it yet.{" "}
+					<a href={CYCLE} target="_blank" rel="noreferrer" className="text-foreground underline underline-offset-4">The full algorithm</a>.
+				</p>
 			</Section>
 
 			<Section eyebrow="Working with it" title="Five things you do">
@@ -120,7 +159,8 @@ export function GetStarted() {
 					</Step>
 					<Step n={2} icon={Tag} title="Queue work">
 						<p>
-							Put <Code>fm:todo</Code> on any issue and a prover picks it up on a coming sweep. Or let the planner write issues from the{" "}
+							Put <Code>fm:todo</Code> on any issue and a prover picks it up on a coming sweep; <Code>fm:rebuild</Code> queues it for the
+							rebuilder instead. Or let the planner write issues from the{" "}
 							<strong className="font-medium text-foreground">Roadmap</strong> section of the proofs repo&apos;s README; it keeps two queued
 							and plans more when the queue runs low.
 						</p>
@@ -132,18 +172,22 @@ export function GetStarted() {
 							and a question that needs the repo or the Lean toolchain starts a real run.
 						</p>
 					</Step>
-					<Step n={4} icon={ShieldCheck} title="Decide when asked">
+					<Step n={4} icon={ShieldCheck} title="Decide when the assistant asks">
 						<p>
-							You are tagged only when a decision is needed: an <Code>fm:blocked</Code> issue, or a PR the merger held because a theorem
-							statement changed, the diff is wide, or a claim did not check out. Add <Code>fm:human-ok</Code> to let it merge. The chief&apos;s
-							daily headline tells you whether anything is <strong className="font-medium text-foreground">Waiting on you</strong>.
+							One agent talks to you: the assistant, on{" "}
+							<a href={ASSISTANT_THREAD} target="_blank" rel="noreferrer" className="text-foreground underline underline-offset-4">its own thread</a>.
+							Whenever another role is stuck, or the editor finds a difference only you can settle, the assistant asks you one question
+							with its recommendation first. Reply in plain words (&ldquo;merge it&rdquo;, &ldquo;follow my code on partial fills&rdquo;,
+							&ldquo;orders should expire after a day&rdquo;) and it unblocks, labels and files the work for you. Every evening it posts what
+							needs you, what landed and where the cycle stands.
 						</p>
 					</Step>
 					<Step n={5} icon={Terminal} title="Drive it by hand">
 						<p>The dispatcher decides on its own, but you can start any role now:</p>
 						<pre className="overflow-x-auto rounded-lg border bg-muted/50 p-3 font-mono text-xs leading-5 text-foreground">{`gh workflow run formalmind-swarm.yml -f role=plan
 gh workflow run formalmind-swarm.yml -f role=prove -f number=12
-gh workflow run formalmind-swarm.yml -f role=review -f number=40`}</pre>
+gh workflow run formalmind-swarm.yml -f role=review -f number=40
+gh workflow run formalmind-swarm.yml -f role=editor`}</pre>
 					</Step>
 				</ol>
 			</Section>
@@ -151,7 +195,7 @@ gh workflow run formalmind-swarm.yml -f role=review -f number=40`}</pre>
 			<Section eyebrow="Budget and safety" title="It cannot run away">
 				<div className="grid gap-3 sm:grid-cols-3">
 					{[
-						{ icon: CircleDollarSign, title: "$5 a day, $150 a month", body: "Enforced from the ledger. Per-run caps: $3 to prove, $1 to review or merge, $0.40 to plan or report. When spent, it posts one pause note and waits for the reset." },
+						{ icon: CircleDollarSign, title: "$5 a day, $150 a month", body: "Enforced from the ledger. Per-run caps: $3 to prove or rebuild, $1 to review, merge or edit, $0.40 to plan or report. When spent, it posts one pause note and waits for the reset." },
 						{ icon: GitPullRequest, title: "Nothing unchecked merges", body: "A clean lake build on the exact head, and never a sorry, admit or new axiom. A false claim in the thread is a bounce." },
 						{ icon: Bot, title: "Bounded retries", body: "One model job per sweep. A prover gets two runs per issue a day and a reviewer bounces twice before the work is parked for you." },
 					].map(({ icon: Icon, title, body }) => (
@@ -170,7 +214,7 @@ gh workflow run formalmind-swarm.yml -f role=review -f number=40`}</pre>
 						<>
 							<span className="font-medium text-foreground">A proofs repository.</span> A Lean 4 project with a README that records your
 							decisions and a <span className="font-medium text-foreground">Roadmap</span>, and a <Code>FORMAL_MIND.md</Code> changelog. Copy
-							the three workflows and the role prompts in <Code>.github/formalmind/</Code> from{" "}
+							the workflows and the role prompts in <Code>.github/formalmind/</Code> from{" "}
 							<a href={PROOFS_REPO} target="_blank" rel="noreferrer" className="text-foreground underline underline-offset-4">asyncswap/v2-proofs</a>.
 						</>,
 						<>
@@ -179,8 +223,9 @@ gh workflow run formalmind-swarm.yml -f role=review -f number=40`}</pre>
 							<Code>PROTOCOL_READ_TOKEN</Code> if the protocol repository is private.
 						</>,
 						<>
-							<span className="font-medium text-foreground">Three pinned issues.</span> A ledger, a notebook and a chief-updates issue; put
-							their numbers in the swarm workflow&apos;s <Code>LEDGER_ISSUE</Code>, <Code>NOTEBOOK_ISSUE</Code> and <Code>CHIEF_ISSUE</Code>.
+							<span className="font-medium text-foreground">Four tracking issues.</span> A ledger, a notebook, a chief-updates issue and your
+							assistant&apos;s thread; put their numbers in the swarm workflow&apos;s <Code>LEDGER_ISSUE</Code>, <Code>NOTEBOOK_ISSUE</Code>,{" "}
+							<Code>CHIEF_ISSUE</Code> and <Code>ASSISTANT_ISSUE</Code>.
 						</>,
 						<>
 							<span className="font-medium text-foreground">The relay.</span> Deploy the{" "}

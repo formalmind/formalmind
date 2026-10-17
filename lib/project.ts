@@ -2,17 +2,17 @@
  * The proofs repository laid out as a GitHub-style project: every issue and pull request with a
  * Status derived from its `fm:` labels, plus the README's numbered Roadmap as milestones.
  */
-import { CHIEF_ISSUE, LEDGER_ISSUE, NOTEBOOK_ISSUE, SWARM_REPO, github, type SwarmItem } from "@/lib/swarm";
+import { ASSISTANT_ISSUE, CHIEF_ISSUE, LEDGER_ISSUE, NOTEBOOK_ISSUE, SWARM_REPO, github, type SwarmItem } from "@/lib/swarm";
 
 export type ProjectStatus = "none" | "todo" | "in-progress" | "review" | "approved" | "blocked" | "done";
 
 export const PROJECT_STATUSES: { key: ProjectStatus; name: string; description: string }[] = [
 	{ key: "none", name: "No Status", description: "Open issues the swarm has not been asked to pick up" },
-	{ key: "todo", name: "Todo", description: "Queued with fm:todo for a prover" },
-	{ key: "in-progress", name: "In progress", description: "A prover is on it, or it went back for changes" },
+	{ key: "todo", name: "Todo", description: "Queued for a prover (fm:todo) or the rebuilder (fm:rebuild), or a finding or intent to specify" },
+	{ key: "in-progress", name: "In progress", description: "A prover or the rebuilder is on it, or it went back for changes" },
 	{ key: "review", name: "In review", description: "Open PRs waiting for the reviewer" },
 	{ key: "approved", name: "Approved", description: "Reviewed; the merger checks and merges" },
-	{ key: "blocked", name: "Blocked", description: "Waiting on a human decision" },
+	{ key: "blocked", name: "Blocked", description: "Waiting on a decision the assistant has put to you" },
 	{ key: "done", name: "Done", description: "Merged or closed as completed" },
 ];
 
@@ -55,7 +55,7 @@ type GitHubIssue = {
 };
 
 /** The swarm's own bookkeeping issues are not work items. */
-const PINNED = new Set([LEDGER_ISSUE, NOTEBOOK_ISSUE, CHIEF_ISSUE]);
+const PINNED = new Set([LEDGER_ISSUE, NOTEBOOK_ISSUE, CHIEF_ISSUE, ASSISTANT_ISSUE]);
 const CACHE_MS = 10_000;
 
 function statusOf(issue: GitHubIssue, labels: string[]): ProjectStatus {
@@ -63,9 +63,9 @@ function statusOf(issue: GitHubIssue, labels: string[]): ProjectStatus {
 	const has = (l: string) => labels.includes(l);
 	if (has("fm:blocked")) return "blocked";
 	if (has("fm:approved")) return "approved";
-	if (has("fm:in-progress") || has("fm:changes") || has("fm:needs-rebase")) return "in-progress";
+	if (has("fm:in-progress") || has("fm:rebuilding") || has("fm:changes") || has("fm:needs-rebase")) return "in-progress";
 	if (issue.pull_request) return "review";
-	return has("fm:todo") ? "todo" : "none";
+	return has("fm:todo") || has("fm:rebuild") || has("fm:finding") || has("fm:intent") ? "todo" : "none";
 }
 
 function plain(body: string | null) {
