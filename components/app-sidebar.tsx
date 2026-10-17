@@ -8,6 +8,7 @@ import {
 	SidebarContent,
 	SidebarFooter,
 	SidebarGroup,
+	SidebarHeader,
 	SidebarMenu,
 	SidebarMenuButton,
 	SidebarMenuItem,
@@ -52,6 +53,18 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
 
 	return (
 		<Sidebar variant="inset" collapsible="icon" {...props}>
+			{/* The toggle sits at the top, the way macOS sidebars carry it. */}
+			<SidebarHeader className="flex-row justify-end group-data-[collapsible=icon]:justify-center">
+				<button
+					type="button"
+					onClick={toggleSidebar}
+					aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"}
+					title={collapsed ? "Expand sidebar" : "Collapse sidebar"}
+					className="inline-flex size-8 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-sidebar-accent hover:text-sidebar-accent-foreground [&>svg]:size-4"
+				>
+					{collapsed ? <PanelLeftOpen /> : <PanelLeftClose />}
+				</button>
+			</SidebarHeader>
 			<SidebarContent>
 				<SidebarGroup>
 					<SidebarMenu>
@@ -62,12 +75,6 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
 			<SidebarFooter>
 				<SidebarMenu>
 					{FOOTER.map((item) => <NavLink key={item.url} item={item} active={pathname === item.url} />)}
-					<SidebarMenuItem>
-						<SidebarMenuButton onClick={toggleSidebar} tooltip={collapsed ? "Expand sidebar" : "Collapse sidebar"} className="text-muted-foreground">
-							{collapsed ? <PanelLeftOpen /> : <PanelLeftClose />}
-							<span>Collapse</span>
-						</SidebarMenuButton>
-					</SidebarMenuItem>
 				</SidebarMenu>
 				<NavUser />
 			</SidebarFooter>
