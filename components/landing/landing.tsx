@@ -5,10 +5,9 @@ import { LogoMark } from "@/components/logo";
 import { MarkGithubIcon } from "@primer/octicons-react";
 import { useState } from "react";
 import { ArrowRight, CircleDollarSign, Loader2, ShieldCheck, Sparkles } from "lucide-react";
-import { STEP_COPY, TeamPicker } from "@/components/onboarding/steps";
 import { SwarmCanvas } from "@/components/swarm/swarm-canvas";
 import YouTubeVideo from "@/components/youtube-video";
-import { TEAM_PRESETS, type TeamPreset } from "@/lib/teams";
+import { TEAM_PRESETS } from "@/lib/teams";
 import { PlanBoard } from "./plan-board";
 import { SetupPreview } from "./setup-preview";
 import { usePlan } from "./use-plan";
@@ -23,9 +22,6 @@ export function Landing({ signedIn }: { signedIn: boolean }) {
 	const [input, setInput] = useState("");
 	const { repo, plan, start, isLoading, error, done } = usePlan();
 	const startHref = signedIn ? "/onboarding" : "/auth/login?screen_hint=signup&returnTo=%2Fonboarding";
-
-	const [team, setTeam] = useState<TeamPreset>("pair");
-	const [squadSize, setSquadSize] = useState(4);
 
 	const run = (value: string) => {
 		setInput(value);
@@ -45,7 +41,6 @@ export function Landing({ signedIn }: { signedIn: boolean }) {
 				</Link>
 				<nav className="flex items-center gap-1 text-sm">
 					<a href="#how" className="hidden rounded-full px-3 py-1.5 text-muted-foreground hover:text-foreground sm:inline">How it works</a>
-					<a href="#teams" className="hidden rounded-full px-3 py-1.5 text-muted-foreground hover:text-foreground sm:inline">Teams</a>
 					<a href={signedIn ? "/" : "/login"} className="rounded-full px-3 py-1.5 text-muted-foreground hover:text-foreground">{signedIn ? "Open the app" : "Log in"}</a>
 					<a href={startHref} className="rounded-full bg-primary px-3.5 py-1.5 font-medium text-primary-foreground hover:opacity-90">Get started</a>
 				</nav>
@@ -128,17 +123,6 @@ export function Landing({ signedIn }: { signedIn: boolean }) {
 					<p className="mt-2 max-w-2xl text-muted-foreground">Six steps from a repository to a running swarm. Click through them: this is the setup you&apos;ll see after signing up.</p>
 					<div className="mt-8">
 						<SetupPreview onPlan={planFromPreview} startHref={startHref} busy={isLoading} />
-					</div>
-				</section>
-
-				<section id="teams" className="mx-auto max-w-6xl px-4 pb-20 sm:px-6">
-					<h2 className="text-2xl font-semibold tracking-tight">Pick your team size</h2>
-					<p className="mt-2 max-w-2xl text-muted-foreground">{STEP_COPY.team.lead}</p>
-					<div className="mt-8 max-w-4xl">
-						<TeamPicker value={team} onChange={setTeam} plannerPick={plan?.team?.preset ?? "pair"} squadSize={squadSize} onSquadSize={setSquadSize} />
-						<a href={startHref} className="mt-6 inline-flex h-9 items-center gap-1.5 rounded-full bg-primary px-4 text-sm font-medium text-primary-foreground hover:opacity-90">
-							Start with a {TEAM_PRESETS.find((t) => t.key === team)?.name}{team === "squad" ? ` of ${squadSize}` : ""} <ArrowRight className="size-4" />
-						</a>
 					</div>
 				</section>
 
