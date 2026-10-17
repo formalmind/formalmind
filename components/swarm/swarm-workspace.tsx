@@ -76,6 +76,7 @@ export function SwarmWorkspace({ repo }: { repo: string }) {
 		<div className="min-h-0 flex-1">
 			<SwarmCanvas
 				state={state}
+				repo={repo}
 				fill
 				title={
 					<>

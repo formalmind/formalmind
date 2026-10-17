@@ -66,6 +66,7 @@ const CARD_MIN_H = 78;
 const CARD_GAP = 10;
 const CARD_W = 160;
 const PANEL_TOP = 420;
+const PANEL_H = 136;
 const PANEL_W = 368;
 const PANEL_GAP = 24;
 const CHIP = { x: PAD, y: 14 };
@@ -363,8 +364,10 @@ function cloneScene(scene: Scene): Scene {
  * `fill` makes the board fill its parent, scaled to fit both ways and centred, below a strip kept clear
  * for the pinned controls; otherwise it scales to the width. `title` and `actions` are pinned top-left and top-right.
  */
-export function SwarmCanvas({ state, highlight, fill = false, title, actions }: {
+export function SwarmCanvas({ state, highlight, fill = false, title, actions, repo }: {
 	state: SwarmState | null;
+	/** The proofs repo, for links before the live state has loaded. */
+	repo?: string;
 	highlight?: SwarmRole | null;
 	fill?: boolean;
 	title?: ReactNode;
@@ -373,6 +376,9 @@ export function SwarmCanvas({ state, highlight, fill = false, title, actions }: 
 	const frameRef = useRef<HTMLDivElement>(null);
 	const [fit, setFit] = useState({ scale: 1, x: 0, y: 0, w: 0, h: 0 });
 	const { scale } = fit;
+	// The ledger grows to list every cost; the board grows with it.
+	const [ledgerH, setLedgerH] = useState(PANEL_H);
+	const boardH = Math.max(H, PANEL_TOP + ledgerH + PAD);
 	// In fill mode people can pan and zoom: `view` sits on top of the fitted placement.
 	const [view, setRawView] = useState({ k: 1, x: 0, y: 0 });
 	// The board can't be dragged away: smaller than the frame it stays inside it, larger it can't leave a gap past its edges.
@@ -385,7 +391,7 @@ export function SwarmCanvas({ state, highlight, fill = false, title, actions }: 
 		return {
 			k: v.k,
 			x: clamp(fit.x + v.x, W * s, fit.w, EDGE) - fit.x,
-			y: clamp(fit.y + v.y, H * s, fit.h, PINNED) - fit.y,
+			y: clamp(fit.y + v.y, boardH * s, fit.h, PINNED) - fit.y,
 		};
 	};
 	const setView = (next: (v: { k: number; x: number; y: number }) => { k: number; x: number; y: number }) => setRawView((v) => bound(next(v)));
@@ -408,8 +414,8 @@ export function SwarmCanvas({ state, highlight, fill = false, title, actions }: 
 	zoomAtRef.current = zoomAt;
 	const [step, setStep] = useState(0);
 	const [playing, setPlaying] = useState(true);
-	// What a click on a card or panel opened: a bottom island on phones, a popover anchored to it elsewhere.
-	const [modal, setModal] = useState<({ card: Card } | { panel: "ledger" | "notebook" | "chief" }) & { anchor?: Anchor } | null>(null);
+	// The card a click opened: a bottom island on phones, a popover anchored to it elsewhere.
+	const [modal, setModal] = useState<{ card: Card; anchor?: Anchor } | null>(null);
 	const isMobile = useIsMobile();
 	const popoverRef = useRef<HTMLDivElement>(null);
 	const anchorFor = (el: HTMLElement): Anchor | undefined => {
@@ -424,7 +430,7 @@ export function SwarmCanvas({ state, highlight, fill = false, title, actions }: 
 			below,
 		};
 	};
-	const open = (what: { card: Card } | { panel: "ledger" | "notebook" | "chief" }, el: HTMLElement) => setModal({ ...what, anchor: anchorFor(el) });
+	const open = (card: Card, el: HTMLElement) => setModal({ card, anchor: anchorFor(el) });
 	const [hover, setHover] = useState<{ item: SwarmItem; left: number; top: number; below: boolean } | null>(null);
 	const hoverTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 	const wrapRef = useRef<HTMLDivElement>(null);
@@ -458,14 +464,14 @@ export function SwarmCanvas({ state, highlight, fill = false, title, actions }: 
 		const observer = new ResizeObserver(([entry]) => {
 			const { width, height } = entry.contentRect;
 			if (!fill) return setFit({ scale: width / W, x: 0, y: 0, w: width, h: height });
-			const next = Math.min(width / W, (height - PINNED) / H);
-			setFit({ scale: next, x: (width - W * next) / 2, y: PINNED + Math.max(0, (height - PINNED - H * next) / 2), w: width, h: height });
+			const next = Math.min(width / W, (height - PINNED) / boardH);
+			setFit({ scale: next, x: (width - W * next) / 2, y: PINNED + Math.max(0, (height - PINNED - boardH * next) / 2), w: width, h: height });
 		});
 		observer.observe(el);
 		return () => observer.disconnect();
-	}, [fill]);
+	}, [fill, boardH]);
 
-	// The desktop popover closes on a press outside it (another card or panel re-anchors it instead) or on Escape.
+	// The desktop popover closes on a press outside it (another card re-anchors it instead) or on Escape.
 	const popoverOpen = !isMobile && modal !== null;
 	useEffect(() => {
 		if (!popoverOpen) return;
@@ -634,22 +640,14 @@ export function SwarmCanvas({ state, highlight, fill = false, title, actions }: 
 	};
 
 	const details = (inDialog: boolean) =>
-		modal && "card" in modal ? (
-			<CardDetails card={modal.card} item={itemFor(modal.card)} repo={state?.repo ?? ""} inDialog={inDialog} />
-		) : modal ? (
-			<>
-				{modal.panel === "ledger" ? <LedgerPanel spend={shown.spend} costs={shown.costs} bare /> : null}
-				{modal.panel === "notebook" ? <NotebookPanel notes={shown.notes} bare /> : null}
-				{modal.panel === "chief" ? <ChiefPanel headline={shown.chief} bare /> : null}
-			</>
-		) : null;
+		modal ? <CardDetails card={modal.card} item={itemFor(modal.card)} repo={state?.repo ?? ""} inDialog={inDialog} /> : null;
 
 	return (
 		<div ref={wrapRef} className={`relative w-full ${fill ? "h-full" : ""}`}>
 			<div
 				ref={frameRef}
 				className={`relative w-full overflow-hidden bg-card ${fill ? `h-full touch-none select-none ${panning ? "cursor-grabbing [&_*]:!cursor-grabbing" : panMode ? "cursor-grab [&_*]:!cursor-grab" : ""}` : "rounded-xl border"}`}
-				style={fill ? { ...DOTS, backgroundSize: `${20 * s}px ${20 * s}px`, backgroundPosition: `${ox}px ${oy}px` } : { height: H * scale }}
+				style={fill ? { ...DOTS, backgroundSize: `${20 * s}px ${20 * s}px`, backgroundPosition: `${ox}px ${oy}px` } : { height: boardH * scale }}
 				onPointerDown={onPointerDown}
 				onPointerMove={onPointerMove}
 				onPointerUp={endDrag}
@@ -666,7 +664,7 @@ export function SwarmCanvas({ state, highlight, fill = false, title, actions }: 
 					className="absolute left-0 top-0 origin-top-left"
 					style={{
 						width: W,
-						height: H,
+						height: boardH,
 						transform: `translate(${ox}px, ${oy}px) scale(${s})`,
 						...(fill ? {} : DOTS),
 					}}
@@ -704,15 +702,15 @@ export function SwarmCanvas({ state, highlight, fill = false, title, actions }: 
 								href={item?.url}
 								onEnter={(el) => showHover(c, el)}
 								onLeave={hideHover}
-								onOpen={fill ? (el) => open({ card: c }, el) : undefined}
+								onOpen={fill ? (el) => open(c, el) : undefined}
 								onMeasure={(h) => measure(c.id, h)}
 							/>
 						);
 					})}
 
-					<LedgerPanel spend={shown.spend} costs={shown.costs} onOpen={fill ? (el) => open({ panel: "ledger" }, el) : undefined} />
-					<NotebookPanel notes={shown.notes} onOpen={fill ? (el) => open({ panel: "notebook" }, el) : undefined} />
-					<ChiefPanel headline={shown.chief} onOpen={fill ? (el) => open({ panel: "chief" }, el) : undefined} />
+					<LedgerPanel spend={shown.spend} costs={shown.costs} repo={state?.repo ?? repo} onMeasure={setLedgerH} />
+					<NotebookPanel notes={shown.notes} repo={state?.repo ?? repo} />
+					<ChiefPanel headline={shown.chief} repo={state?.repo ?? repo} />
 
 					{ROLES.map((role) => (
 						<SwarmCursor
@@ -727,18 +725,14 @@ export function SwarmCanvas({ state, highlight, fill = false, title, actions }: 
 				</div>
 			</div>
 			{isMobile ? (
-				<BottomIsland
-					open={modal !== null}
-					onClose={() => setModal(null)}
-					kicker={modal && "panel" in modal ? PANEL_NAMES[modal.panel] : undefined}
-				>
+				<BottomIsland open={modal !== null} onClose={() => setModal(null)}>
 					{details(true)}
 				</BottomIsland>
 			) : modal?.anchor ? (
 				<div
 					ref={popoverRef}
 					role="dialog"
-					aria-label={"panel" in modal ? PANEL_NAMES[modal.panel] : modal.card.title}
+					aria-label={modal.card.title}
 					data-canvas-ui
 					// The island's look in the board's units: compact type and spacing, scaled with the board.
 					className="absolute z-40 flex max-h-[min(60vh,420px)] flex-col rounded-2xl border border-black/5 bg-background p-3 shadow-[0_12px_32px_-12px_rgba(0,0,0,0.28)] animate-in fade-in-0 duration-200 dark:border-white/10"
@@ -760,7 +754,6 @@ export function SwarmCanvas({ state, highlight, fill = false, title, actions }: 
 						>
 							<X className="size-3.5" />
 						</button>
-						{"panel" in modal ? <p className="font-mono text-xs text-muted-foreground">{PANEL_NAMES[modal.panel]}</p> : null}
 					</div>
 					<div className="no-scrollbar mt-2.5 min-h-0 overflow-y-auto">{details(false)}</div>
 				</div>
@@ -840,11 +833,11 @@ const DOTS = { backgroundImage: "radial-gradient(hsl(var(--border)) 1px, transpa
 
 /**
  * Apple-style bottom island: a card floating just above the bottom edge that slides up on the iOS sheet curve,
- * with a round close button top-left. `kicker` sits beside the close button and titles the island when given.
+ * with a round close button top-left.
  * It is not modal: the board stays usable, a click on another card or panel swaps what it shows, and a click
  * on empty canvas or Escape closes it.
  */
-function BottomIsland({ open, onClose, kicker, children }: { open: boolean; onClose: () => void; kicker?: string; children: ReactNode }) {
+function BottomIsland({ open, onClose, children }: { open: boolean; onClose: () => void; children: ReactNode }) {
 	return (
 		<DialogPrimitive.Root open={open} onOpenChange={(next) => !next && onClose()} modal={false}>
 			<DialogPrimitive.Portal>
@@ -862,7 +855,6 @@ function BottomIsland({ open, onClose, kicker, children }: { open: boolean; onCl
 							<X className="size-[18px]" />
 							<span className="sr-only">Close</span>
 						</DialogPrimitive.Close>
-						{kicker ? <DialogPrimitive.Title className="font-mono text-sm text-muted-foreground">{kicker}</DialogPrimitive.Title> : null}
 					</div>
 					<div className="no-scrollbar mt-4 min-h-0 overflow-y-auto">{children}</div>
 				</DialogPrimitive.Content>
@@ -874,7 +866,6 @@ function BottomIsland({ open, onClose, kicker, children }: { open: boolean; onCl
 type Anchor = { left: number; top: number; below: boolean };
 const POPOVER_W = 300;
 
-const PANEL_NAMES = { ledger: "#38 ledger", notebook: "#55 notebook", chief: "#53 chief updates" } as const;
 
 /** Modal body for a clicked card: the real issue or PR when there is one, else what the replay card stands for. */
 function CardDetails({ card, item, repo, inDialog }: { card: Card; item?: SwarmItem; repo: string; inDialog: boolean }) {
@@ -1132,23 +1123,41 @@ function DispatcherChip({ job }: { job: string | null }) {
 	);
 }
 
-/** `onOpen` makes the panel open in a modal on click; `bare` renders only the contents, for that modal. */
-type PanelMode = { onOpen?: (el: HTMLElement) => void; bare?: boolean };
+type PanelMode = { repo?: string; onMeasure?: (height: number) => void };
 
-function Panel({ index, title, onOpen, bare, children }: PanelMode & { index: number; title: string; children: React.ReactNode }) {
-	if (bare) return <div className="flex flex-col">{children}</div>;
+/** Read in place (its list scrolls); the title links to the issue the panel mirrors. */
+/** With `onMeasure` the panel grows to fit its content (from PANEL_H up) and reports its height. */
+function Panel({ index, title, repo, onMeasure, children }: PanelMode & { index: number; title: string; children: React.ReactNode }) {
+	const ref = useRef<HTMLDivElement>(null);
+	const measureRef = useRef(onMeasure);
+	measureRef.current = onMeasure;
+	const grows = Boolean(onMeasure);
+	useEffect(() => {
+		const el = ref.current;
+		if (!el || !grows) return;
+		const observer = new ResizeObserver(() => measureRef.current?.(el.offsetHeight));
+		observer.observe(el);
+		return () => observer.disconnect();
+	}, [grows]);
 	return (
 		<div
+			ref={ref}
 			data-component
-			role={onOpen ? "button" : undefined}
-			tabIndex={onOpen ? 0 : undefined}
-			aria-label={onOpen ? `Open ${title}` : undefined}
-			onClick={onOpen ? (e) => onOpen(e.currentTarget) : undefined}
-			onKeyDown={onOpen ? (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onOpen(e.currentTarget); } } : undefined}
-			className={`absolute flex flex-col rounded-lg border bg-background p-3 ${onOpen ? "cursor-pointer outline-none transition-colors hover:border-foreground/30 focus-visible:ring-2 focus-visible:ring-ring" : "cursor-default"}`}
-			style={{ left: panelX(index), top: PANEL_TOP, width: PANEL_W, height: 136 }}
+			className="absolute flex cursor-default flex-col rounded-lg border bg-background p-3"
+			style={{ left: panelX(index), top: PANEL_TOP, width: PANEL_W, ...(grows ? { minHeight: PANEL_H } : { height: PANEL_H }) }}
 		>
-			<p className="font-mono text-[12px] font-medium text-muted-foreground">{title}</p>
+			{repo ? (
+				<a
+					href={`https://github.com/${repo}/issues/${title.match(/^#(\d+)/)?.[1] ?? ""}`}
+					target="_blank"
+					rel="noreferrer"
+					className="w-fit font-mono text-[12px] font-medium text-muted-foreground underline-offset-2 hover:text-foreground hover:underline"
+				>
+					{title}
+				</a>
+			) : (
+				<p className="font-mono text-[12px] font-medium text-muted-foreground">{title}</p>
+			)}
 			<div className="mt-2 flex min-h-0 flex-1 flex-col">{children}</div>
 		</div>
 	);
@@ -1164,7 +1173,7 @@ function LedgerPanel({ spend, costs, ...mode }: PanelMode & { spend: number; cos
 			<div className="mt-1.5 h-1.5 overflow-hidden rounded-full bg-muted">
 				<div className="h-full rounded-full bg-foreground/70 transition-[width] duration-700" style={{ width: `${Math.min(100, (spend / 5) * 100)}%` }} />
 			</div>
-			<ul data-scroll className="no-scrollbar mt-2 min-h-0 flex-1 space-y-0.5 overflow-y-auto font-mono text-[12px] text-muted-foreground">
+			<ul className="mt-2 space-y-0.5 font-mono text-[12px] text-muted-foreground">
 				{costs.map((cost, i) => (
 					<li key={`${i}-${cost.role}-${cost.usd}`} className="flex justify-between">
 						<span style={{ color: ROLE_COLORS[cost.role] }}>{cost.role}</span>
@@ -1186,7 +1195,7 @@ function NotebookPanel({ notes, ...mode }: PanelMode & { notes: Note[] }) {
 						<span className={`mt-0.5 inline-flex size-3.5 shrink-0 items-center justify-center rounded-sm border text-[9px] ${n.done ? "border-transparent text-white" : ""}`} style={n.done ? { backgroundColor: ROLE_COLORS[n.role] } : undefined}>
 							{n.done ? "✓" : ""}
 						</span>
-						<span className={`${mode.bare ? "" : "truncate"} ${n.done ? "text-muted-foreground line-through" : "text-foreground"}`}>
+						<span className={`truncate ${n.done ? "text-muted-foreground line-through" : "text-foreground"}`}>
 							<span style={{ color: ROLE_COLORS[n.role] }}>{n.role}</span> {n.text}
 						</span>
 					</li>
