@@ -4,7 +4,7 @@ import Link from "next/link";
 import { LogoMark } from "@/components/logo";
 import { MarkGithubIcon } from "@primer/octicons-react";
 import { useState } from "react";
-import { Loader2, X } from "lucide-react";
+import { Loader2, Maximize2, Minimize2, X } from "lucide-react";
 import { SwarmCanvas } from "@/components/swarm/swarm-canvas";
 import YouTubeVideo from "@/components/youtube-video";
 import { SetupPreview } from "./setup-preview";
@@ -20,6 +20,7 @@ export function Landing({ signedIn }: { signedIn: boolean }) {
 	const [input, setInput] = useState("");
 	const { repo, plan, start, isLoading, error, done } = usePlan();
 	const [showVideo, setShowVideo] = useState(true);
+	const [bigVideo, setBigVideo] = useState(false);
 	const startHref = signedIn ? "/onboarding" : "/auth/login?screen_hint=signup&returnTo=%2Fonboarding";
 
 	const run = (value: string) => {
@@ -100,9 +101,18 @@ export function Landing({ signedIn }: { signedIn: boolean }) {
 				// The intro floats bottom-right, small until hovered (or focused), then grows on the card-resize curve.
 				<aside
 					aria-label="Formal Mind quick intro"
-					className="fixed bottom-4 right-4 z-40 w-48 overflow-hidden rounded-2xl border bg-black shadow-2xl transition-[width] duration-300 ease-[cubic-bezier(0.22,1,0.36,1)] animate-in fade-in-0 slide-in-from-bottom-4 focus-within:w-[min(360px,calc(100vw-2rem))] hover:w-[min(360px,calc(100vw-2rem))] motion-reduce:transition-none"
+					className={`fixed bottom-4 right-4 z-40 overflow-hidden ${bigVideo ? "w-[min(1100px,calc(100vw-2rem))]" : "w-48 focus-within:w-[min(360px,calc(100vw-2rem))] hover:w-[min(360px,calc(100vw-2rem))]"} rounded-2xl border bg-black shadow-2xl transition-[width] duration-300 ease-[cubic-bezier(0.22,1,0.36,1)] animate-in fade-in-0 slide-in-from-bottom-4 motion-reduce:transition-none`}
 				>
 					<YouTubeVideo videoId="xyZZqCQlmCE" title="Formal Mind quick intro" />
+					<button
+						type="button"
+						onClick={() => setBigVideo((big) => !big)}
+						aria-label={bigVideo ? "Shrink video" : "Expand video"}
+						title={bigVideo ? "Shrink video" : "Expand video"}
+						className="absolute right-11 top-2 z-10 flex size-7 items-center justify-center rounded-full bg-black/60 text-white backdrop-blur-sm transition-colors hover:bg-black/80"
+					>
+						{bigVideo ? <Minimize2 className="size-3.5" /> : <Maximize2 className="size-3.5" />}
+					</button>
 					<button
 						type="button"
 						onClick={() => setShowVideo(false)}
