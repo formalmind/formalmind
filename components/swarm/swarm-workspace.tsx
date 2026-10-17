@@ -75,8 +75,9 @@ export function SwarmWorkspace({ repo }: { repo: string }) {
 	const blocked = state?.work.filter((item) => item.labels.includes("fm:blocked")).length ?? 0;
 
 	return (
-		<div className="flex min-h-0 flex-1 flex-col lg:flex-row">
-			<section className="min-w-0 flex-1 overflow-y-auto p-4 sm:p-6">
+		<div className="flex min-h-0 flex-1 flex-col overflow-y-auto lg:flex-row lg:overflow-hidden">
+			{/* Below lg the board and the chat stack and scroll together, so the chat never squeezes the board. */}
+			<section className="min-w-0 shrink-0 p-4 sm:p-6 lg:flex-1 lg:shrink lg:overflow-y-auto">
 				<div className="flex flex-wrap items-center gap-x-3 gap-y-1">
 					<SidebarTrigger className="-ml-1" />
 					<h1 className="text-base font-semibold">Swarm</h1>
@@ -158,7 +159,7 @@ export function SwarmWorkspace({ repo }: { repo: string }) {
 				</ul>
 			</section>
 
-			<aside className="flex h-[70vh] min-h-0 flex-col border-t lg:h-auto lg:w-[380px] lg:border-l lg:border-t-0">
+			<aside className="flex h-[70vh] min-h-0 shrink-0 flex-col border-t lg:h-auto lg:w-[380px] lg:border-l lg:border-t-0">
 				<div className="flex h-14 shrink-0 items-center px-4">
 					<h2 className="text-sm font-semibold">Ask the swarm</h2>
 				</div>
