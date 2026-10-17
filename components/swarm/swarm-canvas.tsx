@@ -476,6 +476,27 @@ function liveScene(state: SwarmState, run: SwarmRun | null): Scene {
 	};
 }
 
+/** How long the roles stay in a project that just appeared before going back to what they were doing. */
+const ARRIVAL_MS = 9000;
+
+/**
+ * A new project's welcome: every role that isn't holding the turn (or waiting on a question) walks into
+ * its lanes, the planner to its roadmap, the dispatcher announcing it. The real run, if any, is untouched.
+ */
+function welcome(scene: Scene, repo: string, group: number): Scene {
+	const next = cloneScene(scene);
+	const free = ROLES.filter((r) => r !== next.turn && !next.cursors[r].say);
+	free.forEach((role, i) => {
+		if (role === "dispatcher") next.cursors.dispatcher = { at: geometry(1).home.dispatcher, say: `New project: ${repo}. It joins the sweep` };
+		else if (role === "planner") next.cursors.planner = { at: { x: laneX("roadmap") + 120, y: groupY(group) + CARD_TOP + 44 }, say: "Reading its roadmap" };
+		else {
+			const lane = LANES[1 + (i % (LANES.length - 1))];
+			next.cursors[role] = { at: { x: laneX(lane.key) + 40 + (i >= LANES.length ? 70 : 0), y: groupY(group) + CARD_TOP + 150 + (i % 2) * 70 } };
+		}
+	});
+	return next;
+}
+
 /** Stacks each project's lanes of cards on their measured heights; a card that would run past its lane's bottom is hidden. */
 function layout(cards: Card[], heights: Map<string, number>) {
 	const positions = new Map<string, { x: number; y: number; hidden: boolean }>();
@@ -732,7 +753,37 @@ export function SwarmCanvas({ state, fill = false, contain = false, title, actio
 	const ox = fit.x + view.x;
 	const oy = fit.y + view.y;
 
-	const shown = live ?? scene;
+	// A project that shows up while the board is open (its plan was just saved) gets a welcome: its lanes
+	// fade in, the board pans to it, and the roles not working stream over to it for a few seconds.
+	const seen = useRef<Set<string> | null>(null);
+	const [arrival, setArrival] = useState<{ repo: string; group: number; at: number } | null>(null);
+	const projectKey = state && fill ? projects.map((p) => p.repo).join("|") : "";
+	useEffect(() => {
+		if (!projectKey) return;
+		const repos = projectKey.split("|");
+		if (!seen.current) {
+			seen.current = new Set(repos);
+			return;
+		}
+		const fresh = repos.find((r) => !seen.current!.has(r));
+		repos.forEach((r) => seen.current!.add(r));
+		if (fresh) setArrival({ repo: fresh, group: repos.indexOf(fresh), at: Date.now() });
+	}, [projectKey]);
+	useEffect(() => {
+		if (!arrival) return;
+		const timer = setTimeout(() => setArrival(null), ARRIVAL_MS);
+		return () => clearTimeout(timer);
+	}, [arrival]);
+	// Bring the new group into view when it lands below (or above) what is on screen.
+	useEffect(() => {
+		if (!arrival) return;
+		const top = fit.y + view.y + groupY(arrival.group) * s;
+		const bottom = top + (LANE_BOTTOM - LANE_TOP) * s;
+		if (top < PINNED || bottom > fit.h) setRawView((v) => ({ ...v, y: v.y + PINNED + 12 - top }));
+		// eslint-disable-next-line react-hooks/exhaustive-deps
+	}, [arrival?.at]);
+
+	const shown = arrival && live ? welcome(live, arrival.repo, arrival.group) : live ?? scene;
 	// Cards grow to fit their label and title; the board stacks them on what they measure.
 	const [heights, setHeights] = useState(() => new Map<string, number>());
 	const measure = (id: string, h: number) =>
@@ -835,7 +886,7 @@ export function SwarmCanvas({ state, fill = false, contain = false, title, actio
 							{LANES.map((lane) => (
 								<div
 									key={lane.key}
-									className="absolute rounded-lg border border-dashed bg-muted/40"
+									className="absolute rounded-lg border border-dashed bg-muted/40 animate-in fade-in-0 duration-700"
 									style={{ left: laneX(lane.key), top: groupY(group) + LANE_TOP, width: LANE_W, height: LANE_BOTTOM - LANE_TOP }}
 								>
 									<div className="flex items-center justify-between px-3 pt-2.5 font-mono text-[12px] font-medium text-muted-foreground">
@@ -870,13 +921,15 @@ export function SwarmCanvas({ state, fill = false, contain = false, title, actio
 					<NotebookPanel notes={shown.notes} repo={state?.repo ?? repo} top={geo.panelTop} onMeasure={measurePanel(1)} />
 					<ChiefPanel headline={shown.chief} repo={state?.repo ?? repo} top={geo.panelTop} onMeasure={measurePanel(2)} />
 
-					{ROLES.map((role) => (
+					{ROLES.map((role, i) => (
 						<SwarmCursor
 							key={role}
 							role={role}
 							{...cursorPos(role)}
 							say={shown.cursors[role].say}
 							turn={shown.turn === role}
+							// Arriving at a new project they come in one after another, not as a block.
+							delay={arrival ? i * 120 : 0}
 						/>
 					))}
 				</div>
@@ -1080,14 +1133,14 @@ function ProjectHeader({ project, group, state }: { project: SwarmProject; group
 const MOVE = "transition-transform duration-700 [transition-timing-function:cubic-bezier(0.22,1,0.36,1)] motion-reduce:transition-none";
 
 /** Every role's cursor stays at full strength; the turn pill says who is working. */
-export function SwarmCursor({ role, x, y, say, turn, side }: { role: SwarmRole; x: number; y: number; say?: string; turn: boolean; side?: "left" }) {
+export function SwarmCursor({ role, x, y, say, turn, side, delay = 0 }: { role: SwarmRole; x: number; y: number; say?: string; turn: boolean; side?: "left"; delay?: number }) {
 	const color = ROLE_COLORS[role];
 	// Near the right edge, or when waiting beside another cursor, the label and bubble open to the left.
 	const flip = side === "left" || x > W - 260;
 	return (
 		<div
 			className={`pointer-events-none absolute left-0 top-0 z-20 ${MOVE}`}
-			style={{ transform: `translate(${x}px, ${y}px)`, transitionProperty: "transform" }}
+			style={{ transform: `translate(${x}px, ${y}px)`, transitionProperty: "transform", transitionDelay: `${delay}ms` }}
 		>
 			<svg width="28" height="28" viewBox="0 0 24 24" className="absolute -left-2 -top-[5px] drop-shadow-sm" aria-hidden>
 				<polygon points="7 20 7 4 19 16 12 16 7 21" fill={color} stroke="white" strokeWidth="1.5" strokeLinejoin="round" />

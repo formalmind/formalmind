@@ -31,6 +31,20 @@ export const SeveralProjects: Story = {
 	decorators: [withMockFetch({ "/api/swarm/state": () => json(severalProjectsState()), "/api/swarm/chat": reply })],
 };
 
+/** A project is added while the board is open: on the next poll (10 s) its lanes appear and the idle roles walk over. */
+let polls = 0;
+export const ProjectArrives: Story = {
+	decorators: [
+		withMockFetch({
+			"/api/swarm/state": () => {
+				const state = severalProjectsState();
+				return json(polls++ === 0 ? { ...state, projects: state.projects.slice(0, 2) } : state);
+			},
+			"/api/swarm/chat": reply,
+		}),
+	],
+};
+
 /** GitHub is unreachable or rate limited. */
 export const StateError: Story = {
 	decorators: [withMockFetch({ "/api/swarm/state": () => new Response("rate limited", { status: 502 }), "/api/swarm/chat": reply })],
