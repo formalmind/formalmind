@@ -2,7 +2,7 @@ import { callLLM, OpenAIModel, openAIModels } from "./lib/llm";
 
 callLLM({
 	provider: "openai",
-	model: openAIModels["gpt-4o"] as OpenAIModel,
+	model: openAIModels["gpt-6-luna"] as OpenAIModel,
 	messages: [
 		{
 			role: "user",

@@ -1,13 +1,16 @@
 import type { Metadata } from "next";
 import localFont from "next/font/local";
+import "katex/dist/katex.min.css";
+import "highlight.js/styles/atom-one-light.css";
 import "./globals.css";
-import { SidebarInset, SidebarProvider, SidebarTrigger } from "@/components/ui/sidebar";
+import { SidebarProvider } from "@/components/ui/sidebar";
 import { AppSidebar } from "@/components/app-sidebar";
-import { Separator } from "@radix-ui/react-separator";
 import { auth0 } from "@/lib/auth0"
 import LoginPage from "@/components/login"
 import { AuthProvider } from "@/components/auth-context";
-import BreadCrumbs from "@/components/bread-crumbs";
+import { WorkspaceContent } from "@/components/workspace-content";
+import { ThemeProvider } from "@/components/theme-provider";
+import { ChatConversationsProvider } from "@/components/chat-conversations";
 
 const geistSans = localFont({
 	src: "./fonts/GeistVF.woff",
@@ -47,8 +50,10 @@ export default async function RootLayout({
 	if (!session) {
 		return (
 			<html>
-				<body className="text-sm">
-					<LoginPage />
+				<body className="text-sm" suppressHydrationWarning>
+					<ThemeProvider>
+						<LoginPage />
+					</ThemeProvider>
 				</body>
 			</html>
 		)
@@ -57,29 +62,18 @@ export default async function RootLayout({
 		<html lang="en" suppressHydrationWarning>
 			<body
 				suppressHydrationWarning
-				className={`${geistSans.variable} ${geistMono.variable} antialiased light`}
+				className={`${geistSans.variable} ${geistMono.variable} antialiased`}
 			>
-				<AuthProvider value={session}>
-					<SidebarProvider>
-						<AppSidebar />
-						<div className="flex-1 overflow-x-auto">
-							<SidebarInset className="flex-1 w-full overflow-x-auto">
-								<header className="flex h-16 shrink-0 items-center gap-2">
-									<div className="flex items-center gap-2 px-4">
-										<SidebarTrigger className="-ml-1" />
-										<Separator orientation="vertical" className="mr-2 h-4" />
-										<BreadCrumbs />
-									</div>
-								</header>
-								<div className="flex flex-1 flex-col min-h-0 gap-4 p-4 pt-0 text-sm">
-									<article className="px-1 markdown prose max-w-full">
-										{children}
-									</article>
-								</div>
-							</SidebarInset>
-						</div>
-					</SidebarProvider >
-				</AuthProvider>
+				<ThemeProvider>
+					<AuthProvider value={session}>
+						<ChatConversationsProvider>
+							<SidebarProvider>
+								<AppSidebar />
+								<WorkspaceContent>{children}</WorkspaceContent>
+							</SidebarProvider >
+						</ChatConversationsProvider>
+					</AuthProvider>
+				</ThemeProvider>
 			</body >
 		</html >
 	);

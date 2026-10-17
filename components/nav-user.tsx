@@ -1,6 +1,5 @@
 "use client"
 
-import { useUser } from "@auth0/nextjs-auth0"
 import {
 	BadgeCheck,
 	Bell,
@@ -28,23 +27,11 @@ import {
 	useSidebar,
 } from "@/components/ui/sidebar"
 
-import { Skeleton } from "@/components/ui/skeleton"
+import { useAuth } from "@/components/auth-context"
 
 export function NavUser() {
 	const { isMobile } = useSidebar()
-	const { user, isLoading } = useUser()
-
-	if (isLoading) {
-		return (
-			<SidebarMenu>
-				<SidebarMenuItem>
-					<SidebarMenuButton size="lg" asChild>
-						<Skeleton className="rounded-lg" />
-					</SidebarMenuButton>
-				</SidebarMenuItem>
-			</SidebarMenu>
-		)
-	}
+	const { user } = useAuth()
 
 	if (!user) {
 		return (

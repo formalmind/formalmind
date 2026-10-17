@@ -1,6 +1,6 @@
 import type { NextConfig } from "next";
 import remarkGfm from 'remark-gfm'
-import rehypePrettyCode from 'rehype-pretty-code'
+import rehypeHighlight from 'rehype-highlight'
 import rehypeCallouts from 'rehype-callouts'
 import remarkDirective from 'remark-directive'
 
@@ -21,10 +21,7 @@ const withMDX = createMDX({
 	extension: /\.(md|mdx)$/,
 	options: {
 		remarkPlugins: [remarkGfm, remarkDirective],
-		rehypePlugins: [
-			rehypeCallouts,
-			[rehypePrettyCode],
-		],
+			rehypePlugins: [rehypeCallouts, [rehypeHighlight, { plainText: ['mermaid'] }]],
 	},
 })
 

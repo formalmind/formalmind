@@ -37,7 +37,7 @@ It's like having a formal methods research assistant who never sleeps and always
 ## 🚀 What’s Next?
 
 ➡️ [Get Started](/documentation/get-started)  
-➡️ [Install the GitHub App](/)  
+➡️ [Install the GitHub App](/github)\
 ➡️ [See Available Agents](/agents)
 
 ---

@@ -2,46 +2,97 @@
 
 import { FederatedConnectionInterrupt } from "@auth0/ai/interrupts";
 import { EnsureAPIAccessPopup } from "@/components/auth0-ai/FederatedConnections/popup";
-import { Button } from "@/components/ui/button"
-import { Input } from "@/components/ui/input"
-import { Card, CardContent, CardFooter, CardHeader, CardTitle } from "@/components/ui/card"
-import { ScrollArea } from "@/components/ui/scroll-area"
-import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
-import { Send, Bot, User, Download, Trash2, MessageCircleDashed } from "lucide-react"
-import { useEffect, useRef } from "react"
+import { Check, Copy, Share2 } from "lucide-react"
+import { Children, isValidElement, useEffect, useRef, useState } from "react"
+import { useParams } from "next/navigation"
+import { ChatComposer } from "@/components/chat-composer"
+import type { OpenAIModel } from "@/lib/llm"
 import { useChatWithInterruptions } from "@/hooks/useChatWithInterruptions";
 import { useAuth } from "./auth-context";
-import { useUser } from "@auth0/nextjs-auth0";
 import LoginPage from "./login";
+import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
+import remarkMath from "remark-math";
+import rehypeKatex from "rehype-katex";
+import rehypeHighlight from "rehype-highlight";
+import rehypeRaw from "rehype-raw";
+import rehypeSanitize, { defaultSchema } from "rehype-sanitize";
+import type { Schema } from "hast-util-sanitize";
+import { MermaidDiagram } from "@/components/mermaid-diagram";
+import { useChatConversations, type ChatConversation } from "@/components/chat-conversations";
+
+const markdownSchema: Schema = {
+	...defaultSchema,
+	tagNames: [...(defaultSchema.tagNames || []), "details", "summary"],
+	attributes: {
+		...defaultSchema.attributes,
+		code: [
+			...(defaultSchema.attributes?.code || []),
+			["className", "math-inline", "math-display", "language-mermaid"],
+		],
+		details: [...(defaultSchema.attributes?.details || []), "open"],
+	},
+};
 
 export function ChatPage() {
-	const { messages, input, handleInputChange, handleSubmit, isLoading, setMessages, toolInterrupt } = useChatWithInterruptions()
-	const scrollAreaRef = useRef<HTMLDivElement>(null)
-	const inputRef = useRef<HTMLInputElement>(null)
 	const session = useAuth();
-	const user = useUser()
+	const { activeConversation, isReady, updateMessages } = useChatConversations();
 
+	if (!session) return <LoginPage />;
+	if (!isReady || !activeConversation) return <div className="flex min-h-0 flex-1 bg-background" />;
 
-	// Load messages on component mount
-	// Load messages from localStorage only once, on mount
-	useEffect(() => {
-		const savedMessages = localStorage.getItem("chat-messages");
-		if (savedMessages) {
+	return (
+		<ChatConversationView
+			key={activeConversation.id}
+			conversation={activeConversation}
+			onMessagesChange={updateMessages}
+		/>
+	);
+}
+
+function ChatConversationView({
+	conversation,
+	onMessagesChange,
+}: {
+	conversation: ChatConversation;
+	onMessagesChange: (id: string, messages: import("ai").Message[]) => void;
+}) {
+	const [model, setModel] = useState<OpenAIModel>("gpt-6-luna")
+	const [copiedMessageId, setCopiedMessageId] = useState<string | null>(null)
+	const [sharedMessageId, setSharedMessageId] = useState<string | null>(null)
+	const { messages, input, handleInputChange, handleSubmit, stop, isLoading, toolInterrupt, error } = useChatWithInterruptions({
+		model,
+		id: conversation.id,
+		initialMessages: conversation.messages,
+	})
+	const scrollAreaRef = useRef<HTMLDivElement>(null)
+	const inputRef = useRef<HTMLTextAreaElement>(null)
+	const params = useParams<{ owner?: string; repo?: string }>()
+	const repo = params?.owner && params?.repo ? { owner: params.owner, name: params.repo } : null
+
+	const copyResponse = async (id: string, content: string) => {
+		await navigator.clipboard.writeText(content)
+		setCopiedMessageId(id)
+		setTimeout(() => setCopiedMessageId((current) => current === id ? null : current), 2000)
+	}
+
+	const shareResponse = async (id: string, content: string) => {
+		if (navigator.share) {
 			try {
-				const parsedMessages = JSON.parse(savedMessages);
-				setMessages(parsedMessages);
+				await navigator.share({ title: "Formal Mind response", text: content })
+				setSharedMessageId(id)
+				setTimeout(() => setSharedMessageId((current) => current === id ? null : current), 2000)
+				return
 			} catch (error) {
-				console.error("Failed to load saved messages:", error);
+				if (error instanceof Error && error.name === "AbortError") return
 			}
 		}
-	}, [setMessages]);
+		await copyResponse(id, content)
+	}
 
-	// Save messages to localStorage when messages change
 	useEffect(() => {
-		if (messages.length > 0) {
-			localStorage.setItem("chat-messages", JSON.stringify(messages));
-		}
-	}, [messages]);
+		onMessagesChange(conversation.id, messages);
+	}, [conversation.id, messages, onMessagesChange]);
 
 	// Scroll to bottom on new messages
 	useEffect(() => {
@@ -61,131 +112,73 @@ export function ChatPage() {
 				return
 			}
 
-			if (inputRef.current && !isLoading) {
-				inputRef.current.focus()
-			}
+			inputRef.current?.focus()
 		}
 
 		document.addEventListener("keydown", handleKeyDown)
 		return () => document.removeEventListener("keydown", handleKeyDown)
-	}, [isLoading])
+	}, [])
 
-	const clearChat = () => {
-		setMessages([])
-		localStorage.removeItem("chat-messages")
-	}
-
-	const exportChat = () => {
-		const chatData = {
-			messages,
-			exportedAt: new Date().toISOString(),
-		}
-		const blob = new Blob([JSON.stringify(chatData, null, 2)], { type: "application/json" })
-		const url = URL.createObjectURL(blob)
-		const a = document.createElement("a")
-		a.href = url
-		a.download = `chat-export-${new Date().toISOString().split("T")[0]}.json`
-		document.body.appendChild(a)
-		a.click()
-		document.body.removeChild(a)
-		URL.revokeObjectURL(url)
-	}
-
-	if (!session) {
-		return <LoginPage />
-	}
-
-	if (!user) {
-		return <LoginPage />
-	}
 	return (
-		<div className="flex flex-1 flex-col min-h-0 overflow-hidden">
-			<Card className="flex flex-1 flex-col overflow-hidden">
-				<CardHeader className="border-b">
-					<div className="flex items-center justify-between">
-						<CardTitle className="flex items-center gap-2 text-xl">
-							<MessageCircleDashed className="h-6 w-6 text-blue-600" />
-							Chat Assistant
-						</CardTitle>
-						<div className="flex gap-2">
-							<Button
-								variant="outline"
-								size="sm"
-								onClick={exportChat}
-								disabled={messages.length === 0}
-								className="text-xs"
-							>
-								<Download className="h-3 w-3 mr-1" />
-								Export
-							</Button>
-							<Button
-								variant="outline"
-								size="sm"
-								onClick={clearChat}
-								disabled={messages.length === 0}
-								className="text-xs text-red-600 hover:text-red-700"
-							>
-								<Trash2 className="h-3 w-3 mr-1" />
-								Clear
-							</Button>
-						</div>
-					</div>
-				</CardHeader>
-
-				<CardContent className="flex flex-col flex-1 overflow-hidden p-0 min-h-0">
-					<ScrollArea className="flex flex-1 flex-col p-4 overflow-y-auto">
-						<div className="flex flex-col flex-1 min-h-0 space-y-4 max-h-none">
-							{messages.length === 0 && (
-								<div className="flex flex-col flex-1 min-h-0 text-center text-gray-500 mt-8">
-									<MessageCircleDashed className="h-12 w-12 mx-auto mb-4 text-gray-400" />
-									<p className="text-lg font-medium">Welcome to AI Chat!</p>
-									<p className="text-sm">Start a conversation by typing a message below.</p>
-								</div>
-							)}
-
+		<div className="flex flex-1 flex-col min-h-0 overflow-hidden bg-background">
+			<div ref={scrollAreaRef} className="min-h-0 flex-1 overflow-y-auto p-4 sm:p-6">
+				<div className="mx-auto w-full max-w-3xl space-y-6 py-4">
 							{messages.map((message) => (
 								<div
 									key={message.id}
-									className={`flex gap-3 ${message.role === "user" ? "justify-end" : "justify-start"}`}
+										className={`flex items-end gap-3 ${message.role === "user" ? "justify-end" : "justify-start"}`}
 								>
 
-									{message.role === "assistant" && (
-										<Avatar className="h-8 w-8 bg-blue-100">
-											<AvatarFallback>
-												<Bot className="h-4 w-4 text-blue-600" />
-											</AvatarFallback>
-										</Avatar>
-									)}
-
 									<div
-										className={`max-w-[70%] rounded-lg px-4 ${message.role === "user" ? "bg-blue-600 text-white" : "bg-gray-100 text-gray-900"
-											}`}
+										className={message.role === "user"
+												? "max-w-[85%] rounded-full bg-secondary px-4 py-2 text-sm text-secondary-foreground sm:max-w-[75%]"
+											: "min-w-0 flex-1 text-foreground"}
 									>
-										<p className="text-sm">{message.content}</p>
+										{message.role === "assistant" ? (
+												<>
+							<div className="chat-markdown prose prose-sm max-w-none leading-6 dark:prose-invert prose-pre:overflow-x-auto prose-pre:rounded-lg prose-pre:bg-muted prose-pre:p-4 prose-pre:text-foreground prose-code:rounded prose-code:bg-muted prose-code:px-1 prose-code:py-0.5 prose-code:text-foreground prose-code:before:content-none prose-code:after:content-none">
+								<ReactMarkdown
+									remarkPlugins={[remarkGfm, remarkMath]}
+									rehypePlugins={[
+										rehypeRaw,
+										[rehypeSanitize, markdownSchema],
+										[rehypeHighlight, { plainText: ["mermaid"] }],
+										rehypeKatex,
+									]}
+									components={{
+										pre({ children, ...props }) {
+											const child = Children.toArray(children).find(isValidElement);
+											const codeProps = child?.props as { className?: string; children?: React.ReactNode } | undefined;
+											if (codeProps?.className?.split(/\s+/).includes("language-mermaid")) {
+												return <MermaidDiagram chart={String(codeProps.children ?? "").replace(/\n$/, "")} />;
+											}
+											return <pre {...props}>{children}</pre>;
+										},
+									}}
+								>
+													{message.content || (isLoading ? "" : "The assistant returned an empty response. Please try again.")}
+												</ReactMarkdown>
+											</div>
+											{message.content && (
+												<div className="mt-2 flex items-center gap-1 text-muted-foreground">
+													<button type="button" aria-label="Copy response" title={copiedMessageId === message.id ? "Copied" : "Copy response"} onClick={() => void copyResponse(message.id, message.content)} className="inline-flex h-8 w-8 items-center justify-center rounded-md hover:bg-secondary hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
+														{copiedMessageId === message.id ? <Check className="h-4 w-4" /> : <Copy className="h-4 w-4" />}
+													</button>
+													<button type="button" aria-label="Share response" title={sharedMessageId === message.id ? "Shared" : "Share response"} onClick={() => void shareResponse(message.id, message.content)} className="inline-flex h-8 w-8 items-center justify-center rounded-md hover:bg-secondary hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
+														<Share2 className="h-4 w-4" />
+													</button>
+												</div>
+											)}
+												</>
+										) : (
+											<p className="whitespace-pre-wrap text-sm leading-6">{message.content}</p>
+										)}
 									</div>
-
-									{message.role === "user" && (
-
-										<Avatar className="h-8 w-8">
-											<AvatarImage src={session.user.picture} alt={session.user.name || "User"} />
-											<AvatarFallback>
-												{session.user?.name ?
-													session.user.name.charAt(0).toUpperCase()
-													: < User className="h-4 w-4 text-white" />
-												}
-											</AvatarFallback>
-										</Avatar>
-									)}
 								</div>
 							))}
 
 							{isLoading && (
 								<div className="flex gap-3 justify-start">
-									<Avatar className="h-8 w-8 bg-blue-100">
-										<AvatarFallback>
-											<Bot className="h-4 w-4 text-blue-600" />
-										</AvatarFallback>
-									</Avatar>
 									<div className="bg-gray-100 rounded-lg px-4 py-2">
 										<div className="flex space-x-1">
 											<div className="w-2 h-2 bg-gray-400 rounded-full animate-bounce"></div>
@@ -214,31 +207,24 @@ export function ChatPage() {
 								)}
 							</div>
 						</div>
-					</ScrollArea>
-				</CardContent>
+			</div>
 
-				<CardFooter className="border-t shadow-none bg-white/50 p-4">
-					<form onSubmit={handleSubmit} className="flex w-full gap-2">
-						<Input
-							ref={inputRef}
+				<div className="shrink-0 px-4 pb-4 pt-2 sm:px-6 sm:pb-6">
+					<div className="mx-auto w-full max-w-3xl">
+					{error && <p role="alert" className="mb-2 rounded-lg border border-destructive/20 bg-destructive/5 px-3 py-2 text-sm text-destructive">{error.message || "The model request failed. Please try again."}</p>}
+						<ChatComposer
+							textareaRef={inputRef}
 							value={input}
 							onChange={handleInputChange}
-							placeholder="Type your message here..."
-							disabled={isLoading}
-							className="flex-1"
-							autoFocus
+							onSubmit={() => handleSubmit()}
+							onStop={stop}
+							isLoading={isLoading}
+							model={model}
+							onModelChange={setModel}
+							repo={repo}
 						/>
-						<Button
-							type="submit"
-							disabled={isLoading || !input.trim()}
-							size="icon"
-							className="bg-blue-600 hover:bg-blue-700"
-						>
-							<Send className="h-4 w-4" />
-						</Button>
-					</form>
-				</CardFooter>
-			</Card>
+					</div>
+				</div>
 		</div>
 	)
 }

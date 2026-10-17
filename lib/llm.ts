@@ -19,8 +19,9 @@ export interface CallLLMOptions {
 
 export type OpenAIModel = (typeof openAIModelNames)[number]
 export const openAIModelNames = [
-	"gpt-4o",
-	"gpt-4o-mini",
+	"gpt-6-luna",
+	"gpt-6.1-sol",
+	"gpt-6-astra",
 ] as const;
 export const openAIModels: Record<OpenAIModel, string> = Object.fromEntries(
 	openAIModelNames.map((m) => [m, m])
