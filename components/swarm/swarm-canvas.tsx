@@ -419,7 +419,7 @@ export function SwarmCanvas({ state, highlight, fill = false, title, actions }: 
 		const frame = wrap.getBoundingClientRect();
 		const below = frame.bottom - box.bottom > 300;
 		return {
-			left: Math.min(Math.max(box.left - frame.left, 12), Math.max(frame.width - POPOVER_W - 12, 12)),
+			left: Math.min(Math.max(box.left - frame.left, 12), Math.max(frame.width - POPOVER_W * scale * view.k - 12, 12)),
 			top: below ? box.bottom - frame.top + 8 : box.top - frame.top - 8,
 			below,
 		};
@@ -740,13 +740,14 @@ export function SwarmCanvas({ state, highlight, fill = false, title, actions }: 
 					role="dialog"
 					aria-label={"panel" in modal ? PANEL_NAMES[modal.panel] : modal.card.title}
 					data-canvas-ui
-					// The phone island's look, anchored: same corners, padding, close button and shadow.
-					className="absolute z-40 flex max-h-[min(60vh,480px)] flex-col rounded-[2rem] border border-black/5 bg-background p-5 shadow-[0_16px_48px_-12px_rgba(0,0,0,0.28)] animate-in fade-in-0 zoom-in-[0.97] duration-200 dark:border-white/10"
+					// The island's look in the board's units: compact type and spacing, scaled with the board.
+					className="absolute z-40 flex max-h-[min(60vh,420px)] flex-col rounded-2xl border border-black/5 bg-background p-3 shadow-[0_12px_32px_-12px_rgba(0,0,0,0.28)] animate-in fade-in-0 duration-200 dark:border-white/10"
 					style={{
 						width: POPOVER_W,
 						left: modal.anchor.left,
 						top: modal.anchor.top,
-						transform: modal.anchor.below ? undefined : "translateY(-100%)",
+						// Drawn at the board's own zoom, so its type and spacing match the cards around it.
+						transform: `${modal.anchor.below ? "" : "translateY(-100%) "}scale(${scale * view.k})`,
 						transformOrigin: modal.anchor.below ? "top left" : "bottom left",
 					}}
 				>
@@ -754,14 +755,14 @@ export function SwarmCanvas({ state, highlight, fill = false, title, actions }: 
 						<button
 							type="button"
 							onClick={() => setModal(null)}
-							className="flex size-10 shrink-0 items-center justify-center rounded-full border bg-background shadow-sm transition-colors hover:bg-muted"
+							className="flex size-7 shrink-0 items-center justify-center rounded-full border bg-background shadow-sm transition-colors hover:bg-muted"
 							aria-label="Close"
 						>
-							<X className="size-[18px]" />
+							<X className="size-3.5" />
 						</button>
-						{"panel" in modal ? <p className="font-mono text-sm text-muted-foreground">{PANEL_NAMES[modal.panel]}</p> : null}
+						{"panel" in modal ? <p className="font-mono text-xs text-muted-foreground">{PANEL_NAMES[modal.panel]}</p> : null}
 					</div>
-					<div className="no-scrollbar mt-4 min-h-0 overflow-y-auto">{details(false)}</div>
+					<div className="no-scrollbar mt-2.5 min-h-0 overflow-y-auto">{details(false)}</div>
 				</div>
 			) : null}
 			{hover ? (
@@ -871,7 +872,7 @@ function BottomIsland({ open, onClose, kicker, children }: { open: boolean; onCl
 }
 
 type Anchor = { left: number; top: number; below: boolean };
-const POPOVER_W = 400;
+const POPOVER_W = 300;
 
 const PANEL_NAMES = { ledger: "#38 ledger", notebook: "#55 notebook", chief: "#53 chief updates" } as const;
 
@@ -883,8 +884,8 @@ function CardDetails({ card, item, repo, inDialog }: { card: Card; item?: SwarmI
 		return (
 			<div>
 				<span className={`rounded px-1.5 py-px font-mono text-[10px] ${LABEL_STYLES[card.label] ?? LABEL_STYLES.README}`}>{card.label}</span>
-				<Title className="mt-2 text-lg font-semibold leading-snug">{card.title}</Title>
-				<p className="mt-1 text-sm text-muted-foreground">
+				<Title className={`mt-2 font-semibold leading-snug ${inDialog ? "text-lg" : "text-sm"}`}>{card.title}</Title>
+				<p className={`mt-1 text-muted-foreground ${inDialog ? "text-sm" : "text-xs leading-5"}`}>
 					{card.kind === "doc" ? "The roadmap in the proofs repo's README." : "A card in the replay; it stands in for an issue and links nowhere."}
 				</p>
 			</div>
@@ -894,7 +895,12 @@ function CardDetails({ card, item, repo, inDialog }: { card: Card; item?: SwarmI
 		<>
 			{inDialog ? <DialogPrimitive.Title className="sr-only">{item.title}</DialogPrimitive.Title> : null}
 			<ItemPreview item={item} repo={repo} full />
-			<a href={item.url} target="_blank" rel="noreferrer" className="mt-5 flex h-12 w-full items-center justify-center rounded-full bg-foreground text-sm font-semibold text-background transition-opacity hover:opacity-90">
+			<a
+				href={item.url}
+				target="_blank"
+				rel="noreferrer"
+				className={`flex items-center justify-center rounded-full bg-foreground font-semibold text-background transition-opacity hover:opacity-90 ${inDialog ? "mt-5 h-12 w-full text-sm" : "mt-3 h-8 w-fit px-3 text-xs"}`}
+			>
 				Open on GitHub
 			</a>
 		</>
@@ -1139,7 +1145,7 @@ function Panel({ index, title, onOpen, bare, children }: PanelMode & { index: nu
 			aria-label={onOpen ? `Open ${title}` : undefined}
 			onClick={onOpen ? (e) => onOpen(e.currentTarget) : undefined}
 			onKeyDown={onOpen ? (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onOpen(e.currentTarget); } } : undefined}
-			className={`absolute flex flex-col rounded-lg border bg-background p-3 ${onOpen ? "cursor-pointer transition-colors hover:border-foreground/30" : "cursor-default"}`}
+			className={`absolute flex flex-col rounded-lg border bg-background p-3 ${onOpen ? "cursor-pointer outline-none transition-colors hover:border-foreground/30 focus-visible:ring-2 focus-visible:ring-ring" : "cursor-default"}`}
 			style={{ left: panelX(index), top: PANEL_TOP, width: PANEL_W, height: 136 }}
 		>
 			<p className="font-mono text-[12px] font-medium text-muted-foreground">{title}</p>
