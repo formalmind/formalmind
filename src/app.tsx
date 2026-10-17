@@ -112,7 +112,7 @@ export function App() {
 							<Route path="/projects/:owner/:name/chat" element={<Title text="Chat · Formal Mind"><ProjectChatPage /></Title>} />
 							<Route path="/projects/:owner/:name/chat/:chatId" element={<Title text="Chat · Formal Mind"><ProjectChatPage /></Title>} />
 							<Route path="/chat" element={<Title text="Chat · Formal Mind"><ChatPage /></Title>} />
-							<Route path="/onboarding" element={<Title text="Set up · Formal Mind"><Onboarding /></Title>} />
+							<Route path="/onboarding" element={<Title text="Onboarding · Formal Mind"><Onboarding /></Title>} />
 							<Route path="/github" element={<Title text="Get Started · Formal Mind"><GetStarted /></Title>} />
 							<Route path="/github/:owner/:repo" element={<RepoChat />} />
 							<Route path="/documentation/get-started" element={<Title text="Get Started · Formal Mind"><GetStarted /></Title>} />

@@ -111,10 +111,16 @@ export function Onboarding() {
 		else setNotice(body.error ?? "Checkout didn't start.");
 	};
 
+	// "+ New project" opens an empty box; a project's Setup link names its repository.
+	const [params] = useSearchParams();
+	const asked = params.get("repo");
+	const boxRepo = params.get("new") === "1" && !planner.repo ? "" : asked ?? state.repo ?? "";
+	// The saved plan belongs to state.repo; a different repository in the box starts from scratch.
+	const planned = Boolean(state.plan) && boxRepo === state.repo;
 	const done: Record<StepKey, boolean> = {
-		plan: Boolean(state.plan),
-		team: Boolean(state.plan),
-		budget: Boolean(state.plan),
+		plan: planned,
+		team: planned,
+		budget: planned,
 		credits: (credits?.cents ?? 0) > 0,
 		github: install.installed,
 		start: false,
@@ -122,16 +128,12 @@ export function Onboarding() {
 	const index = STEPS.findIndex((s) => s.key === step);
 	const go = (offset: number) => setStep(STEPS[Math.min(STEPS.length - 1, Math.max(0, index + offset))].key);
 	const plan = planner.plan ?? state.plan ?? undefined;
-	// "+ Add a project" opens an empty box; a project's Setup link names its repository.
-	const [params] = useSearchParams();
-	const asked = params.get("repo");
-	const boxRepo = params.get("new") === "1" && !planner.repo ? "" : asked ?? state.repo ?? "";
 
 	return (
 		<div className="flex min-h-0 flex-1 flex-col overflow-y-auto p-4 sm:p-6">
 			<div className="flex items-center gap-3">
 				<SidebarTrigger className="-ml-1" />
-				<h1 className="text-sm font-semibold">Set up your swarm</h1>
+				<h1 className="text-sm font-semibold">Onboarding</h1>
 				{boxRepo ? <span className="font-mono text-sm text-muted-foreground">{boxRepo}</span> : null}
 			</div>
 

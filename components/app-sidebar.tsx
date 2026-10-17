@@ -165,10 +165,10 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
 				<SidebarGroup>
 					<SidebarMenu>
 						<SidebarMenuItem>
-							<SidebarMenuButton asChild isActive={pathname === "/onboarding" && window.location.search.includes("new=1")} tooltip="Add a project" className="font-normal data-[active=true]:font-normal">
+							<SidebarMenuButton asChild isActive={pathname === "/onboarding" && window.location.search.includes("new=1")} tooltip="New project" className="font-normal data-[active=true]:font-normal">
 								<Link to="/onboarding?new=1">
-									<span className="flex size-5 shrink-0 items-center justify-center rounded-full bg-sidebar-accent text-sidebar-foreground"><Plus className="size-3.5" /></span>
-									<span>Add a project</span>
+									<Plus />
+									<span>New project</span>
 								</Link>
 							</SidebarMenuButton>
 						</SidebarMenuItem>
