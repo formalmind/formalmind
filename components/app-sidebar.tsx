@@ -63,15 +63,10 @@ function useOpenFolders() {
 	return [open, set] as const
 }
 
-/** One project as a folder: its name, a chevron, and a + for a new chat; inside, its roadmap, setup and chats. */
+/** One project as a folder: its name, a chevron, and a + for a new chat; inside, its chats. */
 function ProjectFolder({ project, open, onOpenChange, pathname }: { project: Project; open: boolean; onOpenChange: (open: boolean) => void; pathname: string }) {
 	const chats = useProjectChats(project.repo)
 	const name = project.repo.split("/")[1] ?? project.repo
-	const pages = [
-		{ title: "Roadmap", url: projectPath(project.repo, "roadmap") },
-		{ title: "Setup", url: `/onboarding?repo=${encodeURIComponent(project.repo)}` },
-	]
-	const current = (url: string) => pathname + (url.includes("?") ? window.location.search : "") === url
 
 	return (
 		<Collapsible open={open} onOpenChange={onOpenChange} asChild>
@@ -92,11 +87,6 @@ function ProjectFolder({ project, open, onOpenChange, pathname }: { project: Pro
 				</div>
 				<CollapsibleContent>
 					<ul className="flex flex-col gap-0.5 pb-2">
-						{pages.map((p) => (
-							<li key={p.title}>
-								<Link to={p.url} className={`${ROW} ${current(p.url) ? ACTIVE : ""}`}>{p.title}</Link>
-							</li>
-						))}
 						{chats.map((c) => {
 							const url = projectPath(project.repo, `chat/${c.id}`)
 							return (
