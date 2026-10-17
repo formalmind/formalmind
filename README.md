@@ -32,8 +32,10 @@ members of the team.
   needed.
 
 The design of the swarm, its labels and its safety rails are documented in
-`asyncswap/v2-proofs/.github/formalmind/README.md`. The Worker relay lives in
-`formalmind/webhook-redis/worker`.
+`asyncswap/v2-proofs/.github/formalmind/README.md`. GitHub webhooks are relayed by a
+stateless Cloudflare Worker in `formalmind/webhook-redis/worker`: it verifies push
+deliveries, forwards them to the proofs repository as `repository_dispatch`, and starts
+the swarm workflow on a schedule. The web app no longer uses Redis.
 
 # Getting Started
 
@@ -47,7 +49,6 @@ Project stack:
 
 - Github app - wehooks /api/github/webhook
 - Auth0 - Gen AI auth
-- Redis - real time event
 - LLMs
 
 ## Setup
@@ -78,16 +79,10 @@ Project stack:
    GROQ_API_KEY=
    HF_TOKEN=
 
-
    # github app
    GITHUB_APP_ID=
    GITHUB_WEBHOOK_SECRET=
    GITHUB_APP_PRIVATE_KEY=
-
-   # redis
-   REDIS_URL=redis://localhost:6379
-   REDIS_PASSWORD=
-   WEBHOOK_URL=http://localhost:3000/api/github/webhook
    ```
 
 > [!TIP]
@@ -104,50 +99,12 @@ Project stack:
    bun dev
    ```
 
-## Using redis server for github events
-
-Run locally on docker:
-
-```sh
-docker compose up -d
-```
-
-
-## Local chat and Redis testing
+## Local chat
 
 The app runs on http://localhost:3001. Set `OPENAI_API_KEY` in `.env.local`
-for live chat responses. Chat history currently uses browser localStorage;
-Redis carries webhook events, not chat messages or formal verification results.
+for live chat responses. Chat history currently uses browser localStorage.
 GitHub repository tools require a configured Auth0/GitHub connection.
-
-Start Docker Desktop, then start Redis with the same password used by the app:
-
-```sh
-docker compose --env-file .env.local up -d redis
-bun run dev:relay
-```
-
-In another terminal, start the app if it is not already running:
 
 ```sh
 bun dev --port 3001
 ```
-
-Set `REDIS_URL=redis://default:<url-encoded-password>@localhost:6379` and
-`REDIS_PASSWORD=<password>` in `.env.local`. The relay binds to localhost:3003.
-It stores webhook bodies in `github_events:install:<id>` and publishes delivery
-objects to the `webhooks` channel. The app forwards them through `/api/events`.
-
-To exercise the local relay, open `curl -N http://localhost:3001/api/events`
-and send a synthetic event from another terminal:
-
-```sh
-curl http://localhost:3003/webhook \
-  -H 'Content-Type: application/json' \
-  -d '{"installation":{"id":0},"action":"local-test"}'
-```
-
-This relay is for local testing. Production needs webhook signature validation
-and authorized event subscriptions before exposing these endpoints. Starting
-Redis does not provide a formal verification engine; that integration remains
-separate work.

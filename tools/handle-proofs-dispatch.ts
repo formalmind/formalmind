@@ -1,5 +1,3 @@
-import { redis } from "@/lib/redis";
-
 /**
  * Formal-mind bot bridge: forward a protocol `push` (delivered to this GitHub App) to the
  * proofs repository as a `repository_dispatch`, which runs `.github/workflows/formal-mind.yml`
@@ -37,9 +35,5 @@ export async function handleProofsDispatch({ octokit, payload }: any) {
 		headers: { "X-GitHub-Api-Version": "2022-11-28" },
 	});
 
-	await redis.lpush(
-		`events:${payload.installation?.id}`,
-		JSON.stringify({ type: "proofs_dispatch", data: { repo: full, sha, target }, receivedAt: Date.now() })
-	);
 	console.log(`🧠 formal-mind: dispatched ${full}@${sha.slice(0, 7)} → ${target.owner}/${target.repo}`);
 }
