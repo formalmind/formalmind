@@ -41,11 +41,8 @@ export function Landing({ signedIn }: { signedIn: boolean }) {
 
 			<main>
 				<section className="mx-auto max-w-6xl px-4 pb-10 pt-10 text-center sm:px-6 sm:pt-16">
-					<p className="inline-flex items-center gap-1.5 rounded-full border px-3 py-1 text-xs text-muted-foreground">
-						<Sparkles className="size-3.5" /> A swarm of agents for formal verification
-					</p>
-					<h1 className="mx-auto mt-5 max-w-3xl text-balance text-4xl font-semibold tracking-tight sm:text-5xl">
-						Prove your Solidity correct, one small pull request at a time
+					<h1 className="mx-auto max-w-3xl text-balance text-4xl font-semibold tracking-tight sm:text-5xl">
+						Prove your Solidity code correct, using a swarm of agents for formal verification
 					</h1>
 
 					<form
