@@ -1,6 +1,6 @@
 import type { Meta, StoryObj } from "@storybook/nextjs-vite";
 import { SwarmCanvas } from "@/components/swarm/swarm-canvas";
-import { justFinishedState, liveState, replayState } from "./fixtures/swarm";
+import { askState, handoffState, justFinishedState, liveState, replayState } from "./fixtures/swarm";
 
 const meta = {
 	title: "Swarm/Canvas",
@@ -27,6 +27,12 @@ export const LiveMerger: Story = { args: { state: liveState("merger") } };
 
 /** The planner works from the roadmap card. */
 export const LivePlanner: Story = { args: { state: liveState("planner") } };
+
+/** A finished turn hands the baton: the reviewer names the merger, who steps up to the PR. */
+export const Handoff: Story = { args: { state: handoffState() } };
+
+/** The prover asked the reviewer a question; the reviewer waits at #61 for its turn to answer. */
+export const QuestionWaiting: Story = { args: { state: askState() } };
 
 /** The chief's daily update finished two minutes ago and stays up until the live window closes. */
 export const JustFinished: Story = { args: { state: justFinishedState() } };

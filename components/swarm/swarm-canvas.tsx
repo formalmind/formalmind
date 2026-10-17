@@ -49,6 +49,7 @@ export const LABEL_STYLES: Record<string, string> = {
 	"fm:blocked": "bg-red-500/15 text-red-600 dark:text-red-300",
 	"fm:needs-rebase": "bg-orange-500/15 text-orange-700 dark:text-orange-300",
 	merged: "bg-violet-500/15 text-violet-700 dark:text-violet-300",
+	...Object.fromEntries(["planner", "prover", "reviewer", "merger", "chief"].map((r) => [`fm:ask-${r}`, "bg-fuchsia-500/15 text-fuchsia-700 dark:text-fuchsia-300"])),
 	README: "bg-muted text-muted-foreground",
 };
 
@@ -92,6 +93,8 @@ type Scene = {
 	job: string | null;
 	costs: { role: SwarmRole; usd: number }[];
 	tick: number;
+	/** The one role holding the turn; the others wait (dimmed) unless they have something to say. */
+	turn: SwarmRole | null;
 };
 
 const HOME: Record<SwarmRole, { x: number; y: number }> = {
@@ -107,7 +110,7 @@ const ROADMAP_SPOT = { x: laneX("roadmap") + 120, y: CARD_TOP + 44 };
 const CHIEF_SPOT = { x: panelX(2) + 300, y: PANEL_TOP + 70 };
 const LEDGER_SPOT = { x: panelX(0) + 300, y: PANEL_TOP + 70 };
 const NOTEBOOK_SPOT = { x: panelX(1) + 300, y: PANEL_TOP + 70 };
-const JOBS = ["merge", "review", "revise", "resume", "new issue", "plan"];
+const JOBS = ["answer", "merge", "review", "revise", "resume", "new issue", "plan"];
 
 type Step = { hold: number; apply: (scene: Scene) => void };
 
@@ -121,6 +124,7 @@ function move(scene: Scene, id: string, lane: Lane, patch: Partial<Card> = {}) {
 
 function say(scene: Scene, role: SwarmRole, text: string | undefined, where?: { x: number; y: number } | string) {
 	const cursor = scene.cursors[role];
+	if (text) scene.turn = role;
 	if (typeof where === "string") scene.cursors[role] = { follow: where, say: text };
 	else scene.cursors[role] = { at: where ?? cursor.at ?? HOME[role], follow: where ? undefined : cursor.follow, say: text };
 }
@@ -168,6 +172,7 @@ function initialScene(state: SwarmState | null): Scene {
 		job: null,
 		costs: [],
 		tick: order,
+		turn: null,
 	};
 }
 
@@ -184,36 +189,56 @@ function buildScript(start: Scene): Step[] {
 	const pr = top + 1;
 	const next = top + 2;
 	const id = a.id;
+	// One issue's trip, one turn at a time. Each turn ends by naming who goes next; twice the
+	// prover stops to /ask the reviewer, once for an answer and once for a quality check the
+	// reviewer takes over.
 	return [
-		{ hold: 1800, apply: (s) => { s.job = "new issue"; say(s, "dispatcher", `Sweep: $${(5 - s.spend).toFixed(2)} of $5 left today. Nothing to merge or review, so prove #${a.number}`); } },
-		{ hold: 1400, apply: (s) => { home(s, "dispatcher"); say(s, "prover", `Picking up #${a.number}`, id); note(s, "prover", `#${a.number}: read, define, prove, build, open PR`); } },
+		{ hold: 1800, apply: (s) => { s.job = "new issue"; say(s, "dispatcher", `Sweep: $${(5 - s.spend).toFixed(2)} of $5 left today. No questions, nothing to merge or review: prover, #${a.number} is yours`); } },
+		{ hold: 1400, apply: (s) => { home(s, "dispatcher"); say(s, "prover", `My turn. Picking up #${a.number}`, id); note(s, "prover", `#${a.number}: read, define, prove, build, open PR`); } },
 		{ hold: 1500, apply: (s) => { move(s, id, "progress", { label: "fm:in-progress", branch: `fm/issue-${a.number}` }); say(s, "prover", `On branch fm/issue-${a.number}`, id); } },
-		{ hold: 1800, apply: (s) => { say(s, "prover", "lake build ✓  no sorry, no new axioms", id); tick(s); spend(s, "prover", 0.95); } },
-		{ hold: 1700, apply: (s) => { move(s, id, "review", { kind: "pr", number: pr, label: "fm:review" }); say(s, "prover", `Opened PR #${pr} with a changelog entry. @fm-reviewer`, id); } },
-		{ hold: 1500, apply: (s) => { home(s, "prover"); s.job = "review"; say(s, "dispatcher", `PR #${pr} has fm:review, so review it`); } },
-		{ hold: 1900, apply: (s) => { home(s, "dispatcher"); say(s, "reviewer", "Checked the Solidity line by line. Suggestion: dsimp only before omega", id); note(s, "reviewer", `#${pr}: diff, Solidity, scope, changelog`); } },
-		{ hold: 1600, apply: (s) => { move(s, id, "progress", { label: "fm:changes" }); say(s, "reviewer", "Changes requested. @fm-prover", id); tick(s); spend(s, "reviewer", 0.22); } },
-		{ hold: 1400, apply: (s) => { home(s, "reviewer"); s.job = "revise"; say(s, "dispatcher", `PR #${pr} has fm:changes, so the prover revises`); } },
-		{ hold: 1700, apply: (s) => { home(s, "dispatcher"); say(s, "prover", "Applied the suggestion. Build still clean", id); spend(s, "prover", 0.6); } },
-		{ hold: 1400, apply: (s) => { move(s, id, "review", { label: "fm:review" }); say(s, "prover", "Back to you. @fm-reviewer", id); } },
-		{ hold: 1600, apply: (s) => { home(s, "prover"); say(s, "reviewer", "Suggestion is in the diff. Approved. @fm-merger", id); } },
-		{ hold: 1500, apply: (s) => { move(s, id, "approved", { label: "fm:approved" }); say(s, "reviewer", undefined, id); spend(s, "reviewer", 0.18); } },
-		{ hold: 1400, apply: (s) => { home(s, "reviewer"); s.job = "merge"; say(s, "dispatcher", `PR #${pr} has fm:approved, so merge comes first`); } },
+		{ hold: 2000, apply: (s) => { move(s, id, "progress", { label: "fm:ask-reviewer" }); say(s, "prover", "/ask reviewer Should the statement cover every entry point, or just swap? Holding until you answer", id); spend(s, "prover", 0.35); } },
+		{ hold: 1500, apply: (s) => { home(s, "prover"); s.job = "answer"; say(s, "dispatcher", `#${a.number} has a question for the reviewer, and questions go first`); } },
+		{ hold: 2000, apply: (s) => { home(s, "dispatcher"); say(s, "reviewer", "Answering prover: every entry point, so it matches Router.sol. Next: prover", id); spend(s, "reviewer", 0.12); } },
+		{ hold: 1400, apply: (s) => { move(s, id, "progress", { label: "fm:in-progress" }); home(s, "reviewer"); s.job = "resume"; say(s, "dispatcher", `Question answered. #${a.number} is in progress, so the prover resumes`); } },
+		{ hold: 1800, apply: (s) => { home(s, "dispatcher"); say(s, "prover", "Quantified over every entry point. lake build ✓ no sorry, no new axioms", id); tick(s); spend(s, "prover", 0.6); } },
+		{ hold: 1800, apply: (s) => { move(s, id, "review", { kind: "pr", number: pr, label: "fm:review" }); say(s, "prover", `Opened PR #${pr}. Next: reviewer — the swap case first`, id); } },
+		{ hold: 1400, apply: (s) => { home(s, "prover"); s.job = "review"; say(s, "dispatcher", `PR #${pr} has fm:review: reviewer's turn`); } },
+		{ hold: 1900, apply: (s) => { home(s, "dispatcher"); say(s, "reviewer", "Checked the Solidity line by line. One suggestion: dsimp only before omega. Next: prover", id); note(s, "reviewer", `#${pr}: diff, Solidity, scope, changelog`); } },
+		{ hold: 1300, apply: (s) => { move(s, id, "progress", { label: "fm:changes" }); tick(s); spend(s, "reviewer", 0.22); home(s, "reviewer"); s.job = "revise"; say(s, "dispatcher", `PR #${pr} has fm:changes: prover revises`); } },
+		{ hold: 2000, apply: (s) => { home(s, "dispatcher"); say(s, "prover", "Applied it. /ask reviewer Quality check the swap case before I hand it back?", id); move(s, id, "progress", { label: "fm:ask-reviewer" }); spend(s, "prover", 0.4); } },
+		{ hold: 1400, apply: (s) => { home(s, "prover"); s.job = "answer"; say(s, "dispatcher", "A question for the reviewer goes first"); } },
+		{ hold: 2000, apply: (s) => { home(s, "dispatcher"); say(s, "reviewer", "Taking over: I'm the quality check, so I'll review it now instead of answering", id); } },
+		{ hold: 1800, apply: (s) => { move(s, id, "approved", { label: "fm:approved" }); say(s, "reviewer", "Swap case holds and the suggestion is in. Approved. Next: merger", id); spend(s, "reviewer", 0.2); } },
+		{ hold: 1400, apply: (s) => { home(s, "reviewer"); s.job = "merge"; say(s, "dispatcher", `PR #${pr} has fm:approved: merger's turn`); } },
 		{ hold: 2000, apply: (s) => { home(s, "dispatcher"); say(s, "merger", "lake build on the exact head ✓. Every theorem the thread claims exists without sorry", id); note(s, "merger", `#${pr}: gate, verify claims, decide, merge`); } },
-		{ hold: 1700, apply: (s) => { move(s, id, "dev", { label: "merged" }); say(s, "merger", "Squash-merged into dev", id); tick(s); spend(s, "merger", 0.25); } },
-		{ hold: 1400, apply: (s) => { home(s, "merger"); s.job = "plan"; say(s, "dispatcher", "Only one fm:todo left, so plan"); } },
+		{ hold: 1700, apply: (s) => { move(s, id, "dev", { label: "merged" }); say(s, "merger", "Squash-merged into dev. Next: nobody — it's done", id); tick(s); spend(s, "merger", 0.25); } },
+		{ hold: 1400, apply: (s) => { home(s, "merger"); s.job = "plan"; say(s, "dispatcher", "Only one fm:todo left: planner's turn"); } },
 		{ hold: 1700, apply: (s) => { home(s, "dispatcher"); say(s, "planner", "Reading the roadmap and the gaps the changelog left", ROADMAP_SPOT); note(s, "planner", "queue small, disjoint issues; post digest"); } },
 		{ hold: 300, apply: (s) => { s.cards.push({ id: "new", number: next, title: "spec: next unproven gap from the changelog", kind: "issue", lane: "roadmap", order: s.tick++, label: "fm:todo" }); } },
-		{ hold: 1800, apply: (s) => { move(s, "new", "todo"); say(s, "planner", `Wrote #${next} and posted a digest on the ledger`, "new"); tick(s); spend(s, "planner", 0.3); } },
-		{ hold: 2600, apply: (s) => { home(s, "planner"); s.job = null; s.chief = "Working: 1 merged, 2 queued, nothing waiting on you"; say(s, "chief", "Posted the daily update on #53. @mmsaki", CHIEF_SPOT); } },
-		{ hold: 1600, apply: (s) => { home(s, "chief"); } },
+		{ hold: 1800, apply: (s) => { move(s, "new", "todo"); say(s, "planner", `Wrote #${next}. Next: prover — #${next} first`, "new"); tick(s); spend(s, "planner", 0.3); } },
+		{ hold: 2600, apply: (s) => { home(s, "planner"); s.job = null; s.chief = "Working: 1 merged, 2 queued, nothing waiting on you"; say(s, "chief", "Posted the daily update on #53. Next: @mmsaki — nothing needs you", CHIEF_SPOT); } },
+		{ hold: 1600, apply: (s) => { home(s, "chief"); s.turn = null; } },
 	];
 }
 
 const COST_ROLES: Record<string, SwarmRole> = { plan: "planner", prove: "prover", review: "reviewer", merge: "merger", chief: "chief" };
 
 /** Lane an open item sits in, from its fm: labels. */
+/** The role an open question on this item is waiting for, from its fm:ask-<role> label. */
+function askedOf(item: SwarmItem): SwarmRole | null {
+	const label = item.labels.find((l) => l.startsWith("fm:ask-"));
+	return label ? (label.slice("fm:ask-".length) as SwarmRole) : null;
+}
+
+/** Lane from the job labels; a pending question shows as the card's label without moving it. */
 function laneOf(item: SwarmItem): { lane: Lane; label: string } | null {
+	const place = jobLaneOf(item);
+	const ask = item.labels.find((l) => l.startsWith("fm:ask-"));
+	if (!ask) return place;
+	return { lane: place?.lane ?? (item.kind === "pr" ? "review" : "progress"), label: ask };
+}
+
+function jobLaneOf(item: SwarmItem): { lane: Lane; label: string } | null {
 	const has = (l: string) => item.labels.includes(l);
 	if (item.kind === "issue") {
 		if (has("fm:in-progress")) return { lane: "progress", label: "fm:in-progress" };
@@ -251,9 +276,11 @@ function liveScene(state: SwarmState, run: SwarmRun): Scene {
 
 	const note = run.note;
 	const role: SwarmRole = note?.role ?? "dispatcher";
+	const done = run.status === "completed";
 	const current = note?.tasks.find((t) => !t.done && !t.dropped);
-	const say = clip(run.status === "completed"
-		? note ? `Done${note.verified ? `: ${note.verified}` : ""}` : "Finished"
+	const handoff = done ? note?.next : null;
+	const say = clip(done
+		? handoff ? `Next: ${handoff.to}${handoff.why ? ` — ${handoff.why}` : ""}` : note ? `Done${note.verified ? `: ${note.verified}` : ""}` : "Finished"
 		: current?.text ?? (note && run.phase === "working" ? "Wrapping up" : PHASE_TEXT[run.phase]));
 
 	const cursors = Object.fromEntries(ROLES.map((r) => [r, { at: HOME[r] }])) as Scene["cursors"];
@@ -265,8 +292,24 @@ function liveScene(state: SwarmState, run: SwarmRun): Scene {
 		: undefined;
 	cursors[role] = target ? { follow: target.id, say } : { at: spot ?? HOME[role], say };
 
-	const label = target?.label;
-	const job = role === "merger" ? "merge"
+	// Open questions: the asked role waits at the item until the dispatcher gives it the turn.
+	for (const item of state.work) {
+		const asked = askedOf(item);
+		if (asked && asked !== role && cards.some((c) => c.id === `w${item.number}`)) {
+			cursors[asked] = { follow: `w${item.number}`, say: `Asked on #${item.number}. I answer on my turn` };
+		}
+	}
+	// The baton: once a run ends, the role it handed to steps up to the same item.
+	const nextRole = handoff && (ROLES as string[]).includes(handoff.to) ? (handoff.to as SwarmRole) : null;
+	if (nextRole && nextRole !== role && !cursors[nextRole].say) {
+		cursors[nextRole] = target ? { follow: target.id, say: "My turn next" } : { at: HOME[nextRole], say: "My turn next" };
+	}
+	// The job comes from the item's job labels, not from a question label shown on the card.
+	const targetItem = state.work.find((item) => item.number === note?.ref);
+	const label = targetItem ? jobLaneOf(targetItem)?.label : target?.label;
+	const answering = Boolean(note?.title.toLowerCase().startsWith("answer"));
+	const job = answering ? "answer"
+		: role === "merger" ? "merge"
 		: role === "reviewer" ? "review"
 		: role === "planner" ? "plan"
 		: role === "prover" ? (label === "fm:changes" || label === "fm:needs-rebase" ? "revise" : label === "fm:in-progress" ? "resume" : "new issue")
@@ -281,6 +324,7 @@ function liveScene(state: SwarmState, run: SwarmRun): Scene {
 		job,
 		costs: state.costs.slice(-3).map((c) => ({ role: COST_ROLES[c.role] ?? "dispatcher", usd: c.usd })),
 		tick: order,
+		turn: done ? nextRole ?? role : role,
 	};
 }
 
@@ -374,9 +418,21 @@ export function SwarmCanvas({ state, highlight }: { state: SwarmState | null; hi
 	const keepHover = () => {
 		if (hoverTimer.current) clearTimeout(hoverTimer.current);
 	};
-	const cursorPos = (cursor: Cursor) => {
+	// Several cursors can stand at one card (a role waiting to answer next to the one working).
+	// The turn holder takes the usual spot; the others wait at the card's left edge.
+	const waiting = new Map<SwarmRole, number>();
+	for (const role of ROLES) {
+		const follow = shown.cursors[role].follow;
+		if (!follow || role === shown.turn) continue;
+		const sharing = ROLES.filter((r) => shown.cursors[r].follow === follow && (r === shown.turn || ROLES.indexOf(r) < ROLES.indexOf(role)));
+		if (sharing.length) waiting.set(role, sharing.length);
+	}
+	const cursorPos = (role: SwarmRole) => {
+		const cursor = shown.cursors[role];
 		const p = cursor.follow ? positions.get(cursor.follow) : undefined;
-		return p ? { x: p.x + CARD_W - 28, y: p.y + 46 } : cursor.at ?? { x: 0, y: 0 };
+		if (!p) return { ...(cursor.at ?? { x: 0, y: 0 }), side: undefined };
+		const slot = waiting.get(role);
+		return slot ? { x: p.x + 14, y: p.y + 60 + (slot - 1) * 56, side: "left" as const } : { x: p.x + CARD_W - 28, y: p.y + 46, side: undefined };
 	};
 
 	return (
@@ -393,6 +449,7 @@ export function SwarmCanvas({ state, highlight }: { state: SwarmState | null; hi
 					}}
 				>
 					<DispatcherChip job={shown.job} />
+					<TurnChip turn={shown.turn} />
 
 					{LANES.map((lane) => (
 						<div
@@ -432,9 +489,10 @@ export function SwarmCanvas({ state, highlight }: { state: SwarmState | null; hi
 						<SwarmCursor
 							key={role}
 							role={role}
-							{...cursorPos(shown.cursors[role])}
+							{...cursorPos(role)}
 							say={shown.cursors[role].say}
-							dim={Boolean(highlight && highlight !== role)}
+							turn={shown.turn === role}
+							dim={highlight ? highlight !== role : Boolean(shown.turn && shown.turn !== role && !shown.cursors[role].say)}
 						/>
 					))}
 				</div>
@@ -469,10 +527,10 @@ export function SwarmCanvas({ state, highlight }: { state: SwarmState | null; hi
 
 const MOVE = "transition-transform duration-700 ease-[cubic-bezier(0.22,1,0.36,1)] motion-reduce:transition-none";
 
-function SwarmCursor({ role, x, y, say, dim }: { role: SwarmRole; x: number; y: number; say?: string; dim: boolean }) {
+function SwarmCursor({ role, x, y, say, dim, turn, side }: { role: SwarmRole; x: number; y: number; say?: string; dim: boolean; turn: boolean; side?: "left" }) {
 	const color = ROLE_COLORS[role];
-	// Near the right edge the label and bubble open to the left so they stay on the board.
-	const flip = x > W - 260;
+	// Near the right edge, or when waiting beside another cursor, the label and bubble open to the left.
+	const flip = side === "left" || x > W - 260;
 	return (
 		<div
 			className={`pointer-events-none absolute left-0 top-0 z-20 ${MOVE}`}
@@ -482,8 +540,10 @@ function SwarmCursor({ role, x, y, say, dim }: { role: SwarmRole; x: number; y: 
 				<polygon points="7 20 7 4 19 16 12 16 7 21" fill={color} stroke="white" strokeWidth="1.5" strokeLinejoin="round" />
 			</svg>
 			<div className={`absolute top-5 flex flex-col gap-1 ${flip ? "right-1 items-end" : "left-4 items-start"}`}>
-				<span className="whitespace-nowrap rounded-full px-2 py-0.5 text-[12px] font-medium text-white shadow-sm" style={{ backgroundColor: color }}>
+				<span className="inline-flex items-center gap-1 whitespace-nowrap rounded-full px-2 py-0.5 text-[12px] font-medium text-white shadow-sm" style={{ backgroundColor: color }}>
+					{turn ? <span className="size-1.5 animate-pulse rounded-full bg-white" aria-hidden /> : null}
 					{role}
+					{turn ? <span className="font-normal opacity-80">· turn</span> : null}
 				</span>
 				{say ? (
 					<span key={say} className="w-max max-w-[240px] rounded-lg border bg-popover px-2.5 py-1.5 text-[13px] leading-snug text-popover-foreground shadow-md animate-in fade-in-0 zoom-in-95 duration-200">
@@ -575,6 +635,21 @@ export function ItemHoverCard({ item, repo, left, top, below, onEnter, onLeave }
 				<span className="font-medium text-foreground">{item.author}</span>
 				<span>opened · {item.comments} comment{item.comments === 1 ? "" : "s"}</span>
 			</div>
+		</div>
+	);
+}
+
+/** Whose turn it is; one role at a time, the way the workflow runs them. */
+function TurnChip({ turn }: { turn: SwarmRole | null }) {
+	return (
+		<div className="absolute flex h-9 items-center gap-2 rounded-full border bg-background px-3 text-[13px] shadow-sm" style={{ right: 132, top: CHIP.y }}>
+			<span className="text-muted-foreground">Turn</span>
+			{turn ? (
+				<span className="inline-flex items-center gap-1.5 font-medium">
+					<span className="size-2 rounded-full" style={{ backgroundColor: ROLE_COLORS[turn] }} />
+					{turn}
+				</span>
+			) : <span className="text-muted-foreground">waiting for the next sweep</span>}
 		</div>
 	);
 }

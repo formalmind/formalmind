@@ -69,6 +69,7 @@ export function liveState(role: keyof typeof LIVE = "prover"): SwarmState {
 			tasks: plan.tasks.map(([text, done]) => ({ text, done, dropped: false })),
 			verified: null,
 			left: null,
+			next: null,
 			createdAt: ago(3),
 			updatedAt: ago(0),
 			url: "https://github.com/asyncswap/v2-proofs/issues/55",
@@ -86,3 +87,28 @@ export function justFinishedState(): SwarmState {
 
 export const openIssue = base.work[0];
 export const mergedPr = base.merged[0];
+
+/** The reviewer just finished and handed the turn to the merger. */
+export function handoffState(): SwarmState {
+	const state = liveState("reviewer");
+	const [run, ...rest] = state.runs;
+	const note = run.note!;
+	return {
+		...state,
+		runs: [{
+			...run,
+			status: "completed",
+			conclusion: "success",
+			phase: "done",
+			updatedAt: ago(1),
+			note: { ...note, tasks: note.tasks.map((t) => ({ ...t, done: true })), verified: "approved PR #63", next: { to: "merger", why: "the swap case is the one to double-check" } },
+		}, ...rest],
+		work: state.work.map((item) => (item.number === 63 ? { ...item, labels: ["fm:approved"] } : item)),
+	};
+}
+
+/** The prover is mid-turn on #61 and has asked the reviewer a question, which waits for its turn. */
+export function askState(): SwarmState {
+	const state = liveState("prover");
+	return { ...state, work: state.work.map((item) => (item.number === 61 ? { ...item, labels: ["fm:in-progress", "fm:ask-reviewer"] } : item)) };
+}

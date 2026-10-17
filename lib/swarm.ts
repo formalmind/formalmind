@@ -47,6 +47,12 @@ export interface SwarmCost {
 }
 
 /** One run's notebook entry: a task list the role ticks off as it works. */
+export interface SwarmHandoff {
+	/** A role, a human's handle (with @), or "nobody". */
+	to: string;
+	why: string;
+}
+
 export interface SwarmNote {
 	role: SwarmRole;
 	ref: number | null;
@@ -55,6 +61,8 @@ export interface SwarmNote {
 	tasks: { text: string; done: boolean; dropped: boolean }[];
 	verified: string | null;
 	left: string | null;
+	/** Who the run handed the turn to, from its "**Next:** <role> — <why>" line. */
+	next: SwarmHandoff | null;
 	createdAt: string;
 	updatedAt: string;
 	url: string;
@@ -168,6 +176,16 @@ async function latestComments(issue: number, count: number): Promise<SwarmCommen
 const NOTE_MARKER = /<!-- fm-note role=(\S+) ref=#?(\S+) run=(\d+) -->/;
 const ROLE_NAMES: Record<string, SwarmRole> = { plan: "planner", prove: "prover", review: "reviewer", merge: "merger", chief: "chief" };
 
+const HANDOFF_ROLES: Record<string, SwarmRole> = { ...ROLE_NAMES, planner: "planner", prover: "prover", reviewer: "reviewer", merger: "merger", dispatcher: "dispatcher" };
+
+/** "reviewer — check the swap case first" → { to: "reviewer", why: "check the swap case first" }. */
+export function parseHandoff(line: string | null): SwarmHandoff | null {
+	const match = line?.match(/^(@?[\w-]+)\s*(?:[—–:-]\s*)?(.*)$/);
+	if (!match) return null;
+	const who = match[1].toLowerCase();
+	return { to: who.startsWith("@") || who === "nobody" ? match[1] : HANDOFF_ROLES[who] ?? who, why: match[2].trim() };
+}
+
 function parseNote(comment: GitHubComment): SwarmNote | null {
 	const marker = comment.body.match(NOTE_MARKER);
 	const role = marker && ROLE_NAMES[marker[1]];
@@ -187,6 +205,7 @@ function parseNote(comment: GitHubComment): SwarmNote | null {
 		}),
 		verified: field("Verified"),
 		left: field("Left"),
+		next: parseHandoff(field("Next")),
 		createdAt: comment.created_at,
 		updatedAt: comment.updated_at,
 		url: comment.html_url,
