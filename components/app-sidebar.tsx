@@ -2,7 +2,7 @@
 
 import { Link } from "react-router";
 import { useLocation } from "react-router";
-import { BookOpen, GanttChart, MessageCircle, Network, Rocket } from "lucide-react"
+import { BookOpen, GanttChart, MessageCircle, Network, Plus } from "lucide-react"
 import {
 	Sidebar,
 	SidebarContent,
@@ -20,12 +20,12 @@ type NavItem = { title: string; url: string; icon: React.ElementType }
 
 const NAV: NavItem[] = [
 	{ title: "Swarm", url: "/", icon: Network },
-	{ title: "Chat", url: "/chat", icon: MessageCircle },
 	{ title: "Roadmap", url: "/roadmap", icon: GanttChart },
+	{ title: "Chat", url: "/chat", icon: MessageCircle },
 ]
 
 const FOOTER: NavItem[] = [
-	{ title: "Set up a repo", url: "/onboarding", icon: Rocket },
+	{ title: "Add a project", url: "/onboarding", icon: Plus },
 	{ title: "Get started", url: "/github", icon: BookOpen },
 ]
 

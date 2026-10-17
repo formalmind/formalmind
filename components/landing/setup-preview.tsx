@@ -135,7 +135,7 @@ export function SetupPreview({ repo, plan, done, failed, startHref }: { repo: st
 						<SetupSummary
 							rows={[
 								{ label: "Repository", value: repo, ok: true },
-								{ label: "Plan", value: done ? `${plan?.issues?.length ?? 0} issues, ${plan?.invariants?.length ?? 0} invariants` : failed ? "not finished: re-plan above" : "planning…", ok: done },
+								{ label: "Plan", value: done ? `${plan?.issues?.length ?? 0} issues, ${plan?.invariants?.length ?? 0} invariants` : failed ? "not finished: plan it above" : "planning…", ok: done },
 								{ label: "Team", value: `${TEAM_PRESETS.find((t) => t.key === team)?.name}${team === "squad" ? ` of ${squadSize}` : ""}`, ok: true },
 								{ label: "Daily budget", value: `$${dailyUsd} a day`, ok: true },
 								{ label: "Credits", value: "$0.00", ok: false },

@@ -69,14 +69,20 @@ export function StepNav({ onBack, onNext, nextDisabled, nextLabel = "Continue" }
 	);
 }
 
-export function RepoForm({ initial, busy, onPlan, cta }: { initial: string; busy: boolean; onPlan: (repo: string) => void; cta?: string }) {
+/**
+ * The repository box. Once `initial` has a plan, `onContinue` makes the button move forward for that
+ * repository (planning it again is a separate, quieter action); typing another repository plans that one.
+ */
+export function RepoForm({ initial, busy, onPlan, onContinue, cta }: { initial: string; busy: boolean; onPlan: (repo: string) => void; onContinue?: () => void; cta?: string }) {
 	const [value, setValue] = useState(initial);
 	useEffect(() => setValue(initial), [initial]);
+	const continues = Boolean(onContinue && initial && value.trim() === initial);
 	return (
 		<form
 			onSubmit={(e) => {
 				e.preventDefault();
-				onPlan(value);
+				if (continues) onContinue?.();
+				else onPlan(value);
 			}}
 			className="flex max-w-xl items-center gap-2 rounded-full border bg-background p-1.5 pl-4 focus-within:ring-2 focus-within:ring-ring"
 		>
@@ -84,7 +90,7 @@ export function RepoForm({ initial, busy, onPlan, cta }: { initial: string; busy
 			<input value={value} onChange={(e) => setValue(e.target.value)} placeholder="github.com/owner/repo" aria-label="GitHub repository" className="min-w-0 flex-1 bg-transparent text-sm outline-none placeholder:text-muted-foreground" />
 			<button type="submit" disabled={busy || !value.trim()} className="inline-flex h-8 items-center gap-1.5 rounded-full bg-primary px-3.5 text-sm font-medium text-primary-foreground hover:opacity-90 disabled:opacity-50">
 				{busy ? <Loader2 className="size-4 animate-spin" /> : null}
-				{cta ?? (initial ? "Re-plan" : "Plan it")}
+				{cta ?? (continues ? "Continue" : "Plan it")}
 			</button>
 		</form>
 	);
@@ -242,7 +248,7 @@ export function SetupSummary({ rows }: { rows: { label: string; value: string; o
 
 /** The copy each step opens with, so the onboarding and its landing preview read the same. */
 export const STEP_COPY: Record<StepKey, { title: string; lead: string }> = {
-	plan: { title: "Your plan", lead: "The planner's first pass on your repository. You can re-plan it, or plan a different repository." },
+	plan: { title: "Your plan", lead: "The planner's first pass on your repository. Continue with it, or enter a different repository to plan that one." },
 	team: { title: "How many agents?", lead: "The protocol is the same for every team size. More agents work disjoint issues in parallel; the planner and the chief are on call in every team." },
 	budget: { title: "Daily budget", lead: "The swarm only starts a run when the run's whole cap fits in what is left today, and pauses until tomorrow when it is spent." },
 	credits: { title: "Credits", lead: "Model usage is paid from prepaid credits. Your daily budget decides how fast they are spent." },

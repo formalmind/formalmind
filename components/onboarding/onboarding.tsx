@@ -134,14 +134,18 @@ export function Onboarding() {
 						<div className="flex items-center gap-2 text-sm text-muted-foreground"><Loader2 className="size-4 animate-spin" /> Loading your setup…</div>
 					) : step === "plan" ? (
 						<Panel {...STEP_COPY.plan}>
-							<RepoForm initial={state.repo ?? ""} busy={planner.isLoading} onPlan={planner.start} />
+							<RepoForm initial={state.repo ?? ""} busy={planner.isLoading} onPlan={planner.start} onContinue={state.plan ? () => go(1) : undefined} />
 							{planner.error ? <p role="alert" className="mt-2 text-sm text-red-600 dark:text-red-400">{planner.error}</p> : null}
 							{planner.repo || state.repo ? (
 								<div className="mt-5">
 									<PlanBoard repo={planner.repo ?? state.repo ?? ""} plan={plan} status={planner.isLoading ? "planning" : "done"} />
 								</div>
 							) : null}
-							<Nav onNext={() => go(1)} nextDisabled={!state.plan} />
+							{state.repo && state.plan && !planner.isLoading ? (
+								<button type="button" onClick={() => planner.start(state.repo ?? "")} className="mt-4 text-sm text-muted-foreground underline-offset-4 hover:text-foreground hover:underline">
+									Plan this repository again
+								</button>
+							) : null}
 						</Panel>
 					) : step === "team" ? (
 						<Panel {...STEP_COPY.team}>
