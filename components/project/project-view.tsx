@@ -12,9 +12,9 @@ import { ProjectRoadmap } from "./project-roadmap";
 export type ProjectViewName = "board" | "roadmap";
 
 const POLL_MS = 30_000;
-const VIEW_PATHS = ["/project", "/roadmap"];
+const VIEW_PATHS = ["/kanban", "/roadmap"];
 const VIEWS: { key: ProjectViewName; name: string; icon: React.ElementType }[] = [
-	{ key: "board", name: "Board", icon: ProjectIcon },
+	{ key: "board", name: "Kanban", icon: ProjectIcon },
 	{ key: "roadmap", name: "Roadmap", icon: ProjectRoadmapIcon },
 ];
 

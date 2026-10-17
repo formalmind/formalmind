@@ -16,7 +16,7 @@ import { NavUser } from "@/components/nav-user"
 
 const NAV = [
 	{ title: "Swarm", url: "/", icon: Network },
-	{ title: "Board", url: "/project", icon: KanbanSquare },
+	{ title: "Kanban", url: "/kanban", icon: KanbanSquare },
 	{ title: "Roadmap", url: "/roadmap", icon: GanttChart },
 	{ title: "Chat", url: "/chat", icon: MessageCircle },
 	{ title: "Get started", url: "/github", icon: BookOpen },
