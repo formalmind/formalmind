@@ -306,3 +306,11 @@
 }
 
 
+
+/* No visible scrollbars anywhere: everything still scrolls with wheel, trackpad, touch and keys. */
+* {
+  scrollbar-width: none;
+}
+*::-webkit-scrollbar {
+  display: none;
+}
