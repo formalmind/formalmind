@@ -225,7 +225,7 @@ const Sidebar = React.forwardRef<
 		return (
 			<div
 				ref={ref}
-				className="group peer hidden text-sidebar-foreground md:block"
+				className="group peer hidden text-sidebar-foreground sm:block"
 				data-state={state}
 				data-collapsible={state === "collapsed" ? collapsible : ""}
 				data-variant={variant}
@@ -244,7 +244,7 @@ const Sidebar = React.forwardRef<
 				/>
 				<div
 					className={cn(
-						"fixed inset-y-0 z-10 hidden h-svh w-[--sidebar-width] transition-[left,right,width] duration-200 ease-linear md:flex",
+						"fixed inset-y-0 z-10 hidden h-svh w-[--sidebar-width] transition-[left,right,width] duration-200 ease-linear sm:flex",
 						side === "left"
 							? "left-0 group-data-[collapsible=offcanvas]:left-[calc(var(--sidebar-width)*-1)]"
 							: "right-0 group-data-[collapsible=offcanvas]:right-[calc(var(--sidebar-width)*-1)]",
@@ -281,8 +281,8 @@ const SidebarTrigger = React.forwardRef<
 			data-sidebar="trigger"
 			variant="ghost"
 			size="icon"
-			// Phones only: from md up the sidebar carries its own toggle at the top and collapses to icons.
-			className={cn("h-7 w-7", className, "md:hidden")}
+			// Phones only: from sm up the sidebar carries its own toggle at the top and collapses to icons.
+			className={cn("h-7 w-7", className, "sm:hidden")}
 			onClick={(event) => {
 				onClick?.(event)
 				toggleSidebar()
@@ -334,7 +334,7 @@ const SidebarInset = React.forwardRef<
 			ref={ref}
 			className={cn(
 				"relative flex w-full flex-1 flex-col bg-background",
-				"md:peer-data-[variant=inset]:m-2 md:peer-data-[state=collapsed]:peer-data-[variant=inset]:ml-2 md:peer-data-[variant=inset]:ml-0 md:peer-data-[variant=inset]:rounded-xl md:peer-data-[variant=inset]:shadow",
+				"sm:peer-data-[variant=inset]:m-2 sm:peer-data-[state=collapsed]:peer-data-[variant=inset]:ml-2 sm:peer-data-[variant=inset]:ml-0 sm:peer-data-[variant=inset]:rounded-xl sm:peer-data-[variant=inset]:shadow",
 				className
 			)}
 			{...props}
