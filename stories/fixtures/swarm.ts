@@ -62,6 +62,7 @@ export function liveState(role: keyof typeof LIVE = "prover"): SwarmState {
 		url: "https://github.com/asyncswap/v2-proofs/actions",
 		usd: null,
 		note: {
+			repo: base.repo,
 			role: role as SwarmRole,
 			ref: plan.ref,
 			runId: 1,
@@ -111,4 +112,34 @@ export function handoffState(): SwarmState {
 export function askState(): SwarmState {
 	const state = liveState("prover");
 	return { ...state, work: state.work.map((item) => (item.number === 61 ? { ...item, labels: ["fm:in-progress", "fm:ask-reviewer"] } : item)) };
+}
+
+/**
+ * One swarm across three projects: the live one, a second proofs repository whose issue the prover is
+ * working on right now, and an account project with no proofs repository yet.
+ */
+export function severalProjectsState(): SwarmState {
+	const state = liveState("prover");
+	const other = "asyncswap/v3-proofs";
+	const copy = (item: SwarmItem, number: number, labels = item.labels): SwarmItem => ({
+		...item,
+		repo: other,
+		number,
+		labels,
+		url: `https://github.com/${other}/issues/${number}`,
+	});
+	const v2 = state.work.map((item) => ({ ...item, repo: state.repo, labels: item.labels.filter((l) => l !== "fm:in-progress") }));
+	const v3 = state.work.slice(0, 3).map((item, i) => copy(item, 4 + i, i === 0 ? ["fm:in-progress"] : item.labels));
+	const run = state.runs[0];
+	return {
+		...state,
+		projects: [
+			{ repo: "asyncswap/v2", proofsRepo: state.repo, inSwarm: true },
+			{ repo: "asyncswap/v3", proofsRepo: other, inSwarm: true },
+			{ repo: "asyncswap/hooks", proofsRepo: null, inSwarm: false },
+		],
+		work: [...v2, ...v3],
+		merged: [...state.merged.map((item) => ({ ...item, repo: state.repo })), ...state.merged.slice(0, 1).map((item) => copy(item, 3))],
+		runs: [{ ...run, note: run.note && { ...run.note, repo: other, ref: 4 } }, ...state.runs.slice(1)],
+	};
 }

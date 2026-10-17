@@ -2,10 +2,11 @@
 
 import { type ReactNode, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { Hand, Maximize, Minus, Pause, Play, Plus, X } from "lucide-react";
+import { Link } from "react-router";
 import * as DialogPrimitive from "@radix-ui/react-dialog";
 import { TextSwap } from "@/components/motion/text-swap";
 import { useIsMobile } from "@/hooks/use-mobile";
-import type { SwarmItem, SwarmRole, SwarmRun, SwarmState } from "@/lib/swarm";
+import type { SwarmItem, SwarmProject, SwarmRole, SwarmRun, SwarmState } from "@/lib/swarm";
 import { ROLE_COLORS } from "@/lib/swarm-roles";
 
 export { ROLE_COLORS };
@@ -28,7 +29,6 @@ function clip(text: string, max = 120) {
 	const plain = text.replace(/`/g, "");
 	return plain.length > max ? `${plain.slice(0, max - 1)}…` : plain;
 }
-const H = 580;
 
 const ROLES = Object.keys(ROLE_COLORS) as SwarmRole[];
 
@@ -69,8 +69,11 @@ const CARD_TOP = 100;
 const CARD_MIN_H = 78;
 const CARD_GAP = 10;
 const CARD_W = 160;
-const PANEL_TOP = 420;
 const PANEL_H = 136;
+/** Each project's lanes repeat this far below the last one's. */
+const GROUP_H = LANE_BOTTOM;
+/** In fill mode the board fits this much of its height to the screen; taller boards (more projects) pan. */
+const FIT_H = 900;
 
 const PANEL_W = 368;
 const PANEL_GAP = 24;
@@ -78,9 +81,16 @@ const CHIP = { x: PAD, y: 14 };
 
 const laneX = (lane: Lane) => PAD + LANES.findIndex((l) => l.key === lane) * (LANE_W + LANE_GAP);
 const panelX = (i: number) => PAD + i * (PANEL_W + PANEL_GAP);
+const groupY = (group: number) => group * GROUP_H;
 
 type Card = {
 	id: string;
+	/** The project's place on the board, top to bottom. */
+	group: number;
+	/** The proofs repository of the issue or PR behind it; none for docs and replay-only cards. */
+	repo?: string;
+	/** What a doc card stands for, in its details. */
+	detail?: string;
 	number: number;
 	title: string;
 	kind: "issue" | "pr" | "doc";
@@ -107,22 +117,42 @@ type Scene = {
 	turn: SwarmRole | null;
 };
 
-const HOME: Record<SwarmRole, { x: number; y: number }> = {
-	dispatcher: { x: 640, y: 34 },
-	planner: { x: 120, y: 360 },
-	prover: { x: 290, y: 360 },
-	rebuilder: { x: 460, y: 360 },
-	editor: { x: 590, y: 360 },
-	reviewer: { x: 720, y: 360 },
-	merger: { x: 860, y: 360 },
-	assistant: { x: 980, y: 360 },
-	chief: { x: 1110, y: 360 },
+const HOME_X: Record<SwarmRole, number> = {
+	dispatcher: 640,
+	planner: 120,
+	prover: 290,
+	rebuilder: 460,
+	editor: 590,
+	reviewer: 720,
+	merger: 860,
+	assistant: 980,
+	chief: 1110,
 };
 
-const ROADMAP_SPOT = { x: laneX("roadmap") + 120, y: CARD_TOP + 44 };
-const CHIEF_SPOT = { x: panelX(2) + 300, y: PANEL_TOP + 70 };
-const LEDGER_SPOT = { x: panelX(0) + 300, y: PANEL_TOP + 70 };
-const NOTEBOOK_SPOT = { x: panelX(1) + 300, y: PANEL_TOP + 70 };
+/**
+ * Where things sit for a board of `groups` projects: each project's lanes, one under the other, then the
+ * bench where the shared roles wait between turns, then the swarm-wide panels. The dispatcher stays on top.
+ */
+function geometry(groups: number) {
+	const bench = groupY(groups - 1) + LANE_BOTTOM + 20;
+	const panelTop = bench + 56;
+	const home = Object.fromEntries(ROLES.map((r) => [r, { x: HOME_X[r], y: r === "dispatcher" ? 34 : bench }])) as Record<SwarmRole, { x: number; y: number }>;
+	return {
+		home,
+		panelTop,
+		height: panelTop + PANEL_H + PAD,
+		roadmap: (group: number) => ({ x: laneX("roadmap") + 120, y: groupY(group) + CARD_TOP + 44 }),
+		chief: { x: panelX(2) + 300, y: panelTop + 70 },
+		ledger: { x: panelX(0) + 300, y: panelTop + 70 },
+		notebook: { x: panelX(1) + 300, y: panelTop + 70 },
+	};
+}
+
+/** The replay and the landing page show one project. */
+const ONE = geometry(1);
+const HOME = ONE.home;
+const ROADMAP_SPOT = ONE.roadmap(0);
+const CHIEF_SPOT = ONE.chief;
 const JOBS = ["answer", "merge", "review", "revise", "resume", "new issue", "edit", "plan"];
 
 type Step = { hold: number; apply: (scene: Scene) => void };
@@ -149,7 +179,7 @@ function home(scene: Scene, ...roles: SwarmRole[]) {
 /** Before the live state has loaded: an empty board, nothing scripted. */
 function emptyScene(): Scene {
 	return {
-		cards: [{ id: "roadmap", number: 0, title: "Roadmap and unproven gaps in FORMAL_MIND.md", kind: "doc", lane: "roadmap", order: 0, label: "README" }],
+		cards: [{ id: "roadmap", group: 0, number: 0, title: "Roadmap and unproven gaps in FORMAL_MIND.md", kind: "doc", lane: "roadmap", order: 0, label: "README" }],
 		cursors: Object.fromEntries(ROLES.map((r) => [r, { at: HOME[r] }])) as Scene["cursors"],
 		spend: 0,
 		notes: [],
@@ -184,15 +214,16 @@ function initialScene(state: SwarmState | null): Scene {
 	// anything real so they never link to (or hover as) an unrelated issue.
 	const known = [...(state?.work ?? []), ...(state?.merged ?? [])].map((item) => item.number);
 	let next = Math.max(61, ...known) + 1;
-	const queue: Pick<SwarmItem, "number" | "title">[] = todo.slice(0, 2);
+	const queue: Pick<SwarmItem, "number" | "title" | "repo" | "url">[] = todo.slice(0, 2);
 	const placeholders = ["spec: the next gap the planner queues", "spec: another roadmap item"];
-	while (queue.length < 2) queue.push({ number: next++, title: placeholders[queue.length] });
+	while (queue.length < 2) queue.push({ number: next++, title: placeholders[queue.length], repo: "", url: "" });
 	const merged = (state?.merged ?? []).slice(0, 2).reverse();
 	let order = 0;
+	const repoOf = (item: Partial<SwarmItem>) => (item.url && state ? item.repo ?? state.repo : undefined);
 	const cards: Card[] = [
-		{ id: "roadmap", number: 0, title: "Roadmap and unproven gaps in FORMAL_MIND.md", kind: "doc", lane: "roadmap", order: order++, label: "README" },
-		...merged.map((item) => ({ id: `m${item.number}`, number: item.number, title: item.title, kind: "pr" as const, lane: "dev" as Lane, order: order++, label: "merged" })),
-		...queue.map((item) => ({ id: `i${item.number}`, number: item.number, title: item.title, kind: "issue" as const, lane: "todo" as Lane, order: order++, label: "fm:todo" })),
+		{ id: "roadmap", group: 0, number: 0, title: "Roadmap and unproven gaps in FORMAL_MIND.md", kind: "doc", lane: "roadmap", order: order++, label: "README" },
+		...merged.map((item) => ({ id: `m${item.number}`, group: 0, repo: repoOf(item), number: item.number, title: item.title, kind: "pr" as const, lane: "dev" as Lane, order: order++, label: "merged" })),
+		...queue.map((item) => ({ id: `i${item.number}`, group: 0, repo: repoOf(item), number: item.number, title: item.title, kind: "issue" as const, lane: "todo" as Lane, order: order++, label: "fm:todo" })),
 	];
 	return {
 		cards,
@@ -245,7 +276,7 @@ function buildScript(start: Scene): Step[] {
 		{ hold: 1700, apply: (s) => { move(s, id, "dev", { label: "merged" }); say(s, "merger", "Squash-merged into dev. Next: nobody — it's done", id); tick(s); spend(s, "merger", 0.25); } },
 		{ hold: 1400, apply: (s) => { home(s, "merger"); s.job = "plan"; say(s, "dispatcher", "Only one fm:todo left: planner's turn"); } },
 		{ hold: 1700, apply: (s) => { home(s, "dispatcher"); say(s, "planner", "Reading the roadmap and the gaps the changelog left", ROADMAP_SPOT); note(s, "planner", "queue small, disjoint issues; post digest"); } },
-		{ hold: 300, apply: (s) => { s.cards.push({ id: "new", number: next, title: "spec: next unproven gap from the changelog", kind: "issue", lane: "roadmap", order: s.tick++, label: "fm:todo" }); } },
+		{ hold: 300, apply: (s) => { s.cards.push({ id: "new", group: 0, number: next, title: "spec: next unproven gap from the changelog", kind: "issue", lane: "roadmap", order: s.tick++, label: "fm:todo" }); } },
 		{ hold: 1800, apply: (s) => { move(s, "new", "todo"); say(s, "planner", `Wrote #${next}. Next: prover — #${next} first`, "new"); tick(s); spend(s, "planner", 0.3); } },
 		{ hold: 1500, apply: (s) => { home(s, "planner"); s.job = "edit"; say(s, "dispatcher", "The spec moved since the editor last compared: editor's turn"); } },
 		{ hold: 2200, apply: (s) => { home(s, "dispatcher"); say(s, "editor", "Cycle 1, compare: the rebuild only takes USDC as currency1, the draft takes either. Filed as fm:finding", ROADMAP_SPOT); note(s, "editor", "draft vs rebuild vs proofs; classify; file"); spend(s, "editor", 0.45); } },
@@ -310,7 +341,9 @@ function ledgerRows(state: SwarmState): LedgerRow[] {
 		.reverse()
 		.map((c) => {
 			const role = COST_ROLES[c.role] ?? "dispatcher";
-			return { role, label: `${role}${/^#?\d+$/.test(c.ref) ? ` #${c.ref.replace(/^#/, "")}` : ""}`, usd: c.usd };
+			const where = c.repo && c.repo !== state.repo ? ` ${c.repo.split("/")[1]}` : "";
+			const ref = /^#?\d+$/.test(c.ref) ? `${where ? "" : " "}#${c.ref.replace(/^#/, "")}` : "";
+			return { role, label: `${role}${where}${ref}`, usd: c.usd };
 		});
 	const days = new Map<string, { usd: number; runs: number }>();
 	for (const c of state.costs) {
@@ -326,19 +359,50 @@ function ledgerRows(state: SwarmState): LedgerRow[] {
 	return rows;
 }
 
-/** The board as the swarm has it, with nothing scripted. With no run in flight the cursors rest at home. */
+/** The board's projects; snapshots from before the swarm had several are its home's one project. */
+export function projectsOf(state: SwarmState | null): SwarmProject[] {
+	if (state?.projects?.length) return state.projects;
+	return [{ repo: "asyncswap/v2", proofsRepo: state?.repo ?? null, inSwarm: true }];
+}
+
+const itemRepo = (state: SwarmState, item: SwarmItem) => item.repo ?? state.repo;
+const itemKey = (repo: string, number: number) => `${repo}#${number}`;
+
+/** A project's first card: its roadmap, or why the swarm has nothing of it yet. */
+function roadmapCard(project: SwarmProject, group: number, home: string): Card {
+	const base = { id: `roadmap:${group}`, group, number: 0, kind: "doc" as const, lane: "roadmap" as Lane, order: 0 };
+	if (!project.proofsRepo) {
+		return { ...base, title: "No proofs repository yet", label: "setup", detail: `Finish ${project.repo}'s Setup to give it a proofs repository; then the swarm can be pointed at it.` };
+	}
+	if (project.error) return { ...base, title: project.error, label: "README", detail: `The swarm's view of ${project.proofsRepo} could not be read from GitHub.` };
+	if (!project.inSwarm) {
+		return { ...base, title: "Not swept by the swarm yet", label: "setup", detail: `${project.proofsRepo} is not in ${home}'s .github/formalmind/projects.json, so the dispatcher does not pick its work yet.` };
+	}
+	return { ...base, title: project.proofsRepo === home ? "Roadmap and unproven gaps in FORMAL_MIND.md" : "Roadmap and unproven gaps in README.md", label: "README", detail: `The roadmap in ${project.proofsRepo}'s README.` };
+}
+
+/** The board as the swarm has it, with nothing scripted: one lane group per project. With no run in flight the cursors rest on the bench. */
 function liveScene(state: SwarmState, run: SwarmRun | null): Scene {
-	let order = 0;
-	const cards: Card[] = [
-		{ id: "roadmap", number: 0, title: "Roadmap and unproven gaps in FORMAL_MIND.md", kind: "doc", lane: "roadmap", order: order++, label: "README" },
-		...state.merged.slice(0, 2).reverse().map((item) => ({ id: `m${item.number}`, number: item.number, title: item.title, kind: "pr" as const, lane: "dev" as Lane, order: order++, label: "merged" })),
-	];
+	const projects = projectsOf(state);
+	const geo = geometry(projects.length);
+	const groupOf = (repo: string) => Math.max(0, projects.findIndex((p) => p.proofsRepo === repo));
+	const cardId = (item: SwarmItem) => `w:${itemKey(itemRepo(state, item), item.number)}`;
+	let order = projects.length;
+	const cards: Card[] = projects.map((project, group) => roadmapCard(project, group, state.repo));
+	for (const project of projects) {
+		const merged = state.merged.filter((item) => itemRepo(state, item) === project.proofsRepo).slice(0, 2).reverse();
+		for (const item of merged) {
+			const repo = itemRepo(state, item);
+			cards.push({ id: `m:${itemKey(repo, item.number)}`, group: groupOf(repo), repo, number: item.number, title: item.title, kind: "pr", lane: "dev", order: order++, label: "merged" });
+		}
+	}
 	for (const item of [...state.work].sort((a, b) => a.number - b.number)) {
 		const place = laneOf(item);
-		if (place) cards.push({ id: `w${item.number}`, number: item.number, title: item.title, kind: item.kind, lane: place.lane, order: order++, label: place.label });
+		const repo = itemRepo(state, item);
+		if (place) cards.push({ id: cardId(item), group: groupOf(repo), repo, number: item.number, title: item.title, kind: item.kind, lane: place.lane, order: order++, label: place.label });
 	}
 
-	const cursorsAtHome = Object.fromEntries(ROLES.map((r) => [r, { at: HOME[r] }])) as Scene["cursors"];
+	const cursorsAtHome = Object.fromEntries(ROLES.map((r) => [r, { at: geo.home[r] }])) as Scene["cursors"];
 	if (!run) {
 		const last = state.runs.find((r) => r.note)?.note;
 		return {
@@ -363,29 +427,32 @@ function liveScene(state: SwarmState, run: SwarmRun | null): Scene {
 		? handoff ? `Next: ${handoff.to}${handoff.why ? ` — ${handoff.why}` : ""}` : note ? `Done${note.verified ? `: ${note.verified}` : ""}` : "Finished"
 		: current?.text ?? (note && run.phase === "working" ? "Wrapping up" : PHASE_TEXT[run.phase]));
 
+	// The shared roles walk over to the project the run is about; the swarm-wide issues are in the home.
+	const noteRepo = note?.repo ?? state.repo;
+	const inHome = noteRepo === state.repo;
 	const cursors = cursorsAtHome;
-	const target = cards.find((c) => c.number === note?.ref && c.kind !== "doc");
-	const spot = role === "chief" || role === "assistant" || note?.ref === 53 || note?.ref === 69 ? CHIEF_SPOT
-		: note?.ref === 38 ? LEDGER_SPOT
-		: note?.ref === 55 ? NOTEBOOK_SPOT
-		: role === "planner" || role === "editor" ? ROADMAP_SPOT
+	const target = cards.find((c) => c.repo === noteRepo && c.number === note?.ref && c.kind !== "doc");
+	const spot = role === "chief" || role === "assistant" || (inHome && (note?.ref === 53 || note?.ref === 69)) ? geo.chief
+		: inHome && note?.ref === 38 ? geo.ledger
+		: inHome && note?.ref === 55 ? geo.notebook
+		: role === "planner" || role === "editor" ? geo.roadmap(groupOf(noteRepo))
 		: undefined;
-	cursors[role] = target ? { follow: target.id, say } : { at: spot ?? HOME[role], say };
+	cursors[role] = target ? { follow: target.id, say } : { at: spot ?? geo.home[role], say };
 
 	// Open questions: the asked role waits at the item until the dispatcher gives it the turn.
 	for (const item of state.work) {
 		const asked = askedOf(item);
-		if (asked && asked !== role && cards.some((c) => c.id === `w${item.number}`)) {
-			cursors[asked] = { follow: `w${item.number}`, say: `Asked on #${item.number}. I answer on my turn` };
+		if (asked && asked !== role && cards.some((c) => c.id === cardId(item))) {
+			cursors[asked] = { follow: cardId(item), say: `Asked on #${item.number}. I answer on my turn` };
 		}
 	}
 	// The baton: once a run ends, the role it handed to steps up to the same item.
 	const nextRole = handoff && (ROLES as string[]).includes(handoff.to) ? (handoff.to as SwarmRole) : null;
 	if (nextRole && nextRole !== role && !cursors[nextRole].say) {
-		cursors[nextRole] = target ? { follow: target.id, say: "My turn next" } : { at: HOME[nextRole], say: "My turn next" };
+		cursors[nextRole] = target ? { follow: target.id, say: "My turn next" } : { at: geo.home[nextRole], say: "My turn next" };
 	}
 	// The job comes from the item's job labels, not from a question label shown on the card.
-	const targetItem = state.work.find((item) => item.number === note?.ref);
+	const targetItem = state.work.find((item) => itemRepo(state, item) === noteRepo && item.number === note?.ref);
 	const label = targetItem ? jobLaneOf(targetItem)?.label : target?.label;
 	const answering = Boolean(note?.title.toLowerCase().startsWith("answer"));
 	const job = answering ? "answer"
@@ -409,18 +476,20 @@ function liveScene(state: SwarmState, run: SwarmRun | null): Scene {
 	};
 }
 
-/** Stacks each lane's cards on their measured heights; a card that would run past the lane's bottom is hidden. */
+/** Stacks each project's lanes of cards on their measured heights; a card that would run past its lane's bottom is hidden. */
 function layout(cards: Card[], heights: Map<string, number>) {
 	const positions = new Map<string, { x: number; y: number; hidden: boolean }>();
-	for (const lane of LANES) {
-		const inLane = cards.filter((c) => c.lane === lane.key).sort((a, b) => b.order - a.order);
-		let y = CARD_TOP;
-		let full = false;
-		for (const c of inLane) {
-			const h = heights.get(c.id) ?? CARD_MIN_H;
-			full ||= y + h > LANE_BOTTOM - 8;
-			positions.set(c.id, { x: laneX(lane.key) + 8, y, hidden: full });
-			y += h + CARD_GAP;
+	for (const group of new Set(cards.map((c) => c.group))) {
+		for (const lane of LANES) {
+			const inLane = cards.filter((c) => c.group === group && c.lane === lane.key).sort((a, b) => b.order - a.order);
+			let y = groupY(group) + CARD_TOP;
+			let full = false;
+			for (const c of inLane) {
+				const h = heights.get(c.id) ?? CARD_MIN_H;
+				full ||= y + h > groupY(group) + LANE_BOTTOM - 8;
+				positions.set(c.id, { x: laneX(lane.key) + 8, y, hidden: full });
+				y += h + CARD_GAP;
+			}
 		}
 	}
 	return positions;
@@ -456,7 +525,11 @@ export function SwarmCanvas({ state, fill = false, contain = false, title, actio
 	// The panels grow with their text; the board grows with the tallest.
 	const [panelHs, setPanelHs] = useState([PANEL_H, PANEL_H, PANEL_H]);
 	const measurePanel = (i: number) => (h: number) => setPanelHs((prev) => (prev[i] === h ? prev : prev.map((v, j) => (j === i ? h : v))));
-	const boardH = Math.max(H, PANEL_TOP + Math.max(...panelHs) + PAD);
+	// The live board has a lane group per project; the replay (and the board before any state) has one.
+	const projects = projectsOf(state);
+	const groups = state && (fill || isLiveRun(state.runs[0])) ? projects.length : 1;
+	const geo = useMemo(() => geometry(groups), [groups]);
+	const boardH = Math.max(geo.height, geo.panelTop + Math.max(...panelHs) + PAD);
 	// In fill mode people can pan and zoom: `view` sits on top of the fitted placement.
 	const [view, setRawView] = useState({ k: 1, x: 0, y: 0 });
 	// The canvas is unbounded: pan anywhere; the fit button in the zoom pill brings the board back.
@@ -536,7 +609,7 @@ export function SwarmCanvas({ state, fill = false, contain = false, title, actio
 				return setFit({ scale: next, x: 0, y: 0, w: W * next, h: boardH * next });
 			}
 			if (!fill) return setFit({ scale: width / W, x: 0, y: 0, w: width, h: height });
-			const next = Math.min(width / W, (height - PINNED) / boardH);
+			const next = Math.min(width / W, (height - PINNED) / Math.min(boardH, FIT_H));
 			setFit({ scale: next, x: (width - W * next) / 2, y: PINNED + Math.max(0, (height - PINNED - boardH * next) / 2), w: width, h: height });
 		});
 		observer.observe(el);
@@ -667,8 +740,8 @@ export function SwarmCanvas({ state, fill = false, contain = false, title, actio
 	const positions = layout(shown.cards, heights);
 
 	// Real issues and PRs behind the cards, for hover cards and links (replay-only cards have none).
-	const items = new Map<number, SwarmItem>([...(state?.work ?? []), ...(state?.merged ?? [])].map((item) => [item.number, item]));
-	const itemFor = (card: Card) => (card.kind === "doc" || card.id === "new" ? undefined : items.get(card.number));
+	const items = new Map<string, SwarmItem>([...(state?.work ?? []), ...(state?.merged ?? [])].map((item) => [itemKey(itemRepo(state!, item), item.number), item]));
+	const itemFor = (card: Card) => (card.kind === "doc" || !card.repo ? undefined : items.get(itemKey(card.repo, card.number)));
 
 	const showHover = (card: Card, el: HTMLElement) => {
 		const item = itemFor(card);
@@ -712,7 +785,7 @@ export function SwarmCanvas({ state, fill = false, contain = false, title, actio
 	};
 
 	const details = (inDialog: boolean) =>
-		modal ? <CardDetails card={modal.card} item={itemFor(modal.card)} repo={state?.repo ?? ""} inDialog={inDialog} /> : null;
+		modal ? <CardDetails card={modal.card} item={itemFor(modal.card)} inDialog={inDialog} /> : null;
 
 	return (
 		<div ref={wrapRef} className={`relative w-full ${fill ? "h-full" : contain ? "flex h-full items-center justify-center" : ""}`}>
@@ -756,16 +829,21 @@ export function SwarmCanvas({ state, fill = false, contain = false, title, actio
 						</>
 					)}
 
-					{LANES.map((lane) => (
-						<div
-							key={lane.key}
-							className="absolute rounded-lg border border-dashed bg-muted/40"
-							style={{ left: laneX(lane.key), top: LANE_TOP, width: LANE_W, height: LANE_BOTTOM - LANE_TOP }}
-						>
-							<div className="flex items-center justify-between px-3 pt-2.5 font-mono text-[12px] font-medium text-muted-foreground">
-								<span>{lane.title}</span>
-								<span>{shown.cards.filter((c) => c.lane === lane.key).length}</span>
-							</div>
+					{Array.from({ length: groups }, (_, group) => (
+						<div key={group} className="contents">
+							{fill ? <ProjectHeader project={projects[group]} group={group} state={state} /> : null}
+							{LANES.map((lane) => (
+								<div
+									key={lane.key}
+									className="absolute rounded-lg border border-dashed bg-muted/40"
+									style={{ left: laneX(lane.key), top: groupY(group) + LANE_TOP, width: LANE_W, height: LANE_BOTTOM - LANE_TOP }}
+								>
+									<div className="flex items-center justify-between px-3 pt-2.5 font-mono text-[12px] font-medium text-muted-foreground">
+										<span>{lane.title}</span>
+										<span>{shown.cards.filter((c) => c.group === group && c.lane === lane.key).length}</span>
+									</div>
+								</div>
+							))}
 						</div>
 					))}
 
@@ -788,9 +866,9 @@ export function SwarmCanvas({ state, fill = false, contain = false, title, actio
 						);
 					})}
 
-					<LedgerPanel spend={shown.spend} costs={shown.costs} repo={state?.repo ?? repo} onMeasure={measurePanel(0)} />
-					<NotebookPanel notes={shown.notes} repo={state?.repo ?? repo} onMeasure={measurePanel(1)} />
-					<ChiefPanel headline={shown.chief} repo={state?.repo ?? repo} onMeasure={measurePanel(2)} />
+					<LedgerPanel spend={shown.spend} costs={shown.costs} repo={state?.repo ?? repo} top={geo.panelTop} onMeasure={measurePanel(0)} />
+					<NotebookPanel notes={shown.notes} repo={state?.repo ?? repo} top={geo.panelTop} onMeasure={measurePanel(1)} />
+					<ChiefPanel headline={shown.chief} repo={state?.repo ?? repo} top={geo.panelTop} onMeasure={measurePanel(2)} />
 
 					{ROLES.map((role) => (
 						<SwarmCursor
@@ -838,7 +916,7 @@ export function SwarmCanvas({ state, fill = false, contain = false, title, actio
 				</div>
 			) : null}
 			{hover ? (
-				<ItemHoverCard {...hover} repo={state?.repo ?? ""} onEnter={keepHover} onLeave={hideHover} />
+				<ItemHoverCard {...hover} onEnter={keepHover} onLeave={hideHover} />
 			) : null}
 			{fill ? (
 				<div className="pointer-events-none absolute inset-x-3 top-14 flex">
@@ -946,7 +1024,7 @@ const POPOVER_W = 300;
 
 
 /** Modal body for a clicked card: the real issue or PR when there is one, else what the replay card stands for. */
-function CardDetails({ card, item, repo, inDialog }: { card: Card; item?: SwarmItem; repo: string; inDialog: boolean }) {
+function CardDetails({ card, item, inDialog }: { card: Card; item?: SwarmItem; inDialog: boolean }) {
 	// Inside the phone island the title must be the dialog's; in the desktop popover it is a plain heading.
 	const Title = inDialog ? DialogPrimitive.Title : "h3";
 	if (!item) {
@@ -955,7 +1033,7 @@ function CardDetails({ card, item, repo, inDialog }: { card: Card; item?: SwarmI
 				<span className={`rounded px-1.5 py-px font-mono text-[10px] ${LABEL_STYLES[card.label] ?? LABEL_STYLES.README}`}>{card.label}</span>
 				<Title className={`mt-2 font-semibold leading-snug ${inDialog ? "text-lg" : "text-sm"}`}>{card.title}</Title>
 				<p className={`mt-1 text-muted-foreground ${inDialog ? "text-sm" : "text-xs leading-5"}`}>
-					{card.kind === "doc" ? "The roadmap in the proofs repo's README." : "A card in the replay; it stands in for an issue and links nowhere."}
+					{card.kind === "doc" ? card.detail ?? "The roadmap in the proofs repo's README." : "A card in the replay; it stands in for an issue and links nowhere."}
 				</p>
 			</div>
 		);
@@ -963,7 +1041,7 @@ function CardDetails({ card, item, repo, inDialog }: { card: Card; item?: SwarmI
 	return (
 		<>
 			{inDialog ? <DialogPrimitive.Title className="sr-only">{item.title}</DialogPrimitive.Title> : null}
-			<ItemPreview item={item} repo={repo} full />
+			<ItemPreview item={item} full />
 			<a
 				href={item.url}
 				target="_blank"
@@ -973,6 +1051,29 @@ function CardDetails({ card, item, repo, inDialog }: { card: Card; item?: SwarmI
 				Open on GitHub
 			</a>
 		</>
+	);
+}
+
+const count = (n: number, noun: string) => `${n} ${noun}${n === 1 ? "" : "s"}`;
+
+/** A project's name over its lanes, linking to its pages, with what the swarm has of it. */
+function ProjectHeader({ project, group, state }: { project: SwarmProject; group: number; state: SwarmState | null }) {
+	const repo = project.proofsRepo;
+	const work = repo ? (state?.work ?? []).filter((item) => itemRepo(state!, item) === repo) : [];
+	const today = state?.fetchedAt.slice(0, 10);
+	const spent = repo ? (state?.costs ?? []).filter((c) => (c.repo ?? state!.repo) === repo && c.createdAt.startsWith(today ?? "")).reduce((sum, c) => sum + c.usd, 0) : 0;
+	const summary = !repo
+		? "no proofs repository yet"
+		: !project.inSwarm
+			? `${repo} · not swept by the swarm yet`
+			: `${repo} · ${count(work.filter((i) => i.kind === "issue").length, "issue")} · ${count(work.filter((i) => i.kind === "pr").length, "PR")} · $${spent.toFixed(2)} today`;
+	return (
+		<div data-component className="absolute flex items-baseline gap-2 whitespace-nowrap text-[13px]" style={{ left: PAD, top: groupY(group) + 28 }}>
+			<Link to={`/projects/${project.repo}`} className="text-foreground underline-offset-2 hover:underline">
+				{project.repo}
+			</Link>
+			<span className="text-muted-foreground">{summary}</span>
+		</div>
 	);
 }
 
@@ -1076,7 +1177,8 @@ function timeAgo(iso: string) {
 /** GitHub-style preview of the issue or PR behind a board card. */
 export function ItemHoverCard({ item, repo, left, top, below, onEnter, onLeave }: {
 	item: SwarmItem;
-	repo: string;
+	/** For items that don't name their repository. */
+	repo?: string;
 	left: number;
 	top: number;
 	below: boolean;
@@ -1097,14 +1199,14 @@ export function ItemHoverCard({ item, repo, left, top, below, onEnter, onLeave }
 }
 
 /** The issue or PR behind a card: state, title, excerpt, labels, author. `full` shows the whole excerpt. */
-function ItemPreview({ item, repo, full = false }: { item: SwarmItem; repo: string; full?: boolean }) {
+function ItemPreview({ item, repo, full = false }: { item: SwarmItem; repo?: string; full?: boolean }) {
 	const state = item.merged ? "merged" : item.state ?? "open";
 	const stateColor = state === "open" ? "text-emerald-600 dark:text-emerald-400" : "text-violet-600 dark:text-violet-400";
 	return (
 		<div>
 			<p className="flex items-center gap-1.5 text-xs text-muted-foreground">
 				<span className={`font-medium ${stateColor}`}>{`${state[0].toUpperCase()}${state.slice(1)} ${item.kind === "pr" ? "PR" : "issue"}`}</span>
-				<span>· {repo}</span>
+				<span>· {item.repo ?? repo}</span>
 				<span>· {timeAgo(item.createdAt)}</span>
 			</p>
 			<a href={item.url} target="_blank" rel="noreferrer" className="mt-1.5 block text-sm font-semibold leading-snug hover:underline">
@@ -1252,11 +1354,11 @@ function SmoothWidth({ children }: { children: ReactNode }) {
 	);
 }
 
-type PanelMode = { repo?: string; onMeasure?: (height: number) => void };
+type PanelMode = { repo?: string; top?: number; onMeasure?: (height: number) => void };
 
 /** Read in place (its list scrolls); the title links to the issue the panel mirrors. */
 /** With `onMeasure` the panel grows to fit its content (from PANEL_H up) and reports its height. */
-function Panel({ index, title, repo, onMeasure, children }: PanelMode & { index: number; title: string; children: React.ReactNode }) {
+function Panel({ index, title, repo, top = ONE.panelTop, onMeasure, children }: PanelMode & { index: number; title: string; children: React.ReactNode }) {
 	const ref = useRef<HTMLDivElement>(null);
 	const measureRef = useRef(onMeasure);
 	measureRef.current = onMeasure;
@@ -1273,7 +1375,7 @@ function Panel({ index, title, repo, onMeasure, children }: PanelMode & { index:
 			ref={ref}
 			data-component
 			className="absolute flex cursor-default flex-col rounded-lg border bg-background p-3"
-			style={{ left: panelX(index), top: PANEL_TOP, width: PANEL_W, ...(grows ? { minHeight: PANEL_H } : { height: PANEL_H }) }}
+			style={{ left: panelX(index), top, width: PANEL_W, ...(grows ? { minHeight: PANEL_H } : { height: PANEL_H }) }}
 		>
 			{repo ? (
 				<a

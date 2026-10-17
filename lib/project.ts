@@ -92,6 +92,7 @@ function toItem(issue: GitHubIssue): ProjectItem {
 	const merged = Boolean(issue.pull_request?.merged_at);
 	const text = plain(issue.body);
 	return {
+		repo: SWARM_REPO,
 		number: issue.number,
 		title: issue.title,
 		kind: issue.pull_request ? "pr" : "issue",

@@ -1,7 +1,9 @@
 import { streamText } from "ai";
 import { openAIModelNames, type OpenAIModel } from "@/lib/llm";
 import { openai } from "@/lib/openai";
-import { getSwarmState } from "@/lib/swarm";
+import { auth0 } from "@/lib/auth0";
+import { LIVE_PROJECT, listProjects } from "@/lib/projects";
+import { getSwarmState, SWARM_REPO } from "@/lib/swarm";
 import { swarmTools } from "@/lib/tools/swarm-tools";
 
 const SWARM_RULES = `The formalmind swarm owns the Lean 4 specification in the proofs repository and works the roadmap in its README, hands off, within a budget.
@@ -30,8 +32,12 @@ export async function POST(request: Request) {
 	const model: OpenAIModel = openAIModelNames.includes(requested) ? requested : "gpt-6-luna";
 
 	let state: string;
+	let repos = [SWARM_REPO];
 	try {
-		state = JSON.stringify(await getSwarmState());
+		const session = await auth0.getSession();
+		const live = await getSwarmState(session?.user ? await listProjects(session.user.sub) : [LIVE_PROJECT]);
+		repos = [SWARM_REPO, ...live.projects.flatMap((p) => (p.proofsRepo && p.proofsRepo !== SWARM_REPO ? [p.proofsRepo] : []))];
+		state = JSON.stringify(live);
 	} catch (error) {
 		console.error("[swarm] state fetch failed:", error);
 		state = "unavailable: the GitHub API request failed";
@@ -39,7 +45,7 @@ export async function POST(request: Request) {
 
 	const result = streamText({
 		model: model.startsWith("gpt-6") ? openai.responses(model) : openai(model),
-		system: `You answer questions about what the formalmind swarm agents are doing. Be concise and concrete: name issue and PR numbers, labels, roles and dollar amounts. Answer only from the live state below; if it does not say, say so. "work" (open items and their current labels) and "merged" are the present truth. Comments in "chief", "notebook" and "ledger" are history with timestamps: when an older comment disagrees with the current labels or the merged list, trust the current state and mention that the comment is out of date. Today is ${new Date().toISOString().slice(0, 10)} (UTC). Link issues as https://github.com/<repo>/issues/<n>.
+		system: `You answer questions about what the formalmind swarm agents are doing. Be concise and concrete: name issue and PR numbers, labels, roles and dollar amounts. Answer only from the live state below; if it does not say, say so. One swarm (one team, one budget) works every project in "projects" that is inSwarm; each item names its proofs repository in "repo", and issue numbers are per repository, so always say which repository. "work" (open items and their current labels) and "merged" are the present truth. Comments in "chief", "notebook" and "ledger" are history with timestamps: when an older comment disagrees with the current labels or the merged list, trust the current state and mention that the comment is out of date. Today is ${new Date().toISOString().slice(0, 10)} (UTC). Link issues as https://github.com/<repo>/issues/<n>.
 When the live state is not enough, use the tools to read an issue or PR thread, the files a PR changed, a run's steps, a file in the repository (README.md holds the decisions and roadmap, FORMAL_MIND.md the changelog), or to search issues. Prefer looking it up over guessing, and cite what you read.
 
 ${SWARM_RULES}
@@ -47,7 +53,7 @@ ${SWARM_RULES}
 Live state (JSON, fetched just now):
 ${state}`,
 		messages,
-		tools: swarmTools,
+		tools: swarmTools(repos),
 		maxSteps: 6,
 	});
 

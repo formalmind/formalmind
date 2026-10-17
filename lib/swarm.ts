@@ -1,11 +1,16 @@
 /**
- * Live state of the formalmind swarm, read from the proofs repository on GitHub.
+ * Live state of the formalmind swarm, read from GitHub. One swarm (one team, one budget) works
+ * several projects: its home repository holds the workflow and the swarm-wide issues (ledger,
+ * notebook, chief, assistant) and lists the proofs repositories it sweeps in
+ * `.github/formalmind/projects.json`; each proofs repository keeps its own fm: issues and PRs.
  * The swarm keeps all of its memory in issues, labels and comments (see
  * `asyncswap/v2-proofs/.github/formalmind/README.md`), so this is everything it knows.
  */
 
+import type { Project } from "@/lib/projects";
 import { SWARM_REPO as DEFAULT_REPO } from "@/lib/swarm-repo";
 
+/** The swarm's home: its workflow, its role docs and its swarm-wide issues. */
 export const SWARM_REPO = process.env.SWARM_REPO || DEFAULT_REPO;
 export const LEDGER_ISSUE = 38;
 export const CHIEF_ISSUE = 53;
@@ -26,6 +31,8 @@ export interface SwarmCycle {
 }
 
 export interface SwarmItem {
+	/** The proofs repository the issue or PR is in. */
+	repo: string;
 	number: number;
 	title: string;
 	kind: "issue" | "pr";
@@ -50,6 +57,8 @@ export interface SwarmComment {
 }
 
 export interface SwarmCost {
+	/** The proofs repository the run worked in. */
+	repo: string;
 	role: string;
 	ref: string;
 	usd: number;
@@ -65,6 +74,8 @@ export interface SwarmHandoff {
 }
 
 export interface SwarmNote {
+	/** The proofs repository `ref` is in. */
+	repo: string;
 	role: SwarmRole;
 	ref: number | null;
 	runId: number;
@@ -95,12 +106,27 @@ export interface SwarmRun {
 	usd: number | null;
 }
 
+/** A project on the swarm's board. */
+export interface SwarmProject {
+	/** The protocol repository: the sidebar's project. */
+	repo: string;
+	/** Where its proofs and fm: issues live; null until it has a proofs repository. */
+	proofsRepo: string | null;
+	/** Listed in the swarm's projects.json, so the dispatcher sweeps it. */
+	inSwarm: boolean;
+	/** Why its issues could not be read, when they could not. */
+	error?: string;
+}
+
 export interface SwarmState {
+	/** The swarm's home repository (ledger, notebook, chief, assistant, runs). */
 	repo: string;
 	fetchedAt: string;
-	/** Open issues and PRs carrying an `fm:` label. */
+	/** Every project on the board, in the swarm's order, then the account's others. */
+	projects: SwarmProject[];
+	/** Open issues and PRs carrying an `fm:` label, across every project. */
 	work: SwarmItem[];
-	/** PRs merged most recently. */
+	/** Each project's most recently merged PRs. */
 	merged: SwarmItem[];
 	/** Every cost line in the ledger issue, oldest first. */
 	costs: SwarmCost[];
@@ -145,7 +171,8 @@ type GitHubRun = { id: number; status: string; conclusion: string | null; run_st
 
 type GitHubJob = { name: string; status: string; steps?: { name: string; status: string }[] };
 
-export async function github<T>(path: string): Promise<T> {
+/** A GitHub REST call on `repo` (the swarm's home unless given). */
+export async function github<T>(path: string, repo = SWARM_REPO): Promise<T> {
 	const headers: Record<string, string> = {
 		Accept: "application/vnd.github+json",
 		"X-GitHub-Api-Version": "2022-11-28",
@@ -153,13 +180,14 @@ export async function github<T>(path: string): Promise<T> {
 		"User-Agent": "formalmind",
 	};
 	if (process.env.GITHUB_TOKEN) headers.Authorization = `Bearer ${process.env.GITHUB_TOKEN}`;
-	const res = await fetch(`https://api.github.com/repos/${SWARM_REPO}${path}`, { headers, cache: "no-store" });
-	if (!res.ok) throw new Error(`GitHub ${path}: ${res.status} ${res.statusText}`);
+	const res = await fetch(`https://api.github.com/repos/${repo}${path}`, { headers, cache: "no-store" });
+	if (!res.ok) throw new Error(`GitHub ${repo}${path}: ${res.status} ${res.statusText}`);
 	return res.json() as Promise<T>;
 }
 
-function toItem(issue: GitHubIssue): SwarmItem {
+function toItem(repo: string, issue: GitHubIssue): SwarmItem {
 	return {
+		repo,
 		number: issue.number,
 		title: issue.title,
 		kind: issue.pull_request ? "pr" : "issue",
@@ -191,7 +219,9 @@ async function latestComments(issue: number, count: number): Promise<SwarmCommen
 	return (await latestRawComments(issue, count)).map(toComment);
 }
 
-const NOTE_MARKER = /<!-- fm-note role=(\S+) ref=#?(\S+) run=(\d+) -->/;
+const NOTE_MARKER = /<!-- fm-note role=(\S+) ref=#?(\S*) run=(\d+)(?: repo=(\S+))? -->/;
+/** Ledger and notebook lines name the proofs repository they are about; older lines are all the home's. */
+const REPO_FIELD = / repo=([\w.-]+\/[\w.-]+)/;
 const ROLE_NAMES: Record<string, SwarmRole> = { plan: "planner", prove: "prover", rebuild: "rebuilder", review: "reviewer", merge: "merger", editor: "editor", chief: "chief", assistant: "assistant" };
 
 const HANDOFF_ROLES: Record<string, SwarmRole> = { ...ROLE_NAMES, planner: "planner", prover: "prover", rebuilder: "rebuilder", reviewer: "reviewer", merger: "merger", dispatcher: "dispatcher" };
@@ -211,6 +241,7 @@ function parseNote(comment: GitHubComment): SwarmNote | null {
 	const lines = comment.body.split("\n");
 	const field = (name: string) => lines.find((l) => l.startsWith(`**${name}:**`))?.slice(name.length + 5).trim() || null;
 	return {
+		repo: marker[4] ?? SWARM_REPO,
 		role,
 		ref: Number(marker[2]) || null,
 		runId: Number(marker[3]),
@@ -266,12 +297,15 @@ const CYCLE_MARKER = /<!-- fm-cycle n=(\d+) phase=(\w+) -->/;
 
 function parseCost(comment: GitHubComment): SwarmCost[] {
 	const match = comment.body.match(COST_MARKER);
-	return match ? [{ role: match[1], ref: match[2], usd: Number(match[3]), runId: match[4] ? Number(match[4]) : null, createdAt: comment.created_at }] : [];
+	if (!match) return [];
+	const repo = comment.body.split("-->")[0].match(REPO_FIELD)?.[1] ?? SWARM_REPO;
+	return [{ repo, role: match[1], ref: match[2], usd: Number(match[3]), runId: match[4] ? Number(match[4]) : null, createdAt: comment.created_at }];
 }
 
 /** What is known of the ledger so far: the costs on its full pages of 100 comments, which no longer change. */
 type LedgerCache = { fullPages: number; costs: SwarmCost[] };
-const LEDGER_KEY = `swarm:ledger:${SWARM_REPO}:v1`;
+// v2: cost lines carry the repository they were spent on.
+const LEDGER_KEY = `swarm:ledger:${SWARM_REPO}:v2`;
 let ledgerCache: LedgerCache | null = null;
 
 async function readLedgerCache(): Promise<LedgerCache> {
@@ -315,26 +349,72 @@ async function allCosts(): Promise<SwarmCost[]> {
 	return [...(ledgerCache ?? cache).costs, ...partial.flatMap(parseCost)];
 }
 
-let cached: { at: number; state: Promise<SwarmState> } | null = null;
+/** One proofs repository the swarm sweeps, from the home's `.github/formalmind/projects.json`. */
+type SwarmConfigProject = { repo: string; protocol: string };
 
-export function getSwarmState(): Promise<SwarmState> {
-	if (cached && Date.now() - cached.at < CACHE_MS) return cached.state;
-	const state = loadSwarmState();
-	cached = { at: Date.now(), state };
-	state.catch(() => { cached = null; });
+/** The proofs repositories the swarm sweeps. Before the home lists any, it is the only one. */
+async function swarmProjects(): Promise<SwarmConfigProject[]> {
+	try {
+		const file = await github<{ content: string }>("/contents/.github/formalmind/projects.json");
+		const parsed = JSON.parse(atob(file.content.replace(/\s/g, ""))) as { projects?: SwarmConfigProject[] };
+		if (parsed.projects?.length) return parsed.projects;
+	} catch {}
+	return [{ repo: SWARM_REPO, protocol: "asyncswap/v2" }];
+}
+
+/** The swarm's projects in its own order, then the account's others (which it does not sweep yet). */
+function boardProjects(config: SwarmConfigProject[], account: Project[]): SwarmProject[] {
+	const board: SwarmProject[] = config.map((c) => ({ repo: c.protocol, proofsRepo: c.repo, inSwarm: true }));
+	for (const p of account) {
+		if (board.some((b) => b.repo === p.repo || (p.proofsRepo && b.proofsRepo === p.proofsRepo))) continue;
+		board.push({ repo: p.repo, proofsRepo: p.proofsRepo, inSwarm: false });
+	}
+	return board;
+}
+
+/** One project's open fm: work and its latest merges; an unreadable repository yields an error, not a failed board. */
+async function projectWork(project: SwarmProject): Promise<{ project: SwarmProject; work: SwarmItem[]; merged: SwarmItem[] }> {
+	const repo = project.proofsRepo;
+	if (!repo) return { project, work: [], merged: [] };
+	try {
+		const [open, closed] = await Promise.all([
+			github<GitHubIssue[]>("/issues?state=open&per_page=100", repo),
+			github<GitHubIssue[]>("/issues?state=closed&per_page=20&sort=updated", repo),
+		]);
+		return {
+			project,
+			work: open.filter((issue) => issue.labels.some((label) => label.name.startsWith("fm:"))).map((issue) => toItem(repo, issue)),
+			merged: closed.filter((issue) => issue.pull_request?.merged_at).slice(0, 5).map((issue) => toItem(repo, issue)),
+		};
+	} catch (error) {
+		console.error(`[swarm] reading ${repo} failed:`, error);
+		return { project: { ...project, error: `Could not read ${repo}.` }, work: [], merged: [] };
+	}
+}
+
+const cached = new Map<string, { at: number; state: Promise<SwarmState> }>();
+
+/** The swarm across its projects and the account's (`projects`, from /api/projects). */
+export function getSwarmState(projects: Project[] = []): Promise<SwarmState> {
+	const key = projects.map((p) => `${p.repo}:${p.proofsRepo ?? ""}`).sort().join(",");
+	const hit = cached.get(key);
+	if (hit && Date.now() - hit.at < CACHE_MS) return hit.state;
+	const state = loadSwarmState(projects);
+	cached.set(key, { at: Date.now(), state });
+	state.catch(() => cached.delete(key));
 	return state;
 }
 
-async function loadSwarmState(): Promise<SwarmState> {
-	const [open, closed, ledger, rawNotebook, chief, assistant, costs] = await Promise.all([
-		github<GitHubIssue[]>("/issues?state=open&per_page=100"),
-		github<GitHubIssue[]>("/issues?state=closed&per_page=20&sort=updated"),
+async function loadSwarmState(account: Project[]): Promise<SwarmState> {
+	const [config, ledger, rawNotebook, chief, assistant, costs] = await Promise.all([
+		swarmProjects(),
 		latestComments(LEDGER_ISSUE, 30),
 		latestRawComments(NOTEBOOK_ISSUE, 12),
 		latestComments(CHIEF_ISSUE, 1),
 		latestComments(ASSISTANT_ISSUE, 1),
 		allCosts(),
 	]);
+	const boards = await Promise.all(boardProjects(config, account).map(projectWork));
 	const notebook = rawNotebook.slice(-6).map(toComment);
 
 	const cycle = ledger.flatMap((comment) => {
@@ -347,8 +427,9 @@ async function loadSwarmState(): Promise<SwarmState> {
 	return {
 		repo: SWARM_REPO,
 		fetchedAt: new Date().toISOString(),
-		work: open.filter((issue) => issue.labels.some((label) => label.name.startsWith("fm:"))).map(toItem),
-		merged: closed.filter((issue) => issue.pull_request?.merged_at).slice(0, 5).map(toItem),
+		projects: boards.map((b) => b.project),
+		work: boards.flatMap((b) => b.work),
+		merged: boards.flatMap((b) => b.merged),
 		costs,
 		spentToday: costs.filter((cost) => cost.createdAt.startsWith(today)).reduce((sum, cost) => sum + cost.usd, 0),
 		chief: chief[0] ?? null,

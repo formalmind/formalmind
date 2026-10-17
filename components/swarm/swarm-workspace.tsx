@@ -65,9 +65,11 @@ export function SwarmWorkspace({ repo }: { repo: string }) {
 	const inFlight = state?.work.filter((item) => item.kind === "pr").length ?? 0;
 	const blocked = state?.work.filter((item) => item.labels.includes("fm:blocked")).length ?? 0;
 
+	const swept = state?.projects?.filter((p) => p.inSwarm).length ?? 1;
+
 	const pill = "inline-flex h-8 items-center rounded-full border bg-background/90 shadow-sm backdrop-blur";
 	const status = state
-		? `${state.cycle ? `Cycle ${state.cycle.n}: ${state.cycle.phase} · ` : ""}${queued} queued · ${inFlight} PRs open · ${blocked} blocked · $${state.spentToday.toFixed(2)} spent today`
+		? `${swept > 1 ? `${swept} projects · ` : ""}${state.cycle ? `Cycle ${state.cycle.n}: ${state.cycle.phase} · ` : ""}${queued} queued · ${inFlight} PRs open · ${blocked} blocked · $${state.spentToday.toFixed(2)} spent today`
 		: error ?? "Loading the live queue…";
 	const synced = syncedAt ? `Synced ${Math.max(0, Math.round((now - syncedAt) / 1000))}s ago. ` : "";
 
