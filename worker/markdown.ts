@@ -49,7 +49,7 @@ const ROUTES: Record<string, { title: string; body: string }> = {
   },
   "/login": {
     title: "Log in · Formal Mind",
-    body: "Sign in with GitHub. There is no password and no agent credential; see /auth.md.",
+    body: "Sign in with GitHub. There is no password. An agent acting for you uses an OAuth access token from formal.team's authorization server instead; see /auth.md.",
   },
   "/terms": { title: "Terms of Service · Formal Mind", body: "Terms of service for the Formal Mind app." },
   "/privacy": { title: "Privacy Policy · Formal Mind", body: "Privacy policy for the Formal Mind app." },
@@ -111,7 +111,7 @@ export function markdownResponse(pathname: string): Response {
 /* Paths the Worker's own handlers or the asset store own are never pages:
  * the API, sign-in, built assets, and anything that looks like a file. */
 export function isPagePath(pathname: string): boolean {
-  if (pathname.startsWith("/api/") || pathname.startsWith("/auth/") || pathname === "/login/callback" || pathname.startsWith("/assets/") || pathname === "/mcp") return false;
+  if (pathname.startsWith("/api/") || pathname.startsWith("/auth/") || pathname.startsWith("/oauth/") || pathname === "/login/callback" || pathname.startsWith("/assets/") || pathname === "/mcp" || pathname.startsWith("/mcp/")) return false;
   const last = pathname.split("/").pop() ?? "";
   return !last.includes(".");
 }

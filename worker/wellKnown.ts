@@ -1,7 +1,11 @@
 /* Further /.well-known/ documents for agent discovery. Each one states
- * something that is true today; none advertises an authorization server,
- * agent endpoint or session feature Formal Mind does not run. */
+ * something that is true today: the authorization server listed here is
+ * the one this Worker runs (worker/oauth.ts), and the resources it protects
+ * are the account MCP server and the token-capable API routes. */
 
+import { issuer, SCOPE_LIST } from "@/lib/oauth";
+import { ACCOUNT_MCP_PATH } from "./account-mcp";
+import { authorizationServerMetadata, jwksDocument } from "./oauth";
 import { CHANGELOG, DESCRIPTION, ORIGIN, PROTOCOL_DOC, SITE_NAME, SWARM_DOC } from "./narrative";
 
 function json(body: unknown, contentType = "application/json; charset=utf-8"): Response {
@@ -14,17 +18,21 @@ function json(body: unknown, contentType = "application/json; charset=utf-8"): R
   });
 }
 
-/* RFC 9728 Protected Resource Metadata. People sign in with GitHub, whose
- * OAuth publishes no RFC 8414 metadata and whose tokens this API does not
- * accept; the only bearer tokens the API takes are the ones it mints for its
- * own desktop app. So `authorization_servers` is empty, which the RFC
- * allows: no token issuer exists that a third party could use. */
-function protectedResource(): Response {
+/* RFC 9728 Protected Resource Metadata. The authorization server is this
+ * host's own (RFC 8414 metadata at /.well-known/oauth-authorization-server);
+ * its access tokens are accepted by /mcp/account and by the API routes
+ * listed in auth.md, each within its scope. People still sign in with
+ * GitHub; the authorization server only lets a client hold a token for the
+ * account that signed in. The root document describes the API; the
+ * path-specific one (RFC 9728 §3) describes the account MCP server, which is
+ * what an MCP client is pointed at by the 401 it gets without a token. */
+function protectedResource(resourcePath = ""): Response {
+  const iss = issuer();
   return json({
-    resource: ORIGIN,
-    resource_name: SITE_NAME,
-    authorization_servers: [],
-    scopes_supported: [],
+    resource: `${iss}${resourcePath}`,
+    resource_name: resourcePath ? `${SITE_NAME} account MCP server` : `${SITE_NAME} API`,
+    authorization_servers: [iss],
+    scopes_supported: SCOPE_LIST,
     bearer_methods_supported: ["header"],
     resource_documentation: `${ORIGIN}/auth.md`,
     resource_policy_uri: `${ORIGIN}/terms`,
@@ -61,15 +69,16 @@ function aiCatalog(): Response {
     entries: [
       {
         identifier: id("server", "swarm"),
-        displayName: "Formal Mind swarm MCP server",
-        description: "Read-only MCP tools: the swarm's live state, its open issues and pull requests by fm: label, the proofs changelog, and each role's instructions.",
+        displayName: "Formal Mind MCP servers",
+        description: "One card, two remotes: read-only tools over the swarm's public record at /mcp (no auth), and the account tools at /mcp/account (OAuth 2.0 from this host, GitHub sign-in): your projects, usage, credits and swarm state, planning a repository and starting the swarm on it.",
         type: "application/mcp-server-card+json",
         url: `${ORIGIN}/.well-known/mcp/server-card.json`,
         representativeQueries: [
           "what is the formalmind swarm working on right now",
           "which pull requests are waiting for the merger",
           "what did the last proofs run change",
-          "what does the reviewer role do",
+          "what did my swarm spend today",
+          "start the planner on my repository",
         ],
       },
       {
@@ -81,6 +90,17 @@ function aiCatalog(): Response {
         representativeQueries: [
           "how do I ask the formalmind bot a question about the spec",
           "how do I ask the prover to pick up an issue",
+        ],
+      },
+      {
+        identifier: id("skill", "connect-formal-mind-as-mcp"),
+        displayName: "Skill: connect Formal Mind as an MCP connector",
+        description: "Add formal.team/mcp/account to Claude, ChatGPT or Cursor, sign in with GitHub, and ask about or act on your own account: projects, usage, credits, swarm state, planning a repository, starting the swarm.",
+        type: "text/markdown",
+        url: `${ORIGIN}/.well-known/agent-skills/connect-formal-mind-as-mcp/SKILL.md`,
+        representativeQueries: [
+          "how do I add Formal Mind to Claude as a connector",
+          "what did my swarm spend today",
         ],
       },
       {
@@ -133,11 +153,18 @@ function aiCatalog(): Response {
   });
 }
 
-export function handleWellKnown(request: Request): Response | null {
+export function handleWellKnown(request: Request): Response | Promise<Response> | null {
   const url = new URL(request.url);
   switch (url.pathname) {
     case "/.well-known/oauth-protected-resource":
       return protectedResource();
+    case `/.well-known/oauth-protected-resource${ACCOUNT_MCP_PATH}`:
+      return protectedResource(ACCOUNT_MCP_PATH);
+    case "/.well-known/oauth-authorization-server":
+    case "/.well-known/oauth-authorization-server/":
+      return authorizationServerMetadata();
+    case "/.well-known/jwks.json":
+      return jwksDocument();
     case "/.well-known/poppy.json":
       return poppy(url.hostname);
     case "/.well-known/ai-catalog.json":

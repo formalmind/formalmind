@@ -64,16 +64,30 @@ with the facts they share in `worker/narrative.ts`. Every claim in them is check
 | --- | --- |
 | `/robots.txt`, `/sitemap.xml` | RFC 9309 rules with explicit AI-crawler groups and `Content-Signal: search=yes, ai-input=yes, ai-train=no`; the public pages |
 | `/llms.txt`, `/llms-full.txt` | Orientation and the full account of the swarm for agents (llmstxt.org) |
-| `/auth.md` | How people sign in (GitHub) and that no agent credential exists yet |
-| `/.well-known/api-catalog` | RFC 9727 linkset: the MCP server and the one open endpoint, `POST /api/onboarding/plan` |
-| `/.well-known/agent-skills/index.json` | Two skills with sha256 digests: `ask-formalmind` and `onboard-a-repository` |
+| `/auth.md` | How people sign in (GitHub) and how agents get account-scoped OAuth 2.0 tokens: registration, authorize, token, scopes, refresh, revoke, which routes and tools take them |
+| `/.well-known/api-catalog` | RFC 9727 linkset: the two MCP servers, the open `POST /api/onboarding/plan`, and the token-capable account routes |
+| `/.well-known/agent-skills/index.json` | Three skills with sha256 digests: `ask-formalmind`, `onboard-a-repository` and `connect-formal-mind-as-mcp` |
 | `/.well-known/mcp/server-card.json`, `/mcp` | Read-only MCP server (Streamable HTTP, no auth): `get_swarm_state`, `list_open_work`, `get_changelog`, `get_role_doc` |
-| `/.well-known/oauth-protected-resource` | RFC 9728 metadata with an empty `authorization_servers` list, because none exists |
+| `/mcp/account` | Account MCP server behind an OAuth access token (`worker/account-mcp.ts`): `my_projects`, `my_usage`, `my_credits`, `swarm_state` (swarm:read), `plan_repository`, `start_swarm` (swarm:write); 401 with `WWW-Authenticate: Bearer resource_metadata=…` without one |
+| `/.well-known/oauth-authorization-server`, `/oauth/register`, `/oauth/authorize`, `/oauth/token`, `/oauth/revoke`, `/.well-known/jwks.json` | The OAuth 2.0 authorization server (`worker/oauth.ts`, `lib/oauth.ts`): RFC 8414 metadata, RFC 7591 registration of public clients, authorization code with PKCE after GitHub sign-in and a consent page, ES256 JWT access tokens (1 h) with rotated refresh tokens, RFC 7009 revocation |
+| `/.well-known/oauth-protected-resource`, `…/mcp/account` | RFC 9728 metadata for the API and for the account MCP server, both naming `https://formal.team` as the authorization server |
 | `/.well-known/poppy.json`, `/.well-known/ai-catalog.json` | Personal Agent Protocol (website-only) and the AI catalog of the artifacts above |
 
 Any page answers in markdown when the request ranks `text/markdown` above `text/html` in `Accept`; HTML responses carry
 `Link`, `Content-Signal` and `Vary: Accept` headers. The page also registers the four MCP tools with WebMCP
 (`document.modelContext`) when the browser offers it (`src/webmcp.ts`).
+
+Access tokens are signed with the `OAUTH_SIGNING_KEY` Worker secret, a private P-256 JWK. Make one and set it (once; rotating
+it signs every holder out at the next hour):
+
+```sh
+bun scripts/oauth-signing-key.ts | npx wrangler secret put OAUTH_SIGNING_KEY
+```
+
+For local preview put the same JSON in `.dev.vars` as `OAUTH_SIGNING_KEY='{…}'`; without it `wrangler dev` uses a key that
+lives as long as the process. `bun scripts/oauth-client.ts http://localhost:8787` walks the whole flow against a running
+preview (`npx wrangler dev --host localhost:8787`, so the issuer in the metadata is the address the script can reach):
+registration, PKCE, consent, tools on `/mcp/account`, refusals, refresh and revocation.
 
 ## Develop
 

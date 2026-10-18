@@ -9,10 +9,13 @@
  * (blog.cloudflare.com/agent-readiness) for what each file is for, and
  * worker/narrative.ts for the facts every document is built from. */
 
+import { SCOPES } from "@/lib/oauth";
+import { ACCOUNT_MCP_PATH, ACCOUNT_TOOLS, handleAccountMcp } from "./account-mcp";
 import { handleSkills } from "./skills";
 import { handleMcp, serverCard } from "./mcp";
 import { handleWellKnown } from "./wellKnown";
 import {
+  AGENT_ACCESS,
   APP_REPO,
   CHANGELOG,
   DESCRIPTION,
@@ -65,7 +68,7 @@ function robotsTxt(): Response {
     "Google-Extended", "Applebot-Extended",
     "CCBot", "Bytespider", "meta-externalagent", "Amazonbot",
   ];
-  const rules = ["Content-Signal: search=yes, ai-input=yes, ai-train=no", "Allow: /", "Disallow: /api/", "Disallow: /auth/", "Disallow: /login/callback", ""];
+  const rules = ["Content-Signal: search=yes, ai-input=yes, ai-train=no", "Allow: /", "Disallow: /api/", "Disallow: /auth/", "Disallow: /oauth/", "Disallow: /login/callback", ""];
   const lines = [
     `# ${SITE_NAME}: a swarm of agents that keeps a Lean 4 specification of a Solidity protocol honest on every commit.`,
     "# Agents: start at /llms.txt and /.well-known/api-catalog.",
@@ -93,10 +96,10 @@ function sitemapXml(): Response {
 export const AGENT_LINKS_MARKDOWN = `## For agents
 
 - [llms.txt](${ORIGIN}/llms.txt) and [llms-full.txt](${ORIGIN}/llms-full.txt): orientation and the full account of the swarm
-- [MCP server card](${ORIGIN}/.well-known/mcp/server-card.json): read-only MCP server at ${ORIGIN}/mcp (swarm state, open work, changelog, role documentation)
-- [Agent Skills](${ORIGIN}/.well-known/agent-skills/index.json): how to ask the swarm on GitHub, and how to onboard a repository
-- [API catalog](${ORIGIN}/.well-known/api-catalog): the one open endpoint and the MCP server
-- [auth.md](${ORIGIN}/auth.md): how people sign in, and that there is no agent credential yet`;
+- [MCP server card](${ORIGIN}/.well-known/mcp/server-card.json): read-only MCP server at ${ORIGIN}/mcp (swarm state, open work, changelog, role documentation) and the account server at ${ORIGIN}/mcp/account (your projects, usage, credits, swarm state, plan and start; OAuth 2.0)
+- [Agent Skills](${ORIGIN}/.well-known/agent-skills/index.json): how to ask the swarm on GitHub, how to onboard a repository, and how to connect Formal Mind as an MCP connector
+- [API catalog](${ORIGIN}/.well-known/api-catalog): the open plan endpoint, the two MCP servers and the token-capable account routes
+- [auth.md](${ORIGIN}/auth.md): GitHub sign-in for people; the OAuth 2.0 authorization server, scopes and tokens for agents`;
 
 /* llmstxt.org: a short orientation plus a curated reading list. */
 function llmsTxt(): Response {
@@ -110,10 +113,11 @@ ${SHORT} The full account, roles, labels and safety rails included, is in [llms-
 
 ## Agents
 
-- [MCP server card](${ORIGIN}/.well-known/mcp/server-card.json): read-only tools at ${ORIGIN}/mcp (Streamable HTTP, no auth): the swarm's live state, its open work, the proofs changelog and each role's instructions
+- [MCP server card](${ORIGIN}/.well-known/mcp/server-card.json): read-only tools at ${ORIGIN}/mcp (Streamable HTTP, no auth): the swarm's live state, its open work, the proofs changelog and each role's instructions; and the account server at ${ORIGIN}/mcp/account (OAuth 2.0, GitHub sign-in): my_projects, my_usage, my_credits, swarm_state, plan_repository, start_swarm
+- [Skill: connect-formal-mind-as-mcp](${ORIGIN}/.well-known/agent-skills/connect-formal-mind-as-mcp/SKILL.md): add ${ORIGIN}/mcp/account to Claude, ChatGPT or Cursor and act on your own account
 - [Skill: ask-formalmind](${ORIGIN}/.well-known/agent-skills/ask-formalmind/SKILL.md): mention @formalmind or /ask a role in an issue or pull request of a proofs repository
 - [Skill: onboard-a-repository](${ORIGIN}/.well-known/agent-skills/onboard-a-repository/SKILL.md): plan a repository, set a budget, add credits, install the GitHub App, start the swarm
-- [auth.md](${ORIGIN}/auth.md): sign-in is GitHub, for people; no agent API key or token issuer exists yet
+- [auth.md](${ORIGIN}/auth.md): GitHub sign-in for people; OAuth 2.0 (RFC 8414 metadata, dynamic registration, PKCE, refresh, revocation) for agents acting on an account
 
 ## The swarm
 
@@ -155,7 +159,10 @@ ${HOW_IT_WORKS}
 - **Read the swarm.** The MCP server at ${ORIGIN}/mcp (Streamable HTTP, JSON responses, no authentication) has four read-only tools: \`get_swarm_state\` (projects, open work with labels, merged pull requests, spend today, the chief's and the assistant's latest notes, the rebuild cycle, recent runs), \`list_open_work\` (open issues and pull requests carrying an fm: label, optionally filtered by label), \`get_changelog\` (the latest entries of FORMAL_MIND.md) and \`get_role_doc\` (a role's instructions). Everything they return is also public on GitHub.
 - **Plan a repository.** \`POST ${ORIGIN}/api/onboarding/plan\` with body \`{"repo":"owner/name"}\` and no credentials. The response is \`text/plain\`: a JSON object streamed a few characters at a time, with the protocol summary, the contracts found, and the first issues the planner would open. Limits: public repositories with Solidity contracts outside tests and libraries; five plans per hour per address (429 after that); a plan is cached for a week and replayed (header \`X-Plan-Cache: hit\`).
 - **Talk to the swarm on GitHub.** In a proofs repository the swarm works, mention \`@formalmind\` for the bot, or comment \`/ask <role> <question>\` to put a question to one role. This needs a GitHub account; the skill at ${ORIGIN}/.well-known/agent-skills/ask-formalmind/SKILL.md says how replies and reactions work.
-- **Onboard a repository for a person.** Signing in, setting a budget, buying credits, installing the GitHub App and starting the swarm are browser flows behind GitHub sign-in; the skill at ${ORIGIN}/.well-known/agent-skills/onboard-a-repository/SKILL.md walks a person through them. There is no API for them.
+- **Act on a person's account.** With an OAuth access token from ${ORIGIN} (the person signs in with GitHub and allows the client on a consent page), the account MCP server at ${ORIGIN}/mcp/account and the API routes listed in ${ORIGIN}/auth.md give the account's projects, usage, credits and swarm state (\`swarm:read\`), and plan a repository or start the swarm on it (\`swarm:write\`). The section below says how.
+- **Onboard a repository for a person.** Planning and Start can be done with a \`swarm:write\` token (\`plan_repository\`, \`start_swarm\`, or \`POST /api/projects/init\`); setting a budget, buying credits and installing the GitHub App are browser flows behind GitHub sign-in. The skill at ${ORIGIN}/.well-known/agent-skills/onboard-a-repository/SKILL.md walks a person through them.
+
+${AGENT_ACCESS}
 
 ${PLANNED}
 
@@ -173,35 +180,77 @@ ${PLANNED}
   return text(body);
 }
 
-/* auth.md: how a client authenticates. People sign in with GitHub; no
- * credential exists for agents, and saying so is better than advertising an
- * authorization server that does not exist. */
+/* auth.md: how a client authenticates. People sign in with GitHub; agents
+ * acting on a person's account use the OAuth 2.0 authorization server this
+ * Worker runs (worker/oauth.ts, lib/oauth.ts). Every endpoint named here
+ * answers. */
 function authMd(): Response {
+  const scopes = Object.entries(SCOPES)
+    .map(([scope, what]) => `- \`${scope}\`: ${what.toLowerCase()}.`)
+    .join("\n");
+  const tools = (scope: string) => ACCOUNT_TOOLS.filter((t) => t.scope === scope).map((t) => `\`${t.name}\``).join(", ");
   const body = `# auth.md
 
-Formal Mind has GitHub sign-in for people and no credential for agents yet.
+Formal Mind has GitHub sign-in for people, and an OAuth 2.0 authorization server of its own for agents and MCP connectors that act on a person's account. A public verification-work API is planned; the credentials below are what it will use.
 
 ## Audience
 
-AI agents and bots reading this site, calling the MCP server at ${ORIGIN}/mcp, or calling the one open endpoint, \`POST ${ORIGIN}/api/onboarding/plan\`.
-
-## Registration
-
-None. There is no account to create for an agent, no API key to request and no client registration endpoint. Send requests to the open endpoints without credentials.
-
-## Supported methods
-
-- Anonymous: the MCP server at ${ORIGIN}/mcp (Streamable HTTP, no Authorization header), \`POST /api/onboarding/plan\`, and every discovery document under /.well-known/.
-- GitHub sign-in, for people in a browser: ${ORIGIN}/auth/login starts the formalmind GitHub App's user authorization and ${ORIGIN}/login/callback finishes it. The session is an httpOnly cookie. Every other /api/ route answers 401 without it.
-- Desktop session token: the Mac app signs in through the browser at /api/desktop/authorize, trades a one-time code at /api/desktop/token for a bearer token (\`Authorization: Bearer fmd_…\`), and uses it on /api/ routes. These tokens are minted by this app for its own desktop client only; they are not issued to third parties.
-
-## Credentials
-
-No credential is sent to Formal Mind by an agent. People authenticate with GitHub; Formal Mind keeps the GitHub user token on the server and never hands it to the browser or to an agent.
+MCP clients (Claude, ChatGPT, Cursor and any other remote-MCP connector), AI agents and bots calling the account MCP server at ${ORIGIN}${ACCOUNT_MCP_PATH} or the token-capable API routes below. The anonymous MCP server at ${ORIGIN}/mcp, \`POST ${ORIGIN}/api/onboarding/plan\` and every discovery document under /.well-known/ need no credential.
 
 ## Metadata
 
-RFC 9728 Protected Resource Metadata is at ${ORIGIN}/.well-known/oauth-protected-resource. Its \`authorization_servers\` list is empty: GitHub's OAuth has no RFC 8414 metadata, its tokens are not accepted by this app's API, and no token issuer of our own exists. If an agent API with credentials is added, an authorization server will be listed there and documented here.
+- RFC 8414 authorization server metadata: ${ORIGIN}/.well-known/oauth-authorization-server (issuer \`${ORIGIN}\`).
+- RFC 9728 protected resource metadata: ${ORIGIN}/.well-known/oauth-protected-resource (the API) and ${ORIGIN}/.well-known/oauth-protected-resource${ACCOUNT_MCP_PATH} (the account MCP server). Both name \`${ORIGIN}\` as the authorization server and list the scopes.
+- Signing keys: ${ORIGIN}/.well-known/jwks.json (ES256).
+
+## Registration (RFC 7591)
+
+\`POST ${ORIGIN}/oauth/register\` with a JSON client metadata document: \`client_name\`, \`redirect_uris\` (https URLs, http on the loopback with any port, or the app's own URI scheme), and optionally \`grant_types\` (\`authorization_code\`, \`refresh_token\`), \`response_types\` (\`code\`), \`scope\`, \`client_uri\`, \`logo_uri\`. Only public clients are registered: \`token_endpoint_auth_method\` is \`none\`. The answer is 201 with \`client_id\` (\`fmc_…\`), \`client_id_issued_at\` and the metadata as stored. Thirty registrations per hour per address. MCP clients do this on their own after the 401 described below.
+
+## Authorization (authorization code with PKCE)
+
+\`GET ${ORIGIN}/oauth/authorize?response_type=code&client_id=…&redirect_uri=…&scope=swarm:read%20swarm:write&state=…&code_challenge=…&code_challenge_method=S256\`, optionally with \`resource=${ORIGIN}${ACCOUNT_MCP_PATH}\` (RFC 8707). PKCE with S256 is required; \`redirect_uri\` must be one the client registered.
+
+- Without a session the person is sent through GitHub sign-in (${ORIGIN}/auth/login) and brought back to the same request.
+- A consent page names the client and each scope. Allow sends the person to \`redirect_uri\` with \`code\`, \`state\` and \`iss\` (RFC 9207); Deny sends \`error=access_denied\`.
+- A code lives ten minutes and works once.
+
+## Token
+
+\`POST ${ORIGIN}/oauth/token\` (form-encoded or JSON) with \`grant_type=authorization_code\`, \`code\`, \`code_verifier\`, \`redirect_uri\` and \`client_id\` returns \`{ access_token, token_type: "Bearer", expires_in: 3600, refresh_token, scope }\`.
+
+- \`access_token\` is an ES256 JWT: \`iss\` \`${ORIGIN}\`, \`aud\` the \`resource\` the client asked for (or \`${ORIGIN}\`), \`sub\` the GitHub account (\`github|<id>\`), \`scope\`, \`client_id\`, \`exp\` one hour after \`iat\`, \`jti\`, plus \`name\`, \`nickname\` and \`email\` as GitHub reported them. Verify it against the JWKS.
+- \`refresh_token\` (\`fmr_…\`) is opaque, lasts thirty days and works once: \`grant_type=refresh_token\` with \`refresh_token\` and \`client_id\` returns a new pair and the old refresh token stops working. \`scope\` may narrow the grant, never widen it.
+- Errors follow RFC 6749 §5.2: \`invalid_client\` (401), \`invalid_grant\`, \`invalid_scope\`, \`unsupported_grant_type\`.
+
+## Revocation (RFC 7009)
+
+\`POST ${ORIGIN}/oauth/revoke\` with \`token\` (and optionally \`token_type_hint\`). A refresh token is deleted; an access token is refused for the rest of its hour. The answer is 200 either way.
+
+## Scopes
+
+${scopes}
+
+Everything else on the account (chat, billing checkout, the GitHub App, onboarding settings) stays behind the person's own sign-in; no scope reaches it.
+
+## What accepts a token
+
+Send \`Authorization: Bearer <access_token>\`.
+
+- The account MCP server, ${ORIGIN}${ACCOUNT_MCP_PATH} (Streamable HTTP, JSON responses): ${tools("swarm:read")} need \`swarm:read\`; ${tools("swarm:write")} need \`swarm:write\`.
+- API routes: \`GET /api/projects\`, \`GET /api/usage\`, \`GET /api/billing/balance\` and \`GET /api/swarm/state\` with \`swarm:read\`; \`POST /api/projects/init\` (body \`{"repo":"owner/name"}\`) with \`swarm:write\`.
+
+Without a credential these answer 401 with \`WWW-Authenticate: Bearer resource_metadata="…/.well-known/oauth-protected-resource[${ACCOUNT_MCP_PATH}]"\`, which is how an MCP client finds this authorization server. A token that does not verify gets 401 with \`error="invalid_token"\`; a valid token without the scope gets 403 with \`error="insufficient_scope"\` and the scope it needs. Every other /api/ route needs the person's own session and answers 403 to an OAuth token.
+
+## Other methods
+
+- Anonymous: the MCP server at ${ORIGIN}/mcp, \`POST /api/onboarding/plan\`, and every discovery document under /.well-known/.
+- GitHub sign-in, for people in a browser: ${ORIGIN}/auth/login starts the formalmind GitHub App's user authorization and ${ORIGIN}/login/callback finishes it. The session is an httpOnly cookie.
+- Desktop session token: the Mac app signs in through the browser at /api/desktop/authorize, trades a one-time code at /api/desktop/token for a bearer token (\`Authorization: Bearer fmd_…\`), and uses it on /api/ routes as the person. These tokens are minted for the app's own desktop client only and are unchanged by the OAuth server.
+
+## Credentials
+
+The GitHub user token stays on the Worker; it is never handed to the browser, to the Mac app or to an OAuth client. An access token carries the account's \`sub\`, \`name\`, \`nickname\` and \`email\` and nothing from GitHub. Access tokens are signed with the Worker's OAUTH_SIGNING_KEY secret; only its public half is published.
 `;
   return text(body, "text/markdown; charset=utf-8");
 }
@@ -216,10 +265,27 @@ function apiCatalog(): Response {
       {
         anchor: `${ORIGIN}/mcp`,
         "service-doc": [
-          { href: `${ORIGIN}/llms-full.txt`, type: "text/plain", title: "Formal Mind: full reference for agents (MCP tools, the open plan endpoint, what is planned)" },
-          { href: `${ORIGIN}/auth.md`, type: "text/markdown", title: "Authentication: none for agents" },
+          { href: `${ORIGIN}/llms-full.txt`, type: "text/plain", title: "Formal Mind: full reference for agents (MCP tools, the open plan endpoint, account access, what is planned)" },
+          { href: `${ORIGIN}/auth.md`, type: "text/markdown", title: "Authentication: none for this server" },
         ],
         "service-meta": [{ href: `${ORIGIN}/.well-known/mcp/server-card.json`, type: "application/mcp-server-card+json" }],
+      },
+      {
+        anchor: `${ORIGIN}${ACCOUNT_MCP_PATH}`,
+        "service-doc": [
+          { href: `${ORIGIN}/auth.md`, type: "text/markdown", title: "Authentication: OAuth 2.0 access token from this host (registration, PKCE, scopes swarm:read and swarm:write)" },
+          { href: `${ORIGIN}/.well-known/agent-skills/connect-formal-mind-as-mcp/SKILL.md`, type: "text/markdown", title: "Connect Formal Mind as an MCP connector in Claude, ChatGPT or Cursor" },
+        ],
+        "service-meta": [
+          { href: `${ORIGIN}/.well-known/mcp/server-card.json`, type: "application/mcp-server-card+json" },
+          { href: `${ORIGIN}/.well-known/oauth-protected-resource${ACCOUNT_MCP_PATH}`, type: "application/json", title: "RFC 9728 protected resource metadata" },
+          { href: `${ORIGIN}/.well-known/oauth-authorization-server`, type: "application/json", title: "RFC 8414 authorization server metadata" },
+        ],
+      },
+      {
+        anchor: `${ORIGIN}/api/projects`,
+        "service-doc": [{ href: `${ORIGIN}/auth.md`, type: "text/markdown", title: "GET with a swarm:read token: the account's projects; also GET /api/usage, /api/billing/balance, /api/swarm/state (swarm:read) and POST /api/projects/init (swarm:write)" }],
+        "service-meta": [{ href: `${ORIGIN}/.well-known/oauth-protected-resource`, type: "application/json", title: "RFC 9728 protected resource metadata" }],
       },
       {
         anchor: `${ORIGIN}/api/onboarding/plan`,
@@ -239,8 +305,9 @@ function apiCatalog(): Response {
 export async function handleDiscovery(request: Request): Promise<Response | null> {
   const { pathname } = new URL(request.url);
 
-  /* MCP endpoint takes GET, POST, DELETE and OPTIONS. */
+  /* MCP endpoints take GET, POST, DELETE and OPTIONS. */
   if (pathname === "/mcp") return handleMcp(request);
+  if (pathname === ACCOUNT_MCP_PATH) return handleAccountMcp(request);
   if (pathname === "/mcp/server-card" || pathname === "/.well-known/mcp/server-card.json") return serverCard();
 
   if (request.method !== "GET" && request.method !== "HEAD") return null;
@@ -248,7 +315,7 @@ export async function handleDiscovery(request: Request): Promise<Response | null
   const skills = await handleSkills(pathname);
   if (skills) return skills;
 
-  const wellKnown = handleWellKnown(request);
+  const wellKnown = await handleWellKnown(request);
   if (wellKnown) return wellKnown;
 
   switch (pathname) {
