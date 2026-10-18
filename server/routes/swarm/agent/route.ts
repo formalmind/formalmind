@@ -80,8 +80,8 @@ export async function POST(request: Request) {
 		console.error("[agent] send failed:", error);
 		const status = (error as { status?: number }).status;
 		const reason = status === 403 || status === 404
-			? `GitHub didn't let your account comment on ${SWARM_REPO}#${ASSISTANT_ISSUE}. Sign out and sign in again so Formal Mind can post as you.`
-			: "Couldn't send it to GitHub just now. Try again in a moment.";
+			? `GitHub didn't let your account comment on ${SWARM_REPO}#${ASSISTANT_ISSUE} (${(error as Error).message}). Sign out and sign in again so Formal Mind can post as you.`
+			: `Couldn't send it to GitHub just now (${(error as Error).message}). Try again in a moment.`;
 		return Response.json({ error: reason }, { status: 502 });
 	}
 }
