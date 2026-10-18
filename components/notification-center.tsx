@@ -99,7 +99,7 @@ export function NotificationCenter() {
           aria-label="Notifications"
           className="absolute right-0 top-full z-[9999999] mt-2 w-[min(22rem,calc(100vw-1.5rem))]"
         >
-          <div className="space-y-2 rounded-3xl bg-[var(--muted)] p-3 shadow-md">
+          <div className="space-y-2 rounded-3xl bg-muted p-3 shadow-md">
             {all.length === 0 ? (
               <p className="px-2 py-3 text-sm text-muted-foreground">No notifications</p>
             ) : (

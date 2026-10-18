@@ -159,13 +159,6 @@ export function SwarmWorkspace({ repo }: { repo: string }) {
 						>
 							<RefreshCw className={`size-3.5 ${loading ? "animate-spin" : ""}`} />
 						</button>
-						<button
-							type="button"
-							onClick={() => setTalkTo(talkTo === "swarm" ? null : "swarm")}
-							className="inline-flex h-8 items-center rounded-full bg-foreground px-3 text-sm font-medium text-background shadow-sm transition-opacity hover:opacity-90"
-						>
-							Ask the swarm
-						</button>
 					</>
 				}
 			/>
