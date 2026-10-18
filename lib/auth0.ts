@@ -12,6 +12,8 @@ const SESSION_COOKIE = "fm_session";
 const TX_COOKIE = "fm_auth_tx";
 const SESSION_TTL = 7 * 24 * 3600;
 const SCOPE = "openid profile email offline_access";
+/** The domains Formal Mind is served on; each must be in the Auth0 app's allowed callback and logout URLs. */
+const SITE_ORIGINS = ["https://formal.team", "https://www.formal.team", "https://formalmind.asyncswap.workers.dev"];
 
 const env = (name: string) => (process.env[name] as string | undefined) ?? "";
 const isAuthConfigured = () => Boolean(env("AUTH0_DOMAIN") && env("AUTH0_CLIENT_ID") && env("AUTH0_CLIENT_SECRET") && env("APP_BASE_URL"));
@@ -93,7 +95,10 @@ const redirect = (location: string, cookies: string[] = []) => {
 /** /auth/login, /auth/callback and /auth/logout. */
 export async function handleAuth(path: string): Promise<Response> {
 	const url = new URL(currentRequest().request.url);
-	const baseUrl = env("APP_BASE_URL").replace(/\/$/, "");
+	// Sign-in returns to the site it started on, so the session cookie lands on that domain. Only the configured
+	// base URL and the site's own domains qualify; anything else falls back to APP_BASE_URL.
+	const configured = env("APP_BASE_URL").replace(/\/$/, "");
+	const baseUrl = SITE_ORIGINS.includes(url.origin) || url.origin === configured ? url.origin : configured;
 	const safeReturn = (to: string | null) => (to && to.startsWith("/") && !to.startsWith("//") ? to : "/");
 
 	if (isDevPreview) return redirect(path === "/auth/logout" ? "/welcome" : safeReturn(url.searchParams.get("returnTo")));
