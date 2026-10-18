@@ -14,6 +14,7 @@ import * as onboardingPlan from "@/server/routes/onboarding/plan/route";
 import * as onboardingState from "@/server/routes/onboarding/state/route";
 import * as project from "@/server/routes/project/route";
 import * as projects from "@/server/routes/projects/route";
+import * as assistant from "@/server/routes/assistant/route";
 import * as projectsInit from "@/server/routes/projects/init/route";
 import * as swarmAgent from "@/server/routes/swarm/agent/route";
 import * as swarmChat from "@/server/routes/swarm/chat/route";
@@ -25,6 +26,7 @@ type RouteModule = Partial<Record<"GET" | "POST" | "PUT" | "DELETE", Handler>>;
 
 /** The API, path for path what the Next.js app served; `open` routes need no session. */
 const ROUTES: Record<string, { module: RouteModule; open?: boolean }> = {
+	"/api/assistant": { module: assistant },
 	"/api/billing/balance": { module: billingBalance },
 	"/api/billing/checkout": { module: billingCheckout },
 	"/api/billing/webhook": { module: billingWebhook, open: true },

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { useChat } from "@ai-sdk/react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
@@ -26,8 +26,27 @@ export function SwarmChat({
 	initialMessages,
 	onMessagesChange,
 	ask,
+	api = "/api/swarm/chat",
+	body,
+	intro,
+	suggestions = SUGGESTIONS,
+	placeholder = "Ask about the agents…",
+	chip,
+	footer,
 }: {
 	repo: string;
+	/** Where the chat streams from; the private assistant uses /api/assistant. */
+	api?: string;
+	/** Sent with every turn, next to the model. */
+	body?: Record<string, unknown>;
+	/** Replaces the opening line shown before the first message. */
+	intro?: ReactNode;
+	suggestions?: string[];
+	placeholder?: string;
+	/** Replaces the "<repo> swarm" chip on the composer's shelf. */
+	chip?: ReactNode;
+	/** A line under the composer. */
+	footer?: ReactNode;
 	/** A question typed elsewhere (the canvas's composer); each new one is sent once. */
 	ask?: { id: number; text: string } | null;
 	chatId?: string;
@@ -38,8 +57,8 @@ export function SwarmChat({
 	const { messages, input, setInput, handleInputChange, handleSubmit, append, stop, isLoading, error } = useChat({
 		// A fixed id keeps the conversation when the sheet closes and opens again.
 		id: chatId,
-		api: "/api/swarm/chat",
-		body: { model },
+		api,
+		body: { model, ...body },
 		initialMessages,
 	});
 	const scrollRef = useRef<HTMLDivElement>(null);
@@ -66,12 +85,14 @@ export function SwarmChat({
 			<div ref={scrollRef} className="min-h-0 flex-1 space-y-5 overflow-y-auto px-4 py-4">
 				{messages.length === 0 ? (
 					<div className="space-y-3">
-						<p className="text-sm text-muted-foreground">
-							Ask what the agents are doing. Answers come from the live issues, labels and comments in{" "}
-							<a href={`https://github.com/${repo}`} className="text-foreground underline underline-offset-4">{repo}</a>.
-						</p>
+						{intro ?? (
+							<p className="text-sm text-muted-foreground">
+								Ask what the agents are doing. Answers come from the live issues, labels and comments in{" "}
+								<a href={`https://github.com/${repo}`} className="text-foreground underline underline-offset-4">{repo}</a>.
+							</p>
+						)}
 						<div className="flex flex-col items-start gap-2">
-							{SUGGESTIONS.map((s) => (
+							{suggestions.map((s) => (
 								<button
 									key={s}
 									type="button"
@@ -113,13 +134,16 @@ export function SwarmChat({
 					isLoading={isLoading}
 					model={model}
 					onModelChange={setModel}
-					placeholder="Ask about the agents…"
+					placeholder={placeholder}
 					context={
-						<span className="inline-flex h-8 items-center gap-1.5 rounded-full bg-secondary px-3 text-sm font-medium text-secondary-foreground">
-							{repo} swarm
-						</span>
+						chip ?? (
+							<span className="inline-flex h-8 items-center gap-1.5 rounded-full bg-secondary px-3 text-sm font-medium text-secondary-foreground">
+								{repo} swarm
+							</span>
+						)
 					}
 				/>
+				{footer}
 			</div>
 		</div>
 	);
@@ -132,6 +156,10 @@ const TOOL_LABELS: Record<string, (args: Record<string, unknown>) => string> = {
 	readFile: (a) => `Read ${a.path}`,
 	listFiles: (a) => `Listed ${a.path || "/"}`,
 	searchIssues: (a) => `Searched “${a.query}”`,
+	askAgent: (a) => `Asked the ${a.role}${a.number ? ` on #${a.number}` : ""}`,
+	commentOn: (a) => `Commented on #${a.number}`,
+	openIssue: (a) => `Opened “${a.title}”`,
+	setLabels: (a) => `Labels on #${a.number}`,
 };
 
 /** The lookups the model made for this answer, so it is clear where the answer came from. */

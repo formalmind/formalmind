@@ -1,31 +1,29 @@
 import type { Meta, StoryObj } from "@storybook/react-vite";
+import type { UIMessage } from "ai";
 import { AgentChat } from "@/components/swarm/agent-chat";
-import type { AgentMessage } from "@/server/routes/swarm/agent/route";
-import { json, withMockFetch } from "./mock-fetch";
+import { chatStream, json, withMockFetch } from "./mock-fetch";
 
-const at = (minutesAgo: number) => new Date(Date.now() - minutesAgo * 60_000).toISOString();
-const url = "https://github.com/asyncswap/v2-proofs/issues/69";
-
-const conversation: AgentMessage[] = [
-	{ id: 1, from: "you", author: "mmsaki", body: "What's left before the swap invariants are proven?", createdAt: at(42), url },
-	{ id: 2, from: "agent", author: "formalmind[bot]", body: "Two pieces:\n\n- **#61** reserves and claim supply stay non-negative (queued, a prover picks it up next sweep)\n- **#64** fee accounting, blocked on a missing lemma about rounding\n\nWant me to re-plan #64 around the rounding lemma?", createdAt: at(30), url },
-	{ id: 3, from: "you", author: "mmsaki", body: "Yes, re-plan it.", createdAt: at(5), url },
+const conversation: UIMessage[] = [
+	{ id: "1", role: "user", content: "What's left before the swap invariants are proven?", parts: [{ type: "text", text: "What's left before the swap invariants are proven?" }] },
+	{
+		id: "2",
+		role: "assistant",
+		content: "Two pieces:\n\n- **#61** reserves and claim supply stay non-negative (queued, a prover picks it up next sweep)\n- **#64** fee accounting, blocked on a missing lemma about rounding\n\nWant me to ask the planner to re-plan #64 around the rounding lemma?",
+		parts: [{ type: "text", text: "Two pieces: …" }],
+	},
 ];
 
-const projects = { projects: [{ repo: "asyncswap/v2", proofsRepo: "asyncswap/v2-proofs", addedAt: at(9000) }, { repo: "mmsaki/v4-core", proofsRepo: "mmsaki/v4-core-proofs", addedAt: at(60) }] };
+const reply = () =>
+	chatStream(
+		[{ name: "askAgent", args: { role: "planner", request: "Re-plan #64 around a rounding lemma.", number: 64 }, result: { url: "https://github.com/asyncswap/v2-proofs/issues/64#issuecomment-1" } }],
+		"Done: I asked the **planner** on [#64](https://github.com/asyncswap/v2-proofs/issues/64) to re-plan it around the rounding lemma. It takes the next turn.",
+	);
 
-/** Answers GET with the conversation so far and POST by appending what was sent. */
-function agentRoute(messages: AgentMessage[]) {
-	const thread = [...messages];
-	return (init?: RequestInit) => {
-		if (init?.method === "POST") {
-			const { text } = JSON.parse(String(init.body)) as { text: string };
-			thread.push({ id: thread.length + 1, from: "you", author: "mmsaki", body: text, createdAt: new Date().toISOString(), url });
-			return json({ ok: true });
-		}
-		return json({ issue: 69, messages: thread });
-	};
-}
+/** GET returns the saved conversation; PUT saves; POST streams the assistant's answer. */
+const assistantRoute = (messages: UIMessage[]) => (init?: RequestInit) =>
+	init?.method === "POST" ? reply() : json(init?.method === "PUT" ? { ok: true } : { messages });
+
+const projects = () => json({ projects: [{ repo: "asyncswap/v2", proofsRepo: "asyncswap/v2-proofs" }, { repo: "mmsaki/v4-core", proofsRepo: "mmsaki/v4-core-proofs" }] });
 
 const meta = {
 	title: "Swarm/Agent chat",
@@ -35,7 +33,7 @@ const meta = {
 	decorators: [
 		(Story) => (
 			<div className="flex h-screen justify-end bg-muted/40 p-3">
-				<aside className="flex w-[400px] flex-col overflow-hidden rounded-2xl border bg-background shadow-md">
+				<aside className="flex w-[400px] flex-col overflow-hidden rounded-2xl border bg-background">
 					<Story />
 				</aside>
 			</div>
@@ -46,23 +44,11 @@ const meta = {
 export default meta;
 type Story = StoryObj<typeof meta>;
 
-/** A conversation with the assistant; the project chip picks which project a message is about. */
-export const Assistant: Story = {
-	decorators: [withMockFetch({ "/api/swarm/agent": agentRoute(conversation), "/api/projects": () => json(projects) })],
-};
+/** A private conversation with the assistant, picked up where it was left. */
+export const Assistant: Story = { decorators: [withMockFetch({ "/api/assistant": assistantRoute(conversation), "/api/projects": projects })] };
 
-/** Nothing said yet. */
-export const Empty: Story = {
-	decorators: [withMockFetch({ "/api/swarm/agent": agentRoute([]), "/api/projects": () => json(projects) })],
-};
+/** Nothing said yet: suggestions to start from. */
+export const Empty: Story = { decorators: [withMockFetch({ "/api/assistant": assistantRoute([]), "/api/projects": projects })] };
 
-/** Another agent: messages go out as /ask prover. */
-export const Prover: Story = {
-	args: { role: "prover" },
-	decorators: [withMockFetch({ "/api/swarm/agent": agentRoute(conversation.slice(0, 2)), "/api/projects": () => json(projects) })],
-};
-
-/** The notebook can't be read. */
-export const LoadError: Story = {
-	decorators: [withMockFetch({ "/api/swarm/agent": () => new Response(JSON.stringify({ error: "GitHub is rate limiting us." }), { status: 502 }), "/api/projects": () => json(projects) })],
-};
+/** Opened from the prover on the canvas; the assistant relays to it. */
+export const Prover: Story = { args: { role: "prover" }, decorators: [withMockFetch({ "/api/assistant": assistantRoute([]), "/api/projects": projects })] };
