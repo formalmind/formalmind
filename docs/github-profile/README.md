@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="https://formalmind.asyncswap.workers.dev/brand/formal-mind-logo.png" alt="Formal Mind" width="96" height="96" />
+  <img src="https://formal.team/brand/formal-mind-logo.png" alt="Formal Mind" width="96" height="96" />
 </p>
 
 <h1 align="center">Formal Mind</h1>
@@ -10,8 +10,8 @@
 </p>
 
 <p align="center">
-  <a href="https://formalmind.asyncswap.workers.dev">Website</a> ·
-  <a href="https://formalmind.asyncswap.workers.dev/welcome">Plan your repo</a> ·
+  <a href="https://formal.team">Website</a> ·
+  <a href="https://formal.team/welcome">Plan your repo</a> ·
   <a href="https://github.com/asyncswap/v2-proofs">See a swarm at work</a>
 </p>
 
@@ -46,7 +46,7 @@ One role works at a time, and every run ends by naming who takes the next turn.
 
 ## Try it
 
-1. Open [formalmind.asyncswap.workers.dev](https://formalmind.asyncswap.workers.dev) and paste a GitHub repository, or pick one of the examples.
+1. Open [formal.team](https://formal.team) and paste a GitHub repository, or pick one of the examples.
 2. Watch the planner draft the plan, then choose a team size and a daily budget.
 3. Install the GitHub App and start the swarm.
 
