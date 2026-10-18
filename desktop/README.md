@@ -38,9 +38,21 @@ bun run desktop:build
 Installers land in `desktop/src-tauri/target/release/bundle/` (`.app`/`.dmg`, `.msi`/`.exe`, `.deb`/`.AppImage`).
 Signing and notarizing aren't set up yet.
 
-The landing page's **Download for Mac** links to
-`releases/latest/download/Formal-Mind-mac.dmg`. To ship a new build, attach the .dmg under that exact name to a new
-release: `gh release create desktop-vX.Y.Z Formal-Mind-mac.dmg`.
+## Releasing
+
+The landing page's **Download for Mac** links to `releases/latest/download/Formal-Mind-mac.dmg`, and the app checks
+`releases/latest/download/latest.json` for updates (on launch and every 6 hours; it offers to install and restart).
+Updates must be signed with the key whose public half is in `tauri.conf.json`. The private key is
+`~/.tauri/formalmind.key` on the maintainer's Mac, not in the repo: back it up, or no future update can install.
+
+1. Bump `version` in `src-tauri/tauri.conf.json` and `src-tauri/Cargo.toml`.
+2. `TAURI_SIGNING_PRIVATE_KEY="$(cat ~/.tauri/formalmind.key)" TAURI_SIGNING_PRIVATE_KEY_PASSWORD="" bun run desktop:build`
+3. Rename the .dmg to `Formal-Mind-mac.dmg` and `Formal Mind.app.tar.gz` to `Formal-Mind-mac.app.tar.gz`, and write
+   `latest.json` (version, notes, pub_date, and under `platforms.darwin-aarch64` the `.sig` file's text and the
+   tar.gz's download URL).
+4. `gh release create desktop-vX.Y.Z Formal-Mind-mac.dmg Formal-Mind-mac.app.tar.gz latest.json`
+
+The .dmg opens on a white window with the app, an arrow and Applications (`src-tauri/dmg-background.png`).
 
 ## Sign-in
 

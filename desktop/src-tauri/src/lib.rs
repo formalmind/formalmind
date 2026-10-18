@@ -47,6 +47,8 @@ pub fn run() {
         .plugin(tauri_plugin_deep_link::init())
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_updater::Builder::new().build())
+        .plugin(tauri_plugin_process::init())
         .manage(executor::Runs::default())
         .setup(|app| {
             // Installed builds register formalmind:// from tauri.conf.json; this covers `tauri dev` on Windows/Linux.

@@ -1,7 +1,7 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "Formal Mind",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "identifier": "team.formal.desktop",
   "build": {
     "beforeDevCommand": "bunx vite --config vite.config.mts",
@@ -36,6 +36,12 @@
           "formalmind"
         ]
       }
+    },
+    "updater": {
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDA4Q0Q3NzU1QjgzQ0Q2RTkKUldUcDFqeTRWWGZOQ1BFSFFBTWRVZzJYVXpVc0lQMVpOZUZycEhYSkZJUDJ4cWxlc1QvNFRWV2oK",
+      "endpoints": [
+        "https://github.com/formalmind/formalmind/releases/latest/download/latest.json"
+      ]
     }
   },
   "bundle": {
@@ -47,6 +53,24 @@
       "icons/128x128@2x.png",
       "icons/icon.icns",
       "icons/icon.ico"
-    ]
+    ],
+    "createUpdaterArtifacts": true,
+    "macOS": {
+      "dmg": {
+        "background": "dmg-background.png",
+        "windowSize": {
+          "width": 660,
+          "height": 400
+        },
+        "appPosition": {
+          "x": 180,
+          "y": 170
+        },
+        "applicationFolderPosition": {
+          "x": 480,
+          "y": 170
+        }
+      }
+    }
   }
 }

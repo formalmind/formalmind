@@ -17,6 +17,7 @@ import { apiBase, clearToken, exchangeCode, loadToken } from "./api";
 import { LocalFolderPage, LocalFolders } from "./local";
 import { onboarded, SetupSteps, SignInStep } from "./onboarding";
 import { TabBar } from "./tabs";
+import { UpdateNotice } from "./update";
 
 const UsagePage = lazy(() => import("@/components/usage/usage-page").then((m) => ({ default: m.UsagePage })));
 const pages = () => import("@/components/projects/project-pages");
@@ -123,6 +124,7 @@ export function DesktopApp() {
 			<div className="fm-shell">
 				<Shell user={user} />
 			</div>
+			<UpdateNotice />
 		</ThemeProvider>
 	);
 }
