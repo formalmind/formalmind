@@ -3,7 +3,6 @@
 import { Link } from "react-router";
 import { forgetLandingProgress } from "@/components/landing/use-plan";
 import {
-	BadgeCheck,
 	ChevronsUpDown,
 	CreditCard,
 	LogIn,
@@ -100,10 +99,6 @@ export function NavUser() {
 						</DropdownMenuGroup>
 						<DropdownMenuSeparator />
 						<DropdownMenuGroup>
-							<DropdownMenuItem>
-								<BadgeCheck />
-								Account
-							</DropdownMenuItem>
 							<DropdownMenuItem asChild>
 								<Link to="/billing">
 									<CreditCard />
