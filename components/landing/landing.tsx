@@ -76,7 +76,7 @@ export function Landing({ signedIn }: { signedIn: boolean }) {
 				</Link>
 				<nav className="flex items-center gap-1 text-sm">
 					{/* One call to action: in for someone signed in, started for everyone else (login is on the way). */}
-					<a href={signedIn ? "/" : startHref} className="rounded-full bg-primary px-3.5 py-1.5 font-medium text-primary-foreground hover:opacity-90">
+					<a href={signedIn ? "/" : startHref} className="btn-dark h-9 px-4">
 						{signedIn ? "Open the app" : "Get started"}
 					</a>
 				</nav>
@@ -84,9 +84,12 @@ export function Landing({ signedIn }: { signedIn: boolean }) {
 
 			<main className="flex min-h-0 flex-1 flex-col overflow-y-auto">
 				<section className="mx-auto w-full max-w-6xl shrink-0 px-4 pb-10 pt-16 text-center sm:px-6 sm:pt-24">
-					<h1 className="mx-auto max-w-3xl text-balance text-4xl font-semibold tracking-tight sm:text-5xl">
+					<h1 className="mx-auto max-w-2xl text-balance text-[34px] font-medium leading-10 tracking-[-1px] sm:text-5xl sm:leading-[1.1] sm:tracking-[-1.5px]">
 						A swarm of Lean4 agents for proving Solidity codebases
 					</h1>
+					<p className="mx-auto mt-4 max-w-[560px] text-balance text-[15px] leading-[22px] text-muted-foreground">
+						Formal proofs of your contracts, one small pull request at a time, within a daily budget you set.
+					</p>
 
 					<form
 						onSubmit={(e) => {
@@ -97,7 +100,7 @@ export function Landing({ signedIn }: { signedIn: boolean }) {
 							}
 							run(input);
 						}}
-						className={`mx-auto mt-8 flex max-w-xl items-center gap-2 rounded-full border p-1.5 pl-4 shadow-sm focus-within:ring-2 focus-within:ring-ring ${locked ? "bg-muted/60" : "bg-background"}`}
+						className={`shadow-pop mx-auto mt-8 flex max-w-xl items-center gap-2 rounded-full p-1.5 pl-4 focus-within:ring-2 focus-within:ring-ring ${locked ? "bg-muted/60" : "bg-background"}`}
 					>
 						{locked ? <Lock className="size-4 shrink-0 text-muted-foreground" aria-label="Locked" /> : <MarkGithubIcon size={16} className="shrink-0 text-muted-foreground" />}
 						<input
@@ -109,12 +112,12 @@ export function Landing({ signedIn }: { signedIn: boolean }) {
 							className={`min-w-0 flex-1 bg-transparent text-sm outline-none placeholder:text-muted-foreground ${locked ? "cursor-default text-muted-foreground" : ""}`}
 						/>
 						{locked ? (
-							<button type="submit" className="inline-flex h-9 items-center gap-1.5 rounded-full border bg-background px-4 text-sm font-medium transition-colors hover:bg-muted">
+							<button type="submit" className="btn-soft h-10">
 								{isLoading ? <Loader2 className="size-4 animate-spin" /> : null}
 								Change
 							</button>
 						) : (
-							<button type="submit" disabled={isLoading || !input.trim()} className="inline-flex h-9 items-center gap-1.5 rounded-full bg-primary px-4 text-sm font-medium text-primary-foreground transition-opacity hover:opacity-90 disabled:opacity-50">
+							<button type="submit" disabled={isLoading || !input.trim()} className="btn-dark h-10 disabled:opacity-50">
 								Plan my repo
 							</button>
 						)}
