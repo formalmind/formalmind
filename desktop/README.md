@@ -50,8 +50,10 @@ Signing and notarizing aren't set up yet.
    The Worker allows the app's webview origins through CORS; no cookies are involved. Signing out deletes it from
    both the keychain and KV.
 
-In `tauri dev` on macOS the `formalmind://` link isn't registered (macOS only registers it for an installed app), so
-paste the code shown in the browser. Windows and Linux register it in dev too.
+The app also opens the browser with a random `poll` id and asks `/api/desktop/token` with it every 2 s (202 until
+the browser side finishes, then the token once). So sign-in completes even where the `formalmind://` link doesn't
+open the app, such as `tauri dev` on macOS, which only registers the link for an installed app. Pasting the code
+still works as a last resort.
 
 ## Local executor
 

@@ -111,7 +111,7 @@ export function DesktopApp() {
 
 	const [setUp, setSetUp] = useState(onboarded);
 	if (user === undefined) return null;
-	if (!user) return <SignInStep onCode={signInWith} error={error} />;
+	if (!user) return <SignInStep onCode={signInWith} onSignedIn={() => void refresh()} error={error} />;
 	if (!setUp) return <SetupSteps onDone={() => setSetUp(true)} />;
 	return (
 		<ThemeProvider>

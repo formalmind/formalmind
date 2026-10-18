@@ -1,8 +1,8 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { open } from "@tauri-apps/plugin-dialog";
 import { openUrl } from "@tauri-apps/plugin-opener";
-import { apiBase, DEFAULT_API, setApiBase } from "./api";
+import { apiBase, DEFAULT_API, newPollId, pollForToken, setApiBase } from "./api";
 
 /** Three small cards: the contract, its proof, the check. Tilted like prints on a table. */
 function Cards() {
@@ -86,15 +86,25 @@ function GitHubMark() {
 }
 
 /** Step 1: sign in with GitHub in the browser; the app gets a code back by deep link (or pasted). */
-export function SignInStep({ onCode, error }: { onCode: (code: string) => void; error: string | null }) {
+export function SignInStep({ onCode, onSignedIn, error }: { onCode: (code: string) => void; onSignedIn: () => void; error: string | null }) {
 	const [waiting, setWaiting] = useState(false);
 	const [pasting, setPasting] = useState(false);
 	const [code, setCode] = useState("");
 	const [base, setBase] = useState(apiBase());
+	const polling = useRef<AbortController | null>(null);
+	useEffect(() => () => polling.current?.abort(), []);
 	const start = () => {
 		setApiBase(base);
 		setWaiting(true);
-		void openUrl(`${apiBase()}/api/desktop/authorize`);
+		// The app asks the server for its sign-in under this id, so it works even when the deep link doesn't.
+		polling.current?.abort();
+		const controller = (polling.current = new AbortController());
+		const poll = newPollId();
+		void openUrl(`${apiBase()}/api/desktop/authorize?poll=${poll}`);
+		void pollForToken(poll, controller.signal).then((ok) => {
+			if (ok) onSignedIn();
+			else if (!controller.signal.aborted) setWaiting(false);
+		});
 	};
 	return (
 		<Frame step={0}>

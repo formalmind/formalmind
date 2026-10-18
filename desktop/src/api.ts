@@ -50,6 +50,29 @@ window.fetch = Object.assign((input: RequestInfo | URL, init?: RequestInit) => {
 	return rawFetch(request, { ...init, headers });
 }, { preconnect: window.fetch.preconnect });
 
+/** A fresh id the app opens the browser with, so it can ask for its sign-in without a deep link. */
+export const newPollId = () => Array.from(crypto.getRandomValues(new Uint8Array(24)), (b) => b.toString(16).padStart(2, "0")).join("");
+
+/** Asks every 2 s whether the browser finished signing in for `poll`; resolves once a token is saved. */
+export async function pollForToken(poll: string, signal: AbortSignal) {
+	const deadline = Date.now() + 10 * 60_000;
+	while (!signal.aborted && Date.now() < deadline) {
+		const res = await rawFetch(`${apiBase()}/api/desktop/token`, {
+			method: "POST",
+			headers: { "Content-Type": "application/json" },
+			body: JSON.stringify({ poll }),
+			signal,
+		}).catch(() => null);
+		if (res?.status === 200) {
+			const body = (await res.json()) as { token: string };
+			await saveToken(body.token);
+			return true;
+		}
+		await new Promise((r) => setTimeout(r, 2000));
+	}
+	return false;
+}
+
 /** Trades the one-time code from the browser for a desktop token. */
 export async function exchangeCode(code: string) {
 	const res = await rawFetch(`${apiBase()}/api/desktop/token`, {
