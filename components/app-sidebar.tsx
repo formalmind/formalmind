@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { Link, useLocation } from "react-router";
-import { BookOpen, ChevronRight, GanttChart, Network, Plus } from "lucide-react"
+import { BookOpen, ChevronRight, GanttChart, Network, Palette, Plus } from "lucide-react"
 import {
 	Sidebar,
 	SidebarContent,
@@ -170,6 +170,15 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
 			<SidebarFooter>
 				<SidebarMenu>
 					{FOOTER.map((item) => <NavLink key={item.url} item={item} active={pathname === item.url} />)}
+					{/* The brand kit is a static page in public/brand, so a full page load, not a router link. */}
+					<SidebarMenuItem>
+						<SidebarMenuButton asChild tooltip="Brand kit" className="font-normal">
+							<a href="/brand/">
+								<Palette />
+								<span>Brand kit</span>
+							</a>
+						</SidebarMenuButton>
+					</SidebarMenuItem>
 				</SidebarMenu>
 				<NavUser />
 			</SidebarFooter>

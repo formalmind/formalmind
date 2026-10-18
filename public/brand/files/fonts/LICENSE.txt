@@ -1,0 +1,4 @@
+These fonts are licensed under the SIL Open Font License 1.1, which allows use in
+logos and products and redistribution with this notice.
+https://openfontlicense.org
+- Inter

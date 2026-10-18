@@ -1,0 +1,289 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><title>formalmind Brand</title><link rel="icon" href="files/icons/web/formalmind-icon-32.png"></head><body><meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:opsz,wght@14..32,400;14..32,500;14..32,600&display=swap">
+<style>
+/* Layout: one column of sections; each section is a label rail on the left and a card grid on the right, stacking on phones. Single dark look, like the brand itself. */
+:root {
+  color-scheme: dark;
+  --bg: #050505;
+  --panel: #0E0E0E;
+  --line: #1F1F1F;
+  --fg: #F2F2F2;
+  --muted: #8C8C8C;
+  --faint: #4A4A4A;
+  --accent: #7CE3A1;
+  --display: "Inter", system-ui, sans-serif;
+  --body: "Inter", system-ui, sans-serif;
+  --mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  --radius: 14px;
+}
+* { box-sizing: border-box; }
+body {
+  margin: 0; background: var(--bg); color: var(--fg); font: 15px/1.55 var(--body);
+  -webkit-font-smoothing: antialiased;
+  padding-left: max(16px, env(safe-area-inset-left, 0px));
+  padding-right: max(16px, env(safe-area-inset-right, 0px));
+}
+.wrap { max-width: 1180px; margin: 0 auto; padding-block: 48px 96px; display: flex; flex-direction: column; gap: 72px; }
+h1, h2, h3 { font-family: var(--display); margin: 0; text-wrap: balance; }
+.mono { font-family: var(--mono); }
+button { font: inherit; color: inherit; cursor: pointer; }
+button:focus-visible, a:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+/* Header */
+.top { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 32px; align-items: end; }
+.brand { display: flex; align-items: center; gap: 18px; }
+.brand img { height: 64px; width: auto; }
+.brand h1 { font-size: clamp(36px, 6vw, 64px); letter-spacing: -0.04em; font-weight: 700; line-height: 1; }
+.about { max-width: 60ch; color: var(--muted); margin: 22px 0 0; font-size: 17px; }
+.tag { font-family: var(--display); font-size: 20px; letter-spacing: -0.02em; margin-top: 10px; color: var(--fg); }
+.primary { display: inline-flex; flex-direction: column; gap: 2px; align-items: flex-start; padding: 16px 22px;
+  border-radius: 12px; border: 0; background: var(--fg); color: var(--bg); font-weight: 600; font-size: 16px; }
+.primary small { font-family: var(--mono); font-weight: 400; font-size: 12px; opacity: .65; }
+.board { display: flex; flex-direction: column; gap: 12px; }
+.board .btns { justify-content: flex-end; }
+.hero { border-radius: var(--radius); overflow: hidden; border: 1px solid var(--line); background: #0A0A0A; }
+.hero img { display: block; width: 100%; height: auto; }
+
+/* Sections */
+section { display: grid; grid-template-columns: 220px minmax(0, 1fr); gap: 32px; border-top: 1px solid var(--line); padding-top: 28px; }
+section > header h2 { font-size: 22px; letter-spacing: -0.02em; font-weight: 600; }
+section > header p { color: var(--muted); font-size: 14px; margin: 10px 0 0; max-width: 34ch; }
+.cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(250px, 1fr)); gap: 16px; }
+.card { background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); overflow: hidden;
+  display: flex; flex-direction: column; min-width: 0; }
+.card.wide { grid-column: 1 / -1; }
+.pv { position: relative; aspect-ratio: 16 / 10; display: grid; place-items: center; max-width: 100%; }
+/* Previews sit inside the box, whatever size the file declares. */
+.pv img { position: absolute; inset: 22px; width: calc(100% - 44px); height: calc(100% - 44px);
+  max-width: none; object-fit: contain; }
+.cards.two { grid-template-columns: repeat(auto-fill, minmax(min(100%, 340px), 1fr)); }
+.pv.black { background: #000; }
+.pv.white { background: #FFF; }
+.pv.checker { background: repeating-conic-gradient(#1A1A1A 0 25%, #121212 0 50%) 0 0 / 18px 18px; }
+.pv.icon img { position: static; width: 96px; height: 96px; border-radius: 22px; border: 1px solid var(--line); }
+.pv.avatar img { position: static; width: 120px; height: 120px; border-radius: 50%; }
+.meta { padding: 14px 16px 16px; display: flex; flex-direction: column; gap: 12px; border-top: 1px solid var(--line); }
+.meta h3 { font-family: var(--body); font-size: 14px; font-weight: 600; letter-spacing: 0; }
+.btns { display: flex; flex-wrap: wrap; gap: 6px; }
+.dl { font-family: var(--mono); font-size: 12px; padding: 6px 10px; border-radius: 8px; background: transparent;
+  border: 1px solid #2C2C2C; color: #D6D6D6; display: inline-flex; gap: 6px; align-items: center; }
+.dl:hover { border-color: var(--fg); color: var(--fg); }
+.dl span { color: var(--faint); }
+
+/* Colour and type */
+.swatches { display: grid; grid-template-columns: repeat(auto-fill, minmax(130px, 1fr)); gap: 12px; }
+.sw { border: 1px solid var(--line); border-radius: var(--radius); overflow: hidden; background: var(--panel); }
+.sw i { display: block; height: 84px; border-bottom: 1px solid var(--line); }
+.sw div { padding: 10px 12px; display: flex; justify-content: space-between; align-items: center; gap: 8px; }
+.sw b { font-size: 13px; font-weight: 600; }
+.sw button { font-family: var(--mono); font-size: 12px; background: none; border: 0; color: var(--muted); padding: 2px 0; }
+.sw button:hover { color: var(--fg); }
+.fonts { display: grid; gap: 12px; }
+.font { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 16px; align-items: center; padding: 18px 20px;
+  background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); }
+.font .spec { font-size: clamp(28px, 4vw, 40px); letter-spacing: -0.03em; line-height: 1.1; }
+.font p { margin: 6px 0 0; color: var(--muted); font-size: 13px; }
+.rules { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 12px; list-style: none; padding: 0; margin: 0; }
+.rules li { background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); padding: 16px 18px; font-size: 14px; color: #CFCFCF; }
+.rules b { display: block; color: var(--fg); margin-bottom: 4px; }
+footer { color: var(--faint); font-size: 13px; }
+
+.toast { position: fixed; left: 50%; bottom: calc(24px + env(safe-area-inset-bottom, 0px)); transform: translateX(-50%);
+  background: var(--fg); color: var(--bg); padding: 10px 16px; border-radius: 10px; font-size: 14px; max-width: calc(100% - 32px); }
+
+@media (max-width: 760px) {
+  .top { grid-template-columns: minmax(0, 1fr); }
+  section { grid-template-columns: minmax(0, 1fr); gap: 18px; }
+  .brand img { height: 48px; }
+}
+@media (prefers-reduced-motion: no-preference) {
+  .dl, .sw button { transition: border-color .15s, color .15s; }
+}
+</style>
+
+<div class="wrap">
+  <div class="top">
+    <div>
+      <div class="brand"><img src="files/logo/formalmind-mark.svg" alt=""><h1>formalmind</h1></div>
+      <p class="about">Keeps a formal specification honest while the code it describes keeps moving: every theorem machine-checked, no sorry, no new axioms.</p>
+      <div class="tag">Every theorem checked.</div>
+    </div>
+    <button class="primary" id="zip">Download brand kit<small id="zipsize">.zip</small></button>
+  </div>
+
+  <div class="board">
+    <div class="hero"><img src="files/board/formalmind-brand-board.png" alt="formalmind brand board: mark, construction, product, colour, type and applications"></div>
+    <div class="btns" id="boardbtn"></div>
+  </div>
+
+  <div id="groups"></div>
+
+  <section>
+    <header><h2>Colour</h2><p>Click a value to copy it.</p></header>
+    <div class="swatches" id="palette"></div>
+  </section>
+
+  <section>
+    <header><h2>Type</h2><p>Free fonts under the SIL Open Font License.</p></header>
+    <div class="fonts" id="fonts"></div>
+  </section>
+
+  <section>
+    <header><h2>Using the logo</h2><p>An F built from three flat planes on the isometric grid: structure with nothing extra.</p></header>
+    <ul class="rules">
+      <li><b>Clear space</b>Keep at least the stem's width of empty space on every side of the mark.</li>
+      <li><b>Minimum size</b>Mark 24px tall on screen; lockup 120px wide.</li>
+      <li><b>Backgrounds</b>Black or very dark surfaces first. On white, use the light lockup.</li>
+      <li><b>Keep it as drawn</b>Don't recolour, rotate, stretch, outline or add shadows to the mark.</li>
+    </ul>
+  </section>
+
+  <footer class="mono">formal.team</footer>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+<script>
+const M = {"groups": [{"title": "Logo", "note": "The mark on its own. SVG is vector and scales to any size; PNG is the original render.", "cards": [{"title": "Mark", "preview": "files/logo/formalmind-mark.svg", "bg": "checker", "files": ["files/logo/formalmind-mark.svg", "files/logo/formalmind-mark-2048.png", "files/logo/formalmind-mark-1024.png", "files/logo/formalmind-mark-cropped.png"]}, {"title": "Mark on black", "preview": "files/logo/formalmind-mark-on-black.svg", "bg": "black", "files": ["files/logo/formalmind-mark-on-black.svg", "files/logo/formalmind-mark-on-black-2048.png"]}, {"title": "Wordmark", "preview": "files/logo/formalmind-wordmark-light.svg", "bg": "black", "files": ["files/logo/formalmind-wordmark-light.svg", "files/logo/formalmind-wordmark-dark.svg"]}]}, {"title": "Lockups", "note": "Mark and wordmark together. The text is converted to outlines, so no font is needed.", "cards": [{"title": "On black", "preview": "files/lockups/formalmind-lockup-dark.svg", "bg": "black", "files": ["files/lockups/formalmind-lockup-dark.svg", "files/lockups/formalmind-lockup-dark.png"]}, {"title": "On white", "preview": "files/lockups/formalmind-lockup-light.svg", "bg": "white", "files": ["files/lockups/formalmind-lockup-light.svg", "files/lockups/formalmind-lockup-light.png"]}, {"title": "Transparent, light text", "preview": "files/lockups/formalmind-lockup-transparent.svg", "bg": "checker", "files": ["files/lockups/formalmind-lockup-transparent.svg", "files/lockups/formalmind-lockup-transparent.png"]}, {"title": "Transparent, dark text", "preview": "files/lockups/formalmind-lockup-transparent-dark-text.svg", "bg": "white", "files": ["files/lockups/formalmind-lockup-transparent-dark-text.svg"]}]}, {"title": "App icons", "note": "Opaque black squares, as app stores require. Sizes of 48px and under use a tighter crop so the mark stays readable.", "cards": [{"title": "iOS", "preview": "files/icons/ios/formalmind-icon-1024.png", "bg": "icon", "files": ["files/icons/ios/formalmind-icon-1024.png", "files/icons/ios/formalmind-icon-180.png", "files/icons/ios/formalmind-icon-167.png", "files/icons/ios/formalmind-icon-152.png", "files/icons/ios/formalmind-icon-120.png", "files/icons/ios/formalmind-icon-87.png", "files/icons/ios/formalmind-icon-80.png", "files/icons/ios/formalmind-icon-76.png", "files/icons/ios/formalmind-icon-60.png", "files/icons/ios/formalmind-icon-58.png", "files/icons/ios/formalmind-icon-40.png", "files/icons/ios/formalmind-icon-29.png", "files/icons/ios/formalmind-icon-20.png"]}, {"title": "Android", "preview": "files/icons/android/formalmind-icon-192.png", "bg": "icon", "files": ["files/icons/android/formalmind-icon-512.png", "files/icons/android/formalmind-icon-192.png", "files/icons/android/formalmind-icon-144.png", "files/icons/android/formalmind-icon-96.png", "files/icons/android/formalmind-icon-72.png", "files/icons/android/formalmind-icon-48.png"]}, {"title": "Web and favicon", "preview": "files/icons/web/formalmind-icon-192.png", "bg": "icon", "files": ["files/icons/web/formalmind-icon-512.png", "files/icons/web/formalmind-icon-192.png", "files/icons/web/formalmind-icon-180.png", "files/icons/web/formalmind-icon-32.png", "files/icons/web/formalmind-icon-16.png", "files/icons/web/formalmind-apple-touch-icon.png", "files/icons/web/formalmind-favicon.ico"]}]}, {"title": "Social", "note": "Ready-made images for link previews, GitHub and X.", "cards": [{"title": "Link preview", "preview": "files/social/formalmind-og-1200x630.png", "bg": "black", "files": ["files/social/formalmind-og-1200x630.png"]}, {"title": "GitHub social preview", "preview": "files/social/formalmind-github-social-1280x640.png", "bg": "black", "files": ["files/social/formalmind-github-social-1280x640.png"]}, {"title": "X header", "preview": "files/social/formalmind-x-header-1500x500.png", "bg": "black", "files": ["files/social/formalmind-x-header-1500x500.png"]}, {"title": "Profile picture", "preview": "files/social/formalmind-avatar-500.png", "bg": "avatar", "files": ["files/social/formalmind-avatar-500.png"]}]}], "fonts": [{"name": "Inter", "use": "Wordmark (SemiBold 600), headlines and body", "file": "files/fonts/Inter-Variable.ttf"}], "zip": "formalmind-brand-kit.zip", "board": "files/board/formalmind-brand-board.png", "sizes": {"formalmind-brand-kit.zip": 4295197, "files/board/formalmind-brand-board.png": 450788, "files/social/formalmind-avatar-500.png": 19238, "files/social/formalmind-x-header-1500x500.png": 49276, "files/social/formalmind-github-social-1280x640.png": 53290, "files/social/formalmind-og-1200x630.png": 51622, "files/logo/formalmind-mark-on-black.svg": 1246, "files/logo/formalmind-mark-2048.png": 1353788, "files/logo/formalmind-mark-1024.png": 97069, "files/logo/formalmind-mark-on-black-2048.png": 1167037, "files/logo/formalmind-wordmark-light.svg": 11298, "files/logo/formalmind-mark-cropped.png": 281670, "files/logo/formalmind-mark.svg": 1173, "files/logo/formalmind-wordmark-dark.svg": 11298, "files/lockups/formalmind-lockup-transparent.png": 65697, "files/lockups/formalmind-lockup-transparent.svg": 12444, "files/lockups/formalmind-lockup-dark.png": 59436, "files/lockups/formalmind-lockup-light.png": 58652, "files/lockups/formalmind-lockup-transparent-dark-text.svg": 12444, "files/lockups/formalmind-lockup-light.svg": 12492, "files/lockups/formalmind-lockup-dark.svg": 12492, "files/fonts/Inter-Variable.ttf": 876576, "files/fonts/LICENSE.txt": 174, "files/icons/web/formalmind-icon-180.png": 4759, "files/icons/web/formalmind-apple-touch-icon.png": 4759, "files/icons/web/formalmind-icon-192.png": 5133, "files/icons/web/formalmind-icon-32.png": 799, "files/icons/web/formalmind-icon-512.png": 20125, "files/icons/web/formalmind-favicon.ico": 15086, "files/icons/web/formalmind-icon-16.png": 377, "files/icons/ios/formalmind-icon-80.png": 1550, "files/icons/ios/formalmind-icon-180.png": 4759, "files/icons/ios/formalmind-icon-40.png": 1024, "files/icons/ios/formalmind-icon-87.png": 1710, "files/icons/ios/formalmind-icon-152.png": 3816, "files/icons/ios/formalmind-icon-20.png": 482, "files/icons/ios/formalmind-icon-120.png": 2854, "files/icons/ios/formalmind-icon-29.png": 704, "files/icons/ios/formalmind-icon-1024.png": 89069, "files/icons/ios/formalmind-icon-76.png": 1433, "files/icons/ios/formalmind-icon-60.png": 1124, "files/icons/ios/formalmind-icon-58.png": 1521, "files/icons/ios/formalmind-icon-167.png": 4312, "files/icons/android/formalmind-icon-96.png": 1913, "files/icons/android/formalmind-icon-144.png": 3622, "files/icons/android/formalmind-icon-192.png": 5133, "files/icons/android/formalmind-icon-512.png": 20125, "files/icons/android/formalmind-icon-48.png": 1263, "files/icons/android/formalmind-icon-72.png": 1397}, "palette": [{"name": "Void", "hex": "#000000"}, {"name": "Carbon", "hex": "#111111"}, {"name": "Graphite", "hex": "#2B2B2B"}, {"name": "Steel", "hex": "#6E6E6E"}, {"name": "Plane", "hex": "#C4C4C4"}, {"name": "Proof", "hex": "#7CE3A1"}]};
+const KEY = "formalmind";
+const STEMS = ["mark-on-black", "mark", "wordmark", "lockup-transparent-dark-text", "lockup-transparent",
+  "lockup-dark", "lockup-light", "og", "github-social", "x-header", "avatar", "brand-board", "icon"];
+
+function human(n) { return n > 1e6 ? (n / 1e6).toFixed(1) + " MB" : Math.max(1, Math.round(n / 1e3)) + " KB"; }
+function label(path) {
+  const name = path.split("/").pop();
+  const ext = name.split(".").pop().toUpperCase();
+  let rest = name.replace(/\.[^.]+$/, "").replace(KEY + "-", "");
+  for (const s of STEMS) if (rest === s || rest.startsWith(s + "-")) { rest = rest.slice(s.length).replace(/^-/, ""); break; }
+  if (/^\d+x\d+$/.test(rest)) rest = "";
+  if (path.includes("/icons/")) return ext !== "PNG" ? ext : /^\d+$/.test(rest) ? rest + "px" : rest.replace(/-/g, " ");
+  return rest ? ext + " · " + rest : ext;
+}
+function el(tag, cls, text) { const e = document.createElement(tag); if (cls) e.className = cls; if (text != null) e.textContent = text; return e; }
+
+let toastTimer;
+function toast(msg) {
+  let t = document.querySelector(".toast");
+  if (!t) { t = el("div", "toast"); t.setAttribute("role", "status"); document.body.appendChild(t); }
+  t.textContent = msg; t.hidden = false;
+  clearTimeout(toastTimer); toastTimer = setTimeout(() => { t.hidden = true; }, 2600);
+}
+
+// Inside claude.ai the page saves through the downloads capability; opened
+// locally or hosted anywhere else, it falls back to a plain download link.
+let downloads = null;
+if (window.claude && window.claude.use) {
+  window.claude.use("downloads").then(d => { downloads = d; }).catch(() => {});
+}
+async function save(path) {
+  const name = path.split("/").pop();
+  if (downloads) {
+    try {
+      const blob = await (await fetch(path)).blob();
+      await downloads.save({ filename: name, data: blob });
+      toast("Saved " + name);
+    } catch (e) {
+      const code = e && e.code;
+      if (code === "declined") return;
+      if (code === "rejected_extension" || code === "extension_not_enabled") toast(name + " is included in the brand kit zip.");
+      else if (code === "rate_limited") toast("Finish the open download first.");
+      else toast("Downloads aren't available in this view.");
+    }
+    return;
+  }
+  const a = document.createElement("a");
+  a.href = path; a.download = name; document.body.appendChild(a); a.click(); a.remove();
+}
+
+// The whole kit as one zip. Inside claude.ai it is built in the browser
+// from the published files; elsewhere the prebuilt zip next to the page is used.
+let zipping = false;
+async function saveKit() {
+  if (!downloads || !window.JSZip) return save(M.zip);
+  if (zipping) return;
+  zipping = true;
+  const btn = document.getElementById("zip");
+  const small = document.getElementById("zipsize");
+  const was = small.textContent;
+  try {
+    const zip = new JSZip();
+    const paths = Object.keys(M.sizes).filter(p => p.startsWith("files/"));
+    let done = 0;
+    await Promise.all(paths.map(async p => {
+      const blob = await (await fetch(p)).blob();
+      zip.file(KEY + "-brand-kit/" + p.slice("files/".length), blob);
+      small.textContent = "Collecting " + (++done) + " of " + paths.length;
+    }));
+    small.textContent = "Compressing";
+    const blob = await zip.generateAsync({ type: "blob", compression: "DEFLATE" });
+    small.textContent = was;
+    await downloads.save({ filename: KEY + "-brand-kit.zip", data: blob });
+    toast("Saved " + KEY + "-brand-kit.zip");
+  } catch (e) {
+    small.textContent = was;
+    if (!(e && e.code === "declined")) toast("Couldn't build the zip here. Try the single files below.");
+  } finally {
+    zipping = false;
+  }
+}
+
+function render() {
+  const root = document.getElementById("groups");
+  for (const g of M.groups) {
+    const sec = el("section");
+    const head = el("header"); head.append(el("h2", null, g.title), el("p", null, g.note));
+    const cards = el("div", "cards" + (g.cards.length === 4 ? " two" : ""));
+    for (const c of g.cards) {
+      const card = el("div", "card" + (c.wide ? " wide" : ""));
+      const pv = el("div", "pv " + c.bg);
+      const img = el("img"); img.src = c.preview; img.alt = c.title; img.loading = "lazy";
+      pv.append(img);
+      const meta = el("div", "meta"); meta.append(el("h3", null, c.title));
+      const btns = el("div", "btns");
+      for (const f of c.files) {
+        const b = el("button", "dl"); b.type = "button";
+        b.append(document.createTextNode(label(f) + " "), el("span", null, human(M.sizes[f] || 0)));
+        b.title = "Download " + f.split("/").pop();
+        b.addEventListener("click", () => save(f));
+        btns.append(b);
+      }
+      meta.append(btns); card.append(pv, meta); cards.append(card);
+    }
+    sec.append(head, cards); root.append(sec);
+  }
+  root.style.display = "contents";
+
+  const pal = document.getElementById("palette");
+  for (const p of M.palette) {
+    const sw = el("div", "sw"); const chip = el("i"); chip.style.background = p.hex;
+    const row = el("div"); const b = el("button", null, p.hex); b.type = "button";
+    b.addEventListener("click", () => {
+      navigator.clipboard.writeText(p.hex).then(() => toast("Copied " + p.hex), () => toast(p.hex));
+    });
+    row.append(el("b", null, p.name), b); sw.append(chip, row); pal.append(sw);
+  }
+
+  const fonts = document.getElementById("fonts");
+  for (const f of M.fonts) {
+    const row = el("div", "font");
+    const left = el("div"); const spec = el("div", "spec", f.name);
+    spec.style.fontFamily = '"' + f.name + '", var(--body)';
+    left.append(spec, el("p", null, f.use));
+    const b = el("button", "dl"); b.type = "button";
+    b.append(document.createTextNode("TTF "), el("span", null, human(M.sizes[f.file] || 0)));
+    b.addEventListener("click", () => save(f.file));
+    row.append(left, b); fonts.append(row);
+  }
+
+  const bb = el("button", "dl"); bb.type = "button";
+  bb.append(document.createTextNode("Brand board PNG "), el("span", null, human(M.sizes[M.board] || 0)));
+  bb.addEventListener("click", () => save(M.board));
+  document.getElementById("boardbtn").append(bb);
+
+  document.getElementById("zipsize").textContent = ".zip · " + human(M.sizes[M.zip] || 0);
+  document.getElementById("zip").addEventListener("click", saveKit);
+}
+render();
+</script>
+</body></html>
