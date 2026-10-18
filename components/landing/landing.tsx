@@ -17,6 +17,32 @@ const EXAMPLES = EXAMPLE_REPOS;
  * The public front door: paste a repository, watch the planner draft the swarm's first plan
  * live, then sign up to start it.
  */
+const FOOTER = [
+	{
+		title: "Product",
+		links: [
+			{ label: "Get started", href: "/onboarding" },
+			{ label: "Documentation", href: "/documentation/get-started" },
+			{ label: "GitHub App", href: "https://github.com/apps/formalmind" },
+		],
+	},
+	{
+		title: "Resources",
+		links: [
+			{ label: "Brand kit", href: "/brand/" },
+			{ label: "GitHub", href: "https://github.com/formalmind" },
+			{ label: "Lean template", href: "https://github.com/formalmind/lean-template" },
+		],
+	},
+	{
+		title: "Legal",
+		links: [
+			{ label: "Privacy", href: "/privacy/" },
+			{ label: "Terms", href: "/terms/" },
+		],
+	},
+];
+
 export function Landing({ signedIn }: { signedIn: boolean }) {
 	const [input, setInput] = useState("");
 	const { repo, plan, start, reset, resume, isLoading, error, done } = usePlan();
@@ -120,11 +146,31 @@ export function Landing({ signedIn }: { signedIn: boolean }) {
 					)}
 				</section>
 
-				<footer className="mx-auto flex w-full max-w-6xl shrink-0 flex-wrap items-center gap-x-5 gap-y-2 px-4 pb-8 pt-4 text-sm text-muted-foreground sm:px-6">
-					<span>© {new Date().getFullYear()} Formal Mind</span>
-					<a href="/brand/" className="hover:text-foreground">Brand kit</a>
-					<a href="/privacy/" className="hover:text-foreground">Privacy</a>
-					<a href="/terms/" className="hover:text-foreground">Terms</a>
+				<footer className="mt-8 w-full shrink-0 border-t">
+					<div className="mx-auto grid w-full max-w-6xl grid-cols-2 gap-8 px-4 py-10 text-sm sm:grid-cols-4 sm:px-6">
+						<div className="col-span-2 sm:col-span-1">
+							<Link to="/welcome" className="flex items-center gap-2 font-semibold tracking-tight">
+								<LogoMark size={20} />
+								Formal Mind.
+							</Link>
+							<p className="mt-3 max-w-[16rem] text-muted-foreground">A swarm of Lean 4 agents that proves your Solidity code correct.</p>
+						</div>
+						{FOOTER.map((column) => (
+							<nav key={column.title} aria-label={column.title}>
+								<h2 className="font-medium">{column.title}</h2>
+								<ul className="mt-3 space-y-2">
+									{column.links.map((link) => (
+										<li key={link.label}>
+											<a href={link.href} {...(link.href.startsWith("http") ? { target: "_blank", rel: "noreferrer" } : {})} className="text-muted-foreground hover:text-foreground">
+												{link.label}
+											</a>
+										</li>
+									))}
+								</ul>
+							</nav>
+						))}
+					</div>
+					<div className="mx-auto w-full max-w-6xl px-4 pb-8 text-xs text-muted-foreground sm:px-6">© {new Date().getFullYear()} Formal Mind</div>
 				</footer>
 			</main>
 
