@@ -1,0 +1,30 @@
+/* The window has no title bar (macOS draws its buttons over the content), so leave room and a strip to drag by. */
+.fm-drag {
+	position: fixed;
+	inset: 0 0 auto 0;
+	height: 36px;
+	z-index: 50;
+}
+.fm-desktop [data-sidebar="header"] {
+	padding-top: 40px;
+}
+.font-display {
+	font-family: "Instrument Serif", ui-serif, Georgia, serif;
+	letter-spacing: -0.01em;
+}
+
+@keyframes fm-rise {
+	from {
+		opacity: 0;
+		transform: translateY(8px);
+		filter: blur(4px);
+	}
+}
+.fm-rise {
+	animation: fm-rise 600ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+@media (prefers-reduced-motion: reduce) {
+	.fm-rise {
+		animation: none;
+	}
+}

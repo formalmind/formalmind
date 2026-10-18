@@ -11,9 +11,10 @@ import { SidebarProvider } from "@/components/ui/sidebar";
 import { WorkspaceContent } from "@/components/workspace-content";
 import { SWARM_REPO } from "@/lib/swarm-repo";
 import type { SessionData } from "@/lib/session";
-import { apiBase, clearToken, DEFAULT_API, exchangeCode, loadToken, setApiBase } from "./api";
+import { apiBase, clearToken, exchangeCode, loadToken } from "./api";
 
 import { LocalFolderPage, LocalFolders } from "./local";
+import { onboarded, SetupSteps, SignInStep } from "./onboarding";
 
 const UsagePage = lazy(() => import("@/components/usage/usage-page").then((m) => ({ default: m.UsagePage })));
 const pages = () => import("@/components/projects/project-pages");
@@ -31,50 +32,6 @@ const codeFrom = (link: string) => {
 		return null;
 	}
 };
-
-function SignIn({ onCode, error }: { onCode: (code: string) => void; error: string | null }) {
-	const [code, setCode] = useState("");
-	const [base, setBase] = useState(apiBase());
-	const start = () => {
-		setApiBase(base);
-		void openUrl(`${apiBase()}/api/desktop/authorize`);
-	};
-	return (
-		<main className="grid min-h-screen place-items-center bg-background p-6 text-foreground">
-			<div className="w-full max-w-sm space-y-6 text-center">
-				<div className="space-y-1">
-					<h1 className="text-xl font-semibold">Formal Mind</h1>
-					<p className="text-sm text-muted-foreground">Sign in with GitHub in your browser, then come back here.</p>
-				</div>
-				<button type="button" onClick={start} className="btn-dark w-full rounded-full px-4 py-2 text-sm font-medium">
-					Sign in with GitHub
-				</button>
-				<form
-					className="flex gap-2"
-					onSubmit={(e) => {
-						e.preventDefault();
-						if (code.trim()) onCode(code.trim());
-					}}
-				>
-					<input value={code} onChange={(e) => setCode(e.target.value)} placeholder="Or paste the code" className="min-w-0 flex-1 rounded-full border bg-transparent px-3 py-1.5 text-sm" />
-					<button type="submit" className="btn-soft rounded-full px-3 py-1.5 text-sm">Continue</button>
-				</form>
-				{error ? <p className="text-sm text-red-600">{error}</p> : null}
-				<details className="text-left text-xs text-muted-foreground">
-					<summary className="cursor-pointer">Server</summary>
-					<input
-						value={base}
-						onChange={(e) => setBase(e.target.value)}
-						onBlur={() => setApiBase(base)}
-						placeholder={DEFAULT_API}
-						className="mt-2 w-full rounded-md border bg-transparent px-2 py-1"
-					/>
-					<p className="mt-1">Use http://localhost:8787 with a local `wrangler dev`.</p>
-				</details>
-			</div>
-		</main>
-	);
-}
 
 function Shell({ user }: { user: User }) {
 	return (
@@ -152,6 +109,14 @@ export function DesktopApp() {
 		return () => document.removeEventListener("click", onClick, true);
 	}, []);
 
+	const [setUp, setSetUp] = useState(onboarded);
 	if (user === undefined) return null;
-	return <ThemeProvider>{user ? <Shell user={user} /> : <SignIn onCode={signInWith} error={error} />}</ThemeProvider>;
+	if (!user) return <SignInStep onCode={signInWith} error={error} />;
+	if (!setUp) return <SetupSteps onDone={() => setSetUp(true)} />;
+	return (
+		<ThemeProvider>
+			<div data-tauri-drag-region className="fm-drag" />
+			<Shell user={user} />
+		</ThemeProvider>
+	);
 }

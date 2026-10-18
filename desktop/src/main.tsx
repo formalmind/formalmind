@@ -3,6 +3,7 @@ import { createRoot } from "react-dom/client";
 import { HashRouter } from "react-router";
 import "katex/dist/katex.min.css";
 import "@/src/globals.css";
+import "./desktop.css";
 import "./api";
 import { DesktopApp } from "./app";
 

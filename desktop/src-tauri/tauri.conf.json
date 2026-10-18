@@ -10,19 +10,43 @@
     "frontendDist": "../dist"
   },
   "app": {
-    "windows": [{ "title": "Formal Mind", "width": 1280, "height": 820, "minWidth": 800, "minHeight": 560 }],
+    "windows": [
+      {
+        "title": "Formal Mind",
+        "width": 1280,
+        "height": 820,
+        "minWidth": 800,
+        "minHeight": 560,
+        "titleBarStyle": "Overlay",
+        "hiddenTitle": true,
+        "trafficLightPosition": {
+          "x": 18,
+          "y": 22
+        }
+      }
+    ],
     "security": {
       "csp": null
     }
   },
   "plugins": {
     "deep-link": {
-      "desktop": { "schemes": ["formalmind"] }
+      "desktop": {
+        "schemes": [
+          "formalmind"
+        ]
+      }
     }
   },
   "bundle": {
     "active": true,
     "targets": "all",
-    "icon": ["icons/32x32.png", "icons/128x128.png", "icons/128x128@2x.png", "icons/icon.icns", "icons/icon.ico"]
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.icns",
+      "icons/icon.ico"
+    ]
   }
 }
