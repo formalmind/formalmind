@@ -131,17 +131,17 @@ export function UsagePage() {
 
 function Breakdown({ title, rows, total, color }: { title: string; rows: [string, number][]; total: number; color?: (key: string) => string | undefined }) {
 	return (
-		<section className="rounded-xl border p-5">
-			<h2 className="mb-4 text-sm font-medium">{title}</h2>
+		<section className="rounded-xl border p-4">
+			<h2 className="mb-2.5 text-sm font-medium">{title}</h2>
 			{rows.length === 0 ? <p className="text-sm text-muted-foreground">Nothing yet.</p> : null}
-			<ul className="space-y-3 text-sm">
+			<ul className="space-y-2 text-sm">
 				{rows.map(([key, value]) => (
 					<li key={key}>
 						<div className="flex justify-between gap-2">
 							<span className="truncate">{key}</span>
 							<span className="tabular-nums">{usd(value)}</span>
 						</div>
-						<div className="mt-1.5 h-1.5 rounded-full bg-muted">
+						<div className="mt-1 h-1 rounded-full bg-muted">
 							<div className="h-full rounded-full bg-foreground/70" style={{ width: `${total ? (value / total) * 100 : 0}%`, background: color?.(key) }} />
 						</div>
 					</li>
