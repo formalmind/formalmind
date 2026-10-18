@@ -5,13 +5,15 @@
 	"main": "worker/index.ts",
 	"compatibility_date": "2026-10-01",
 	"compatibility_flags": ["nodejs_compat", "global_fetch_strictly_public"],
-	// The Vite build. Files are served straight from the edge; unknown paths get index.html (the app routes them),
-	// and only /api, /auth, /login/callback (GitHub sign-in) and /assets (so a missing chunk is a 404, not index.html) wake the Worker.
+	// The Vite build. Unknown paths get index.html (the app routes them). Every request wakes the Worker first: it
+	// answers the agent discovery paths (robots.txt, sitemap.xml, llms.txt, /.well-known/*, /mcp; worker/discovery.ts),
+	// serves markdown to clients that prefer it, adds the Link, Content-Signal and Vary headers to HTML, keeps a missing
+	// chunk a 404 rather than index.html, and otherwise hands the request to the asset store.
 	"assets": {
 		"directory": "dist",
 		"binding": "ASSETS",
 		"not_found_handling": "single-page-application",
-		"run_worker_first": ["/api/*", "/auth/*", "/login/callback", "/assets/*"]
+		"run_worker_first": true
 	},
 	// The production domain. workers.dev and preview URLs stay on as well (wrangler turns them off
 	// once a route exists unless they are set explicitly).

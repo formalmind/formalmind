@@ -53,6 +53,28 @@ there reads like this:
 theorem matchAmounts_sound …
 ```
 
+## For agents
+
+formal.team publishes the discovery files Cloudflare's Agent Readiness scanner (isitagentready.com) looks for, all served by
+the Worker from `worker/discovery.ts`, `worker/markdown.ts`, `worker/skills.ts`, `worker/wellKnown.ts` and `worker/mcp.ts`,
+with the facts they share in `worker/narrative.ts`. Every claim in them is checkable against this repository or against
+[asyncswap/v2-proofs](https://github.com/asyncswap/v2-proofs); anything not built yet is labelled planned.
+
+| Path | What it is |
+| --- | --- |
+| `/robots.txt`, `/sitemap.xml` | RFC 9309 rules with explicit AI-crawler groups and `Content-Signal: search=yes, ai-input=yes, ai-train=no`; the public pages |
+| `/llms.txt`, `/llms-full.txt` | Orientation and the full account of the swarm for agents (llmstxt.org) |
+| `/auth.md` | How people sign in (GitHub) and that no agent credential exists yet |
+| `/.well-known/api-catalog` | RFC 9727 linkset: the MCP server and the one open endpoint, `POST /api/onboarding/plan` |
+| `/.well-known/agent-skills/index.json` | Two skills with sha256 digests: `ask-formalmind` and `onboard-a-repository` |
+| `/.well-known/mcp/server-card.json`, `/mcp` | Read-only MCP server (Streamable HTTP, no auth): `get_swarm_state`, `list_open_work`, `get_changelog`, `get_role_doc` |
+| `/.well-known/oauth-protected-resource` | RFC 9728 metadata with an empty `authorization_servers` list, because none exists |
+| `/.well-known/poppy.json`, `/.well-known/ai-catalog.json` | Personal Agent Protocol (website-only) and the AI catalog of the artifacts above |
+
+Any page answers in markdown when the request ranks `text/markdown` above `text/html` in `Accept`; HTML responses carry
+`Link`, `Content-Signal` and `Vary: Accept` headers. The page also registers the four MCP tools with WebMCP
+(`document.modelContext`) when the browser offers it (`src/webmcp.ts`).
+
 ## Develop
 
 ```sh

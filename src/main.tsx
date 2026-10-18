@@ -5,6 +5,7 @@ import "katex/dist/katex.min.css";
 import "highlight.js/styles/atom-one-light.css";
 import "./globals.css";
 import { App } from "./app";
+import { registerWebMcpTools } from "./webmcp";
 
 // A tab opened before a deploy asks for chunks that no longer exist: reload once to pick up the new build.
 window.addEventListener("vite:preloadError", (event) => {
@@ -14,6 +15,9 @@ window.addEventListener("vite:preloadError", (event) => {
 	window.location.reload();
 });
 window.addEventListener("load", () => setTimeout(() => sessionStorage.removeItem("fm:reloaded-for-chunk"), 10_000));
+
+// WebMCP: read-only swarm tools for an agent driving this page, when the browser offers a model context.
+registerWebMcpTools();
 
 createRoot(document.getElementById("root")!).render(
 	<StrictMode>
