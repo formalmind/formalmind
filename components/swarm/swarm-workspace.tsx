@@ -5,7 +5,7 @@ import { ROLE_COLORS } from "@/lib/swarm-roles";
 import type { SwarmRole } from "@/lib/swarm";
 import { AgentChat } from "./agent-chat";
 import { SwarmChat } from "./swarm-chat";
-import { Bot, RefreshCw, X } from "lucide-react";
+import { RefreshCw, X } from "lucide-react";
 import type { SwarmState } from "@/lib/swarm";
 import { ChatComposer } from "@/components/chat-composer";
 import type { OpenAIModel } from "@/lib/models";
@@ -153,7 +153,6 @@ export function SwarmWorkspace({ repo }: { repo: string }) {
 							placeholder="Ask about the agents…"
 							context={
 								<span className="inline-flex h-8 items-center gap-1.5 rounded-full bg-secondary px-3 text-sm font-medium text-secondary-foreground">
-									<Bot className="size-3.5" />
 									{repo} swarm
 								</span>
 							}

@@ -4,7 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { useChat } from "@ai-sdk/react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-import { Bot, Wrench } from "lucide-react";
+import { Wrench } from "lucide-react";
 import { ChatComposer } from "@/components/chat-composer";
 import type { OpenAIModel } from "@/lib/models";
 import type { UIMessage } from "ai";
@@ -116,7 +116,6 @@ export function SwarmChat({
 					placeholder="Ask about the agents…"
 					context={
 						<span className="inline-flex h-8 items-center gap-1.5 rounded-full bg-secondary px-3 text-sm font-medium text-secondary-foreground">
-							<Bot className="h-3.5 w-3.5" />
 							{repo} swarm
 						</span>
 					}
