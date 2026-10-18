@@ -106,7 +106,7 @@ export function swarmTools(repos: string[]) {
 		}),
 
 		readFile: tool({
-			description: "Read a file from the proofs repository, such as README.md (decisions and roadmap), FORMAL_MIND.md (changelog) or a Lean file. Use listFiles to find paths.",
+			description: "Read a file from the proofs repository, such as .formal/plan.md (decisions and roadmap; README.md in projects not yet moved), .formal/notebook.json (config), FORMAL_MIND.md (changelog) or a Lean file. Use listFiles to find paths.",
 			parameters: z.object({
 				repo,
 				path: z.string().describe("Path from the repository root, e.g. FORMAL_MIND.md or AsyncSwapProtocol/V2/BalNonNeg.lean"),

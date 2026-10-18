@@ -15,7 +15,7 @@ The words MUST, SHOULD and MAY are used as in RFC 2119.
 | **User object** | one Durable Object per user | yes (SQLite) | Account, credits, preferences, private chats, the projects the user can see. |
 | **Directory** | D1 | yes, small | Indexes only: GitHub login → user, repository → project. Nothing that changes per turn. |
 | **Executor** | Container, the user's machine, or GitHub Actions | no | Does one turn at a time: checkout, agent run, push. |
-| **Record** | GitHub | yes | Branches, PRs, `fm:` labels, notebook issues, `.github/formalmind/notebook.json`. The source of truth. |
+| **Record** | GitHub | yes | Branches, PRs, `fm:` labels, notebook issues, `.formal/notebook.json` and `.formal/plan.md`. The source of truth. |
 
 Distribution comes from the project object: every project is its own single-threaded actor, placed near the
 people using it, with no shared lock between projects. A project never waits on another one.
@@ -34,7 +34,9 @@ GitHub stays the place anyone can audit, and the place a lost object is rebuilt 
 
 ### 3.1 notebook.json
 
-`.github/formalmind/notebook.json` on the integration branch (`formalmind`):
+`.formal/notebook.json` on the integration branch (`formalmind`). The same `.formal/` folder holds
+`plan.md`, the decisions and roadmap, and works the same in a local folder. Readers fall back to
+`.github/formalmind/notebook.json` and the README's Roadmap for projects not yet moved.
 
 ```json
 {

@@ -1,6 +1,6 @@
 /**
  * The proofs repository laid out as a GitHub-style project: every issue and pull request with a
- * Status derived from its `fm:` labels, plus the README's numbered Roadmap as milestones.
+ * Status derived from its `fm:` labels, plus the numbered Roadmap in `.formal/plan.md` (or the README, before the move) as milestones.
  */
 import { ASSISTANT_ISSUE, CHIEF_ISSUE, LEDGER_ISSUE, NOTEBOOK_ISSUE, SWARM_REPO, github, type SwarmItem } from "@/lib/swarm";
 
@@ -112,6 +112,15 @@ function toItem(issue: GitHubIssue): ProjectItem {
 	};
 }
 
+/** The plan lives in `.formal/plan.md`; projects not yet moved keep it in README.md. */
+async function readPlan() {
+	try {
+		return await github<{ content: string }>("/contents/.formal/plan.md?ref=dev");
+	} catch {
+		return github<{ content: string }>("/contents/README.md?ref=dev");
+	}
+}
+
 /** Every issue and PR, newest first; at most five pages. */
 async function allIssues() {
 	const pages: GitHubIssue[][] = [];
@@ -124,8 +133,8 @@ async function allIssues() {
 }
 
 async function loadProject(): Promise<ProjectData> {
-	const [pages, readme] = await Promise.all([allIssues(), github<{ content: string }>("/contents/README.md?ref=dev")]);
-	const text = new TextDecoder().decode(Uint8Array.from(atob(readme.content.replace(/\n/g, "")), (c) => c.charCodeAt(0)));
+	const [pages, plan] = await Promise.all([allIssues(), readPlan()]);
+	const text = new TextDecoder().decode(Uint8Array.from(atob(plan.content.replace(/\n/g, "")), (c) => c.charCodeAt(0)));
 	const items = pages.flat()
 		.filter((issue) => !PINNED.has(issue.number))
 		// Closed PRs that never merged and issues closed as not planned are noise on a board.

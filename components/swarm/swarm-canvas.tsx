@@ -181,7 +181,7 @@ function home(scene: Scene, ...roles: SwarmRole[]) {
 /** Before the live state has loaded: an empty board, nothing scripted. */
 function emptyScene(): Scene {
 	return {
-		cards: [{ id: "roadmap", group: 0, number: 0, title: "Roadmap and unproven gaps in FORMAL_MIND.md", kind: "doc", lane: "roadmap", order: 0, label: "README", href: HOME_ROADMAP }],
+		cards: [{ id: "roadmap", group: 0, number: 0, title: "Roadmap and unproven gaps in .formal/plan.md", kind: "doc", lane: "roadmap", order: 0, label: "plan", href: HOME_ROADMAP }],
 		cursors: Object.fromEntries(ROLES.map((r) => [r, { at: HOME[r] }])) as Scene["cursors"],
 		spend: 0,
 		notes: [],
@@ -223,7 +223,7 @@ function initialScene(state: SwarmState | null): Scene {
 	let order = 0;
 	const repoOf = (item: Partial<SwarmItem>) => (item.url && state ? item.repo ?? state.repo : undefined);
 	const cards: Card[] = [
-		{ id: "roadmap", group: 0, number: 0, title: "Roadmap and unproven gaps in FORMAL_MIND.md", kind: "doc", lane: "roadmap", order: order++, label: "README", href: HOME_ROADMAP },
+		{ id: "roadmap", group: 0, number: 0, title: "Roadmap and unproven gaps in .formal/plan.md", kind: "doc", lane: "roadmap", order: order++, label: "plan", href: HOME_ROADMAP },
 		...merged.map((item) => ({ id: `m${item.number}`, group: 0, repo: repoOf(item), number: item.number, title: item.title, kind: "pr" as const, lane: "dev" as Lane, order: order++, label: "merged" })),
 		...queue.map((item) => ({ id: `i${item.number}`, group: 0, repo: repoOf(item), number: item.number, title: item.title, kind: "issue" as const, lane: "todo" as Lane, order: order++, label: "fm:todo" })),
 	];
@@ -370,7 +370,7 @@ export function projectsOf(state: SwarmState | null): SwarmProject[] {
 const itemRepo = (state: SwarmState, item: SwarmItem) => item.repo ?? state.repo;
 const itemKey = (repo: string, number: number) => `${repo}#${number}`;
 
-const HOME_ROADMAP = "https://github.com/asyncswap/v2-proofs/blob/HEAD/FORMAL_MIND.md";
+const HOME_ROADMAP = "https://github.com/asyncswap/v2-proofs/blob/HEAD/.formal/plan.md";
 
 /** A project's first card: its roadmap, or why the swarm has nothing of it yet. */
 function roadmapCard(project: SwarmProject, group: number, home: string): Card {
@@ -382,7 +382,7 @@ function roadmapCard(project: SwarmProject, group: number, home: string): Card {
 	if (!project.inSwarm) {
 		return { ...base, title: "Not swept by the swarm yet", label: "setup", detail: `${project.proofsRepo} is not in ${home}'s .github/formalmind/projects.json, so the dispatcher does not pick its work yet.`, href: `https://github.com/${home}/blob/HEAD/.github/formalmind/projects.json` };
 	}
-	return { ...base, title: project.proofsRepo === home ? "Roadmap and unproven gaps in FORMAL_MIND.md" : "Roadmap and unproven gaps in README.md", label: "README", detail: `The roadmap in ${project.proofsRepo}'s README.`, href: `https://github.com/${project.proofsRepo}/blob/HEAD/${project.proofsRepo === home ? "FORMAL_MIND.md" : "README.md"}` };
+	return { ...base, title: "Roadmap and unproven gaps in .formal/plan.md", label: "plan", detail: `The roadmap in ${project.proofsRepo}'s .formal/plan.md.`, href: `https://github.com/${project.proofsRepo}/blob/HEAD/.formal/plan.md` };
 }
 
 /** The board as the swarm has it, with nothing scripted: one lane group per project. With no run in flight the cursors rest on the bench. */
@@ -1093,7 +1093,7 @@ function CardDetails({ card, item, inDialog }: { card: Card; item?: SwarmItem; i
 				<span className={`rounded px-1.5 py-px font-mono text-[10px] ${LABEL_STYLES[card.label] ?? LABEL_STYLES.README}`}>{card.label}</span>
 				<Title className={`mt-2 font-semibold leading-snug ${inDialog ? "text-lg" : "text-sm"}`}>{card.title}</Title>
 				<p className={`mt-1 text-muted-foreground ${inDialog ? "text-sm" : "text-xs leading-5"}`}>
-					{card.kind === "doc" ? card.detail ?? "The roadmap in the proofs repo's README." : "A card in the replay; it stands in for an issue and links nowhere."}
+					{card.kind === "doc" ? card.detail ?? "The roadmap in the proofs repo's .formal/plan.md." : "A card in the replay; it stands in for an issue and links nowhere."}
 				</p>
 				{card.href ? <OpenOnGitHub href={card.href} inDialog={inDialog} /> : null}
 			</div>

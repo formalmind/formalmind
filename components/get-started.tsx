@@ -200,7 +200,7 @@ export function GetStarted() {
 						<p>
 							Put <Code>fm:todo</Code> on any issue and a prover picks it up on a coming sweep; <Code>fm:rebuild</Code> queues it for the
 							rebuilder instead. Or let the planner write issues from the{" "}
-							<strong className="font-medium text-foreground">Roadmap</strong> section of the proofs repo&apos;s README; it keeps two queued
+							<strong className="font-medium text-foreground">Roadmap</strong> section of the proofs repo&apos;s <Code>.formal/plan.md</Code>; it keeps two queued
 							and plans more when the queue runs low.
 						</p>
 					</Step>
@@ -251,8 +251,9 @@ gh workflow run formalmind-swarm.yml -f role=editor`}</pre>
 				<ol className="space-y-4 text-sm leading-6 text-muted-foreground">
 					{[
 						<>
-							<span className="font-medium text-foreground">A proofs repository.</span> A Lean 4 project with a README that records your
-							decisions and a <span className="font-medium text-foreground">Roadmap</span>, and a <Code>FORMAL_MIND.md</Code> changelog. Copy
+							<span className="font-medium text-foreground">A proofs repository.</span> A Lean 4 project with a <Code>.formal/plan.md</Code> that records
+							your decisions and a <span className="font-medium text-foreground">Roadmap</span>, a <Code>.formal/notebook.json</Code> config,
+							and a <Code>FORMAL_MIND.md</Code> changelog. Copy
 							the workflows and the role prompts in <Code>.github/formalmind/</Code> from{" "}
 							<a href={PROOFS_REPO} target="_blank" rel="noreferrer" className="text-foreground underline underline-offset-4">asyncswap/v2-proofs</a>.
 						</>,
