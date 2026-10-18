@@ -3,6 +3,7 @@ import { Link, useLocation, useSearchParams } from "react-router";
 import { invoke } from "@tauri-apps/api/core";
 import { open } from "@tauri-apps/plugin-dialog";
 import { HardDrive, Plus, X } from "lucide-react";
+import { TurnPanel } from "./turn-panel";
 import { SidebarGroup, SidebarGroupAction, SidebarGroupLabel, SidebarMenu, SidebarMenuAction, SidebarMenuButton, SidebarMenuItem } from "@/components/ui/sidebar";
 
 type Config = { folders: string[] };
@@ -106,6 +107,7 @@ export function LocalFolderPage() {
 				<p className="truncate font-mono text-xs text-muted-foreground">{path}</p>
 			</header>
 			{error ? <p className="text-sm text-red-600">{error}</p> : null}
+			{path && !error ? <TurnPanel folder={path} /> : null}
 			{scan ? (
 				<>
 					<div className="grid gap-6 md:grid-cols-2">
@@ -113,7 +115,6 @@ export function LocalFolderPage() {
 						<FileList title="Lean" files={scan.lean} />
 					</div>
 					{scan.truncated ? <p className="text-xs text-muted-foreground">Big folder: stopped after 5,000 entries.</p> : null}
-					<p className="text-sm text-muted-foreground">Running the swarm on a local folder comes with the local executor. Files stay on this computer.</p>
 				</>
 			) : !error ? (
 				<p className="text-sm text-muted-foreground">Reading the folder…</p>

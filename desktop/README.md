@@ -53,8 +53,21 @@ Signing and notarizing aren't set up yet.
 In `tauri dev` on macOS the `formalmind://` link isn't registered (macOS only registers it for an installed app), so
 paste the code shown in the browser. Windows and Linux register it in dev too.
 
-## Next: the local executor
+## Local executor
 
-Running agent turns on this machine (the "local executor" in `docs/protocol.md`) belongs in `src-tauri/src/`, as a
-module started from `setup` in `lib.rs`: it claims turns from the project's Durable Object with the same bearer
-token, runs Lean locally, renews and reports. Code never leaves the machine.
+A folder's page has **Run a turn here**: pick Prover or Reviewer, say what to prove or review, and the agent works
+on the folder on this computer (`src-tauri/src/executor.rs`):
+
+- The model is called directly with your own OpenAI key, saved in the OS keychain (`team.formal.desktop` / `openai`).
+  formal.team never sees the key or the code.
+- Tools: `list_files`, `read_file`, `write_file` (Prover only), and `run`, which allows only `lake build`,
+  `lake env lean <file>`, `forge build` and `forge test`, with no shell. Every path must stay inside the folder,
+  symlinks included. `lake`/`forge` are found in `~/.elan/bin` and `~/.foundry/bin` too.
+- A turn stops when the agent finishes, at 60 steps, at 400k tokens, or on **Stop**. Progress streams to the page.
+- Try it without the UI: `FM_OPENAI_KEY=… FM_FOLDER=… FM_TASK=… cargo test -- --ignored live_turn --nocapture`
+  in `src-tauri/`.
+
+Not yet: turns are local only. The protocol's claim, renew and report (`docs/protocol.md` section 5) wrap
+`run_turn`: claim a Grant from the project's Durable Object with the desktop token instead of taking the task from
+the page, renew the lease while the loop runs, and report the outcome and cost. That needs the claim/report routes
+on the Worker first. Costs show as tokens until there's a price table.
