@@ -782,6 +782,20 @@ export function SwarmCanvas({ state, fill = false, contain = false, title, actio
 	const ox = fit.x + view.x;
 	const oy = fit.y + view.y;
 
+	// Where your pointer is on the board (in board units), for the assistant to follow; null when it's off the board.
+	const [companion, setCompanion] = useState<{ x: number; y: number } | null>(null);
+	const companionFrame = useRef(0);
+	const followPointer = (e: React.PointerEvent<HTMLDivElement>) => {
+		const box = frameRef.current?.getBoundingClientRect();
+		if (!box || companionFrame.current) return;
+		const x = (e.clientX - box.left - ox) / s + 22;
+		const y = (e.clientY - box.top - oy) / s + 26;
+		companionFrame.current = requestAnimationFrame(() => {
+			companionFrame.current = 0;
+			setCompanion({ x, y });
+		});
+	};
+
 	// A project that shows up while the board is open (its plan was just saved) gets a welcome: its lanes
 	// fade in, the board pans to it, and the roles not working stream over to it for a few seconds.
 	const seen = useRef<Set<string> | null>(null);
@@ -862,6 +876,8 @@ export function SwarmCanvas({ state, fill = false, contain = false, title, actio
 		if (sharing.length) waiting.set(role, sharing.length);
 	}
 	const cursorPos = (role: SwarmRole) => {
+		// The assistant is yours: while your pointer is on the board it keeps you company, a step behind.
+		if (role === "assistant" && companion) return { ...companion, side: companion.x > W - 260 ? ("left" as const) : undefined };
 		const cursor = shown.cursors[role];
 		const p = cursor.follow ? positions.get(cursor.follow) : undefined;
 		if (!p) return { ...(cursor.at ?? { x: 0, y: 0 }), side: undefined };
@@ -887,7 +903,11 @@ export function SwarmCanvas({ state, fill = false, contain = false, title, actio
 							: { height: boardH * scale }
 				}
 				onPointerDown={onPointerDown}
-				onPointerMove={onPointerMove}
+				onPointerMove={(e) => {
+					onPointerMove(e);
+					followPointer(e);
+				}}
+				onPointerLeave={() => setCompanion(null)}
 				onPointerUp={endDrag}
 				onPointerCancel={endDrag}
 				onLostPointerCapture={endDrag}

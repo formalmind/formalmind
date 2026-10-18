@@ -59,7 +59,8 @@ export function PlanBoard({ repo, plan, status }: { repo: string; plan: PartialP
 			setSpots({
 				planner: at(latest, -36, 18) ?? { x: 40, y: 64 },
 				prover: (status === "done" && at("issue-0", -36, 44)) || { x: box.width - 300, y: box.height - 58 },
-				reviewer: (status === "done" && at("inv-0", -36, 44)) || { x: box.width - 160, y: box.height - 58 },
+				// Lower than the prover on its neighbouring card, so the two labels never share a row.
+				reviewer: (status === "done" && at("inv-0", -36, 112)) || { x: box.width - 160, y: box.height - 58 },
 			});
 		};
 		measure();
@@ -71,7 +72,9 @@ export function PlanBoard({ repo, plan, status }: { repo: string; plan: PartialP
 	const cursor = (role: SwarmRole, say: string | undefined, turn: boolean) => {
 		const spot = spots[role];
 		if (!spot) return null;
-		return <SwarmCursor key={role} role={role} x={spot.x} y={spot.y} say={say} turn={turn} side={spot.x > width - 260 ? "left" : undefined} />;
+		// The reviewer's bubble opens over its own card, not into the prover's column next to it.
+		const left = spot.x > width - 260 || (role === "reviewer" && status === "done");
+		return <SwarmCursor key={role} role={role} x={spot.x} y={spot.y} say={say} turn={turn} side={left ? "left" : undefined} />;
 	};
 
 	return (
