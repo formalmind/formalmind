@@ -1,10 +1,9 @@
 "use client";
 
 import { notify } from "@/lib/notifications";
+import { ChatMarkdown } from "@/components/chat-markdown";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { useChat } from "@ai-sdk/react";
-import ReactMarkdown from "react-markdown";
-import remarkGfm from "remark-gfm";
 import { Wrench } from "lucide-react";
 import { ChatComposer } from "@/components/chat-composer";
 import type { OpenAIModel } from "@/lib/models";
@@ -117,9 +116,7 @@ export function SwarmChat({
 						) : (
 							<div>
 								<ToolCalls message={m} />
-								<div className="prose prose-sm max-w-none leading-6 dark:prose-invert prose-p:my-2 prose-ul:my-2 prose-code:rounded prose-code:bg-muted prose-code:px-1 prose-code:py-0.5 prose-code:before:content-none prose-code:after:content-none">
-								<ReactMarkdown remarkPlugins={[remarkGfm]}>{m.content}</ReactMarkdown>
-								</div>
+								<ChatMarkdown>{m.content}</ChatMarkdown>
 							</div>
 						)}
 					</div>

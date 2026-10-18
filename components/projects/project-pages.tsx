@@ -1,7 +1,6 @@
 import { Suspense, lazy, useEffect, useMemo, useRef, useState } from "react";
+import { ChatMarkdown } from "@/components/chat-markdown";
 import { Link, Navigate, useNavigate, useParams } from "react-router";
-import ReactMarkdown from "react-markdown";
-import remarkGfm from "remark-gfm";
 import type { UIMessage } from "ai";
 import { Loader2 } from "lucide-react";
 import { SwarmChat } from "@/components/swarm/swarm-chat";
@@ -117,9 +116,7 @@ function ProjectChat({ repo, chatId }: { repo: string; chatId: string }) {
 							{m.role === "user" ? (
 								<p className="max-w-[85%] rounded-2xl bg-secondary px-3.5 py-2 text-sm text-secondary-foreground">{m.content}</p>
 							) : (
-								<div className="prose prose-sm max-w-none leading-6 dark:prose-invert prose-p:my-2 prose-ul:my-2">
-									<ReactMarkdown remarkPlugins={[remarkGfm]}>{m.content}</ReactMarkdown>
-								</div>
+								<ChatMarkdown>{m.content}</ChatMarkdown>
 							)}
 						</div>
 					))}
