@@ -25,8 +25,11 @@ export function SwarmChat({
 	chatId = "swarm-chat",
 	initialMessages,
 	onMessagesChange,
+	ask,
 }: {
 	repo: string;
+	/** A question typed elsewhere (the canvas's composer); each new one is sent once. */
+	ask?: { id: number; text: string } | null;
 	chatId?: string;
 	initialMessages?: UIMessage[];
 	onMessagesChange?: (messages: UIMessage[]) => void;
@@ -40,6 +43,12 @@ export function SwarmChat({
 		initialMessages,
 	});
 	const scrollRef = useRef<HTMLDivElement>(null);
+	const asked = useRef<number | null>(null);
+	useEffect(() => {
+		if (!ask || asked.current === ask.id) return;
+		asked.current = ask.id;
+		void append({ role: "user", content: ask.text });
+	}, [ask, append]);
 	const onChange = useRef(onMessagesChange);
 	onChange.current = onMessagesChange;
 

@@ -3,10 +3,10 @@ import { Link, Navigate, useNavigate, useParams } from "react-router";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import type { UIMessage } from "ai";
-import { ChevronDown, FolderGit2, Loader2 } from "lucide-react";
+import { Loader2 } from "lucide-react";
 import { SwarmChat } from "@/components/swarm/swarm-chat";
 import { ChatComposer } from "@/components/chat-composer";
-import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
+import { ProjectPicker } from "@/components/projects/project-picker";
 import { useChatWithInterruptions } from "@/hooks/useChatWithInterruptions";
 import type { OpenAIModel } from "@/lib/llm";
 import { SWARM_REPO } from "@/lib/swarm-repo";
@@ -82,29 +82,6 @@ export function ProjectRoadmapPage() {
 		<Suspense fallback={<Loading />}>
 			<ProjectView repo={project.proofsRepo} />
 		</Suspense>
-	);
-}
-
-/** The project picker on a chat's shelf: which project the chat is about. Picking another starts a chat there. */
-function ProjectPicker({ repo }: { repo: string }) {
-	const projects = useProjects() ?? [];
-	const navigate = useNavigate();
-	return (
-		<DropdownMenu>
-			<DropdownMenuTrigger className="inline-flex h-8 items-center gap-1.5 rounded-full bg-secondary px-3 text-sm text-secondary-foreground outline-none hover:bg-secondary/80">
-				<FolderGit2 className="size-3.5" />
-				<span className="max-w-[14rem] truncate">{repo}</span>
-				<ChevronDown className="size-3.5 text-muted-foreground" />
-			</DropdownMenuTrigger>
-			<DropdownMenuContent side="top" align="start" sideOffset={6}>
-				{projects.map((p) => (
-					<DropdownMenuItem key={p.repo} onSelect={() => p.repo !== repo && navigate(projectPath(p.repo, "chat"))}>
-						{p.repo}
-					</DropdownMenuItem>
-				))}
-				<DropdownMenuItem onSelect={() => navigate("/onboarding?new=1")}>New project…</DropdownMenuItem>
-			</DropdownMenuContent>
-		</DropdownMenu>
 	);
 }
 

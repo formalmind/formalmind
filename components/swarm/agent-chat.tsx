@@ -3,6 +3,9 @@ import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { ExternalLink, Loader2 } from "lucide-react";
 import { ChatComposer } from "@/components/chat-composer";
+import { ProjectPicker } from "@/components/projects/project-picker";
+/** The swarm's home project, whose notebook these chats are carried on (LIVE_PROJECT in lib/projects). */
+const HOME_PROJECT = "asyncswap/v2";
 import type { SwarmRole } from "@/lib/swarm";
 import { ROLE_COLORS } from "@/lib/swarm-roles";
 import type { AgentMessage } from "@/server/routes/swarm/agent/route";
@@ -28,6 +31,8 @@ export function AgentChat({ role, repo }: { role: SwarmRole; repo: string }) {
 	const [error, setError] = useState<string | null>(null);
 	const [text, setText] = useState("");
 	const [sending, setSending] = useState(false);
+	// Which project the message is about; the notebook is shared, so other projects are named in the message.
+	const [project, setProject] = useState(HOME_PROJECT);
 	const [issue, setIssue] = useState(69);
 	const listRef = useRef<HTMLDivElement>(null);
 
@@ -56,8 +61,9 @@ export function AgentChat({ role, repo }: { role: SwarmRole; repo: string }) {
 	}, [messages]);
 
 	const send = async () => {
-		const message = text.trim();
-		if (!message || sending) return;
+		const typed = text.trim();
+		const message = project === HOME_PROJECT ? typed : `On ${project}: ${typed}`;
+		if (!typed || sending) return;
 		setSending(true);
 		try {
 			const res = await fetch(`/api/swarm/agent?role=${role}`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ text: message }) });
@@ -102,12 +108,7 @@ export function AgentChat({ role, repo }: { role: SwarmRole; repo: string }) {
 					onStop={() => {}}
 					isLoading={sending}
 					placeholder={`Message the ${role}…`}
-					context={
-						<span className="inline-flex h-8 items-center gap-1.5 rounded-full bg-secondary px-3 text-sm font-medium capitalize text-secondary-foreground">
-							<span className="size-2 rounded-full" style={{ backgroundColor: ROLE_COLORS[role] }} />
-							{role}
-						</span>
-					}
+					context={<ProjectPicker repo={project} onSelect={setProject} />}
 				/>
 				<p className="mt-1.5 px-3 text-[11px] text-muted-foreground">
 					Posted as you on{" "}

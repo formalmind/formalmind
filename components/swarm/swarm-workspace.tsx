@@ -4,9 +4,11 @@ import { useEffect, useState } from "react";
 import { ROLE_COLORS } from "@/lib/swarm-roles";
 import type { SwarmRole } from "@/lib/swarm";
 import { AgentChat } from "./agent-chat";
-import { RefreshCw, X } from "lucide-react";
+import { SwarmChat } from "./swarm-chat";
+import { Bot, RefreshCw, X } from "lucide-react";
 import type { SwarmState } from "@/lib/swarm";
-import { Link } from "react-router";
+import { ChatComposer } from "@/components/chat-composer";
+import type { OpenAIModel } from "@/lib/models";
 import { SidebarTrigger } from "@/components/ui/sidebar";
 import { isLiveRun, SwarmCanvas } from "./swarm-canvas";
 import { TextSwap } from "@/components/motion/text-swap";
@@ -22,8 +24,12 @@ function minutesAgo(iso: string) {
 }
 
 export function SwarmWorkspace({ repo }: { repo: string }) {
-	// The agent whose chat is open, from a click on its name on the canvas.
-	const [talkTo, setTalkTo] = useState<SwarmRole | null>(null);
+	// The chat open beside the canvas: an agent (a click on its name) or the whole swarm ("Ask the swarm").
+	const [talkTo, setTalkTo] = useState<SwarmRole | "swarm" | null>(null);
+	// What was typed into the canvas's composer, handed to the swarm chat in the panel.
+	const [draft, setDraft] = useState("");
+	const [ask, setAsk] = useState<{ id: number; text: string } | null>(null);
+	const [model, setModel] = useState<OpenAIModel>("gpt-6-luna");
 	const [state, setState] = useState<SwarmState | null>(null);
 	const [error, setError] = useState<string | null>(null);
 	const [loading, setLoading] = useState(false);
@@ -87,7 +93,7 @@ export function SwarmWorkspace({ repo }: { repo: string }) {
 
 	return (
 		<div className="relative flex min-h-0 flex-1">
-			<div className="flex min-w-0 flex-1 flex-col">
+			<div className="relative flex min-w-0 flex-1 flex-col">
 			<SwarmCanvas
 				state={state}
 				repo={repo}
@@ -119,31 +125,57 @@ export function SwarmWorkspace({ repo }: { repo: string }) {
 						>
 							<RefreshCw className={`size-3.5 ${loading ? "animate-spin" : ""}`} />
 						</button>
-						{/* The swarm's chat is a page of its own, not a side panel. */}
-						<Link
-							to="/swarm/chat"
+						<button
+							type="button"
+							onClick={() => setTalkTo(talkTo === "swarm" ? null : "swarm")}
 							className="inline-flex h-8 items-center rounded-full bg-foreground px-3 text-sm font-medium text-background shadow-sm transition-opacity hover:opacity-90"
 						>
 							Ask the swarm
-						</Link>
+						</button>
 					</>
 				}
 			/>
+			{talkTo !== "swarm" ? (
+				<div className="pointer-events-none absolute inset-x-0 bottom-0 z-20 flex justify-center px-4 pb-4">
+					<div className="pointer-events-auto w-full max-w-2xl">
+						<ChatComposer
+							value={draft}
+							onChange={(e) => setDraft(e.target.value)}
+							onSubmit={() => {
+								setAsk({ id: Date.now(), text: draft.trim() });
+								setDraft("");
+								setTalkTo("swarm");
+							}}
+							onStop={() => {}}
+							isLoading={false}
+							model={model}
+							onModelChange={setModel}
+							placeholder="Ask about the agents…"
+							context={
+								<span className="inline-flex h-8 items-center gap-1.5 rounded-full bg-secondary px-3 text-sm font-medium text-secondary-foreground">
+									<Bot className="size-3.5" />
+									{repo} swarm
+								</span>
+							}
+						/>
+					</div>
+				</div>
+			) : null}
 			</div>
 			{/* The agent's chat sits beside the canvas, which narrows to make room; on phones it covers the canvas. */}
 			{talkTo ? (
 				<aside
-					aria-label={`Talk to the ${talkTo}`}
-					className="absolute inset-2 z-30 flex flex-col overflow-hidden rounded-2xl border bg-background shadow-lg animate-in fade-in-0 slide-in-from-right-4 duration-200 motion-reduce:animate-none md:static md:inset-auto md:my-3 md:mr-3 md:w-[400px] md:shrink-0 md:shadow-md"
+					aria-label={talkTo === "swarm" ? "Ask the swarm" : `Talk to the ${talkTo}`}
+					className="absolute inset-2 z-30 flex flex-col overflow-hidden rounded-2xl border bg-background animate-in fade-in-0 slide-in-from-right-4 duration-200 motion-reduce:animate-none md:static md:inset-auto md:my-3 md:mr-3 md:w-[400px] md:shrink-0"
 				>
 					<div className="flex h-12 shrink-0 items-center gap-2 px-4">
-						<span className="size-2.5 rounded-full" style={{ backgroundColor: ROLE_COLORS[talkTo] }} />
-						<h2 className="flex-1 text-sm font-semibold capitalize">{talkTo}</h2>
+						{talkTo === "swarm" ? null : <span className="size-2.5 rounded-full" style={{ backgroundColor: ROLE_COLORS[talkTo] }} />}
+						<h2 className={`flex-1 text-sm font-semibold ${talkTo === "swarm" ? "" : "capitalize"}`}>{talkTo === "swarm" ? "Ask the swarm" : talkTo}</h2>
 						<button type="button" onClick={() => setTalkTo(null)} aria-label="Close" className="flex size-7 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-muted hover:text-foreground">
 							<X className="size-4" />
 						</button>
 					</div>
-					<AgentChat key={talkTo} role={talkTo} repo={repo} />
+					{talkTo === "swarm" ? <SwarmChat repo={repo} ask={ask} /> : <AgentChat key={talkTo} role={talkTo} repo={repo} />}
 				</aside>
 			) : null}
 		</div>
