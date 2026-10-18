@@ -1,6 +1,9 @@
 //! The Formal Mind desktop shell: a webview over the shared React app, plus the bits only a native app can do.
-//! Today that's the sign-in token in the OS keychain and the formalmind:// deep link. The local executor (running
+//! Today that's the sign-in token in the OS keychain, the formalmind:// deep link, and local folders
+//! with settings in ~/.formalmind (local.rs). The local executor (running
 //! agent turns on this machine, docs/protocol.md) will live here too, as its own module started from `setup`.
+
+mod local;
 
 use keyring::Entry;
 #[cfg(any(windows, target_os = "linux"))]
@@ -43,6 +46,7 @@ pub fn run() {
         .plugin(tauri_plugin_single_instance::init(|_app, _argv, _cwd| {}))
         .plugin(tauri_plugin_deep_link::init())
         .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_dialog::init())
         .setup(|app| {
             // Installed builds register formalmind:// from tauri.conf.json; this covers `tauri dev` on Windows/Linux.
             #[cfg(any(windows, target_os = "linux"))]
@@ -50,7 +54,15 @@ pub fn run() {
             let _ = app;
             Ok(())
         })
-        .invoke_handler(tauri::generate_handler![token_get, token_set, token_clear])
+        .invoke_handler(tauri::generate_handler![
+            token_get,
+            token_set,
+            token_clear,
+            local::config_get,
+            local::folder_add,
+            local::folder_remove,
+            local::folder_scan
+        ])
         .run(tauri::generate_context!())
         .expect("error while running the Formal Mind desktop app");
 }

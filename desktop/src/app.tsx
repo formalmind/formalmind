@@ -13,7 +13,12 @@ import { SWARM_REPO } from "@/lib/swarm-repo";
 import type { SessionData } from "@/lib/session";
 import { apiBase, clearToken, DEFAULT_API, exchangeCode, loadToken, setApiBase } from "./api";
 
+import { LocalFolderPage, LocalFolders } from "./local";
+
 const UsagePage = lazy(() => import("@/components/usage/usage-page").then((m) => ({ default: m.UsagePage })));
+const pages = () => import("@/components/projects/project-pages");
+const SwarmChatPage = lazy(() => pages().then((m) => ({ default: m.SwarmChatPage })));
+const FirstProject = lazy(() => pages().then((m) => ({ default: m.FirstProject })));
 
 type User = SessionData["user"];
 
@@ -76,12 +81,15 @@ function Shell({ user }: { user: User }) {
 		<AuthProvider value={{ user, tokenSet: { accessToken: "", expiresAt: 0 } }}>
 			<ChatConversationsProvider>
 				<SidebarProvider defaultOpen>
-					<AppSidebar />
+					<AppSidebar extra={<LocalFolders />} />
 					<WorkspaceContent>
 						<Suspense fallback={null}>
 							<Routes>
 								<Route path="/" element={<SwarmWorkspace repo={SWARM_REPO} />} />
+								<Route path="/swarm/chat" element={<SwarmChatPage />} />
+								<Route path="/roadmap" element={<FirstProject page="roadmap" />} />
 								<Route path="/usage" element={<UsagePage />} />
+								<Route path="/local" element={<LocalFolderPage />} />
 								{/* Other pages come over from the web app as the desktop app grows. */}
 								<Route path="*" element={<Navigate to="/" replace />} />
 							</Routes>

@@ -7,6 +7,13 @@ the `@/` alias, nothing copied), plus what only a native app can do. Runs on mac
   `api.ts` points the shared components' `fetch("/api/…")` at the API with the desktop token.
 - `src-tauri/`: the Rust side. Keychain storage for the token, the `formalmind://` deep link, opening the browser.
 
+## Local folders
+
+**On this computer** in the sidebar adds folders from disk (native picker). The list lives in
+`~/.formalmind/config.json`, the app's home for local settings. A folder's page lists its Solidity and Lean files
+(skipping `.git`, `node_modules`, `lib`, `out`, `cache`, `target`, `.lake`, `dist`). Only folders you added can be
+read. Nothing is uploaded. `src-tauri/src/local.rs` has it, with a test (`cargo test` in `src-tauri/`).
+
 ## Develop
 
 Needs Rust (`rustup`) and, on Linux, the [Tauri system packages](https://tauri.app/start/prerequisites/).
@@ -19,6 +26,8 @@ bun run desktop:dev
 That starts Vite on :1420 and opens the app. It talks to https://formal.team by default. For a local Worker, run
 `bun run dev:api` (port 8787) and either start the app with `VITE_FORMALMIND_API=http://localhost:8787` or set
 **Server** on the sign-in screen. A local Worker without `APP_BASE_URL` signs everyone in as "Dev Preview".
+Chat needs `OPENAI_API_KEY` in `.dev.vars`, and the swarm state needs `GITHUB_TOKEN` there too (unauthenticated
+GitHub requests hit the rate limit fast); `gh auth token` gives you one.
 
 ## Build
 

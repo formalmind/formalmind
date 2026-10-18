@@ -150,7 +150,8 @@ function Projects({ pathname }: { pathname: string }) {
 	)
 }
 
-export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
+/** `extra` is for a host's own sections under the projects (the desktop app's local folders). */
+export function AppSidebar({ extra, ...props }: React.ComponentProps<typeof Sidebar> & { extra?: React.ReactNode }) {
 	const pathname = useLocation().pathname
 	// The landing page is a page of its own, even for someone signed in.
 	if (pathname === "/welcome") return null
@@ -187,6 +188,7 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
 					</SidebarMenu>
 					<Projects pathname={pathname} />
 				</SidebarGroup>
+				{extra}
 			</SidebarContent>
 			<SidebarFooter>
 				<SidebarMenu>
