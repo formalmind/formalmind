@@ -27,9 +27,21 @@ function roleOf(request: Request): SwarmRole | null {
 	return role && ROLES.includes(role) ? role : null;
 }
 
+/** The names the swarm's workflows sign with ("**review** answering …"), where they differ from the role. */
+const SIGNED_AS: Partial<Record<SwarmRole, string[]>> = {
+	planner: ["plan"],
+	prover: ["prove"],
+	reviewer: ["review"],
+	merger: ["merge"],
+	rebuilder: ["rebuild"],
+	editor: ["edit"],
+	dispatcher: ["dispatch"],
+};
+
 /** A bot comment belongs to a role when it opens with that role's bold name, the swarm's convention. */
 function isFromRole(body: string, role: SwarmRole) {
-	return new RegExp(`^\\s*(<!--[^>]*-->\\s*)*\\*\\*${role}\\*\\*`, "i").test(body);
+	const names = [role, ...(SIGNED_AS[role] ?? [])].join("|");
+	return new RegExp(`^\\s*(<!--[^>]*-->\\s*)*\\*\\*(${names})\\*\\*`, "i").test(body);
 }
 
 /** The latest of this agent's replies on #69, and what people sent it there. */
