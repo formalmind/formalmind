@@ -38,6 +38,10 @@ bun run desktop:build
 Installers land in `desktop/src-tauri/target/release/bundle/` (`.app`/`.dmg`, `.msi`/`.exe`, `.deb`/`.AppImage`).
 Signing and notarizing aren't set up yet.
 
+The landing page's **Download for Mac** links to
+`releases/latest/download/Formal-Mind-mac.dmg`. To ship a new build, attach the .dmg under that exact name to a new
+release: `gh release create desktop-vX.Y.Z Formal-Mind-mac.dmg`.
+
 ## Sign-in
 
 1. **Sign in with GitHub** opens the system browser at `<api>/api/desktop/authorize`.
