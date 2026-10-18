@@ -2,6 +2,7 @@ import { lazy, Suspense, useCallback, useEffect, useState } from "react";
 import { Navigate, Route, Routes } from "react-router";
 import { getCurrent, onOpenUrl } from "@tauri-apps/plugin-deep-link";
 import { openUrl } from "@tauri-apps/plugin-opener";
+import { getCurrentWindow } from "@tauri-apps/api/window";
 import { AppSidebar } from "@/components/app-sidebar";
 import { AuthProvider } from "@/components/auth-context";
 import { ChatConversationsProvider } from "@/components/chat-conversations";
@@ -63,6 +64,8 @@ export function DesktopApp() {
 	const [error, setError] = useState<string | null>(null);
 
 	const refresh = useCallback(async () => {
+		// Sign-in finished in the browser: bring the app back in front of it.
+		void getCurrentWindow().unminimize().then(() => getCurrentWindow().setFocus()).catch(() => {});
 		const res = await fetch("/api/me").catch(() => null);
 		const body = res?.ok ? ((await res.json()) as { user: User | null }) : { user: null };
 		setUser(body.user);
