@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="https://formal.team/brand/files/social/formalmind-x-header-1500x500.png" alt="Formal Mind" width="100%" />
+  <img src="https://formal.team/brand/formal-mind-logo.png" alt="Formal Mind" width="96" height="96" />
 </p>
 
 <h1 align="center">Formal Mind</h1>
