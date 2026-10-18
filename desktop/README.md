@@ -52,7 +52,7 @@ Updates must be signed with the key whose public half is in `tauri.conf.json`. T
    tar.gz's download URL).
 4. `gh release create desktop-vX.Y.Z Formal-Mind-mac.dmg Formal-Mind-mac.app.tar.gz latest.json`
 
-The .dmg opens on a white window with the app, an arrow and Applications (`src-tauri/dmg-background.png`).
+The .dmg opens on a white window with the app, an arrow and Applications (`src-tauri/dmg-background.tiff`).
 
 ## Sign-in
 

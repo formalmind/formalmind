@@ -57,7 +57,7 @@
     "createUpdaterArtifacts": true,
     "macOS": {
       "dmg": {
-        "background": "dmg-background.png",
+        "background": "dmg-background.tiff",
         "windowSize": {
           "width": 660,
           "height": 400
