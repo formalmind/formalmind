@@ -34,5 +34,5 @@
 	// Secrets (set with `npx wrangler secret put <NAME>`, or `.dev.vars` for local preview):
 	//   OPENAI_API_KEY, GITHUB_CLIENT_SECRET (the formalmind App's client secret, for sign-in), APP_BASE_URL,
 	//   GITHUB_APP_ID, GITHUB_APP_PRIVATE_KEY, GITHUB_WEBHOOK_SECRET, GITHUB_TOKEN,
-	//   STRIPE_SECRET_KEY, STRIPE_WEBHOOK_SECRET
+	//   STRIPE_SECRET_KEY, STRIPE_WEBHOOK_SECRET, GITHUB_MARKETPLACE_WEBHOOK_SECRET
 }

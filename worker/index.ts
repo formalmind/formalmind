@@ -8,6 +8,7 @@ import * as billingWebhook from "@/server/routes/billing/webhook/route";
 import * as chat from "@/server/routes/chat/route";
 import * as githubInstallStatus from "@/server/routes/github/install-status/route";
 import * as githubRepos from "@/server/routes/github/repos/route";
+import * as githubMarketplace from "@/server/routes/github/marketplace/route";
 import * as onboardingInstall from "@/server/routes/onboarding/install/route";
 import * as onboardingPlan from "@/server/routes/onboarding/plan/route";
 import * as onboardingState from "@/server/routes/onboarding/state/route";
@@ -29,6 +30,7 @@ const ROUTES: Record<string, { module: RouteModule; open?: boolean }> = {
 	"/api/billing/webhook": { module: billingWebhook, open: true },
 	"/api/chat": { module: chat },
 	"/api/github/install-status": { module: githubInstallStatus },
+	"/api/github/marketplace": { module: githubMarketplace, open: true },
 	"/api/github/repos": { module: githubRepos },
 	"/api/onboarding/install": { module: onboardingInstall },
 	"/api/onboarding/plan": { module: onboardingPlan, open: true },
