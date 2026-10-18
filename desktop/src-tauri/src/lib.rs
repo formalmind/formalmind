@@ -6,6 +6,7 @@ mod executor;
 mod local;
 
 use keyring::Entry;
+use tauri::Manager;
 #[cfg(any(windows, target_os = "linux"))]
 use tauri_plugin_deep_link::DeepLinkExt;
 
@@ -42,8 +43,14 @@ fn token_clear() -> Result<(), String> {
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
-        // On Windows and Linux a deep link starts a second copy of the app; this hands the link to the running one.
-        .plugin(tauri_plugin_single_instance::init(|_app, _argv, _cwd| {}))
+        // Opening the app again (or a deep link on Windows and Linux) hands off to the running copy: show its window.
+        .plugin(tauri_plugin_single_instance::init(|app, _argv, _cwd| {
+            if let Some(window) = app.get_webview_window("main") {
+                let _ = window.unminimize();
+                let _ = window.show();
+                let _ = window.set_focus();
+            }
+        }))
         .plugin(tauri_plugin_deep_link::init())
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
