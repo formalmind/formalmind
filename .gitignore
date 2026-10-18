@@ -61,3 +61,7 @@ storybook-static/
 # Vite build
 /dist
 /storybook-static
+
+# signing keys and certificates
+*.p12
+*.p8
