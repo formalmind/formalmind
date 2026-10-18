@@ -318,9 +318,8 @@
 /* Animated sidebar icons (lucide-animated style): each plays once when its row is hovered or focused. */
 .icon-anim-host svg * { transform-box: fill-box; }
 .icon-anim-host:is(:hover, :focus-visible) .icon-anim-plus { animation: icon-turn 0.4s cubic-bezier(0.34, 1.56, 0.64, 1); }
-.icon-anim-host:is(:hover, :focus-visible) .icon-anim-chart > :nth-child(n + 2) { transform-origin: bottom; animation: icon-grow 0.5s ease-out both; }
-.icon-anim-host:is(:hover, :focus-visible) .icon-anim-chart > :nth-child(3) { animation-delay: 60ms; }
-.icon-anim-host:is(:hover, :focus-visible) .icon-anim-chart > :nth-child(4) { animation-delay: 120ms; }
+/* The needle (first path, pivoting on the dial's centre) sweeps up from empty. */
+.icon-anim-host:is(:hover, :focus-visible) .icon-anim-gauge > :first-child { transform-box: view-box; transform-origin: 12px 14px; animation: icon-sweep 0.6s cubic-bezier(0.34, 1.56, 0.64, 1); }
 .icon-anim-host:is(:hover, :focus-visible) .icon-anim-roadmap > * { animation: icon-slide 0.45s ease-out both; }
 .icon-anim-host:is(:hover, :focus-visible) .icon-anim-roadmap > :nth-child(2) { animation-delay: 50ms; }
 .icon-anim-host:is(:hover, :focus-visible) .icon-anim-roadmap > :nth-child(3) { animation-delay: 100ms; }
@@ -330,7 +329,7 @@
 .icon-anim-host:is(:hover, :focus-visible) .icon-anim-book { transform-origin: center; animation: icon-wiggle 0.5s ease-in-out; }
 
 @keyframes icon-turn { from { transform: rotate(0deg); } to { transform: rotate(90deg); } }
-@keyframes icon-grow { 0% { transform: scaleY(0.2); } 60% { transform: scaleY(1.12); } 100% { transform: scaleY(1); } }
+@keyframes icon-sweep { from { transform: rotate(-135deg); } to { transform: rotate(0deg); } }
 @keyframes icon-slide { 0% { transform: translateX(-3px); opacity: 0.3; } 100% { transform: translateX(0); opacity: 1; } }
 @keyframes icon-pop { 0% { transform: scale(1); } 45% { transform: scale(1.25); } 100% { transform: scale(1); } }
 @keyframes icon-wiggle { 0%, 100% { transform: rotate(0deg); } 25% { transform: rotate(-8deg); } 75% { transform: rotate(8deg); } }

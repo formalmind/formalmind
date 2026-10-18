@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { Link, useLocation } from "react-router";
-import { BookOpen, ChartColumn, ChevronRight, GanttChart, Network, Plus } from "lucide-react"
+import { BookOpen, Gauge, ChevronRight, GanttChart, Network, Plus } from "lucide-react"
 import {
 	Sidebar,
 	SidebarContent,
@@ -156,7 +156,7 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
 						{/* One swarm, one budget, working across every project: the home page. */}
 						<NavLink item={{ title: "Swarm", url: "/", icon: Network, anim: "network" }} active={pathname === "/" || pathname === "/swarm/chat"} />
 						<NavLink item={{ title: "Roadmap", url: "/roadmap", icon: GanttChart, anim: "roadmap" }} active={pathname === "/roadmap" || pathname.endsWith("/roadmap")} />
-						<NavLink item={{ title: "Usage", url: "/usage", icon: ChartColumn, anim: "chart" }} active={pathname === "/usage"} />
+						<NavLink item={{ title: "Usage", url: "/usage", icon: Gauge, anim: "gauge" }} active={pathname === "/usage"} />
 						<SidebarMenuItem>
 							<SidebarMenuButton asChild isActive={pathname === "/onboarding" && window.location.search.includes("new=1")} tooltip="New project" className="font-normal data-[active=true]:font-normal">
 								<Link to="/onboarding?new=1" className="icon-anim-host">
