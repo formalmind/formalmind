@@ -81,9 +81,18 @@ async function saveUser(user: SessionData["user"] & { githubId: number; login: s
 		.run();
 }
 
+/**
+ * The session id: the desktop app sends its token as `Authorization: Bearer fmd_…` (a session of its own, minted by
+ * /api/desktop/token); the browser sends the httpOnly cookie.
+ */
+function sessionId(): string | null {
+	const bearer = currentRequest().request.headers.get("authorization")?.match(/^Bearer (fmd_[\w-]+)$/)?.[1];
+	return bearer ?? readCookie(SESSION_COOKIE);
+}
+
 async function getSession(): Promise<SessionData | null> {
 	if (isDevPreview) return devSession;
-	const id = readCookie(SESSION_COOKIE);
+	const id = sessionId();
 	if (!id) return null;
 	const raw = await (await kv()).get(`session:${id}`);
 	const session = raw ? (JSON.parse(raw) as SessionData & { scope?: string }) : null;
@@ -93,7 +102,7 @@ async function getSession(): Promise<SessionData | null> {
 
 /** The signed-in person's GitHub token (from the formalmind App), refreshed when it has expired. */
 async function getGitHubToken(): Promise<string> {
-	const id = readCookie(SESSION_COOKIE);
+	const id = sessionId();
 	const session = await getSession();
 	if (!session?.tokenSet.accessToken) throw new Error("Not signed in with GitHub; sign in again.");
 	if (session.tokenSet.expiresAt - 60 > Date.now() / 1000) return session.tokenSet.accessToken;
@@ -105,6 +114,19 @@ async function getGitHubToken(): Promise<string> {
 }
 
 export const auth = { getSession, getGitHubToken };
+
+/** A desktop session: a copy of the browser's, under its own id, so signing out of one leaves the other. */
+export async function createDesktopSession(session: SessionData): Promise<string> {
+	const token = `fmd_${randomId()}`;
+	await (await kv()).put(`session:${token}`, JSON.stringify({ ...session, scope: SCOPE }), { expirationTtl: SESSION_TTL });
+	return token;
+}
+
+export async function deleteDesktopSession(token: string) {
+	if (token.startsWith("fmd_")) await (await kv()).delete(`session:${token}`);
+}
+
+export const newCode = () => randomId(24);
 
 /** A small page saying why sign-in failed, with a way to try again. */
 function authError(reason: string) {

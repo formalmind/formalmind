@@ -21,6 +21,8 @@ import * as swarmChat from "@/server/routes/swarm/chat/route";
 import * as swarmState from "@/server/routes/swarm/state/route";
 import * as tooltip from "@/server/routes/tooltip/route";
 import * as usage from "@/server/routes/usage/route";
+import * as desktopAuthorize from "@/server/routes/desktop/authorize/route";
+import * as desktopToken from "@/server/routes/desktop/token/route";
 import * as githubItem from "@/server/routes/github/item/route";
 import * as githubWebhook from "@/server/routes/github/webhook/route";
 
@@ -36,6 +38,9 @@ const ROUTES: Record<string, { module: RouteModule; open?: boolean }> = {
 	"/api/billing/checkout": { module: billingCheckout },
 	"/api/billing/webhook": { module: billingWebhook, open: true },
 	"/api/chat": { module: chat },
+	// Desktop sign-in: authorize checks the session itself (it sends people to sign in first); token is the code exchange.
+	"/api/desktop/authorize": { module: desktopAuthorize, open: true },
+	"/api/desktop/token": { module: desktopToken, open: true },
 	"/api/github/install-status": { module: githubInstallStatus },
 	"/api/github/item": { module: githubItem },
 	"/api/github/webhook": { module: githubWebhook, open: true },
@@ -55,6 +60,32 @@ const ROUTES: Record<string, { module: RouteModule; open?: boolean }> = {
 };
 
 const app = new Hono<{ Bindings: Env }>();
+
+/** The desktop app's webview origins (macOS/Linux, Windows, and its Vite dev server). It authenticates with a bearer token, never cookies. */
+const DESKTOP_ORIGINS = new Set(["tauri://localhost", "http://tauri.localhost", "https://tauri.localhost", "http://localhost:1420"]);
+
+app.use("/api/*", async (c, next) => {
+	const origin = c.req.header("origin");
+	const allowed = origin && DESKTOP_ORIGINS.has(origin);
+	if (allowed && c.req.method === "OPTIONS") {
+		return new Response(null, {
+			status: 204,
+			headers: {
+				"Access-Control-Allow-Origin": origin,
+				"Access-Control-Allow-Methods": "GET, POST, PUT, DELETE",
+				"Access-Control-Allow-Headers": "Authorization, Content-Type",
+				"Access-Control-Max-Age": "86400",
+				Vary: "Origin",
+			},
+		});
+	}
+	await next();
+	if (allowed) {
+		c.res = new Response(c.res.body, c.res);
+		c.res.headers.set("Access-Control-Allow-Origin", origin);
+		c.res.headers.append("Vary", "Origin");
+	}
+});
 
 app.get("/auth/*", (c) => handleAuth(new URL(c.req.url).pathname));
 app.get("/login/callback", (c) => handleAuth(new URL(c.req.url).pathname));
