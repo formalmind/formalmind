@@ -17,6 +17,8 @@ const DEFAULT_CLIENT_ID = "Iv23liDOGcOZlHPdp9Jf";
 const CALLBACK_PATH = "/login/callback";
 /** Sign-in runs on this origin, so its callback URL is the only one the App needs. Other domains hand off to it. */
 const AUTH_ORIGIN = "https://formal.team";
+/** Profile and email, plus public_repo so chat messages are posted as you on the swarm's (public) notebook issues. */
+const SCOPE = "read:user user:email public_repo";
 
 const env = (name: string) => (process.env[name] as string | undefined) ?? "";
 const clientId = () => env("GITHUB_CLIENT_ID") || DEFAULT_CLIENT_ID;
@@ -134,7 +136,7 @@ export async function handleAuth(path: string): Promise<Response> {
 		const state = randomId(16);
 		const tx = JSON.stringify({ state, returnTo: safeReturn(url.searchParams.get("returnTo")) });
 		const authorize = new URL("https://github.com/login/oauth/authorize");
-		authorize.search = new URLSearchParams({ client_id: clientId(), redirect_uri: `${AUTH_ORIGIN}${CALLBACK_PATH}`, scope: "read:user user:email", state }).toString();
+		authorize.search = new URLSearchParams({ client_id: clientId(), redirect_uri: `${AUTH_ORIGIN}${CALLBACK_PATH}`, scope: SCOPE, state }).toString();
 		return redirect(authorize.toString(), [cookie(TX_COOKIE, tx, { maxAge: 600 })]);
 	}
 
