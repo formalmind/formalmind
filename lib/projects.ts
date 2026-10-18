@@ -24,3 +24,13 @@ export async function addProject(sub: string, repo: string): Promise<void> {
 	if (repo === LIVE_PROJECT.repo || saved.some((p) => p.repo === repo)) return;
 	await putJSON(key(sub), [...saved, { repo, proofsRepo: null, addedAt: new Date().toISOString() }]);
 }
+
+/** Records the proofs repository a project's swarm works in. */
+export async function setProofsRepo(sub: string, repo: string, proofsRepo: string): Promise<void> {
+	const saved = (await getJSON<Project[]>(key(sub))) ?? [];
+	const exists = saved.some((p) => p.repo === repo);
+	const next = exists
+		? saved.map((p) => (p.repo === repo ? { ...p, proofsRepo } : p))
+		: [...saved, { repo, proofsRepo, addedAt: new Date().toISOString() }];
+	await putJSON(key(sub), next);
+}

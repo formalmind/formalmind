@@ -52,3 +52,11 @@ export async function findInstallationForUser(githubLogin: string): Promise<numb
 	const match = installations.find(inst => inst.account?.login === githubLogin)
 	return match?.id ?? null
 }
+
+/** An Octokit acting as the App's installation on one account, with the permissions that installation granted. */
+export function getInstallationOctokit(installationId: number) {
+	const appId = process.env.GITHUB_APP_ID;
+	const pem = process.env.GITHUB_APP_PRIVATE_KEY?.replace(/\\n/g, "\n");
+	if (!appId || !pem) throw new Error("GITHUB_APP_ID and GITHUB_APP_PRIVATE_KEY must be set");
+	return new Octokit({ authStrategy: createAppAuth, auth: { appId, privateKey: toPkcs8(pem), installationId } });
+}

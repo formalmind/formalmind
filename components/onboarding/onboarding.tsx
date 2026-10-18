@@ -1,12 +1,12 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Loader2, Rocket } from "lucide-react";
+import { Check, Loader2, Rocket } from "lucide-react";
 import { SidebarTrigger } from "@/components/ui/sidebar";
 import { PlanBoard } from "@/components/landing/plan-board";
 import { forgetLandingProgress, readDraft, usePlan } from "@/components/landing/use-plan";
-import { refreshProjects } from "@/components/projects/use-projects";
-import { useSearchParams } from "react-router";
+import { projectPath, refreshProjects, useProjects } from "@/components/projects/use-projects";
+import { Link, useSearchParams } from "react-router";
 import type { OnboardingState } from "@/server/routes/onboarding/state/route";
 import { TEAM_PRESETS } from "@/lib/teams";
 import {
@@ -99,9 +99,27 @@ export function Onboarding() {
 		if (installed) setStep((current) => (current === "github" ? "start" : current));
 	}, []);
 
+	// Checked as soon as the repository is known, so the step's check mark shows without visiting it first.
 	useEffect(() => {
-		if (step === "github" || step === "start") void checkInstall(state.repo);
+		if (loaded) void checkInstall(state.repo);
+	}, [loaded, state.repo, checkInstall]);
+	useEffect(() => {
+		if (step === "github") void checkInstall(state.repo);
 	}, [step, state.repo, checkInstall]);
+
+	const projects = useProjects();
+	const proofsRepo = projects?.find((p) => p.repo === state.repo)?.proofsRepo ?? null;
+	const [init, setInit] = useState<{ busy: boolean; error?: string }>({ busy: false });
+	const initialise = async () => {
+		if (!state.repo) return;
+		setInit({ busy: true });
+		const res = await fetch("/api/projects/init", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ repo: state.repo }) }).catch(() => null);
+		const body = (await res?.json().catch(() => null)) as { proofsRepo?: string; error?: string } | null;
+		if (res?.ok && body?.proofsRepo) {
+			setInit({ busy: false });
+			refreshProjects();
+		} else setInit({ busy: false, error: body?.error ?? "Couldn't reach the server; try again." });
+	};
 
 	const deposit = async (usd: number) => {
 		setNotice(null);
@@ -123,7 +141,7 @@ export function Onboarding() {
 		budget: planned,
 		credits: (credits?.cents ?? 0) > 0,
 		github: install.installed,
-		start: false,
+		start: planned && Boolean(proofsRepo),
 	};
 	const index = STEPS.findIndex((s) => s.key === step);
 	const go = (offset: number) => setStep(STEPS[Math.min(STEPS.length - 1, Math.max(0, index + offset))].key);
@@ -202,14 +220,34 @@ export function Onboarding() {
 									{ label: "Daily budget", value: `$${state.dailyUsd} a day`, ok: true },
 									{ label: "Credits", value: credits ? `$${(credits.cents / 100).toFixed(2)}` : "…", ok: (credits?.cents ?? 0) > 0 },
 									{ label: "GitHub App", value: install.installed ? "installed" : "not installed", ok: install.installed },
+									{ label: "Proofs repository", value: proofsRepo ?? "not created", ok: Boolean(proofsRepo) },
 								]}
 							/>
-							<button type="button" disabled className="mt-5 inline-flex h-10 items-center gap-2 rounded-full bg-primary px-5 text-sm font-medium text-primary-foreground opacity-50">
-								<Rocket className="size-4" /> Start the swarm
-							</button>
-							<p className="mt-3 max-w-xl text-sm text-muted-foreground">
-								Starting is the last piece we&apos;re building: it commits the swarm&apos;s workflows to your repository, opens the plan&apos;s issues, and meters the agents&apos; model usage against your credits. Your setup is saved, so it&apos;ll be one click from here.
-							</p>
+							{proofsRepo ? (
+								<p role="status" className="mt-5 inline-flex items-center gap-2 text-sm">
+									<Check className="size-4 text-green-600" /> Proofs repository ready:{" "}
+									<a href={`https://github.com/${proofsRepo}`} target="_blank" rel="noreferrer" className="font-mono underline underline-offset-4">{proofsRepo}</a>
+									<Link to={projectPath(state.repo ?? "")} className="ml-2 text-muted-foreground underline-offset-4 hover:text-foreground hover:underline">Open the project</Link>
+								</p>
+							) : (
+								<>
+									<button
+										type="button"
+										disabled={!state.repo || !state.plan || !install.installed || init.busy}
+										onClick={() => void initialise()}
+										className="mt-5 inline-flex h-10 items-center gap-2 rounded-full bg-primary px-5 text-sm font-medium text-primary-foreground disabled:opacity-50"
+									>
+										{init.busy ? <Loader2 className="size-4 animate-spin" /> : <Rocket className="size-4" />}
+										{init.busy ? `Creating ${state.repo}-proofs…` : "Create the proofs repository"}
+									</button>
+									{init.error ? <p role="alert" className="mt-3 max-w-xl text-sm text-red-600 dark:text-red-400">{init.error}</p> : null}
+									<p className="mt-3 max-w-xl text-sm text-muted-foreground">
+										{install.installed
+											? `This creates ${state.repo}-proofs from the formalmind/lean-template Lean project and lists it for the swarm, which writes its proofs there.`
+											: "Install the GitHub App first (the GitHub step); the proofs repository is created through it."}
+									</p>
+								</>
+							)}
 						</Panel>
 					)}
 				</section>
