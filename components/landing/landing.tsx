@@ -4,9 +4,8 @@ import { Link } from "react-router";
 import { LogoMark } from "@/components/logo";
 import { MarkGithubIcon } from "@primer/octicons-react";
 import { useEffect, useState } from "react";
-import { Loader2, Lock, Maximize2, Minimize2, Play, X } from "lucide-react";
+import { Loader2, Lock } from "lucide-react";
 import { SwarmCanvas } from "@/components/swarm/swarm-canvas";
-import YouTubeVideo from "@/components/youtube-video";
 import { SetupPreview } from "./setup-preview";
 import { readDraft, usePlan } from "./use-plan";
 import { EXAMPLE_REPOS } from "@/lib/plan";
@@ -69,8 +68,6 @@ export function Landing({ signedIn }: { signedIn: boolean }) {
 	}, []);
 	// Once a repository is being planned the box locks, so the next step is the setup below; Change unlocks it.
 	const locked = Boolean(repo) && !(error && !plan);
-	// The intro starts as an icon, opens small, and can expand to most of the page.
-	const [video, setVideo] = useState<"icon" | "small" | "big">("icon");
 	const startHref = signedIn ? "/onboarding" : "/auth/login?returnTo=%2Fonboarding";
 
 	const run = (value: string) => {
@@ -202,42 +199,6 @@ export function Landing({ signedIn }: { signedIn: boolean }) {
 				</footer>
 			</main>
 
-			{video === "icon" ? (
-				<button
-					type="button"
-					onClick={() => setVideo("small")}
-					aria-label="Play the quick intro"
-					title="Watch the quick intro"
-					className="fixed bottom-4 right-4 z-40 flex size-12 items-center justify-center rounded-full bg-foreground text-background shadow-2xl transition-transform duration-200 hover:scale-105 active:scale-95 animate-in fade-in-0 zoom-in-90 motion-reduce:transition-none"
-				>
-					<Play className="ml-0.5 size-5 fill-current" />
-				</button>
-			) : (
-				<aside
-					aria-label="Formal Mind quick intro"
-					className={`fixed bottom-4 right-4 z-40 overflow-hidden ${video === "big" ? "w-[min(1100px,calc(100vw-2rem))]" : "w-[min(288px,calc(100vw-2rem))]"} rounded-2xl border bg-black shadow-2xl transition-[width] duration-300 [transition-timing-function:cubic-bezier(0.22,1,0.36,1)] animate-in fade-in-0 zoom-in-95 motion-reduce:transition-none`}
-				>
-					<YouTubeVideo videoId="xyZZqCQlmCE" title="Formal Mind quick intro" />
-					<button
-						type="button"
-						onClick={() => setVideo(video === "big" ? "small" : "big")}
-						aria-label={video === "big" ? "Shrink video" : "Expand video"}
-						title={video === "big" ? "Shrink video" : "Expand video"}
-						className="absolute right-11 top-2 z-10 flex size-7 items-center justify-center rounded-full bg-black/60 text-white backdrop-blur-sm transition-colors hover:bg-black/80"
-					>
-						{video === "big" ? <Minimize2 className="size-3.5" /> : <Maximize2 className="size-3.5" />}
-					</button>
-					<button
-						type="button"
-						onClick={() => setVideo("icon")}
-						aria-label="Minimize video"
-						title="Minimize"
-						className="absolute right-2 top-2 z-10 flex size-7 items-center justify-center rounded-full bg-black/60 text-white backdrop-blur-sm transition-colors hover:bg-black/80"
-					>
-						<X className="size-3.5" />
-					</button>
-				</aside>
-			)}
 
 		</div>
 	);
