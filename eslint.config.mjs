@@ -2,7 +2,7 @@ import tseslint from "typescript-eslint";
 import reactHooks from "eslint-plugin-react-hooks";
 
 export default tseslint.config(
-	{ ignores: ["dist", ".wrangler", "node_modules", "storybook-static", "mcp-server", "packages"] },
+	{ ignores: ["dist", ".wrangler", "node_modules", "storybook-static"] },
 	...tseslint.configs.recommended,
 	{
 		plugins: { "react-hooks": reactHooks },
