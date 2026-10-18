@@ -19,28 +19,22 @@ export function LoginForm({
         <CardHeader className="text-center">
           <CardTitle className="text-sm">Welcome back</CardTitle>
           <CardDescription>
-            Login with Google or Github account.
+            Sign in with your GitHub account.
           </CardDescription>
         </CardHeader>
         <CardContent>
           <div className="grid gap-6">
             <div className="flex flex-col gap-4">
-              <a href="/auth/login?connection=github&access_type=offline&prompt=consent" className="flex items-center gap-2">
+              <a href="/auth/login" className="flex items-center gap-2">
                 <Button variant="outline" className="w-full">
                   <GithubIcon />
                   Login with GitHub
                 </Button>
               </a>
-
-              <a href="/auth/login?connection=google-oauth2&access_type=offline&prompt=consent" className="underline underline-offset-4">
-                <Button variant="outline" className="w-full">
-                  Login with Google
-                </Button>
-              </a>
             </div>
             <div className="text-center text-sm">
               Don&apos;t have an account?{" "}
-              <a href="/auth/login?connection=github&access_type=offline&prompt=consent" className="underline underline-offset-4">
+              <a href="/auth/login" className="underline underline-offset-4">
                 Sign up
               </a>
             </div>

@@ -1,10 +1,10 @@
-import { auth0 } from "@/lib/auth0";
+import { auth } from "@/lib/auth";
 import { getAppOctokit } from "@/lib/octokit";
 import { parseRepo } from "@/lib/plan";
 
 /** Whether the formalmind GitHub App is installed with access to this repository. */
 export async function GET(request: Request) {
-	const session = await auth0.getSession();
+	const session = await auth.getSession();
 	if (!session?.user) return Response.json({ error: "Sign in first." }, { status: 401 });
 	const repo = parseRepo(new URL(request.url).searchParams.get("repo") ?? "");
 	if (!repo) return Response.json({ error: "Which repository?" }, { status: 400 });

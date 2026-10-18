@@ -1,6 +1,6 @@
 import { tool } from "ai";
 import { z } from 'zod';
-import { auth0 } from "@/lib/auth0";
+import { auth } from "@/lib/auth";
 import { Octokit } from "@octokit/rest";
 
 // tool to Fetch user details for the authenticated user
@@ -10,7 +10,7 @@ export const getUserDetails = tool({
 	execute: async () => {
 		try {
 			const octokit = new Octokit({
-				auth: (await auth0.getAccessTokenForConnection({ connection: "github" })).token,
+				auth: await auth.getGitHubToken(),
 			});
 
 			const response = await octokit.request('GET /user');
@@ -29,7 +29,7 @@ export const getUserRepos = tool({
 	execute: async () => {
 		try {
 			const octokit = new Octokit({
-				auth: (await auth0.getAccessTokenForConnection({ connection: "github" })).token,
+				auth: await auth.getGitHubToken(),
 			});
 
 			const response = await octokit.request('GET /user/repos', {

@@ -1,5 +1,5 @@
 import { Hono, type ExecutionContext } from "hono";
-import { auth0, handleAuth } from "@/lib/auth0";
+import { auth, handleAuth } from "@/lib/auth";
 import { requestContext, type Env } from "./context";
 
 import * as billingBalance from "@/server/routes/billing/balance/route";
@@ -45,10 +45,11 @@ const ROUTES: Record<string, { module: RouteModule; open?: boolean }> = {
 const app = new Hono<{ Bindings: Env }>();
 
 app.get("/auth/*", (c) => handleAuth(new URL(c.req.url).pathname));
+app.get("/login/callback", (c) => handleAuth(new URL(c.req.url).pathname));
 
 /** Who is signed in, for the browser: the profile only, never tokens. */
 app.get("/api/me", async (c) => {
-	const session = await auth0.getSession();
+	const session = await auth.getSession();
 	return c.json(session ? { user: session.user } : { user: null });
 });
 
@@ -56,7 +57,7 @@ app.all("/api/*", async (c) => {
 	const route = ROUTES[new URL(c.req.url).pathname];
 	const handler = route?.module[c.req.method as keyof RouteModule];
 	if (!route || !handler) return c.json({ error: "Not found" }, 404);
-	if (!route.open && !(await auth0.getSession())) return c.json({ error: "unauthenticated" }, 401);
+	if (!route.open && !(await auth.getSession())) return c.json({ error: "unauthenticated" }, 401);
 	return handler(c.req.raw);
 });
 

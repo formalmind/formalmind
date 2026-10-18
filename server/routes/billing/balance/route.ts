@@ -1,9 +1,9 @@
-import { auth0 } from "@/lib/auth0";
+import { auth } from "@/lib/auth";
 import { confirmCheckout, getCredits, isBillingConfigured } from "@/lib/billing";
 
 /** The signed-in user's credits; with ?session_id= (the Checkout redirect) it confirms that payment first. */
 export async function GET(request: Request) {
-	const session = await auth0.getSession();
+	const session = await auth.getSession();
 	if (!session?.user) return Response.json({ error: "Sign in first." }, { status: 401 });
 	const configured = isBillingConfigured();
 	const sessionId = new URL(request.url).searchParams.get("session_id");

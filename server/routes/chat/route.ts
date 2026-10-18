@@ -1,7 +1,7 @@
 import { createDataStreamResponse, streamText, type ToolSet } from "ai";
 import { setAIContext } from "@auth0/ai-vercel";
 import { errorSerializer, withInterruptions } from "@auth0/ai-vercel/interrupts";
-import { isDevPreview } from "@/lib/auth0";
+import { isDevPreview } from "@/lib/auth";
 import { openAIModelNames, type OpenAIModel } from "@/lib/llm";
 import { openai } from "@/lib/openai";
 

@@ -1,5 +1,5 @@
 import { Octokit } from "@octokit/rest";
-import { auth0, isDevPreview } from "@/lib/auth0";
+import { auth, isDevPreview } from "@/lib/auth";
 import { ASSISTANT_ISSUE, SWARM_REPO, github, type SwarmRole } from "@/lib/swarm";
 
 /**
@@ -71,7 +71,7 @@ export async function POST(request: Request) {
 	if (isDevPreview) return Response.json({ error: "Sending needs a real sign-in (dev preview)." }, { status: 503 });
 	const body = role === "assistant" ? message : `/ask ${role} ${message}`;
 	try {
-		const { token } = await auth0.getAccessTokenForConnection({ connection: "github" });
+		const token = await auth.getGitHubToken();
 		const octokit = new Octokit({ auth: token, userAgent: "formalmind" });
 		const [owner, repo] = SWARM_REPO.split("/");
 		const { data } = await octokit.rest.issues.createComment({ owner, repo, issue_number: ASSISTANT_ISSUE, body });

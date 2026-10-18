@@ -6,12 +6,12 @@
 	"compatibility_date": "2026-10-01",
 	"compatibility_flags": ["nodejs_compat", "global_fetch_strictly_public"],
 	// The Vite build. Files are served straight from the edge; unknown paths get index.html (the app routes them),
-	// and only /api, /auth and /assets (so a missing chunk is a 404, not index.html) wake the Worker.
+	// and only /api, /auth, /login/callback (GitHub sign-in) and /assets (so a missing chunk is a 404, not index.html) wake the Worker.
 	"assets": {
 		"directory": "dist",
 		"binding": "ASSETS",
 		"not_found_handling": "single-page-application",
-		"run_worker_first": ["/api/*", "/auth/*", "/assets/*"]
+		"run_worker_first": ["/api/*", "/auth/*", "/login/callback", "/assets/*"]
 	},
 	// The production domain. workers.dev and preview URLs stay on as well (wrangler turns them off
 	// once a route exists unless they are set explicitly).
@@ -24,10 +24,13 @@
 	// Onboarding drafts, credit balances and applied Stripe payments (lib/kv.ts).
 	"kv_namespaces": [
 		{ "binding": "FORMALMIND", "id": "9d16b5c66b4645cb9ac59e8b1d81d0c8" }
+	],
+	// Users (migrations/): `wrangler d1 migrations apply formalmind-users --remote`.
+	"d1_databases": [
+		{ "binding": "DB", "database_name": "formalmind-users", "database_id": "cf9ae3bf-c762-4aa3-bd81-b7b50273e689" }
 	]
 	// Secrets (set with `npx wrangler secret put <NAME>`, or `.dev.vars` for local preview):
-	//   OPENAI_API_KEY, AUTH0_SECRET, AUTH0_DOMAIN, AUTH0_CLIENT_ID, AUTH0_CLIENT_SECRET,
-	//   AUTH0_M2M_CLIENT_ID, AUTH0_M2M_CLIENT_SECRET, APP_BASE_URL,
+	//   OPENAI_API_KEY, GITHUB_CLIENT_SECRET (the formalmind App's client secret, for sign-in), APP_BASE_URL,
 	//   GITHUB_APP_ID, GITHUB_APP_PRIVATE_KEY, GITHUB_WEBHOOK_SECRET, GITHUB_TOKEN,
 	//   STRIPE_SECRET_KEY, STRIPE_WEBHOOK_SECRET
 }

@@ -69,7 +69,7 @@ export function NavProjects() {
 							<SidebarMenuButton disabled><span>Configure GitHub to see projects</span></SidebarMenuButton>
 						) : (
 							<SidebarMenuButton asChild>
-								<a href="/auth/login?connection=github&access_type=offline&prompt=consent">
+								<a href="/auth/login">
 									<span>Connect GitHub to see projects</span>
 								</a>
 							</SidebarMenuButton>

@@ -1,8 +1,8 @@
-import { auth0 } from "@/lib/auth0"
+import { auth } from "@/lib/auth"
 import { findInstallationForUser } from "@/lib/octokit"
 
 export async function GET() {
-	const session = await auth0.getSession()
+	const session = await auth.getSession()
 	if (!session?.user) {
 		return Response.json({ installed: false }, { status: 401 })
 	}

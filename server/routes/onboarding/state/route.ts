@@ -1,4 +1,4 @@
-import { auth0 } from "@/lib/auth0";
+import { auth } from "@/lib/auth";
 import { getJSON, putJSON } from "@/lib/kv";
 import { addProject } from "@/lib/projects";
 import type { RepoPlan } from "@/lib/plan";
@@ -17,13 +17,13 @@ export type OnboardingState = {
 const key = (sub: string) => `onboarding:${sub}`;
 
 export async function GET() {
-	const session = await auth0.getSession();
+	const session = await auth.getSession();
 	if (!session?.user) return Response.json({ error: "Sign in first." }, { status: 401 });
 	return Response.json(await getJSON<OnboardingState>(key(session.user.sub)));
 }
 
 export async function PUT(request: Request) {
-	const session = await auth0.getSession();
+	const session = await auth.getSession();
 	if (!session?.user) return Response.json({ error: "Sign in first." }, { status: 401 });
 	const body = (await request.json()) as Partial<OnboardingState>;
 	const previous = await getJSON<OnboardingState>(key(session.user.sub));

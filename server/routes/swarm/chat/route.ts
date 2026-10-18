@@ -1,7 +1,7 @@
 import { streamText } from "ai";
 import { openAIModelNames, type OpenAIModel } from "@/lib/llm";
 import { openai } from "@/lib/openai";
-import { auth0 } from "@/lib/auth0";
+import { auth } from "@/lib/auth";
 import { LIVE_PROJECT, listProjects } from "@/lib/projects";
 import { getSwarmState, SWARM_REPO } from "@/lib/swarm";
 import { swarmTools } from "@/lib/tools/swarm-tools";
@@ -34,7 +34,7 @@ export async function POST(request: Request) {
 	let state: string;
 	let repos = [SWARM_REPO];
 	try {
-		const session = await auth0.getSession();
+		const session = await auth.getSession();
 		const live = await getSwarmState(session?.user ? await listProjects(session.user.sub) : [LIVE_PROJECT]);
 		repos = [SWARM_REPO, ...live.projects.flatMap((p) => (p.proofsRepo && p.proofsRepo !== SWARM_REPO ? [p.proofsRepo] : []))];
 		state = JSON.stringify(live);
