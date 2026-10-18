@@ -83,6 +83,29 @@ const laneX = (lane: Lane) => PAD + LANES.findIndex((l) => l.key === lane) * (LA
 const panelX = (i: number) => PAD + i * (PANEL_W + PANEL_GAP);
 const groupY = (group: number) => group * GROUP_H;
 
+/** What a replay card would look like as a GitHub issue or PR, for the demo's hover cards. */
+function demoItem(card: Card): SwarmItem {
+	const pr = card.kind === "pr";
+	const when = new Date(Date.now() - (card.number % 5 + 1) * 3_600_000).toISOString();
+	return {
+		repo: "asyncswap/v2-proofs",
+		number: card.number,
+		title: card.title,
+		kind: pr ? "pr" : "issue",
+		labels: [card.label],
+		url: "https://github.com/asyncswap/v2-proofs",
+		updatedAt: when,
+		createdAt: when,
+		author: "formalmind[bot]",
+		authorAvatar: "https://avatars.githubusercontent.com/in/1301446",
+		excerpt: pr
+			? "Proves the invariant stated in the issue in Lean 4. lake build is clean on this commit, with no sorry and no new axiom. The changelog entry lists the theorems added."
+			: "Scope: state the property in Lean 4 and prove it for every entry point that touches this state. Done when lake build is clean and the theorem is listed in the changelog.",
+		comments: pr ? 3 : 1,
+		merged: card.label === "merged",
+	};
+}
+
 type Card = {
 	id: string;
 	/** The project's place on the board, top to bottom. */
@@ -798,7 +821,12 @@ export function SwarmCanvas({ state, fill = false, contain = false, title, actio
 
 	// Real issues and PRs behind the cards, for hover cards and links (replay-only cards have none).
 	const items = new Map<string, SwarmItem>([...(state?.work ?? []), ...(state?.merged ?? [])].map((item) => [itemKey(itemRepo(state!, item), item.number), item]));
-	const itemFor = (card: Card) => (card.kind === "doc" || !card.repo ? undefined : items.get(itemKey(card.repo, card.number)));
+	const itemFor = (card: Card) =>
+		card.kind === "doc" ? undefined
+		// The landing demo has no live data: its cards preview as the issues they stand for.
+		: !state && !fill ? demoItem(card)
+		: !card.repo ? undefined
+		: items.get(itemKey(card.repo, card.number));
 
 	const showHover = (card: Card, el: HTMLElement) => {
 		const item = itemFor(card);

@@ -56,6 +56,7 @@ function AppleMark() {
 
 export function Landing({ signedIn }: { signedIn: boolean }) {
 	const [input, setInput] = useState("");
+	const [scrolled, setScrolled] = useState(false);
 	const { repo, plan, start, reset, resume, isLoading, error, done } = usePlan();
 	// Coming back to the page picks up the last plan where it was left.
 	useEffect(() => {
@@ -79,8 +80,16 @@ export function Landing({ signedIn }: { signedIn: boolean }) {
 
 	return (
 		// One screen: header and hero at the top, the demo (or the setup steps) taking every pixel left.
-		<div className="flex h-dvh flex-col bg-background text-foreground">
-			<header className="mx-auto flex h-16 w-full max-w-6xl shrink-0 items-center justify-between px-4 sm:px-6">
+		<div className="relative flex h-dvh flex-col bg-background text-foreground">
+			{/* Floats over the page; once it scrolls, it tucks into a frosted pill. */}
+			<header className="pointer-events-none absolute inset-x-0 top-0 z-30 flex justify-center px-3">
+				<div
+					className={`pointer-events-auto flex w-full items-center justify-between transition-[max-width,height,margin,padding,background-color,box-shadow,border-color] duration-300 [transition-timing-function:cubic-bezier(0.22,1,0.36,1)] motion-reduce:transition-none ${
+						scrolled
+							? "mt-3 h-12 max-w-2xl rounded-full border border-border/70 bg-background/80 pl-4 pr-1.5 shadow-[0_8px_30px_-12px_rgba(0,0,0,0.25)] backdrop-blur-xl"
+							: "mt-0 h-16 max-w-6xl border border-transparent px-1 sm:px-3"
+					}`}
+				>
 				<Link to="/welcome" className="flex items-center gap-2 font-semibold tracking-tight">
 					<LogoMark size={24} />
 					Formal Mind.
@@ -95,9 +104,10 @@ export function Landing({ signedIn }: { signedIn: boolean }) {
 						Download for Mac
 					</a>
 				</nav>
+				</div>
 			</header>
 
-			<main className="flex min-h-0 flex-1 flex-col overflow-y-auto">
+			<main onScroll={(e) => setScrolled(e.currentTarget.scrollTop > 8)} className="flex min-h-0 flex-1 flex-col overflow-y-auto pt-16">
 				<section className="mx-auto w-full max-w-6xl shrink-0 px-4 pb-10 pt-16 text-center sm:px-6 sm:pt-24">
 					<h1 className="mx-auto max-w-2xl text-balance text-[34px] font-medium leading-10 tracking-[-1px] sm:text-5xl sm:leading-[1.1] sm:tracking-[-1.5px]">
 						A swarm of agents for verifying Ethereum smart contracts
