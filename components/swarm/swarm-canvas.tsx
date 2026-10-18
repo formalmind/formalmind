@@ -91,6 +91,8 @@ type Card = {
 	repo?: string;
 	/** What a doc card stands for, in its details. */
 	detail?: string;
+	/** Where a doc card lives on GitHub. */
+	href?: string;
 	number: number;
 	title: string;
 	kind: "issue" | "pr" | "doc";
@@ -179,7 +181,7 @@ function home(scene: Scene, ...roles: SwarmRole[]) {
 /** Before the live state has loaded: an empty board, nothing scripted. */
 function emptyScene(): Scene {
 	return {
-		cards: [{ id: "roadmap", group: 0, number: 0, title: "Roadmap and unproven gaps in FORMAL_MIND.md", kind: "doc", lane: "roadmap", order: 0, label: "README" }],
+		cards: [{ id: "roadmap", group: 0, number: 0, title: "Roadmap and unproven gaps in FORMAL_MIND.md", kind: "doc", lane: "roadmap", order: 0, label: "README", href: HOME_ROADMAP }],
 		cursors: Object.fromEntries(ROLES.map((r) => [r, { at: HOME[r] }])) as Scene["cursors"],
 		spend: 0,
 		notes: [],
@@ -221,7 +223,7 @@ function initialScene(state: SwarmState | null): Scene {
 	let order = 0;
 	const repoOf = (item: Partial<SwarmItem>) => (item.url && state ? item.repo ?? state.repo : undefined);
 	const cards: Card[] = [
-		{ id: "roadmap", group: 0, number: 0, title: "Roadmap and unproven gaps in FORMAL_MIND.md", kind: "doc", lane: "roadmap", order: order++, label: "README" },
+		{ id: "roadmap", group: 0, number: 0, title: "Roadmap and unproven gaps in FORMAL_MIND.md", kind: "doc", lane: "roadmap", order: order++, label: "README", href: HOME_ROADMAP },
 		...merged.map((item) => ({ id: `m${item.number}`, group: 0, repo: repoOf(item), number: item.number, title: item.title, kind: "pr" as const, lane: "dev" as Lane, order: order++, label: "merged" })),
 		...queue.map((item) => ({ id: `i${item.number}`, group: 0, repo: repoOf(item), number: item.number, title: item.title, kind: "issue" as const, lane: "todo" as Lane, order: order++, label: "fm:todo" })),
 	];
@@ -368,17 +370,19 @@ export function projectsOf(state: SwarmState | null): SwarmProject[] {
 const itemRepo = (state: SwarmState, item: SwarmItem) => item.repo ?? state.repo;
 const itemKey = (repo: string, number: number) => `${repo}#${number}`;
 
+const HOME_ROADMAP = "https://github.com/asyncswap/v2-proofs/blob/HEAD/FORMAL_MIND.md";
+
 /** A project's first card: its roadmap, or why the swarm has nothing of it yet. */
 function roadmapCard(project: SwarmProject, group: number, home: string): Card {
 	const base = { id: `roadmap:${group}`, group, number: 0, kind: "doc" as const, lane: "roadmap" as Lane, order: 0 };
 	if (!project.proofsRepo) {
 		return { ...base, title: "No proofs repository yet", label: "setup", detail: `Finish ${project.repo}'s Setup to give it a proofs repository; then the swarm can be pointed at it.` };
 	}
-	if (project.error) return { ...base, title: project.error, label: "README", detail: `The swarm's view of ${project.proofsRepo} could not be read from GitHub.` };
+	if (project.error) return { ...base, title: project.error, label: "README", detail: `The swarm's view of ${project.proofsRepo} could not be read from GitHub.`, href: `https://github.com/${project.proofsRepo}` };
 	if (!project.inSwarm) {
-		return { ...base, title: "Not swept by the swarm yet", label: "setup", detail: `${project.proofsRepo} is not in ${home}'s .github/formalmind/projects.json, so the dispatcher does not pick its work yet.` };
+		return { ...base, title: "Not swept by the swarm yet", label: "setup", detail: `${project.proofsRepo} is not in ${home}'s .github/formalmind/projects.json, so the dispatcher does not pick its work yet.`, href: `https://github.com/${home}/blob/HEAD/.github/formalmind/projects.json` };
 	}
-	return { ...base, title: project.proofsRepo === home ? "Roadmap and unproven gaps in FORMAL_MIND.md" : "Roadmap and unproven gaps in README.md", label: "README", detail: `The roadmap in ${project.proofsRepo}'s README.` };
+	return { ...base, title: project.proofsRepo === home ? "Roadmap and unproven gaps in FORMAL_MIND.md" : "Roadmap and unproven gaps in README.md", label: "README", detail: `The roadmap in ${project.proofsRepo}'s README.`, href: `https://github.com/${project.proofsRepo}/blob/HEAD/${project.proofsRepo === home ? "FORMAL_MIND.md" : "README.md"}` };
 }
 
 /** The board as the swarm has it, with nothing scripted: one lane group per project. With no run in flight the cursors rest on the bench. */
@@ -1091,6 +1095,7 @@ function CardDetails({ card, item, inDialog }: { card: Card; item?: SwarmItem; i
 				<p className={`mt-1 text-muted-foreground ${inDialog ? "text-sm" : "text-xs leading-5"}`}>
 					{card.kind === "doc" ? card.detail ?? "The roadmap in the proofs repo's README." : "A card in the replay; it stands in for an issue and links nowhere."}
 				</p>
+				{card.href ? <OpenOnGitHub href={card.href} inDialog={inDialog} /> : null}
 			</div>
 		);
 	}
@@ -1098,15 +1103,21 @@ function CardDetails({ card, item, inDialog }: { card: Card; item?: SwarmItem; i
 		<>
 			{inDialog ? <DialogPrimitive.Title className="sr-only">{item.title}</DialogPrimitive.Title> : null}
 			<ItemPreview item={item} full />
-			<a
-				href={item.url}
-				target="_blank"
-				rel="noreferrer"
-				className={`flex items-center justify-center rounded-full bg-foreground font-semibold text-background transition-opacity hover:opacity-90 ${inDialog ? "mt-5 h-12 w-full text-sm" : "mt-3 h-8 w-fit px-3 text-xs"}`}
-			>
-				Open on GitHub
-			</a>
+			<OpenOnGitHub href={item.url} inDialog={inDialog} />
 		</>
+	);
+}
+
+function OpenOnGitHub({ href, inDialog }: { href: string; inDialog: boolean }) {
+	return (
+		<a
+			href={href}
+			target="_blank"
+			rel="noreferrer"
+			className={`flex items-center justify-center rounded-full bg-foreground font-semibold text-background transition-opacity hover:opacity-90 ${inDialog ? "mt-5 h-12 w-full text-sm" : "mt-3 h-8 w-fit px-3 text-xs"}`}
+		>
+			Open on GitHub
+		</a>
 	);
 }
 
