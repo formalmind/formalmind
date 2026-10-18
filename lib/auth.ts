@@ -11,7 +11,7 @@ import type { SessionData } from "@/lib/session";
 const SESSION_COOKIE = "fm_session";
 const TX_COOKIE = "fm_auth_tx";
 const SESSION_TTL = 30 * 24 * 3600;
-/** The formalmind App's client id (public); its client secret is the GITHUB_CLIENT_SECRET Worker secret. */
+/** Fallback client id (the formalmind App); wrangler.jsonc sets GITHUB_CLIENT_ID to the sign-in OAuth App. Its secret is GITHUB_CLIENT_SECRET. */
 const DEFAULT_CLIENT_ID = "Iv23liDOGcOZlHPdp9Jf";
 /** Where GitHub sends people back; it must be one of the App's callback URLs. */
 const CALLBACK_PATH = "/login/callback";
@@ -134,7 +134,7 @@ export async function handleAuth(path: string): Promise<Response> {
 		const state = randomId(16);
 		const tx = JSON.stringify({ state, returnTo: safeReturn(url.searchParams.get("returnTo")) });
 		const authorize = new URL("https://github.com/login/oauth/authorize");
-		authorize.search = new URLSearchParams({ client_id: clientId(), redirect_uri: `${AUTH_ORIGIN}${CALLBACK_PATH}`, state }).toString();
+		authorize.search = new URLSearchParams({ client_id: clientId(), redirect_uri: `${AUTH_ORIGIN}${CALLBACK_PATH}`, scope: "read:user user:email", state }).toString();
 		return redirect(authorize.toString(), [cookie(TX_COOKIE, tx, { maxAge: 600 })]);
 	}
 

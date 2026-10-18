@@ -18,6 +18,8 @@
 	"routes": [{ "pattern": "formal.team", "custom_domain": true }],
 	"workers_dev": true,
 	"preview_urls": true,
+	// The "Formal Mind" OAuth App people sign in with (public); its secret is GITHUB_CLIENT_SECRET.
+	"vars": { "GITHUB_CLIENT_ID": "Ov23liK0RilXoojDmXW1" },
 	"observability": {
 		"enabled": true
 	},
