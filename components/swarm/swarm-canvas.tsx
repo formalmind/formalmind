@@ -1,7 +1,7 @@
 "use client";
 
 import { type ReactNode, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import { Hand, Maximize, Minus, Pause, Play, Plus, X } from "lucide-react";
+import { Hand, MousePointer2, Maximize, Minus, Pause, Play, Plus, X } from "lucide-react";
 import { Link } from "react-router";
 import * as DialogPrimitive from "@radix-ui/react-dialog";
 import { TextSwap } from "@/components/motion/text-swap";
@@ -784,10 +784,29 @@ export function SwarmCanvas({ state, fill = false, contain = false, title, actio
 
 	// Where your pointer is on the board (in board units), for the assistant to follow; null when it's off the board.
 	const [companion, setCompanion] = useState<{ x: number; y: number } | null>(null);
+	// The demo always has the assistant follow you; in the app it's opt-in (it can get in the way), remembered here.
+	const [followPref, setFollowPref] = useState(() => {
+		try {
+			return localStorage.getItem("fm:assistant-follows") === "1";
+		} catch {
+			return false;
+		}
+	});
+	const follows = fill ? followPref : true;
+	const toggleFollow = () => {
+		const next = !followPref;
+		setFollowPref(next);
+		if (!next) setCompanion(null);
+		try {
+			localStorage.setItem("fm:assistant-follows", next ? "1" : "0");
+		} catch {
+			// Storage refused: the choice lasts for this visit.
+		}
+	};
 	const companionFrame = useRef(0);
 	const followPointer = (e: React.PointerEvent<HTMLDivElement>) => {
 		const box = frameRef.current?.getBoundingClientRect();
-		if (!box || companionFrame.current) return;
+		if (!follows || !box || companionFrame.current) return;
 		const x = (e.clientX - box.left - ox) / s + 22;
 		const y = (e.clientY - box.top - oy) / s + 26;
 		companionFrame.current = requestAnimationFrame(() => {
@@ -1069,6 +1088,16 @@ export function SwarmCanvas({ state, fill = false, contain = false, title, actio
 						title={hand ? "Hand tool on: drag to move the canvas (V to leave)" : "Hand tool (H), or hold Space and drag"}
 					>
 						<Hand className="size-3.5" />
+					</button>
+					<button
+						type="button"
+						onClick={toggleFollow}
+						aria-pressed={followPref}
+						className={`flex size-8 items-center justify-center rounded-full border-r transition-colors ${followPref ? "bg-foreground text-background" : "hover:text-foreground"}`}
+						aria-label="Assistant follows your pointer"
+						title={followPref ? "The assistant follows your pointer (click to stop)" : "Have the assistant follow your pointer"}
+					>
+						<MousePointer2 className="size-3.5" />
 					</button>
 					<button type="button" onClick={() => zoomCentre(1 / 1.25)} className="flex size-8 items-center justify-center rounded-full transition-colors hover:text-foreground" aria-label="Zoom out" title="Zoom out">
 						<Minus className="size-3.5" />
