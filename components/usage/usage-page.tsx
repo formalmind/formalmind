@@ -19,6 +19,9 @@ function sumBy(costs: SwarmCost[], key: (c: SwarmCost) => string) {
 }
 
 /** Historical spend: every cost line the swarm wrote to its ledger issue, by day, role and project. */
+
+/** The ledger names a run by its job (prove, review, ...); colour each by the agent that does it. */
+const LEDGER_ROLES: Record<string, SwarmRole> = { plan: "planner", prove: "prover", rebuild: "rebuilder", review: "reviewer", merge: "merger", edit: "editor", chief: "chief", assist: "assistant", answer: "assistant" };
 export function UsagePage() {
 	const [costs, setCosts] = useState<SwarmCost[] | null>(null);
 	const [error, setError] = useState<string | null>(null);
@@ -99,7 +102,7 @@ export function UsagePage() {
 				</section>
 
 				<div className="grid items-start gap-4 sm:grid-cols-2">
-					<Breakdown title="By role" rows={byRole} total={total} color={(k) => ROLE_COLORS[k as SwarmRole]} />
+					<Breakdown title="By role" rows={byRole} total={total} color={(k) => ROLE_COLORS[(LEDGER_ROLES[k] ?? k) as SwarmRole]} />
 					<Breakdown title="By project" rows={byRepo} total={total} />
 				</div>
 
