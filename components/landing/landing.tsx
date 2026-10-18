@@ -49,9 +49,6 @@ export function Landing({ signedIn }: { signedIn: boolean }) {
 					Formal Mind.
 				</Link>
 				<nav className="flex items-center gap-1 text-sm">
-					<a href="/brand/" className="rounded-full px-3 py-1.5 text-muted-foreground hover:text-foreground">
-						Brand kit
-					</a>
 					{/* One call to action: in for someone signed in, started for everyone else (login is on the way). */}
 					<a href={signedIn ? "/" : startHref} className="rounded-full bg-primary px-3.5 py-1.5 font-medium text-primary-foreground hover:opacity-90">
 						{signedIn ? "Open the app" : "Get started"}
@@ -123,6 +120,12 @@ export function Landing({ signedIn }: { signedIn: boolean }) {
 					)}
 				</section>
 
+				<footer className="mx-auto flex w-full max-w-6xl shrink-0 flex-wrap items-center gap-x-5 gap-y-2 px-4 pb-8 pt-4 text-sm text-muted-foreground sm:px-6">
+					<span>© {new Date().getFullYear()} Formal Mind</span>
+					<a href="/brand/" className="hover:text-foreground">Brand kit</a>
+					<a href="/privacy/" className="hover:text-foreground">Privacy</a>
+					<a href="/terms/" className="hover:text-foreground">Terms</a>
+				</footer>
 			</main>
 
 			{video === "icon" ? (
