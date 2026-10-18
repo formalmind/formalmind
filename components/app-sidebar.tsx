@@ -18,10 +18,11 @@ import { NavUser } from "@/components/nav-user"
 import { LogoMark } from "@/components/logo"
 import { projectPath, useProjectChats, useProjects, type Project } from "@/components/projects/use-projects"
 
-type NavItem = { title: string; url: string; icon: React.ElementType }
+/** `anim` names the hover animation in globals.css (icon-anim-*). */
+type NavItem = { title: string; url: string; icon: React.ElementType; anim?: string }
 
 const FOOTER: NavItem[] = [
-	{ title: "Get started", url: "/github", icon: BookOpen },
+	{ title: "Get started", url: "/github", icon: BookOpen, anim: "book" },
 ]
 
 /* Plain text throughout, no bold: the current page gets a soft pill, everything else stays quiet. */
@@ -32,8 +33,8 @@ function NavLink({ item, active }: { item: NavItem; active: boolean }) {
 	return (
 		<SidebarMenuItem>
 			<SidebarMenuButton asChild isActive={active} tooltip={item.title} className="font-normal data-[active=true]:font-normal">
-				<Link to={item.url}>
-					<item.icon />
+				<Link to={item.url} className="icon-anim-host">
+					<item.icon className={item.anim ? `icon-anim-${item.anim}` : undefined} />
 					<span>{item.title}</span>
 				</Link>
 			</SidebarMenuButton>
@@ -153,13 +154,13 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
 				<SidebarGroup>
 					<SidebarMenu>
 						{/* One swarm, one budget, working across every project: the home page. */}
-						<NavLink item={{ title: "Swarm", url: "/", icon: Network }} active={pathname === "/" || pathname === "/swarm/chat"} />
-						<NavLink item={{ title: "Roadmap", url: "/roadmap", icon: GanttChart }} active={pathname === "/roadmap" || pathname.endsWith("/roadmap")} />
-						<NavLink item={{ title: "Usage", url: "/usage", icon: ChartColumn }} active={pathname === "/usage"} />
+						<NavLink item={{ title: "Swarm", url: "/", icon: Network, anim: "network" }} active={pathname === "/" || pathname === "/swarm/chat"} />
+						<NavLink item={{ title: "Roadmap", url: "/roadmap", icon: GanttChart, anim: "roadmap" }} active={pathname === "/roadmap" || pathname.endsWith("/roadmap")} />
+						<NavLink item={{ title: "Usage", url: "/usage", icon: ChartColumn, anim: "chart" }} active={pathname === "/usage"} />
 						<SidebarMenuItem>
 							<SidebarMenuButton asChild isActive={pathname === "/onboarding" && window.location.search.includes("new=1")} tooltip="New project" className="font-normal data-[active=true]:font-normal">
-								<Link to="/onboarding?new=1">
-									<Plus />
+								<Link to="/onboarding?new=1" className="icon-anim-host">
+									<Plus className="icon-anim-plus" />
 									<span>New project</span>
 								</Link>
 							</SidebarMenuButton>
