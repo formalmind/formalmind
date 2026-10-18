@@ -1059,7 +1059,7 @@ export function SwarmCanvas({ state, fill = false, contain = false, title, actio
 			)}
 			</div>
 			{fill ? (
-				<div data-canvas-ui className="absolute bottom-3 right-3 flex h-8 items-center rounded-full border bg-background/90 text-muted-foreground shadow-sm backdrop-blur">
+				<div data-canvas-ui className="absolute right-3 top-14 z-10 flex h-8 items-center rounded-full border bg-background/90 text-muted-foreground shadow-sm backdrop-blur">
 					<button
 						type="button"
 						onClick={() => setHand((on) => !on)}
