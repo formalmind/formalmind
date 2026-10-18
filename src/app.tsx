@@ -38,6 +38,8 @@ const ProjectHomePage = page(() => import("@/components/projects/project-pages")
 const SwarmChatPage = page(() => import("@/components/projects/project-pages"), (m) => m.SwarmChatPage);
 const ProjectRoadmapPage = page(() => import("@/components/projects/project-pages"), (m) => m.ProjectRoadmapPage);
 const ProjectChatPage = page(() => import("@/components/projects/project-pages"), (m) => m.ProjectChatPage);
+const UsagePage = page(() => import("@/components/usage/usage-page"), (m) => m.UsagePage);
+const BillingPage = page(() => import("@/components/billing/billing-page"), (m) => m.BillingPage);
 const FirstProject = page(() => import("@/components/projects/project-pages"), (m) => m.FirstProject);
 
 type User = SessionData["user"];
@@ -111,6 +113,8 @@ export function App() {
 							<Route path="/" element={<Title text="Swarm · Formal Mind"><SwarmWorkspace repo={SWARM_REPO} /></Title>} />
 							<Route path="/swarm/chat" element={<Title text="Ask the swarm · Formal Mind"><SwarmChatPage /></Title>} />
 							<Route path="/roadmap" element={<Title text="Roadmap · Formal Mind"><FirstProject page="roadmap" /></Title>} />
+							<Route path="/billing" element={<Title text="Billing · Formal Mind"><BillingPage /></Title>} />
+							<Route path="/usage" element={<Title text="Usage · Formal Mind"><UsagePage /></Title>} />
 							<Route path="/projects/:owner/:name" element={<ProjectHomePage />} />
 							<Route path="/projects/:owner/:name/roadmap" element={<Title text="Roadmap · Formal Mind"><ProjectRoadmapPage /></Title>} />
 							<Route path="/projects/:owner/:name/chat" element={<Title text="Chat · Formal Mind"><ProjectChatPage /></Title>} />

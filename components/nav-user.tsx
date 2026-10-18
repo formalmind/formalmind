@@ -1,9 +1,9 @@
 "use client"
 
+import { Link } from "react-router";
 import { forgetLandingProgress } from "@/components/landing/use-plan";
 import {
 	BadgeCheck,
-	Bell,
 	ChevronsUpDown,
 	CreditCard,
 	LogIn,
@@ -104,13 +104,11 @@ export function NavUser() {
 								<BadgeCheck />
 								Account
 							</DropdownMenuItem>
-							<DropdownMenuItem>
-								<CreditCard />
-								Billing
-							</DropdownMenuItem>
-							<DropdownMenuItem>
-								<Bell />
-								Notifications
+							<DropdownMenuItem asChild>
+								<Link to="/billing">
+									<CreditCard />
+									Billing
+								</Link>
 							</DropdownMenuItem>
 						</DropdownMenuGroup>
 						<DropdownMenuSeparator />

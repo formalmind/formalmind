@@ -50,7 +50,8 @@ async function stripe<T>(path: string, init?: { method?: string; form?: Record<s
 	return body;
 }
 
-export async function createCheckout({ sub, email, usd, origin }: { sub: string; email?: string; usd: number; origin: string }) {
+/** Checkout returns to the page that started it: onboarding or billing. */
+export async function createCheckout({ sub, email, usd, origin, page = "/onboarding" }: { sub: string; email?: string; usd: number; origin: string; page?: "/onboarding" | "/billing" }) {
 	if (!Number.isFinite(usd) || usd < MIN_USD || usd > MAX_USD) throw new Error(`Deposits are between $${MIN_USD} and $${MAX_USD}.`);
 	const session = await stripe<{ id: string; url: string }>("/checkout/sessions", {
 		method: "POST",
@@ -64,8 +65,8 @@ export async function createCheckout({ sub, email, usd, origin }: { sub: string;
 			client_reference_id: sub,
 			"metadata[sub]": sub,
 			...(email ? { customer_email: email } : {}),
-			success_url: `${origin}/onboarding?checkout=success&session_id={CHECKOUT_SESSION_ID}`,
-			cancel_url: `${origin}/onboarding?checkout=cancelled`,
+			success_url: `${origin}${page}?checkout=success&session_id={CHECKOUT_SESSION_ID}`,
+			cancel_url: `${origin}${page}?checkout=cancelled`,
 		},
 	});
 	return session.url;

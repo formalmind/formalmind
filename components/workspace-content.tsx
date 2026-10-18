@@ -10,6 +10,8 @@ export function WorkspaceContent({ children }: { children: React.ReactNode }) {
 	const pathname = useLocation().pathname;
 	// App pages fill the window; anything else is a document page with a breadcrumb.
 	const isChat = ["/", "/chat", "/roadmap", "/onboarding"].includes(pathname) || pathname.startsWith("/projects/") || pathname === "/swarm/chat";
+	// Account pages keep the breadcrumb header but lay themselves out (no document prose).
+	const isPanel = ["/usage", "/billing"].includes(pathname);
 	// The landing page brings its own header and main.
 	if (pathname === "/welcome") return <div className="w-full">{children}</div>;
 	return (
@@ -22,7 +24,7 @@ export function WorkspaceContent({ children }: { children: React.ReactNode }) {
 						<BreadCrumbs />
 					</div>
 				</header>
-				{isChat ? (
+				{isChat || isPanel ? (
 					<div className="flex min-h-0 flex-1 flex-col">{children}</div>
 				) : (
 					<div className="flex flex-1 flex-col min-h-0 gap-4 p-4 pt-0 text-sm">
