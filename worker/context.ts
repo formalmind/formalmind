@@ -4,6 +4,8 @@ import type { KV } from "@/lib/kv";
 export interface Env {
 	ASSETS: { fetch(request: Request): Promise<Response> };
 	FORMALMIND: KV;
+	/** One Durable Object per project (worker/project-do.ts). */
+	PROJECT?: { idFromName(name: string): unknown; get(id: unknown): unknown };
 	[secret: string]: unknown;
 }
 

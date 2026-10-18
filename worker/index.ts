@@ -20,6 +20,11 @@ import * as swarmAgent from "@/server/routes/swarm/agent/route";
 import * as swarmChat from "@/server/routes/swarm/chat/route";
 import * as swarmState from "@/server/routes/swarm/state/route";
 import * as tooltip from "@/server/routes/tooltip/route";
+import * as usage from "@/server/routes/usage/route";
+import * as githubItem from "@/server/routes/github/item/route";
+import * as githubWebhook from "@/server/routes/github/webhook/route";
+
+export { ProjectDO } from "./project-do";
 
 type Handler = (request: Request) => Response | Promise<Response>;
 type RouteModule = Partial<Record<"GET" | "POST" | "PUT" | "DELETE", Handler>>;
@@ -32,6 +37,8 @@ const ROUTES: Record<string, { module: RouteModule; open?: boolean }> = {
 	"/api/billing/webhook": { module: billingWebhook, open: true },
 	"/api/chat": { module: chat },
 	"/api/github/install-status": { module: githubInstallStatus },
+	"/api/github/item": { module: githubItem },
+	"/api/github/webhook": { module: githubWebhook, open: true },
 	"/api/github/marketplace": { module: githubMarketplace, open: true },
 	"/api/github/repos": { module: githubRepos },
 	"/api/onboarding/install": { module: onboardingInstall },
@@ -44,6 +51,7 @@ const ROUTES: Record<string, { module: RouteModule; open?: boolean }> = {
 	"/api/swarm/chat": { module: swarmChat },
 	"/api/swarm/state": { module: swarmState },
 	"/api/tooltip": { module: tooltip },
+	"/api/usage": { module: usage },
 };
 
 const app = new Hono<{ Bindings: Env }>();

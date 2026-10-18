@@ -51,11 +51,11 @@ export function BillingPage() {
 
 	return (
 		<div className="flex min-h-0 flex-1 flex-col overflow-y-auto">
-			<main className="mx-auto w-full max-w-3xl space-y-6 px-4 pb-6">
+			<main className="mx-auto w-full max-w-4xl space-y-6 px-6 pb-10 pt-2">
 				<section className="rounded-xl border p-5">
 					<p className="text-sm text-muted-foreground">Credit balance</p>
-					<p className="text-3xl font-semibold tabular-nums">{balance ? usd(balance.cents) : "…"}</p>
-					<p className="mt-1 text-xs text-muted-foreground">
+					<p className="mt-1 text-3xl font-semibold tabular-nums">{balance ? usd(balance.cents) : "…"}</p>
+					<p className="mt-2 text-xs text-muted-foreground">
 						Prepaid model usage for your swarm. It pauses for the day once the daily budget is spent.{" "}
 						<Link to="/usage" className="underline underline-offset-2 hover:text-foreground">
 							See usage
@@ -66,9 +66,9 @@ export function BillingPage() {
 				<section className="rounded-xl border p-5">
 					<h2 className="text-sm font-medium">Add credits</h2>
 					{balance && !balance.configured ? (
-						<p className="mt-2 text-sm text-muted-foreground">Payments aren't connected yet.</p>
+						<p className="mt-4 text-sm text-muted-foreground">Payments aren't connected yet.</p>
 					) : (
-						<div className="mt-3 flex flex-wrap gap-2">
+						<div className="mt-4 flex flex-wrap gap-2">
 							{DEPOSITS_USD.map((amount) => (
 								<button
 									key={amount}
@@ -82,17 +82,17 @@ export function BillingPage() {
 							))}
 						</div>
 					)}
-					<p className="mt-3 text-xs text-muted-foreground">Paid securely with Stripe.</p>
+					<p className="mt-4 text-xs text-muted-foreground">Paid securely with Stripe.</p>
 				</section>
 
 				<section className="rounded-xl border">
-					<h2 className="border-b px-5 py-2 text-sm font-medium">Payment history</h2>
+					<h2 className="border-b px-5 py-3 text-sm font-medium">Payment history</h2>
 					{!balance?.entries.length ? (
-						<p className="px-5 py-3 text-sm text-muted-foreground">{balance ? "No payments yet." : "Loading…"}</p>
+						<p className="px-5 py-4 text-sm text-muted-foreground">{balance ? "No payments yet." : "Loading…"}</p>
 					) : (
 						<ul className="divide-y text-sm">
 							{[...balance.entries].reverse().map((e) => (
-								<li key={e.ref} className="flex items-center gap-3 px-5 py-2">
+								<li key={e.ref} className="flex items-center gap-4 px-5 py-2.5">
 									<span className="w-32 shrink-0 text-xs text-muted-foreground tabular-nums">{e.at.slice(0, 16).replace("T", " ")}</span>
 									<span className="flex-1">Deposit</span>
 									<span className="tabular-nums">{usd(e.cents)}</span>

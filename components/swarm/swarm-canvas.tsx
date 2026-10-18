@@ -1280,7 +1280,7 @@ export function ItemHoverCard({ item, repo, left, top, below, onEnter, onLeave }
 }
 
 /** The issue or PR behind a card: state, title, excerpt, labels, author. `full` shows the whole excerpt. */
-function ItemPreview({ item, repo, full = false }: { item: SwarmItem; repo?: string; full?: boolean }) {
+export function ItemPreview({ item, repo, full = false }: { item: SwarmItem; repo?: string; full?: boolean }) {
 	const state = item.merged ? "merged" : item.state ?? "open";
 	const stateColor = state === "open" ? "text-emerald-600 dark:text-emerald-400" : "text-violet-600 dark:text-violet-400";
 	return (

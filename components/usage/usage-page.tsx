@@ -1,7 +1,10 @@
 import { useEffect, useMemo, useState } from "react";
+import { GitFork, Star } from "lucide-react";
 import { notify } from "@/lib/notifications";
 import { ROLE_COLORS } from "@/lib/swarm-roles";
-import type { SwarmCost, SwarmRole, SwarmState } from "@/lib/swarm";
+import type { SwarmCost, SwarmItem, SwarmRole } from "@/lib/swarm";
+import { HoverCard, HoverCardContent, HoverCardTrigger } from "@/components/ui/hover-card";
+import { ItemPreview } from "@/components/swarm/swarm-canvas";
 
 const RANGES = [7, 30, 90] as const;
 type Range = (typeof RANGES)[number];
@@ -22,11 +25,12 @@ export function UsagePage() {
 	const [range, setRange] = useState<Range>(30);
 
 	useEffect(() => {
-		fetch("/api/swarm/state")
+		// Spend is kept on Cloudflare (the Project Durable Object), so this page works while GitHub is unreachable.
+		fetch("/api/usage")
 			.then(async (res) => {
 				const body = await res.json();
 				if (!res.ok) throw new Error(body.error ?? res.statusText);
-				setCosts((body as SwarmState).costs);
+				setCosts((body as { costs: SwarmCost[] }).costs);
 			})
 			.catch((err) => {
 				const message = err instanceof Error ? err.message : "Could not load usage.";
@@ -52,12 +56,12 @@ export function UsagePage() {
 
 	return (
 		<div className="flex min-h-0 flex-1 flex-col overflow-y-auto">
-			<main className="mx-auto w-full max-w-4xl space-y-6 px-4 pb-6">
+			<main className="mx-auto w-full max-w-4xl space-y-6 px-6 pb-10 pt-2">
 				{error ? <p className="text-sm text-destructive">{error}</p> : null}
-				<div className="flex flex-wrap items-end justify-between gap-4">
+				<div className="flex flex-wrap items-center justify-between gap-4">
 					<div>
 						<p className="text-sm text-muted-foreground">Spent in the last {range} days</p>
-						<p className="text-3xl font-semibold tabular-nums">{costs ? usd(total) : "…"}</p>
+						<p className="mt-1 text-3xl font-semibold tabular-nums">{costs ? usd(total) : "…"}</p>
 						<p className="mt-1 text-xs text-muted-foreground">
 							{costs ? `${inRange.length} runs · ${usd(allTime)} all time` : "Reading the ledger…"}
 						</p>
@@ -76,7 +80,7 @@ export function UsagePage() {
 					</div>
 				</div>
 
-				<section className="rounded-xl border p-4">
+				<section className="rounded-xl border p-5">
 					<div className="flex h-40 items-end gap-px">
 						{days.map((d) => (
 							<div key={d.date} className="group relative flex h-full flex-1 items-end" title={`${d.date}: ${usd(d.usd)}`}>
@@ -87,31 +91,32 @@ export function UsagePage() {
 							</div>
 						))}
 					</div>
-					<div className="mt-2 flex justify-between text-xs text-muted-foreground tabular-nums">
+					<div className="mt-3 flex justify-between text-xs text-muted-foreground tabular-nums">
 						<span>{days[0]?.date}</span>
 						<span>peak {usd(peak === 0.01 ? 0 : peak)} / day</span>
 						<span>{days.at(-1)?.date}</span>
 					</div>
 				</section>
 
-				<div className="grid gap-4 sm:grid-cols-2">
+				<div className="grid items-start gap-4 sm:grid-cols-2">
 					<Breakdown title="By role" rows={byRole} total={total} color={(k) => ROLE_COLORS[k as SwarmRole]} />
 					<Breakdown title="By project" rows={byRepo} total={total} />
 				</div>
 
 				<section className="rounded-xl border">
-					<h2 className="border-b px-4 py-2 text-sm font-medium">Runs</h2>
+					<h2 className="border-b px-5 py-3 text-sm font-medium">Runs</h2>
 					{inRange.length === 0 ? (
-						<p className="px-4 py-3 text-sm text-muted-foreground">No runs in this range.</p>
+						<p className="px-5 py-4 text-sm text-muted-foreground">No runs in this range.</p>
 					) : (
 						<ul className="max-h-96 divide-y overflow-y-auto text-sm">
 							{[...inRange].reverse().map((c, i) => (
-								<li key={`${c.createdAt}-${i}`} className="flex items-center gap-3 px-4 py-2">
+								<li key={`${c.createdAt}-${i}`} className="flex items-center gap-4 px-5 py-2.5">
 									<span className="w-32 shrink-0 text-xs text-muted-foreground tabular-nums">{c.createdAt.slice(0, 16).replace("T", " ")}</span>
 									<span className="min-w-0 flex-1 truncate">
 										{c.role}
-										{c.ref ? <span className="text-muted-foreground"> on #{c.ref}</span> : null}
-										<span className="text-muted-foreground"> · {c.repo}</span>
+										{c.ref ? <> <span className="text-muted-foreground">on</span> <RefCard repo={c.repo} ref_={c.ref} /></> : null}
+										<span className="text-muted-foreground"> · </span>
+										<RepoCard repo={c.repo} />
 									</span>
 									<span className="tabular-nums">{usd(c.usd)}</span>
 								</li>
@@ -126,22 +131,108 @@ export function UsagePage() {
 
 function Breakdown({ title, rows, total, color }: { title: string; rows: [string, number][]; total: number; color?: (key: string) => string | undefined }) {
 	return (
-		<section className="rounded-xl border p-4">
-			<h2 className="mb-3 text-sm font-medium">{title}</h2>
+		<section className="rounded-xl border p-5">
+			<h2 className="mb-4 text-sm font-medium">{title}</h2>
 			{rows.length === 0 ? <p className="text-sm text-muted-foreground">Nothing yet.</p> : null}
-			<ul className="space-y-2 text-sm">
+			<ul className="space-y-3 text-sm">
 				{rows.map(([key, value]) => (
 					<li key={key}>
 						<div className="flex justify-between gap-2">
 							<span className="truncate">{key}</span>
 							<span className="tabular-nums">{usd(value)}</span>
 						</div>
-						<div className="mt-1 h-1.5 rounded-full bg-muted">
+						<div className="mt-1.5 h-1.5 rounded-full bg-muted">
 							<div className="h-full rounded-full bg-foreground/70" style={{ width: `${total ? (value / total) * 100 : 0}%`, background: color?.(key) }} />
 						</div>
 					</li>
 				))}
 			</ul>
 		</section>
+	);
+}
+
+// Issues and PRs looked up once per page view, shared by every row that names them.
+const items = new Map<string, Promise<SwarmItem | null>>();
+function loadItem(repo: string, number: number) {
+	const key = `${repo}#${number}`;
+	if (!items.has(key)) {
+		items.set(
+			key,
+			fetch(`/api/github/item?repo=${encodeURIComponent(repo)}&number=${number}`)
+				.then((res) => (res.ok ? (res.json() as Promise<SwarmItem>) : null))
+				.catch(() => null),
+		);
+	}
+	return items.get(key)!;
+}
+
+/** "#75" with a GitHub-style preview of that issue or PR on hover. */
+function RefCard({ repo, ref_ }: { repo: string; ref_: string }) {
+	const number = Number(ref_.replace(/^#/, ""));
+	const [item, setItem] = useState<SwarmItem | null | undefined>(undefined);
+	const url = `https://github.com/${repo}/issues/${number}`;
+	if (!Number.isInteger(number) || number < 1) return <span className="text-muted-foreground">{ref_}</span>;
+	return (
+		<HoverCard openDelay={200} closeDelay={100} onOpenChange={(open) => open && item === undefined && void loadItem(repo, number).then(setItem)}>
+			<HoverCardTrigger asChild>
+				<a href={item?.url ?? url} target="_blank" rel="noreferrer" className="text-muted-foreground hover:text-foreground hover:underline">
+					#{number}
+				</a>
+			</HoverCardTrigger>
+			<HoverCardContent align="start" className="w-80 p-4">
+				{item ? <ItemPreview item={item} repo={repo} /> : (
+					<p className="text-xs text-muted-foreground">{item === null ? `Could not load ${repo}#${number}.` : "Loading…"}</p>
+				)}
+			</HoverCardContent>
+		</HoverCard>
+	);
+}
+
+type RepoSummary = {
+	name: string; description: string | null; url: string; stars: number; forks: number; openIssues: number;
+	language: string | null; pushedAt: string; private: boolean; owner: { login: string; avatar: string; url: string };
+};
+const repos = new Map<string, Promise<RepoSummary | null>>();
+function loadRepo(repo: string) {
+	if (!repos.has(repo)) {
+		repos.set(repo, fetch(`/api/github/item?repo=${encodeURIComponent(repo)}`).then((res) => (res.ok ? (res.json() as Promise<RepoSummary>) : null)).catch(() => null));
+	}
+	return repos.get(repo)!;
+}
+
+/** The repository name, with its GitHub profile (owner, description, stars) on hover. */
+function RepoCard({ repo }: { repo: string }) {
+	const [summary, setSummary] = useState<RepoSummary | null | undefined>(undefined);
+	return (
+		<HoverCard openDelay={200} closeDelay={100} onOpenChange={(open) => open && summary === undefined && void loadRepo(repo).then(setSummary)}>
+			<HoverCardTrigger asChild>
+				<a href={`https://github.com/${repo}`} target="_blank" rel="noreferrer" className="text-muted-foreground hover:text-foreground hover:underline">
+					{repo}
+				</a>
+			</HoverCardTrigger>
+			<HoverCardContent align="start" className="w-80 p-4">
+				{summary ? (
+					<div>
+						<a href={summary.owner.url} target="_blank" rel="noreferrer" className="flex items-center gap-2 text-xs text-muted-foreground hover:text-foreground">
+							<img src={`${summary.owner.avatar}&s=48`} alt="" className="size-6 rounded-full" />
+							{summary.owner.login}
+						</a>
+						<a href={summary.url} target="_blank" rel="noreferrer" className="mt-2 block text-sm font-semibold hover:underline">
+							{summary.name}
+							{summary.private ? <span className="ml-2 rounded-full border px-1.5 text-[10px] font-normal text-muted-foreground">Private</span> : null}
+						</a>
+						{summary.description ? <p className="mt-1.5 text-xs leading-5 text-muted-foreground">{summary.description}</p> : null}
+						<div className="mt-3 flex items-center gap-4 border-t pt-3 text-xs text-muted-foreground">
+							{summary.language ? <span>{summary.language}</span> : null}
+							<span className="inline-flex items-center gap-1"><Star className="size-3" />{summary.stars}</span>
+							<span className="inline-flex items-center gap-1"><GitFork className="size-3" />{summary.forks}</span>
+							<span>{summary.openIssues} open</span>
+						</div>
+					</div>
+				) : (
+					<p className="text-xs text-muted-foreground">{summary === null ? `Could not load ${repo}.` : "Loading…"}</p>
+				)}
+			</HoverCardContent>
+		</HoverCard>
 	);
 }

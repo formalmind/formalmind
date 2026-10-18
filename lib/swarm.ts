@@ -142,7 +142,7 @@ export interface SwarmState {
 	runs: SwarmRun[];
 }
 
-type GitHubIssue = {
+export type GitHubIssue = {
 	number: number;
 	title: string;
 	html_url: string;
@@ -165,7 +165,7 @@ function excerptOf(body: string | null) {
 	return text.length > 240 ? `${text.slice(0, 239)}…` : text;
 }
 
-type GitHubComment = { body: string; created_at: string; updated_at: string; html_url: string };
+export type GitHubComment = { body: string; created_at: string; updated_at: string; html_url: string };
 
 type GitHubRun = { id: number; status: string; conclusion: string | null; run_started_at: string; updated_at: string; html_url: string };
 
@@ -185,7 +185,7 @@ export async function github<T>(path: string, repo = SWARM_REPO): Promise<T> {
 	return res.json() as Promise<T>;
 }
 
-function toItem(repo: string, issue: GitHubIssue): SwarmItem {
+export function toItem(repo: string, issue: GitHubIssue): SwarmItem {
 	return {
 		repo,
 		number: issue.number,
@@ -295,7 +295,7 @@ async function recentRuns(notes: SwarmNote[], costs: SwarmCost[]): Promise<Swarm
 const COST_MARKER = /<!-- fm-cost role=(\S+) ref=(\S*) usd=([\d.]+)(?: run=(\d+))?/;
 const CYCLE_MARKER = /<!-- fm-cycle n=(\d+) phase=(\w+) -->/;
 
-function parseCost(comment: GitHubComment): SwarmCost[] {
+export function parseCost(comment: GitHubComment): SwarmCost[] {
 	const match = comment.body.match(COST_MARKER);
 	if (!match) return [];
 	const repo = comment.body.split("-->")[0].match(REPO_FIELD)?.[1] ?? SWARM_REPO;
@@ -326,6 +326,18 @@ async function writeLedgerCache(next: LedgerCache) {
 		const { putJSON } = await import("@/lib/kv");
 		await putJSON(LEDGER_KEY, next);
 	} catch {}
+}
+
+/** Cost lines from the Project Durable Object (no GitHub read per poll); straight from the ledger where there is none. */
+async function spendCosts(): Promise<SwarmCost[]> {
+	try {
+		const { projectObject } = await import("@/lib/spend");
+		const project = projectObject();
+		if (project) return (await project.costs()).costs;
+	} catch (err) {
+		console.error("[swarm] spend object unavailable, reading the ledger", err);
+	}
+	return allCosts();
 }
 
 /**
@@ -412,7 +424,7 @@ async function loadSwarmState(account: Project[]): Promise<SwarmState> {
 		latestRawComments(NOTEBOOK_ISSUE, 12),
 		latestComments(CHIEF_ISSUE, 1),
 		latestComments(ASSISTANT_ISSUE, 1),
-		allCosts(),
+		spendCosts(),
 	]);
 	const boards = await Promise.all(boardProjects(config, account).map(projectWork));
 	const notebook = rawNotebook.slice(-6).map(toComment);

@@ -28,6 +28,9 @@
 		{ "binding": "FORMALMIND", "id": "9d16b5c66b4645cb9ac59e8b1d81d0c8" }
 	],
 	// Users (migrations/): `wrangler d1 migrations apply formalmind-users --remote`.
+	// One Durable Object per project (worker/project-do.ts): spend now; lease, queue and dispatcher later.
+	"durable_objects": { "bindings": [{ "name": "PROJECT", "class_name": "ProjectDO" }] },
+	"migrations": [{ "tag": "v1", "new_sqlite_classes": ["ProjectDO"] }],
 	"d1_databases": [
 		{ "binding": "DB", "database_name": "formalmind-users", "database_id": "cf9ae3bf-c762-4aa3-bd81-b7b50273e689" }
 	]
