@@ -7,15 +7,19 @@
 }
 /* Signed in, everything starts below that strip, so nothing clickable sits under it or under the window buttons. */
 .fm-shell [data-sidebar="header"] {
-	padding-top: 32px;
+	padding-top: 40px;
 }
 .fm-shell .h-dvh,
 .fm-shell .min-h-svh {
-	height: calc(100dvh - 32px);
+	height: calc(100dvh - 40px);
 	min-height: 0;
 }
 .fm-shell {
-	padding-top: 32px;
+	padding-top: 40px;
+}
+/* The title bar has the sidebar toggle; the pages' own toggles would be a second one. */
+.fm-shell main [data-sidebar="trigger"] {
+	display: none;
 }
 .font-display {
 	font-family: "Instrument Serif", ui-serif, Georgia, serif;

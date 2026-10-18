@@ -16,6 +16,7 @@ import { apiBase, clearToken, exchangeCode, loadToken } from "./api";
 
 import { LocalFolderPage, LocalFolders } from "./local";
 import { onboarded, SetupSteps, SignInStep } from "./onboarding";
+import { TabBar } from "./tabs";
 
 const UsagePage = lazy(() => import("@/components/usage/usage-page").then((m) => ({ default: m.UsagePage })));
 const pages = () => import("@/components/projects/project-pages");
@@ -39,6 +40,7 @@ function Shell({ user }: { user: User }) {
 		<AuthProvider value={{ user, tokenSet: { accessToken: "", expiresAt: 0 } }}>
 			<ChatConversationsProvider>
 				<SidebarProvider defaultOpen>
+					<TabBar />
 					<AppSidebar extra={<LocalFolders />} />
 					<WorkspaceContent>
 						<Suspense fallback={null}>
@@ -118,7 +120,6 @@ export function DesktopApp() {
 	if (!setUp) return <SetupSteps onDone={() => setSetUp(true)} />;
 	return (
 		<ThemeProvider>
-			<div data-tauri-drag-region className="fm-drag" />
 			<div className="fm-shell">
 				<Shell user={user} />
 			</div>
