@@ -2,11 +2,20 @@
 .fm-drag {
 	position: fixed;
 	inset: 0 0 auto 0;
-	height: 36px;
+	height: 32px;
 	z-index: 50;
 }
-.fm-desktop [data-sidebar="header"] {
-	padding-top: 40px;
+/* Signed in, everything starts below that strip, so nothing clickable sits under it or under the window buttons. */
+.fm-shell [data-sidebar="header"] {
+	padding-top: 32px;
+}
+.fm-shell .h-dvh,
+.fm-shell .min-h-svh {
+	height: calc(100dvh - 32px);
+	min-height: 0;
+}
+.fm-shell {
+	padding-top: 32px;
 }
 .font-display {
 	font-family: "Instrument Serif", ui-serif, Georgia, serif;

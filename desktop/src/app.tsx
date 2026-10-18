@@ -119,7 +119,9 @@ export function DesktopApp() {
 	return (
 		<ThemeProvider>
 			<div data-tauri-drag-region className="fm-drag" />
-			<Shell user={user} />
+			<div className="fm-shell">
+				<Shell user={user} />
+			</div>
 		</ThemeProvider>
 	);
 }
