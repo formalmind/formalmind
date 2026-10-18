@@ -86,7 +86,9 @@ async function getSession(): Promise<SessionData | null> {
 	const id = readCookie(SESSION_COOKIE);
 	if (!id) return null;
 	const raw = await (await kv()).get(`session:${id}`);
-	return raw ? (JSON.parse(raw) as SessionData) : null;
+	const session = raw ? (JSON.parse(raw) as SessionData & { scope?: string }) : null;
+	// A session from before the sign-in scopes changed lacks permissions the app now relies on: sign in again.
+	return session?.scope === SCOPE ? session : null;
 }
 
 /** The signed-in person's GitHub token (from the formalmind App), refreshed when it has expired. */
@@ -97,7 +99,7 @@ async function getGitHubToken(): Promise<string> {
 	if (session.tokenSet.expiresAt - 60 > Date.now() / 1000) return session.tokenSet.accessToken;
 	if (!session.tokenSet.refreshToken || !id) throw new Error("The GitHub sign-in expired; sign in again.");
 	const tokens = await githubToken({ grant_type: "refresh_token", refresh_token: session.tokenSet.refreshToken });
-	const next: SessionData = { ...session, tokenSet: tokenSetFrom(tokens) };
+	const next = { ...session, tokenSet: tokenSetFrom(tokens) };
 	await (await kv()).put(`session:${id}`, JSON.stringify(next), { expirationTtl: SESSION_TTL });
 	return next.tokenSet.accessToken;
 }
@@ -153,7 +155,7 @@ export async function handleAuth(path: string): Promise<Response> {
 			const user = { sub: `github|${profile.id}`, nickname: profile.login, name: profile.name ?? profile.login, email: profile.email ?? undefined, picture: profile.avatar_url };
 			await saveUser({ ...user, githubId: profile.id, login: profile.login });
 			const id = randomId();
-			const session: SessionData = { user, tokenSet: tokenSetFrom(tokens) };
+			const session: SessionData & { scope: string } = { user, tokenSet: tokenSetFrom(tokens), scope: SCOPE };
 			await (await kv()).put(`session:${id}`, JSON.stringify(session), { expirationTtl: SESSION_TTL });
 			return redirect(tx.returnTo, [cookie(SESSION_COOKIE, id, { maxAge: SESSION_TTL }), cookie(TX_COOKIE, "", { maxAge: 0 })]);
 		} catch (error) {
