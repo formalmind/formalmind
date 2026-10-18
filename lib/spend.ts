@@ -5,7 +5,7 @@ import { currentRequest } from "@/worker/context";
 export const SPEND_OBJECT = "swarm:asyncswap/v2-proofs";
 
 type ProjectStub = {
-	costs(): Promise<{ costs: SwarmCost[]; syncedAt: number | null; stale?: string }>;
+	costs(): Promise<{ costs: SwarmCost[]; syncedAt: number | null }>;
 	addComments(comments: { body: string; created_at: string; updated_at: string; html_url: string }[]): Promise<number>;
 };
 

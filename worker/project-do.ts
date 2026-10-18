@@ -60,23 +60,31 @@ export class ProjectDO extends DurableObject {
 		this.setMeta("synced_at", String(Date.now()));
 	}
 
-	/** Every cost line, oldest first. Catches up from GitHub when the copy is old; if GitHub is down, serves what it has. */
-	async costs(): Promise<{ costs: SwarmCost[]; syncedAt: number | null; stale?: string }> {
+	/** Background catch-up from GitHub. A failure (rate limit, outage) is logged and retried later, never shown. */
+	async alarm() {
+		try {
+			await this.catchUp();
+		} catch (err) {
+			console.error("[project] ledger catch-up failed", err);
+			this.setMeta("synced_at", String(Date.now() - CATCH_UP_MS + 60_000)); // try again in a minute
+		}
+	}
+
+	/**
+	 * Every cost line, oldest first, always from this object's own storage. When the copy is older than
+	 * CATCH_UP_MS an alarm catches up from GitHub in the background; only a never-filled store waits for GitHub.
+	 */
+	async costs(): Promise<{ costs: SwarmCost[]; syncedAt: number | null }> {
 		const syncedAt = Number(this.meta("synced_at")) || null;
-		let stale: string | undefined;
-		if (!syncedAt || Date.now() - syncedAt > CATCH_UP_MS) {
-			try {
-				await this.ctx.blockConcurrencyWhile(() => this.catchUp());
-			} catch (err) {
-				stale = err instanceof Error ? err.message : String(err);
-				if (!syncedAt) throw err;
-			}
+		if (!syncedAt) {
+			await this.catchUp();
+		} else if (Date.now() - syncedAt > CATCH_UP_MS && !(await this.ctx.storage.getAlarm())) {
+			await this.ctx.storage.setAlarm(Date.now());
 		}
 		const rows = this.ctx.storage.sql.exec<CostRow>("SELECT repo, role, ref, usd, run_id, created_at FROM costs ORDER BY created_at").toArray();
 		return {
 			costs: rows.map((r) => ({ repo: r.repo, role: r.role, ref: r.ref, usd: r.usd, runId: r.run_id, createdAt: r.created_at })),
 			syncedAt: Number(this.meta("synced_at")) || null,
-			...(stale ? { stale } : {}),
 		};
 	}
 }

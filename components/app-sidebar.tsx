@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { Link, useLocation } from "react-router";
-import { BookOpen, Gauge, ChevronRight, GanttChart, Network, Plus } from "lucide-react"
+import { BookOpen, Folder, FolderOpen, Gauge, ChevronRight, GanttChart, Network, Plus } from "lucide-react"
 import {
 	Sidebar,
 	SidebarContent,
@@ -12,6 +12,7 @@ import {
 	SidebarMenu,
 	SidebarMenuButton,
 	SidebarMenuItem,
+	useSidebar,
 } from "@/components/ui/sidebar"
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible"
 import { NavUser } from "@/components/nav-user"
@@ -64,30 +65,41 @@ function useOpenFolders() {
 	return [open, set] as const
 }
 
-/** One project as a folder: its name, a chevron, and a + for a new chat; inside, its chats. */
-function ProjectFolder({ project, open, onOpenChange, pathname }: { project: Project; open: boolean; onOpenChange: (open: boolean) => void; pathname: string }) {
+/** One project as a folder: its icon, name, a chevron, and a + for a new chat; inside, its chats. */
+function ProjectFolder({ project, open, onOpenChange, pathname, collapsed, onExpand }: { project: Project; open: boolean; onOpenChange: (open: boolean) => void; pathname: string; collapsed: boolean; onExpand: () => void }) {
 	const chats = useProjectChats(project.repo)
 	const name = project.repo.split("/")[1] ?? project.repo
 
 	return (
 		<Collapsible open={open} onOpenChange={onOpenChange} asChild>
 			<li className="list-none">
-				<div className="group/folder flex h-8 items-center rounded-md pr-1">
-					<CollapsibleTrigger className="flex min-w-0 flex-1 items-center gap-1 px-2 text-left text-sm font-normal text-muted-foreground outline-none hover:text-sidebar-foreground focus-visible:ring-2 focus-visible:ring-sidebar-ring" title={project.repo}>
-						<span className="truncate">{name}</span>
-						<ChevronRight className={`size-3.5 shrink-0 transition-transform duration-150 ${open ? "rotate-90" : ""}`} aria-hidden />
+				<div className="group/folder flex h-8 items-center rounded-md pr-1 hover:bg-sidebar-accent group-data-[collapsible=icon]:size-8 group-data-[collapsible=icon]:p-0">
+					{/* Collapsed, only the folder shows: a click widens the sidebar with this project open. */}
+					<CollapsibleTrigger
+						onClick={(e) => {
+							if (collapsed) {
+								e.preventDefault()
+								onExpand()
+							}
+						}}
+						className="flex h-8 min-w-0 flex-1 items-center gap-2 px-2 text-left text-sm font-normal text-sidebar-foreground/90 outline-none focus-visible:ring-2 focus-visible:ring-sidebar-ring"
+						title={project.repo}
+					>
+						{open && !collapsed ? <FolderOpen className="size-4 shrink-0" aria-hidden /> : <Folder className="size-4 shrink-0" aria-hidden />}
+						<span className="truncate group-data-[collapsible=icon]:hidden">{name}</span>
+						<ChevronRight className={`size-3.5 shrink-0 text-muted-foreground transition-transform duration-150 group-data-[collapsible=icon]:hidden ${open ? "rotate-90" : ""}`} aria-hidden />
 					</CollapsibleTrigger>
 					<Link
 						to={projectPath(project.repo, "chat")}
 						aria-label={`New chat in ${project.repo}`}
 						title="New chat"
-						className="flex size-6 shrink-0 items-center justify-center rounded-md text-muted-foreground opacity-70 hover:bg-sidebar-accent hover:text-sidebar-foreground hover:opacity-100 focus-visible:opacity-100"
+						className="flex size-6 shrink-0 items-center justify-center rounded-md text-muted-foreground opacity-0 hover:bg-background hover:text-sidebar-foreground group-hover/folder:opacity-100 focus-visible:opacity-100 group-data-[collapsible=icon]:hidden"
 					>
 						<Plus className="size-3.5" />
 					</Link>
 				</div>
-				<CollapsibleContent>
-					<ul className="flex flex-col gap-0.5 pb-2">
+				<CollapsibleContent className="group-data-[collapsible=icon]:hidden">
+					<ul className="flex flex-col gap-0.5 pb-2 pl-6">
 						{chats.map((c) => {
 							const url = projectPath(project.repo, `chat/${c.id}`)
 							return (
@@ -108,6 +120,8 @@ function ProjectFolder({ project, open, onOpenChange, pathname }: { project: Pro
 function Projects({ pathname }: { pathname: string }) {
 	const projects = useProjects()
 	const [open, setOpen] = useOpenFolders()
+	const sidebar = useSidebar()
+	const collapsed = sidebar.state === "collapsed" && !sidebar.isMobile
 	// The folder holding the page you are on opens by itself.
 	const here = projects?.find((p) => pathname.startsWith(projectPath(p.repo)))?.repo
 	useEffect(() => {
@@ -116,7 +130,7 @@ function Projects({ pathname }: { pathname: string }) {
 
 	if (!projects) return null
 	return (
-		<ul className="mt-2 flex flex-col gap-0.5 group-data-[collapsible=icon]:hidden">
+		<ul className="mt-2 flex flex-col gap-0.5">
 			{projects.map((p, i) => (
 				<ProjectFolder
 					key={p.repo}
@@ -125,6 +139,11 @@ function Projects({ pathname }: { pathname: string }) {
 					open={open[p.repo] ?? (here ? here === p.repo : i === 0)}
 					onOpenChange={(value) => setOpen(p.repo, value)}
 					pathname={pathname}
+					collapsed={collapsed}
+					onExpand={() => {
+						setOpen(p.repo, true)
+						sidebar.setOpen(true)
+					}}
 				/>
 			))}
 		</ul>
