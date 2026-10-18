@@ -242,6 +242,43 @@ Send \`Authorization: Bearer <access_token>\`.
 
 Without a credential these answer 401 with \`WWW-Authenticate: Bearer resource_metadata="…/.well-known/oauth-protected-resource[${ACCOUNT_MCP_PATH}]"\`, which is how an MCP client finds this authorization server. A token that does not verify gets 401 with \`error="invalid_token"\`; a valid token without the scope gets 403 with \`error="insufficient_scope"\` and the scope it needs. Every other /api/ route needs the person's own session and answers 403 to an OAuth token.
 
+## With curl alone
+
+\`\`\`sh
+# 1. Register a public client (once; keep the client_id).
+curl -s ${ORIGIN}/oauth/register -H 'content-type: application/json' \\
+  -d '{"client_name":"my agent","redirect_uris":["http://127.0.0.1:9876/callback"]}'
+# → {"client_id":"fmc_…","client_id_issued_at":…,"redirect_uris":[…],"grant_types":[…],"scope":"swarm:read swarm:write",…}
+
+# 2. PKCE: a verifier and its S256 challenge.
+VERIFIER=$(openssl rand -base64 48 | tr -d '=+/' | cut -c1-64)
+CHALLENGE=$(printf %s "$VERIFIER" | openssl dgst -sha256 -binary | openssl base64 -A | tr '+/' '-_' | tr -d '=')
+
+# 3. Open this in the person's browser; they sign in with GitHub and click Allow.
+#    The browser lands on redirect_uri?code=…&state=…&iss=${ORIGIN}
+echo "${ORIGIN}/oauth/authorize?response_type=code&client_id=fmc_…&redirect_uri=http%3A%2F%2F127.0.0.1%3A9876%2Fcallback&scope=swarm%3Aread%20swarm%3Awrite&state=xyz&code_challenge=$CHALLENGE&code_challenge_method=S256&resource=${ORIGIN}${ACCOUNT_MCP_PATH}"
+
+# 4. Exchange the code within ten minutes.
+curl -s ${ORIGIN}/oauth/token -d grant_type=authorization_code -d code=… -d code_verifier="$VERIFIER" \\
+  -d redirect_uri=http://127.0.0.1:9876/callback -d client_id=fmc_…
+# → {"access_token":"eyJ…","token_type":"Bearer","expires_in":3600,"refresh_token":"fmr_…","scope":"swarm:read swarm:write"}
+
+# 5. Use it.
+curl -s ${ORIGIN}/api/projects -H "authorization: Bearer $ACCESS_TOKEN"
+curl -s ${ORIGIN}${ACCOUNT_MCP_PATH} -H "authorization: Bearer $ACCESS_TOKEN" -H 'content-type: application/json' \\
+  -H 'accept: application/json, text/event-stream' \\
+  -d '{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"my_usage","arguments":{}}}'
+
+# 6. Renew (the old refresh token stops working) and revoke.
+curl -s ${ORIGIN}/oauth/token -d grant_type=refresh_token -d refresh_token=fmr_… -d client_id=fmc_…
+curl -s ${ORIGIN}/oauth/revoke -d token=fmr_…
+\`\`\`
+
+## Error shapes
+
+- Authorization server endpoints: a JSON body \`{"error":"…","error_description":"…"}\` (RFC 6749 §5.2, RFC 7591 §3.2.2): \`invalid_client_metadata\` or \`invalid_redirect_uri\` (400) from registration, \`invalid_request\`, \`invalid_scope\`, \`invalid_target\`, \`unsupported_response_type\` or \`access_denied\` as query parameters on the redirect from authorize, \`invalid_client\` (401), \`invalid_grant\`, \`invalid_scope\` or \`unsupported_grant_type\` (400) from the token endpoint. A client or redirect_uri problem at authorize is an HTML page, never a redirect.
+- Protected routes and ${ACCOUNT_MCP_PATH}: 401 \`{"error":"unauthenticated"|"unauthorized"|"invalid_token","error_description":"…"}\` with \`WWW-Authenticate: Bearer resource_metadata="…"[, error="invalid_token", error_description="…"][, scope="…"]\`; 403 \`{"error":"insufficient_scope","error_description":"…","scope":"swarm:write"}\` with \`WWW-Authenticate: Bearer error="insufficient_scope", scope="…"\`. A tool that fails for another reason returns an MCP result with \`isError: true\` and the reason as text.
+
 ## Other methods
 
 - Anonymous: the MCP server at ${ORIGIN}/mcp, \`POST /api/onboarding/plan\`, and every discovery document under /.well-known/.
