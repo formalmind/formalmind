@@ -12,6 +12,9 @@ import type { OpenAIModel } from "@/lib/models";
 import { SidebarTrigger } from "@/components/ui/sidebar";
 import { isLiveRun, SwarmCanvas } from "./swarm-canvas";
 import { TextSwap } from "@/components/motion/text-swap";
+import { NotificationCenter } from "@/components/notification-center";
+import { notify } from "@/lib/notifications";
+import { HoverCard, HoverCardContent, HoverCardTrigger } from "@/components/ui/hover-card";
 
 const POLL_MS = 10_000;
 
@@ -58,7 +61,12 @@ export function SwarmWorkspace({ repo }: { repo: string }) {
 			setError(null);
 			setSyncedAt(Date.now());
 		} catch (err) {
-			setError(err instanceof Error ? err.message : "Could not load the swarm state.");
+			const message = err instanceof Error ? err.message : "Could not load the swarm state.";
+			// One notice per distinct failure, not one per poll.
+			setError((previous) => {
+				if (previous !== message) notify.error("Could not refresh the swarm", { id: "swarm-state", description: message });
+				return message;
+			});
 		} finally {
 			setLoading(false);
 		}
@@ -86,9 +94,18 @@ export function SwarmWorkspace({ repo }: { repo: string }) {
 	const swept = state?.projects?.filter((p) => p.inSwarm).length ?? 1;
 
 	const pill = "inline-flex h-8 items-center rounded-full border bg-background/90 shadow-sm backdrop-blur";
-	const status = state
-		? `${swept > 1 ? `${swept} projects · ` : ""}${state.cycle ? `Cycle ${state.cycle.n}: ${state.cycle.phase} · ` : ""}${queued} queued · ${inFlight} PRs open · ${blocked} blocked · $${state.spentToday.toFixed(2)} spent today`
-		: error ?? "Loading the live queue…";
+	const status = state ? `$${state.spentToday.toFixed(2)} today` : error ? "" : "Loading…";
+	// The rest of the queue, shown when the spend is hovered.
+	const details: [string, string | number][] = state
+		? [
+				...(swept > 1 ? [["Projects", swept] as [string, number]] : []),
+				...(state.cycle ? [["Cycle", `${state.cycle.n}: ${state.cycle.phase}`] as [string, string]] : []),
+				["Queued", queued],
+				["PRs open", inFlight],
+				["Blocked", blocked],
+				["Spent today", `$${state.spentToday.toFixed(2)}`],
+			]
+		: [];
 	const synced = syncedAt ? `Synced ${Math.max(0, Math.round((now - syncedAt) / 1000))}s ago. ` : "";
 
 	return (
@@ -102,20 +119,37 @@ export function SwarmWorkspace({ repo }: { repo: string }) {
 				title={
 					<>
 						<SidebarTrigger className={`${pill} size-8 shrink-0 justify-center`} />
-						<span
-							className={`${pill} min-w-0 gap-2 px-3 text-sm text-muted-foreground`}
-							title={run ? `${status}. The board shows ${repo} as it is right now.` : `${status}. Until a run starts, the cursors replay how one issue moves through the hand-off rules; moves and costs in the replay are illustrative.`}
-						>
-							<span className={`size-1.5 shrink-0 rounded-full ${run && run.status !== "completed" ? "animate-pulse bg-red-500" : "bg-muted-foreground/50"}`} />
-							<span className="font-semibold text-foreground">Swarm</span>
-							<span className="hidden min-w-0 truncate sm:inline">
-								<TextSwap value={status} />
-							</span>
-						</span>
+						<HoverCard openDelay={150} closeDelay={100}>
+							<HoverCardTrigger asChild>
+								<span className={`${pill} min-w-0 cursor-default gap-2 px-3 text-sm text-muted-foreground`}>
+									<span className={`size-1.5 shrink-0 rounded-full ${run && run.status !== "completed" ? "animate-pulse bg-red-500" : "bg-muted-foreground/50"}`} />
+									<span className="font-semibold text-foreground">Swarm</span>
+									<span className="min-w-0 truncate tabular-nums">
+										<TextSwap value={status} />
+									</span>
+								</span>
+							</HoverCardTrigger>
+							{state ? (
+								<HoverCardContent align="start" className="w-60 p-3 text-sm">
+									<dl className="grid grid-cols-[1fr_auto] gap-x-4 gap-y-1.5">
+										{details.map(([label, value]) => (
+											<div key={label} className="contents">
+												<dt className="text-muted-foreground">{label}</dt>
+												<dd className="text-right tabular-nums">{value}</dd>
+											</div>
+										))}
+									</dl>
+									<p className="mt-3 border-t pt-2 text-xs text-muted-foreground">
+										{run ? `The board shows ${repo} as it is right now.` : "Until a run starts, the cursors replay how one issue moves through the hand-off rules; moves and costs are illustrative."}
+									</p>
+								</HoverCardContent>
+							) : null}
+						</HoverCard>
 					</>
 				}
 				actions={
 					<>
+						<NotificationCenter />
 						<button
 							type="button"
 							onClick={() => void load()}

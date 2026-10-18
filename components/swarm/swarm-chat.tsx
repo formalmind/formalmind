@@ -1,5 +1,6 @@
 "use client";
 
+import { notify } from "@/lib/notifications";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { useChat } from "@ai-sdk/react";
 import ReactMarkdown from "react-markdown";
@@ -61,6 +62,10 @@ export function SwarmChat({
 		body: { model, ...body },
 		initialMessages,
 	});
+	// Errors stay inline here and also go to the bell.
+	useEffect(() => {
+		if (error) notify.error("Chat failed", { description: error.message });
+	}, [error]);
 	const scrollRef = useRef<HTMLDivElement>(null);
 	const asked = useRef<number | null>(null);
 	useEffect(() => {

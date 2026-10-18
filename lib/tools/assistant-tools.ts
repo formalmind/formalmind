@@ -52,13 +52,14 @@ export function assistantTools(repos: string[], who: string, focus = repos[0]) {
 			parameters: z.object({
 				role: z.enum(ROLES),
 				request: z.string().describe("What the role should answer or do."),
-				repo: repo.optional(),
-				number: z.number().int().optional().describe(focus === home ? `Issue or PR number (default #${ASSISTANT_ISSUE}).` : "Issue or PR number in the project's proofs repository."),
+				// OpenAI strict tool schemas need every key required; "no value" is null.
+				repo: repo.nullable(),
+				number: z.number().int().nullable().describe(focus === home ? `Issue or PR number (default #${ASSISTANT_ISSUE}).` : "Issue or PR number in the project's proofs repository."),
 			}),
 			execute: ({ role, request, repo: target, number }) =>
 				safely(() => {
 					const where = target ?? focus;
-					if (number === undefined && where !== home) throw new Error(`Say which issue or PR in ${where}; open one with openIssue first if there is none.`);
+					if (number == null && where !== home) throw new Error(`Say which issue or PR in ${where}; open one with openIssue first if there is none.`);
 					return comment(where, number ?? ASSISTANT_ISSUE, `/ask ${role} ${request}\n\n<sub>Relayed by Formal Mind for @${who}.</sub>`);
 				}),
 		}),
@@ -69,17 +70,17 @@ export function assistantTools(repos: string[], who: string, focus = repos[0]) {
 		}),
 		openIssue: tool({
 			description: "Open an issue as formalmind[bot]. Use fm:todo for work the swarm should pick up, fm:intent for behaviour the user described in words.",
-			parameters: z.object({ repo, title: z.string(), body: z.string(), labels: z.array(z.string()).optional() }),
+			parameters: z.object({ repo, title: z.string(), body: z.string(), labels: z.array(z.string()).nullable() }),
 			execute: ({ repo: target, title, body, labels }) =>
 				safely(async () => {
 					const [owner, name] = allowed(target).split("/");
-					const { data } = await (await appFor(target)).rest.issues.create({ owner, repo: name, title, body, labels });
+					const { data } = await (await appFor(target)).rest.issues.create({ owner, repo: name, title, body, labels: labels ?? undefined });
 					return { number: data.number, url: data.html_url };
 				}),
 		}),
 		setLabels: tool({
 			description: "Add or remove labels on an issue or PR (for example fm:human-ok to approve, or removing fm:blocked).",
-			parameters: z.object({ repo, number: z.number().int(), add: z.array(z.string()).optional(), remove: z.array(z.string()).optional() }),
+			parameters: z.object({ repo, number: z.number().int(), add: z.array(z.string()).nullable(), remove: z.array(z.string()).nullable() }),
 			execute: ({ repo: target, number, add, remove }) =>
 				safely(async () => {
 					const [owner, name] = allowed(target).split("/");
