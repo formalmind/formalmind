@@ -1,6 +1,8 @@
 import { Hono, type ExecutionContext } from "hono";
 import { auth, handleAuth } from "@/lib/auth";
 import { requestContext, type Env } from "./context";
+import { DISCOVERY_LINK_HEADER, handleDiscovery } from "./discovery";
+import { CONTENT_SIGNAL, isPagePath, markdownResponse, prefersMarkdown } from "./markdown";
 
 import * as billingBalance from "@/server/routes/billing/balance/route";
 import * as billingCheckout from "@/server/routes/billing/checkout/route";
@@ -87,6 +89,18 @@ app.use("/api/*", async (c, next) => {
 	}
 });
 
+// Agent discovery (worker/discovery.ts): robots.txt, sitemap.xml, llms.txt, auth.md, /.well-known/* and the MCP
+// server at /mcp must never fall through to the SPA's index.html. A page requested with Accept: text/markdown gets a
+// markdown rendering instead of the app shell (worker/markdown.ts). Both run before the API and the assets.
+app.use("*", async (c, next) => {
+	const discovery = await handleDiscovery(c.req.raw);
+	if (discovery) return discovery;
+	if (isPagePath(new URL(c.req.url).pathname) && prefersMarkdown(c.req.header("accept") ?? null)) {
+		return markdownResponse(new URL(c.req.url).pathname);
+	}
+	await next();
+});
+
 app.get("/auth/*", (c) => handleAuth(new URL(c.req.url).pathname));
 app.get("/login/callback", (c) => handleAuth(new URL(c.req.url).pathname));
 
@@ -111,8 +125,19 @@ app.get("/assets/*", async (c) => {
 	return res.headers.get("content-type")?.includes("text/html") ? c.text("Not found", 404) : res;
 });
 
-// Everything else is the single-page app (wrangler serves files and falls back to index.html first).
-app.all("*", (c) => c.env.ASSETS.fetch(c.req.raw));
+// Everything else is the single-page app: the asset store serves files and falls back to index.html. HTML responses
+// carry the agent entry points (RFC 8288 Link), the Content-Signal policy from robots.txt, and Vary: Accept because the
+// same path answers in markdown to a client that prefers it.
+app.all("*", async (c) => {
+	const res = await c.env.ASSETS.fetch(c.req.raw);
+	if (!res.headers.get("content-type")?.includes("text/html")) return res;
+	const html = new Response(res.body, res);
+	html.headers.set("link", DISCOVERY_LINK_HEADER);
+	html.headers.set("content-signal", CONTENT_SIGNAL);
+	const vary = html.headers.get("vary");
+	html.headers.set("vary", vary ? `${vary}, Accept` : "Accept");
+	return html;
+});
 
 export default {
 	fetch(request: Request, env: Env, ctx: ExecutionContext) {

@@ -10,6 +10,11 @@
 		<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400..600&display=swap" />
 		<title>Formal Mind</title>
 		<meta name="description" content="A swarm of agents for verifying Ethereum smart contracts." />
+		<!-- Agent discovery: the same entry points the Link response header names (worker/discovery.ts). -->
+		<link rel="alternate" type="text/plain" href="/llms.txt" title="llms.txt" />
+		<link rel="api-catalog" href="/.well-known/api-catalog" />
+		<link rel="ai-catalog" href="/.well-known/ai-catalog.json" />
+		<link rel="alternate" type="application/mcp-server-card+json" href="/.well-known/mcp/server-card.json" />
 	</head>
 	<body class="antialiased">
 		<div id="root"></div>
