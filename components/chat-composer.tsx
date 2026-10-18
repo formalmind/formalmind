@@ -33,8 +33,9 @@ export interface ChatComposerProps {
 	onSubmit: () => void;
 	onStop: () => void;
 	isLoading: boolean;
-	model: OpenAIModel;
-	onModelChange: (model: OpenAIModel) => void;
+	/** The model pill; left out where the model isn't the person's choice (agent chats). */
+	model?: OpenAIModel;
+	onModelChange?: (model: OpenAIModel) => void;
 	/** "owner/repo" the chat is scoped to, if any. */
 	repo?: { owner: string; name: string } | null;
 	/** Replaces the repo chip on the shelf. */
@@ -125,25 +126,27 @@ export function ChatComposer({
 
 			{/* Bottom row: model pill, send/stop */}
 			<div className="flex items-center gap-2 px-3 pb-3">
+				{model && onModelChange ? (
 				<DropdownMenu>
-					<DropdownMenuTrigger
-						className={cn(CHIP, "bg-secondary text-secondary-foreground outline-none focus-visible:ring-1 focus-visible:ring-ring")}
-						aria-label="Model"
-					>
-						<Sparkles className="h-3.5 w-3.5" />
-						{MODEL_LABELS[model]}
-						<ChevronDown className="h-3 w-3 text-muted-foreground" />
-					</DropdownMenuTrigger>
-					<DropdownMenuContent align="start">
-						<DropdownMenuRadioGroup value={model} onValueChange={(v) => onModelChange(v as OpenAIModel)}>
-							{openAIModelNames.map((m) => (
-								<DropdownMenuRadioItem key={m} value={m}>
-									{MODEL_LABELS[m]}
-								</DropdownMenuRadioItem>
-							))}
-						</DropdownMenuRadioGroup>
-					</DropdownMenuContent>
-				</DropdownMenu>
+						<DropdownMenuTrigger
+							className={cn(CHIP, "bg-secondary text-secondary-foreground outline-none focus-visible:ring-1 focus-visible:ring-ring")}
+							aria-label="Model"
+						>
+							<Sparkles className="h-3.5 w-3.5" />
+							{MODEL_LABELS[model]}
+							<ChevronDown className="h-3 w-3 text-muted-foreground" />
+						</DropdownMenuTrigger>
+						<DropdownMenuContent align="start">
+							<DropdownMenuRadioGroup value={model} onValueChange={(v) => onModelChange(v as OpenAIModel)}>
+								{openAIModelNames.map((m) => (
+									<DropdownMenuRadioItem key={m} value={m}>
+										{MODEL_LABELS[m]}
+									</DropdownMenuRadioItem>
+								))}
+							</DropdownMenuRadioGroup>
+						</DropdownMenuContent>
+					</DropdownMenu>
+				) : null}
 
 				<div className="flex-1" />
 

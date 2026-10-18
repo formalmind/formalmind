@@ -17,7 +17,7 @@ const meta = {
 	},
 	render: function Render(args) {
 		const [value, setValue] = useState(args.value);
-		const [model, setModel] = useState<OpenAIModel>(args.model);
+		const [model, setModel] = useState<OpenAIModel>(args.model ?? "gpt-6-luna");
 		return (
 			<div className="max-w-2xl">
 				<ChatComposer {...args} value={value} onChange={(e) => setValue(e.target.value)} onSubmit={() => setValue("")} model={model} onModelChange={setModel} />

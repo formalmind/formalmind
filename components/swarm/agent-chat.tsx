@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-import { ArrowUp, ExternalLink, Loader2 } from "lucide-react";
+import { ExternalLink, Loader2 } from "lucide-react";
+import { ChatComposer } from "@/components/chat-composer";
 import type { SwarmRole } from "@/lib/swarm";
 import { ROLE_COLORS } from "@/lib/swarm-roles";
 import type { AgentMessage } from "@/server/routes/swarm/agent/route";
@@ -93,40 +94,29 @@ export function AgentChat({ role, repo }: { role: SwarmRole; repo: string }) {
 				))}
 				{error ? <p role="alert" className="text-sm text-red-600 dark:text-red-400">{error}</p> : null}
 			</div>
-			<form
-				onSubmit={(e) => {
-					e.preventDefault();
-					void send();
-				}}
-				className="border-t p-3"
-			>
-				<div className="flex items-end gap-2 rounded-2xl border bg-background p-2 focus-within:ring-2 focus-within:ring-ring">
-					<textarea
-						value={text}
-						onChange={(e) => setText(e.target.value)}
-						onKeyDown={(e) => {
-							if (e.key === "Enter" && !e.shiftKey) {
-								e.preventDefault();
-								void send();
-							}
-						}}
-						rows={2}
-						placeholder={`Message the ${role}…`}
-						aria-label={`Message the ${role}`}
-						className="min-h-[2.5rem] flex-1 resize-none bg-transparent px-1 text-sm outline-none placeholder:text-muted-foreground"
-					/>
-					<button type="submit" disabled={sending || !text.trim()} aria-label="Send" className="flex size-8 shrink-0 items-center justify-center rounded-full text-white disabled:opacity-40" style={{ backgroundColor: ROLE_COLORS[role] }}>
-						{sending ? <Loader2 className="size-4 animate-spin" /> : <ArrowUp className="size-4" />}
-					</button>
-				</div>
-				<p className="mt-1.5 px-1 text-[11px] text-muted-foreground">
+			<div className="shrink-0 px-3 pb-3">
+				<ChatComposer
+					value={text}
+					onChange={(e) => setText(e.target.value)}
+					onSubmit={() => void send()}
+					onStop={() => {}}
+					isLoading={sending}
+					placeholder={`Message the ${role}…`}
+					context={
+						<span className="inline-flex h-8 items-center gap-1.5 rounded-full bg-secondary px-3 text-sm font-medium capitalize text-secondary-foreground">
+							<span className="size-2 rounded-full" style={{ backgroundColor: ROLE_COLORS[role] }} />
+							{role}
+						</span>
+					}
+				/>
+				<p className="mt-1.5 px-3 text-[11px] text-muted-foreground">
 					Posted as you on{" "}
 					<a href={`https://github.com/${repo}/issues/${issue}`} target="_blank" rel="noreferrer" className="underline underline-offset-2">
 						{repo}#{issue}
 					</a>
 					{role === "assistant" ? "" : `, as /ask ${role}`}. Replies arrive on the swarm's next turn.
 				</p>
-			</form>
+			</div>
 		</div>
 	);
 }

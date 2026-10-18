@@ -1,11 +1,10 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Sheet, SheetContent, SheetDescription, SheetTitle } from "@/components/ui/sheet";
 import { ROLE_COLORS } from "@/lib/swarm-roles";
 import type { SwarmRole } from "@/lib/swarm";
 import { AgentChat } from "./agent-chat";
-import { RefreshCw } from "lucide-react";
+import { RefreshCw, X } from "lucide-react";
 import type { SwarmState } from "@/lib/swarm";
 import { Link } from "react-router";
 import { SidebarTrigger } from "@/components/ui/sidebar";
@@ -30,6 +29,13 @@ export function SwarmWorkspace({ repo }: { repo: string }) {
 	const [loading, setLoading] = useState(false);
 	const [syncedAt, setSyncedAt] = useState<number | null>(null);
 	const [now, setNow] = useState(() => Date.now());
+
+	useEffect(() => {
+		if (!talkTo) return;
+		const close = (e: KeyboardEvent) => e.key === "Escape" && setTalkTo(null);
+		window.addEventListener("keydown", close);
+		return () => window.removeEventListener("keydown", close);
+	}, [talkTo]);
 
 	useEffect(() => {
 		const timer = setInterval(() => setNow(Date.now()), 1000);
@@ -80,7 +86,8 @@ export function SwarmWorkspace({ repo }: { repo: string }) {
 	const synced = syncedAt ? `Synced ${Math.max(0, Math.round((now - syncedAt) / 1000))}s ago. ` : "";
 
 	return (
-		<div className="min-h-0 flex-1">
+		<div className="relative flex min-h-0 flex-1">
+			<div className="flex min-w-0 flex-1 flex-col">
 			<SwarmCanvas
 				state={state}
 				repo={repo}
@@ -122,20 +129,23 @@ export function SwarmWorkspace({ repo }: { repo: string }) {
 					</>
 				}
 			/>
-			<Sheet open={talkTo !== null} onOpenChange={(open) => !open && setTalkTo(null)}>
-				<SheetContent className="flex w-full flex-col gap-0 p-0 sm:max-w-[440px]">
-					{talkTo ? (
-						<>
-							<div className="flex h-14 shrink-0 items-center gap-2 border-b px-4">
-								<span className="size-2.5 rounded-full" style={{ backgroundColor: ROLE_COLORS[talkTo] }} />
-								<SheetTitle className="text-sm font-semibold capitalize">{talkTo}</SheetTitle>
-								<SheetDescription className="sr-only">Talk to the {talkTo}</SheetDescription>
-							</div>
-							<AgentChat key={talkTo} role={talkTo} repo={repo} />
-						</>
-					) : null}
-				</SheetContent>
-			</Sheet>
+			</div>
+			{/* The agent's chat sits beside the canvas, which narrows to make room; on phones it covers the canvas. */}
+			{talkTo ? (
+				<aside
+					aria-label={`Talk to the ${talkTo}`}
+					className="absolute inset-2 z-30 flex flex-col overflow-hidden rounded-2xl border bg-background shadow-lg animate-in fade-in-0 slide-in-from-right-4 duration-200 motion-reduce:animate-none md:static md:inset-auto md:my-3 md:mr-3 md:w-[400px] md:shrink-0 md:shadow-md"
+				>
+					<div className="flex h-12 shrink-0 items-center gap-2 px-4">
+						<span className="size-2.5 rounded-full" style={{ backgroundColor: ROLE_COLORS[talkTo] }} />
+						<h2 className="flex-1 text-sm font-semibold capitalize">{talkTo}</h2>
+						<button type="button" onClick={() => setTalkTo(null)} aria-label="Close" className="flex size-7 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-muted hover:text-foreground">
+							<X className="size-4" />
+						</button>
+					</div>
+					<AgentChat key={talkTo} role={talkTo} repo={repo} />
+				</aside>
+			) : null}
 		</div>
 	);
 }
