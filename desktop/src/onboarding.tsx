@@ -115,9 +115,9 @@ export function SignInStep({ onCode, onSignedIn, error }: { onCode: (code: strin
 					<GitHubMark />
 					{waiting ? "Waiting for your browser…" : "Continue with GitHub"}
 				</button>
-				{waiting && !pasting ? (
+				{!pasting ? (
 					<p className="text-sm text-white/50">
-						Finish signing in in your browser.{" "}
+						{waiting ? "Finish signing in in your browser. " : null}
 						<button type="button" onClick={() => setPasting(true)} className={quiet}>
 							Have a code?
 						</button>
