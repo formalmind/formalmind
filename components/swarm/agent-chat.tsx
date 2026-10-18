@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-import { ExternalLink, Loader2 } from "lucide-react";
+import { Check, Copy, ExternalLink, Globe, Loader2 } from "lucide-react";
 import { ChatComposer } from "@/components/chat-composer";
 import { ProjectPicker } from "@/components/projects/project-picker";
 /** The swarm's home project, whose notebook these chats are carried on (LIVE_PROJECT in lib/projects). */
@@ -11,16 +11,6 @@ import { ROLE_COLORS } from "@/lib/swarm-roles";
 import type { AgentMessage } from "@/server/routes/swarm/agent/route";
 
 const POLL_MS = 8_000;
-
-/** What each agent is for, said to the person about to write to it. */
-const INTRO: Partial<Record<SwarmRole, string>> = {
-	assistant: "Your assistant. Tell it what you want done, ask what's going on, or answer its questions; it acts on your behalf and asks you only when a decision is yours.",
-	planner: "Plans the work. Ask it to scope something new or re-plan what's blocked.",
-	prover: "Writes the Lean. Ask about a proof or what it's stuck on.",
-	reviewer: "Reviews each PR. Ask why it bounced something or what it wants changed.",
-	merger: "Verifies and merges. Ask what's holding a PR.",
-	chief: "Audits the day. Ask for a status summary.",
-};
 
 /**
  * A chat with one agent, carried on the assistant's notebook issue: what you send is posted there as you (with
@@ -82,20 +72,16 @@ export function AgentChat({ role, repo }: { role: SwarmRole; repo: string }) {
 	return (
 		<div className="flex min-h-0 flex-1 flex-col">
 			<div ref={listRef} className="min-h-0 flex-1 space-y-3 overflow-y-auto px-4 py-4">
-				{INTRO[role] ? <p className="text-sm text-muted-foreground">{INTRO[role]}</p> : null}
 				{messages === null && !error ? <Loader2 className="size-4 animate-spin text-muted-foreground" /> : null}
 				{messages?.length === 0 ? <p className="text-sm text-muted-foreground">No messages yet. Say hello.</p> : null}
 				{messages?.map((m) => (
-					<div key={m.id} className={`flex ${m.from === "you" ? "justify-end" : "justify-start"}`}>
-						<div className={`max-w-[85%] rounded-2xl px-3 py-2 text-sm ${m.from === "you" ? "bg-foreground text-background" : "border bg-background"}`}>
-							<div className="chat-markdown prose prose-sm max-w-none break-words dark:prose-invert [&_p]:my-1">
+					<div key={m.id} className={`group flex flex-col ${m.from === "you" ? "items-end" : "items-start"}`}>
+						<div className={m.from === "you" ? "max-w-[85%] rounded-2xl bg-secondary px-3.5 py-2 text-sm text-secondary-foreground" : "max-w-full text-sm"}>
+							<div className="chat-markdown prose prose-sm max-w-none break-words leading-6 dark:prose-invert [&_p]:my-1">
 								<ReactMarkdown remarkPlugins={[remarkGfm]}>{m.body}</ReactMarkdown>
 							</div>
-							<a href={m.url} target="_blank" rel="noreferrer" className={`mt-1 inline-flex items-center gap-1 text-[11px] ${m.from === "you" ? "text-background/60" : "text-muted-foreground"} hover:underline`}>
-								{new Date(m.createdAt).toLocaleString([], { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })}
-								<ExternalLink className="size-3" />
-							</a>
 						</div>
+						<MessageActions text={m.body} url={m.url} />
 					</div>
 				))}
 				{error ? <p role="alert" className="text-sm text-red-600 dark:text-red-400">{error}</p> : null}
@@ -110,14 +96,44 @@ export function AgentChat({ role, repo }: { role: SwarmRole; repo: string }) {
 					placeholder={`Message the ${role}…`}
 					context={<ProjectPicker repo={project} onSelect={setProject} />}
 				/>
-				<p className="mt-1.5 px-3 text-[11px] text-muted-foreground">
-					Posted as you on{" "}
-					<a href={`https://github.com/${repo}/issues/${issue}`} target="_blank" rel="noreferrer" className="underline underline-offset-2">
-						{repo}#{issue}
-					</a>
-					{role === "assistant" ? "" : `, as /ask ${role}`}. Replies arrive on the swarm's next turn.
+				<p className="mt-2 flex items-start gap-1.5 px-3 text-[11px] leading-4 text-amber-700 dark:text-amber-400">
+					<Globe className="mt-px size-3 shrink-0" />
+					<span>
+						Not private: everything here is posted publicly as you on{" "}
+						<a href={`https://github.com/${repo}/issues/${issue}`} target="_blank" rel="noreferrer" className="underline underline-offset-2">
+							{repo}#{issue}
+						</a>
+						{role === "assistant" ? "" : ` (as /ask ${role})`}. Replies arrive on the swarm&apos;s next turn.
+					</span>
 				</p>
 			</div>
+		</div>
+	);
+}
+
+/** Copy the message, or open it on GitHub. */
+function MessageActions({ text, url }: { text: string; url: string }) {
+	const [copied, setCopied] = useState(false);
+	const button = "flex size-6 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground";
+	return (
+		<div className="mt-1 flex items-center gap-0.5 opacity-60 transition-opacity group-hover:opacity-100 focus-within:opacity-100">
+			<button
+				type="button"
+				aria-label="Copy"
+				title="Copy"
+				className={button}
+				onClick={() => {
+					void navigator.clipboard.writeText(text).then(() => {
+						setCopied(true);
+						setTimeout(() => setCopied(false), 1500);
+					});
+				}}
+			>
+				{copied ? <Check className="size-3.5" /> : <Copy className="size-3.5" />}
+			</button>
+			<a href={url} target="_blank" rel="noreferrer" aria-label="Open on GitHub" title="Open on GitHub" className={button}>
+				<ExternalLink className="size-3.5" />
+			</a>
 		</div>
 	);
 }
