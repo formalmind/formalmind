@@ -149,7 +149,6 @@ export function SwarmWorkspace({ repo }: { repo: string }) {
 				}
 				actions={
 					<>
-						<NotificationCenter />
 						<button
 							type="button"
 							onClick={() => void load()}
@@ -159,6 +158,7 @@ export function SwarmWorkspace({ repo }: { repo: string }) {
 						>
 							<RefreshCw className={`size-3.5 ${loading ? "animate-spin" : ""}`} />
 						</button>
+						<NotificationCenter />
 					</>
 				}
 			/>
