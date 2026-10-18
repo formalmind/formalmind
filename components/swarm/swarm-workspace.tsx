@@ -1,6 +1,10 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { Sheet, SheetContent, SheetDescription, SheetTitle } from "@/components/ui/sheet";
+import { ROLE_COLORS } from "@/lib/swarm-roles";
+import type { SwarmRole } from "@/lib/swarm";
+import { AgentChat } from "./agent-chat";
 import { RefreshCw } from "lucide-react";
 import type { SwarmState } from "@/lib/swarm";
 import { Link } from "react-router";
@@ -19,6 +23,8 @@ function minutesAgo(iso: string) {
 }
 
 export function SwarmWorkspace({ repo }: { repo: string }) {
+	// The agent whose chat is open, from a click on its name on the canvas.
+	const [talkTo, setTalkTo] = useState<SwarmRole | null>(null);
 	const [state, setState] = useState<SwarmState | null>(null);
 	const [error, setError] = useState<string | null>(null);
 	const [loading, setLoading] = useState(false);
@@ -79,6 +85,7 @@ export function SwarmWorkspace({ repo }: { repo: string }) {
 				state={state}
 				repo={repo}
 				fill
+				onTalk={setTalkTo}
 				title={
 					<>
 						<SidebarTrigger className={`${pill} size-8 shrink-0 justify-center`} />
@@ -115,6 +122,20 @@ export function SwarmWorkspace({ repo }: { repo: string }) {
 					</>
 				}
 			/>
+			<Sheet open={talkTo !== null} onOpenChange={(open) => !open && setTalkTo(null)}>
+				<SheetContent className="flex w-full flex-col gap-0 p-0 sm:max-w-[440px]">
+					{talkTo ? (
+						<>
+							<div className="flex h-14 shrink-0 items-center gap-2 border-b px-4">
+								<span className="size-2.5 rounded-full" style={{ backgroundColor: ROLE_COLORS[talkTo] }} />
+								<SheetTitle className="text-sm font-semibold capitalize">{talkTo}</SheetTitle>
+								<SheetDescription className="sr-only">Talk to the {talkTo}</SheetDescription>
+							</div>
+							<AgentChat key={talkTo} role={talkTo} repo={repo} />
+						</>
+					) : null}
+				</SheetContent>
+			</Sheet>
 		</div>
 	);
 }

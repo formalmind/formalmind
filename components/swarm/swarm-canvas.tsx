@@ -530,12 +530,14 @@ function cloneScene(scene: Scene): Scene {
  * `fill` makes the board fill its parent, scaled to fit both ways and centred, below a strip kept clear
  * for the pinned controls; otherwise it scales to the width. `title` and `actions` are pinned top-left and top-right.
  */
-export function SwarmCanvas({ state, fill = false, contain = false, title, actions, repo }: {
+export function SwarmCanvas({ state, fill = false, contain = false, title, actions, repo, onTalk }: {
 	state: SwarmState | null;
 	/** Fit the board inside its parent's height as well as its width (the landing demo); the replay still plays. */
 	contain?: boolean;
 	/** The proofs repo, for links before the live state has loaded. */
 	repo?: string;
+	/** Clicking an agent's name opens a chat with it (the app; the landing demo leaves it out). */
+	onTalk?: (role: SwarmRole) => void;
 	fill?: boolean;
 	title?: ReactNode;
 	actions?: ReactNode;
@@ -930,6 +932,7 @@ export function SwarmCanvas({ state, fill = false, contain = false, title, actio
 							turn={shown.turn === role}
 							// Arriving at a new project they come in one after another, not as a block.
 							delay={arrival ? i * 120 : 0}
+							onTalk={onTalk}
 						/>
 					))}
 				</div>
@@ -1133,7 +1136,8 @@ function ProjectHeader({ project, group, state }: { project: SwarmProject; group
 const MOVE = "transition-transform duration-700 [transition-timing-function:cubic-bezier(0.22,1,0.36,1)] motion-reduce:transition-none";
 
 /** Every role's cursor stays at full strength; the turn pill says who is working. */
-export function SwarmCursor({ role, x, y, say, turn, side, delay = 0 }: { role: SwarmRole; x: number; y: number; say?: string; turn: boolean; side?: "left"; delay?: number }) {
+/** `onTalk` makes the name pill a button that opens a chat with this agent. */
+export function SwarmCursor({ role, x, y, say, turn, side, delay = 0, onTalk }: { role: SwarmRole; x: number; y: number; say?: string; turn: boolean; side?: "left"; delay?: number; onTalk?: (role: SwarmRole) => void }) {
 	const color = ROLE_COLORS[role];
 	// Near the right edge, or when waiting beside another cursor, the label and bubble open to the left.
 	const flip = side === "left" || x > W - 260;
@@ -1147,11 +1151,24 @@ export function SwarmCursor({ role, x, y, say, turn, side, delay = 0 }: { role: 
 			</svg>
 			<div className={`absolute top-5 flex flex-col gap-1 ${flip ? "right-1 items-end" : "left-4 items-start"}`}>
 				{/* The arrow lets clicks through; the pill and bubble take them, so what you see is what you point at. */}
-				<span className="pointer-events-auto inline-flex cursor-default items-center gap-1 whitespace-nowrap rounded-full px-2 py-0.5 text-[12px] font-medium text-white shadow-sm" style={{ backgroundColor: color }}>
-					{turn ? <span className="size-1.5 animate-pulse rounded-full bg-white" aria-hidden /> : null}
-					{role}
-					{turn ? <span className="font-normal opacity-80">· turn</span> : null}
-				</span>
+				{(() => {
+					const pill = (
+						<>
+							{turn ? <span className="size-1.5 animate-pulse rounded-full bg-white" aria-hidden /> : null}
+							{role}
+							{turn ? <span className="font-normal opacity-80">· turn</span> : null}
+						</>
+					);
+					const style = { backgroundColor: color };
+					const cls = "pointer-events-auto inline-flex items-center gap-1 whitespace-nowrap rounded-full px-2 py-0.5 text-[12px] font-medium text-white shadow-sm";
+					return onTalk ? (
+						<button type="button" data-component onClick={() => onTalk(role)} title={`Talk to the ${role}`} aria-label={`Talk to the ${role}`} className={`${cls} cursor-pointer transition-transform hover:scale-105 active:scale-95`} style={style}>
+							{pill}
+						</button>
+					) : (
+						<span className={`${cls} cursor-default`} style={style}>{pill}</span>
+					);
+				})()}
 				{say ? (
 					<span key={say} className="pointer-events-auto w-max max-w-[240px] cursor-default rounded-lg border bg-popover px-2.5 py-1.5 text-[13px] leading-snug text-popover-foreground shadow-md animate-in fade-in-0 zoom-in-95 duration-200">
 						{say}
