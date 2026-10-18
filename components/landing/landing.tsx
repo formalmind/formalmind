@@ -100,7 +100,7 @@ export function Landing({ signedIn }: { signedIn: boolean }) {
 			<main className="flex min-h-0 flex-1 flex-col overflow-y-auto">
 				<section className="mx-auto w-full max-w-6xl shrink-0 px-4 pb-10 pt-16 text-center sm:px-6 sm:pt-24">
 					<h1 className="mx-auto max-w-2xl text-balance text-[34px] font-medium leading-10 tracking-[-1px] sm:text-5xl sm:leading-[1.1] sm:tracking-[-1.5px]">
-						A swarm of Lean4 agents for proving Solidity codebases
+						A swarm of agents for verifying Ethereum smart contracts
 					</h1>
 					<p className="mx-auto mt-4 max-w-[560px] text-balance text-[15px] leading-[22px] text-muted-foreground">
 						Formal proofs of your contracts, one small pull request at a time, within a daily budget you set.
@@ -171,7 +171,7 @@ export function Landing({ signedIn }: { signedIn: boolean }) {
 								<LogoMark size={20} />
 								Formal Mind.
 							</Link>
-							<p className="mt-3 max-w-[16rem] text-muted-foreground">A swarm of Lean 4 agents that proves your Solidity code correct.</p>
+							<p className="mt-3 max-w-[16rem] text-muted-foreground">A swarm of agents that verifies your Ethereum smart contracts in Lean 4.</p>
 						</div>
 						{FOOTER.map((column) => (
 							<nav key={column.title} aria-label={column.title}>

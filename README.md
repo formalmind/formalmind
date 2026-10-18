@@ -2,7 +2,7 @@
 
 # Formal Mind
 
-Formal Mind is a swarm of agents for verifying smart contracts. Point it at a Solidity repository and the agents write
+Formal Mind is a swarm of agents for verifying Ethereum smart contracts. Point it at a Solidity repository and the agents write
 a Lean 4 specification of it, prove it, and keep the proofs up to date as the code changes. Every theorem is
 machine-checked by `lake build`, with no `sorry` and no new axioms.
 

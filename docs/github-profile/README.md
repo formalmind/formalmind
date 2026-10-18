@@ -5,7 +5,7 @@
 <h1 align="center">Formal Mind</h1>
 
 <p align="center">
-  <strong>A swarm of Lean4 agents for proving Solidity codebases.</strong><br />
+  <strong>A swarm of agents for verifying Ethereum smart contracts.</strong><br />
   Formal proofs of your contracts, one small pull request at a time, within a daily budget you set.
 </p>
 
