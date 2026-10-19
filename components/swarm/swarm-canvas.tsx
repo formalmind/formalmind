@@ -126,7 +126,7 @@ type Card = {
 };
 
 /** `thinking`: working right now (a running job), so the cursor shows it. */
-type Cursor = { at?: { x: number; y: number }; follow?: string; say?: string; thinking?: boolean };
+type Cursor = { at?: { x: number; y: number }; follow?: string; say?: string; thinking?: boolean; where?: { text: string; card?: string; href: string } };
 
 type Note = { role: SwarmRole; text: string; done: boolean };
 
@@ -422,9 +422,13 @@ function placeActive(state: SwarmState, cards: Card[], cursors: Scene["cursors"]
 	for (const a of state.active ?? []) {
 		if (cursors[a.role].say) continue;
 		const target = a.ref ? cards.find((c) => c.repo === a.repo && c.number === a.ref && c.kind !== "doc") : undefined;
-		const where = `${a.repo.split("/")[1]?.replace(/-proofs$/, "") ?? a.repo}${a.ref ? `#${a.ref}` : ""}`;
-		const say = `${a.task ?? ACTIVE_PHASE[a.phase] ?? "working"} · ${where}`;
-		cursors[a.role] = target ? { follow: target.id, say, thinking: true } : { at: roadmap(a.repo), say, thinking: true };
+		const where = {
+			text: `${a.repo.split("/")[1]?.replace(/-proofs$/, "") ?? a.repo}${a.ref ? `#${a.ref}` : ""}`,
+			card: target?.id,
+			href: a.ref ? `https://github.com/${a.repo}/issues/${a.ref}` : `https://github.com/${a.repo}`,
+		};
+		const say = a.task ?? ACTIVE_PHASE[a.phase] ?? "working";
+		cursors[a.role] = target ? { follow: target.id, say, thinking: true, where } : { at: roadmap(a.repo), say, thinking: true, where };
 	}
 }
 
@@ -1037,6 +1041,13 @@ export function SwarmCanvas({ state, fill = false, contain = false, title, actio
 							{...cursorPos(role)}
 							say={shown.cursors[role].say}
 							thinking={shown.cursors[role].thinking}
+							where={shown.cursors[role].where}
+							// The issue or PR in the bubble previews like its card on the board.
+							onWhereEnter={(el, id) => {
+								const c = shown.cards.find((card) => card.id === id);
+								if (c) showHover(c, el);
+							}}
+							onWhereLeave={hideHover}
 							turn={shown.turn === role}
 							// Arriving at a new project they come in one after another, not as a block.
 							delay={arrival ? i * 120 : 0}
@@ -1262,7 +1273,21 @@ const MOVE = "transition-transform duration-700 [transition-timing-function:cubi
 
 /** Every role's cursor stays at full strength; the turn pill says who is working. */
 /** `onTalk` makes the name pill a button that opens a chat with this agent. */
-export function SwarmCursor({ role, x, y, say, turn, thinking, side, delay = 0, onTalk }: { role: SwarmRole; x: number; y: number; say?: string; turn: boolean; thinking?: boolean; side?: "left"; delay?: number; onTalk?: (role: SwarmRole) => void }) {
+export function SwarmCursor({ role, x, y, say, turn, thinking, where, onWhereEnter, onWhereLeave, side, delay = 0, onTalk }: {
+	role: SwarmRole;
+	x: number;
+	y: number;
+	say?: string;
+	turn: boolean;
+	thinking?: boolean;
+	/** The issue or PR a working agent is on, linked after its words. */
+	where?: { text: string; card?: string; href: string };
+	onWhereEnter?: (el: HTMLElement, card: string) => void;
+	onWhereLeave?: () => void;
+	side?: "left";
+	delay?: number;
+	onTalk?: (role: SwarmRole) => void;
+}) {
 	const color = ROLE_COLORS[role];
 	// Near the right edge, or when waiting beside another cursor, the label and bubble open to the left.
 	const flip = side === "left" || x > W - 260;
@@ -1284,7 +1309,7 @@ export function SwarmCursor({ role, x, y, say, turn, thinking, side, delay = 0, 
 							{turn ? <span className="size-1.5 animate-pulse rounded-full bg-white" aria-hidden /> : null}
 							{role}
 							{/* Working right now: a small spinner by the name. */}
-							{thinking ? <span className="size-2.5 animate-spin rounded-full border-[1.5px] border-white/40 border-t-white motion-reduce:animate-none" aria-label="working" /> : null}
+							{thinking ? <span className="size-2 animate-spin rounded-full border border-white/25 border-t-white/80 [animation-duration:1.4s] motion-reduce:animate-none" aria-label="working" /> : null}
 							{turn ? <span className="font-normal opacity-80">· turn</span> : null}
 						</>
 					);
@@ -1300,8 +1325,23 @@ export function SwarmCursor({ role, x, y, say, turn, thinking, side, delay = 0, 
 				})()}
 				{say ? (
 					<span key={say} className="pointer-events-auto w-max max-w-[240px] cursor-default rounded-lg border bg-popover px-2.5 py-1.5 text-[13px] leading-snug text-popover-foreground shadow-md animate-in fade-in-0 zoom-in-95 duration-200">
-						{thinking ? <span className="fm-dots mr-1 inline-flex gap-0.5 align-middle" aria-hidden><i /><i /><i /></span> : null}
+						{thinking ? <span className="fm-dots mr-1.5 inline-flex gap-[3px] align-middle" aria-hidden><i /><i /><i /></span> : null}
 						{say}
+						{where ? (
+							<>
+								{" · "}
+								<a
+									href={where.href}
+									target="_blank"
+									rel="noreferrer"
+									className="font-mono underline-offset-2 hover:underline"
+									onMouseEnter={(e) => where.card && onWhereEnter?.(e.currentTarget, where.card)}
+									onMouseLeave={() => onWhereLeave?.()}
+								>
+									{where.text}
+								</a>
+							</>
+						) : null}
 					</span>
 				) : null}
 			</div>
