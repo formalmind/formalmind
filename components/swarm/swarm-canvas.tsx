@@ -8,6 +8,7 @@ import { TextSwap } from "@/components/motion/text-swap";
 import { useIsMobile } from "@/hooks/use-mobile";
 import type { SwarmItem, SwarmProject, SwarmRole, SwarmRun, SwarmState } from "@/lib/swarm";
 import { ROLE_COLORS } from "@/lib/swarm-roles";
+import { onCheer, playMood } from "./cursor-moods";
 
 export { ROLE_COLORS };
 
@@ -125,7 +126,8 @@ type Card = {
 	branch?: string;
 };
 
-type Cursor = { at?: { x: number; y: number }; follow?: string; say?: string };
+/** `thinking`: working right now (a running job), so the cursor shows it. */
+type Cursor = { at?: { x: number; y: number }; follow?: string; say?: string; thinking?: boolean };
 
 type Note = { role: SwarmRole; text: string; done: boolean };
 
@@ -411,6 +413,22 @@ function roadmapCard(project: SwarmProject, group: number, home: string): Card {
 }
 
 /** The board as the swarm has it, with nothing scripted: one lane group per project. With no run in flight the cursors rest on the bench. */
+const ACTIVE_PHASE: Partial<Record<SwarmRun["phase"], string>> = { queued: "getting ready", "setting up": "setting up", building: "building", working: "thinking", "recording cost": "wrapping up" };
+
+/**
+ * Agents with a job running in a project's proofs repository walk to the issue they work on (or the project's
+ * roadmap) and say where their head is: "thinking · protocol#5". Who already has something to say keeps it.
+ */
+function placeActive(state: SwarmState, cards: Card[], cursors: Scene["cursors"], roadmap: (repo: string) => { x: number; y: number }) {
+	for (const a of state.active ?? []) {
+		if (cursors[a.role].say) continue;
+		const target = a.ref ? cards.find((c) => c.repo === a.repo && c.number === a.ref && c.kind !== "doc") : undefined;
+		const where = `${a.repo.split("/")[1]?.replace(/-proofs$/, "") ?? a.repo}${a.ref ? `#${a.ref}` : ""}`;
+		const say = `${a.task ?? ACTIVE_PHASE[a.phase] ?? "working"} · ${where}`;
+		cursors[a.role] = target ? { follow: target.id, say, thinking: true } : { at: roadmap(a.repo), say, thinking: true };
+	}
+}
+
 function liveScene(state: SwarmState, run: SwarmRun | null): Scene {
 	const projects = projectsOf(state);
 	const geo = geometry(projects.length);
@@ -433,6 +451,7 @@ function liveScene(state: SwarmState, run: SwarmRun | null): Scene {
 
 	const cursorsAtHome = Object.fromEntries(ROLES.map((r) => [r, { at: geo.home[r] }])) as Scene["cursors"];
 	if (!run) {
+		placeActive(state, cards, cursorsAtHome, (repo) => geo.roadmap(groupOf(repo)));
 		const last = state.runs.find((r) => r.note)?.note;
 		return {
 			cards,
@@ -480,6 +499,7 @@ function liveScene(state: SwarmState, run: SwarmRun | null): Scene {
 	if (nextRole && nextRole !== role && !cursors[nextRole].say) {
 		cursors[nextRole] = target ? { follow: target.id, say: "My turn next" } : { at: geo.home[nextRole], say: "My turn next" };
 	}
+	placeActive(state, cards, cursors, (repo) => geo.roadmap(groupOf(repo)));
 	// The job comes from the item's job labels, not from a question label shown on the card.
 	const targetItem = state.work.find((item) => itemRepo(state, item) === noteRepo && item.number === note?.ref);
 	const label = targetItem ? jobLaneOf(targetItem)?.label : target?.label;
@@ -863,6 +883,41 @@ export function SwarmCanvas({ state, fill = false, contain = false, title, actio
 	}, [arrival?.at]);
 
 	const shown = arrival && live ? welcome(live, arrival.repo, arrival.group) : live ?? scene;
+
+	// Life on the board. Idle agents now and then dance, hop, wiggle or zoom around and settle back; anyone can
+	// cheer an agent (an answer in its chat); and a new card makes the agent who made it hop.
+	const shownRef = useRef(shown);
+	shownRef.current = shown;
+	useEffect(() => {
+		const root = frameRef.current;
+		if (!root) return;
+		let timer: ReturnType<typeof setTimeout>;
+		const idle = () => {
+			const idleRoles = ROLES.filter((r) => !shownRef.current.cursors[r].say && !shownRef.current.cursors[r].thinking);
+			const role = idleRoles[Math.floor(Math.random() * idleRoles.length)];
+			if (role && document.visibilityState === "visible") playMood(root, role);
+			timer = setTimeout(idle, 7000 + Math.random() * 9000);
+		};
+		timer = setTimeout(idle, 4000);
+		const stop = onCheer((role, mood) => playMood(root, role, mood));
+		return () => {
+			clearTimeout(timer);
+			stop();
+		};
+	}, []);
+	const seenCards = useRef<Set<string> | null>(null);
+	useEffect(() => {
+		const root = frameRef.current;
+		const ids = new Set(shown.cards.map((c) => c.id));
+		const before = seenCards.current;
+		seenCards.current = ids;
+		if (!root || !before) return;
+		for (const c of shown.cards) {
+			if (before.has(c.id)) continue;
+			const maker: SwarmRole = c.lane === "todo" || c.lane === "roadmap" ? "planner" : c.lane === "dev" ? "merger" : c.lane === "approved" ? "reviewer" : "prover";
+			playMood(root, maker, "hop");
+		}
+	}, [shown.cards]);
 	// Cards grow to fit their label and title; the board stacks them on what they measure.
 	const [heights, setHeights] = useState(() => new Map<string, number>());
 	const measure = (id: string, h: number) =>
@@ -1016,6 +1071,7 @@ export function SwarmCanvas({ state, fill = false, contain = false, title, actio
 							role={role}
 							{...cursorPos(role)}
 							say={shown.cursors[role].say}
+							thinking={shown.cursors[role].thinking}
 							turn={shown.turn === role}
 							// Arriving at a new project they come in one after another, not as a block.
 							delay={arrival ? i * 120 : 0}
@@ -1241,7 +1297,7 @@ const MOVE = "transition-transform duration-700 [transition-timing-function:cubi
 
 /** Every role's cursor stays at full strength; the turn pill says who is working. */
 /** `onTalk` makes the name pill a button that opens a chat with this agent. */
-export function SwarmCursor({ role, x, y, say, turn, side, delay = 0, onTalk }: { role: SwarmRole; x: number; y: number; say?: string; turn: boolean; side?: "left"; delay?: number; onTalk?: (role: SwarmRole) => void }) {
+export function SwarmCursor({ role, x, y, say, turn, thinking, side, delay = 0, onTalk }: { role: SwarmRole; x: number; y: number; say?: string; turn: boolean; thinking?: boolean; side?: "left"; delay?: number; onTalk?: (role: SwarmRole) => void }) {
 	const color = ROLE_COLORS[role];
 	// Near the right edge, or when waiting beside another cursor, the label and bubble open to the left.
 	const flip = side === "left" || x > W - 260;
@@ -1251,6 +1307,8 @@ export function SwarmCursor({ role, x, y, say, turn, side, delay = 0, onTalk }: 
 			className={`pointer-events-none absolute left-0 top-0 z-20 ${MOVE}`}
 			style={{ transform: `translate(${x}px, ${y}px)`, transitionProperty: "transform", transitionDelay: `${delay}ms` }}
 		>
+			{/* The body takes the moods (thinking, dances, hops) so they never fight the move's transform. */}
+			<div data-cursor-body className={`relative ${thinking ? "fm-thinking" : ""}`}>
 			<svg width="28" height="28" viewBox="0 0 24 24" className="absolute -left-2 -top-[5px] drop-shadow-sm" aria-hidden>
 				<polygon points="7 20 7 4 19 16 12 16 7 21" fill={color} stroke="white" strokeWidth="1.5" strokeLinejoin="round" />
 			</svg>
@@ -1261,6 +1319,8 @@ export function SwarmCursor({ role, x, y, say, turn, side, delay = 0, onTalk }: 
 						<>
 							{turn ? <span className="size-1.5 animate-pulse rounded-full bg-white" aria-hidden /> : null}
 							{role}
+							{/* Working right now: a small spinner by the name. */}
+							{thinking ? <span className="size-2.5 animate-spin rounded-full border-[1.5px] border-white/40 border-t-white motion-reduce:animate-none" aria-label="working" /> : null}
 							{turn ? <span className="font-normal opacity-80">· turn</span> : null}
 						</>
 					);
@@ -1276,9 +1336,11 @@ export function SwarmCursor({ role, x, y, say, turn, side, delay = 0, onTalk }: 
 				})()}
 				{say ? (
 					<span key={say} className="pointer-events-auto w-max max-w-[240px] cursor-default rounded-lg border bg-popover px-2.5 py-1.5 text-[13px] leading-snug text-popover-foreground shadow-md animate-in fade-in-0 zoom-in-95 duration-200">
+						{thinking ? <span className="fm-dots mr-1 inline-flex gap-0.5 align-middle" aria-hidden><i /><i /><i /></span> : null}
 						{say}
 					</span>
 				) : null}
+			</div>
 			</div>
 		</div>
 	);

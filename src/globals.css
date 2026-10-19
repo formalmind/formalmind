@@ -357,3 +357,22 @@
   .shadow-card { box-shadow: 0 1px 1.5px rgb(0 0 0 / 0.04), inset 0 -1px 0 rgb(0 0 0 / 0.06); }
   .shadow-pop { box-shadow: 0 4px 42px rgb(0 0 0 / 0.06), 0 2px 6px rgb(0 0 0 / 0.05), 0 0 0 1px rgb(0 0 0 / 0.06); }
 }
+
+/* Swarm cursor moods. They move the cursor's body (data-cursor-body), never its position, so they never fight a move. */
+@keyframes fm-think { 0%, 100% { transform: translate(0, 0) rotate(0deg); } 25% { transform: translate(2px, -2px) rotate(-4deg); } 75% { transform: translate(-2px, 1px) rotate(3deg); } }
+@keyframes fm-dot { 0%, 80%, 100% { opacity: 0.25; transform: translateY(0); } 40% { opacity: 1; transform: translateY(-2px); } }
+@keyframes fm-dance { 0% { transform: rotate(0deg) translateX(14px) rotate(0deg); } 100% { transform: rotate(360deg) translateX(14px) rotate(-360deg); } }
+@keyframes fm-hop { 0%, 100% { transform: translateY(0) scale(1); } 30% { transform: translateY(-18px) scale(1.06); } 55% { transform: translateY(0) scale(0.96, 1.04); } 75% { transform: translateY(-6px); } }
+@keyframes fm-wiggle { 0%, 100% { transform: rotate(0deg); } 20% { transform: rotate(-12deg); } 40% { transform: rotate(10deg); } 60% { transform: rotate(-6deg); } 80% { transform: rotate(4deg); } }
+@keyframes fm-zoom { 0% { transform: translate(0, 0); } 25% { transform: translate(60px, -30px) rotate(12deg); } 50% { transform: translate(110px, 10px) rotate(-8deg); } 75% { transform: translate(40px, 30px) rotate(6deg); } 100% { transform: translate(0, 0); } }
+.fm-thinking { animation: fm-think 2.4s ease-in-out infinite; }
+.fm-dots i { display: block; width: 4px; height: 4px; border-radius: 9999px; background: currentColor; animation: fm-dot 1.2s ease-in-out infinite; }
+.fm-dots i:nth-child(2) { animation-delay: 0.15s; }
+.fm-dots i:nth-child(3) { animation-delay: 0.3s; }
+.fm-mood-dance { animation: fm-dance 1.6s cubic-bezier(0.45, 0, 0.55, 1) 2; }
+.fm-mood-hop { animation: fm-hop 0.9s cubic-bezier(0.34, 1.36, 0.64, 1) 2; }
+.fm-mood-wiggle { animation: fm-wiggle 0.8s ease-in-out 2; }
+.fm-mood-zoom { animation: fm-zoom 2.4s cubic-bezier(0.22, 1, 0.36, 1) 1; }
+@media (prefers-reduced-motion: reduce) {
+	.fm-thinking, .fm-dots i, .fm-mood-dance, .fm-mood-hop, .fm-mood-wiggle, .fm-mood-zoom { animation: none; }
+}

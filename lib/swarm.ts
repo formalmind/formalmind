@@ -140,6 +140,19 @@ export interface SwarmState {
 	ledger: SwarmComment[];
 	/** The latest swarm workflow runs, newest first. */
 	runs: SwarmRun[];
+	/** Agents working right now, in any project's proofs repository. */
+	active: SwarmActive[];
+}
+
+/** An agent job running now: who, in which proofs repository, on which issue or PR, and how far along. */
+export interface SwarmActive {
+	repo: string;
+	role: SwarmRole;
+	ref: number | null;
+	/** What the job does, when the role alone doesn't say it (the POC writer runs as the prover). */
+	task: string | null;
+	phase: SwarmRunPhase;
+	startedAt: string;
 }
 
 export type GitHubIssue = {
@@ -271,6 +284,43 @@ function phaseOf(run: GitHubRun, jobs: GitHubJob[]): SwarmRunPhase {
 	if (step.includes("lake") || step.includes("build") || step.includes("forge")) return "building";
 	if (step.includes("cost")) return "recording cost";
 	return "setting up";
+}
+
+/** A job's name is "<role> #<n>" (or the role alone) in the template's workflow; the dispatcher and hand-off jobs aren't agents. */
+const JOB_ROLES: Record<string, { role: SwarmRole; task: string | null }> = {
+	plan: { role: "planner", task: null },
+	prove: { role: "prover", task: null },
+	poc: { role: "prover", task: "writing a POC" },
+	review: { role: "reviewer", task: null },
+	merge: { role: "merger", task: null },
+	chief: { role: "chief", task: null },
+};
+
+/** Who is working now in each proofs repository, read from its running swarm jobs. */
+async function activeAgents(repos: string[]): Promise<SwarmActive[]> {
+	const perRepo = await Promise.all(repos.map(async (repo) => {
+		try {
+			const { workflow_runs } = await github<{ workflow_runs: (GitHubRun & { id: number })[] }>(`/actions/workflows/${SWARM_WORKFLOW}/runs?status=in_progress&per_page=5`, repo);
+			const jobs = await Promise.all(workflow_runs.map((run) => github<{ jobs: (GitHubJob & { started_at?: string })[] }>(`/actions/runs/${run.id}/jobs`, repo).then((r) => r.jobs)));
+			return jobs.flat().flatMap((job): SwarmActive[] => {
+				if (job.status !== "in_progress" && job.status !== "queued") return [];
+				const match = job.name.match(/^(\w+)(?:\s+#(\d+))?$/);
+				const known = match ? JOB_ROLES[match[1]] : undefined;
+				if (!known) return [];
+				const step = job.steps?.find((s) => s.status === "in_progress")?.name ?? "";
+				const phase: SwarmRunPhase = job.status === "queued" ? "queued"
+					: step.includes("claude-code-action") ? "working"
+					: step.includes("lake") || step.includes("build") || step.includes("Gate") || step.includes("forge") ? "building"
+					: step.includes("cost") ? "recording cost"
+					: "setting up";
+				return [{ repo, role: known.role, ref: match?.[2] ? Number(match[2]) : null, task: known.task, phase, startedAt: job.started_at ?? new Date().toISOString() }];
+			});
+		} catch {
+			// A repository we can't read (no workflow yet, no access) has nobody to show.
+			return [];
+		}
+	}));
+	return perRepo.flat();
 }
 
 async function recentRuns(notes: SwarmNote[], costs: SwarmCost[]): Promise<SwarmRun[]> {
@@ -433,7 +483,11 @@ async function loadSwarmState(account: Project[]): Promise<SwarmState> {
 		const match = comment.body.match(CYCLE_MARKER);
 		return match ? [{ n: Number(match[1]), phase: match[2], createdAt: comment.createdAt }] : [];
 	}).at(-1) ?? null;
-	const runs = await recentRuns(rawNotebook.flatMap((comment) => parseNote(comment) ?? []), costs);
+	const [runs, active] = await Promise.all([
+		recentRuns(rawNotebook.flatMap((comment) => parseNote(comment) ?? []), costs),
+		// The home's own runs are told by its notebook; the other proofs repositories by their running jobs.
+		activeAgents(boards.flatMap((b) => (b.project.proofsRepo && b.project.proofsRepo !== SWARM_REPO ? [b.project.proofsRepo] : []))),
+	]);
 	const today = new Date().toISOString().slice(0, 10);
 
 	return {
@@ -450,5 +504,6 @@ async function loadSwarmState(account: Project[]): Promise<SwarmState> {
 		notebook,
 		ledger: ledger.filter((comment) => !COST_MARKER.test(comment.body)).slice(-5),
 		runs,
+		active,
 	};
 }

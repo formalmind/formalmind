@@ -25,6 +25,7 @@ export function SwarmChat({
 	chatId = "swarm-chat",
 	initialMessages,
 	onMessagesChange,
+	onReply,
 	ask,
 	api = "/api/swarm/chat",
 	body,
@@ -52,6 +53,8 @@ export function SwarmChat({
 	chatId?: string;
 	initialMessages?: UIMessage[];
 	onMessagesChange?: (messages: UIMessage[]) => void;
+	/** Called once each time an answer finishes arriving. */
+	onReply?: () => void;
 }) {
 	const [model, setModel] = useState<OpenAIModel>("gpt-6-luna");
 	const { messages, input, setInput, handleInputChange, handleSubmit, append, stop, isLoading, error } = useChat({
@@ -74,6 +77,14 @@ export function SwarmChat({
 	}, [ask, append]);
 	const onChange = useRef(onMessagesChange);
 	onChange.current = onMessagesChange;
+
+	const replied = useRef(onReply);
+	replied.current = onReply;
+	const wasLoading = useRef(false);
+	useEffect(() => {
+		if (wasLoading.current && !isLoading && messages.at(-1)?.role === "assistant") replied.current?.();
+		wasLoading.current = isLoading;
+	}, [isLoading, messages]);
 
 	// Save once a turn has settled, not on every streamed token.
 	useEffect(() => {
