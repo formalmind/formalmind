@@ -366,3 +366,13 @@
 @media (prefers-reduced-motion: reduce) {
 	.fm-dots i { animation: none; }
 }
+
+/* Sidebar folders: the closed and open icons swap with a short blur and scale; hovering the row tips the folder. */
+.fm-folder > svg { transition: opacity 0.25s ease-in-out, transform 0.25s ease-in-out, filter 0.25s ease-in-out; transform-origin: 30% 80%; }
+.fm-folder > .fm-folder-open { opacity: 0; transform: scale(0.85); filter: blur(2px); }
+.fm-folder[data-open] > .fm-folder-open { opacity: 1; transform: scale(1); filter: blur(0); }
+.fm-folder[data-open] > .fm-folder-closed { opacity: 0; transform: scale(0.85); filter: blur(2px); }
+:is(button, a):is(:hover, :focus-visible) > .fm-folder:not([data-open]) > .fm-folder-closed { transform: rotate(-8deg); }
+@media (prefers-reduced-motion: reduce) {
+	.fm-folder > svg { transition: none; }
+}

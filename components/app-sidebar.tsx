@@ -86,7 +86,11 @@ function ProjectFolder({ project, open, onOpenChange, pathname, collapsed, onExp
 						className="flex h-8 min-w-0 flex-1 items-center gap-2 px-2 text-left text-sm font-normal text-sidebar-foreground/90 outline-none focus-visible:ring-2 focus-visible:ring-sidebar-ring"
 						title={project.repo}
 					>
-						{open && !collapsed ? <FolderOpen className="size-4 shrink-0" aria-hidden /> : <Folder className="size-4 shrink-0" aria-hidden />}
+						{/* Closed and open folders cross-fade; hovering lifts the lid a little. */}
+						<span className="fm-folder relative size-4 shrink-0" data-open={open && !collapsed ? "" : undefined} aria-hidden>
+							<Folder className="fm-folder-closed absolute inset-0 size-4" />
+							<FolderOpen className="fm-folder-open absolute inset-0 size-4" />
+						</span>
 						<span className="truncate group-data-[collapsible=icon]:hidden">{name}</span>
 						<ChevronRight className={`size-3.5 shrink-0 text-muted-foreground transition-transform duration-150 group-data-[collapsible=icon]:hidden ${open ? "rotate-90" : ""}`} aria-hidden />
 					</CollapsibleTrigger>
@@ -174,6 +178,10 @@ export function AppSidebar({ extra, ...props }: React.ComponentProps<typeof Side
 			<SidebarContent>
 				<SidebarGroup>
 					<SidebarMenu>
+						{/* One swarm, one budget, working across every project: the home page. */}
+						<NavLink item={{ title: "Swarm", url: "/", icon: Network, anim: "network" }} active={pathname === "/" || pathname === "/swarm/chat"} />
+						<NavLink item={{ title: "Roadmap", url: "/roadmap", icon: GanttChart, anim: "roadmap" }} active={pathname === "/roadmap" || pathname.endsWith("/roadmap")} />
+						{/* Right above the folders it adds to. */}
 						<SidebarMenuItem>
 							<SidebarMenuButton asChild isActive={pathname === "/onboarding" && window.location.search.includes("new=1")} tooltip="New project" className="font-normal data-[active=true]:font-normal">
 								<Link to="/onboarding?new=1" className="icon-anim-host">
@@ -182,9 +190,6 @@ export function AppSidebar({ extra, ...props }: React.ComponentProps<typeof Side
 								</Link>
 							</SidebarMenuButton>
 						</SidebarMenuItem>
-						{/* One swarm, one budget, working across every project: the home page. */}
-						<NavLink item={{ title: "Swarm", url: "/", icon: Network, anim: "network" }} active={pathname === "/" || pathname === "/swarm/chat"} />
-						<NavLink item={{ title: "Roadmap", url: "/roadmap", icon: GanttChart, anim: "roadmap" }} active={pathname === "/roadmap" || pathname.endsWith("/roadmap")} />
 					</SidebarMenu>
 					<Projects pathname={pathname} />
 				</SidebarGroup>
