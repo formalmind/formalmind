@@ -3,7 +3,6 @@ import { Loader2, Lock } from "lucide-react";
 import type { UIMessage } from "ai";
 import type { SwarmRole } from "@/lib/swarm";
 import { ProjectPicker } from "@/components/projects/project-picker";
-import { cheer } from "./cursor-moods";
 import { SwarmChat } from "./swarm-chat";
 
 const SUGGESTIONS: Partial<Record<SwarmRole, string[]>> = {
@@ -39,8 +38,6 @@ export function AgentChat({ role, repo }: { role: SwarmRole; repo: string }) {
 			api="/api/assistant"
 			body={{ role, project }}
 			initialMessages={saved}
-			// An answer makes the agent's cursor on the board hop.
-			onReply={() => cheer(role, "hop")}
 			onMessagesChange={(messages) =>
 				void fetch("/api/assistant", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ role, messages }) })
 			}

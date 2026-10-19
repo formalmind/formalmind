@@ -8,7 +8,6 @@ import { TextSwap } from "@/components/motion/text-swap";
 import { useIsMobile } from "@/hooks/use-mobile";
 import type { SwarmItem, SwarmProject, SwarmRole, SwarmRun, SwarmState } from "@/lib/swarm";
 import { ROLE_COLORS } from "@/lib/swarm-roles";
-import { onCheer, playMood } from "./cursor-moods";
 
 export { ROLE_COLORS };
 
@@ -884,40 +883,6 @@ export function SwarmCanvas({ state, fill = false, contain = false, title, actio
 
 	const shown = arrival && live ? welcome(live, arrival.repo, arrival.group) : live ?? scene;
 
-	// Life on the board. Idle agents now and then dance, hop, wiggle or zoom around and settle back; anyone can
-	// cheer an agent (an answer in its chat); and a new card makes the agent who made it hop.
-	const shownRef = useRef(shown);
-	shownRef.current = shown;
-	useEffect(() => {
-		const root = frameRef.current;
-		if (!root) return;
-		let timer: ReturnType<typeof setTimeout>;
-		const idle = () => {
-			const idleRoles = ROLES.filter((r) => !shownRef.current.cursors[r].say && !shownRef.current.cursors[r].thinking);
-			const role = idleRoles[Math.floor(Math.random() * idleRoles.length)];
-			if (role && document.visibilityState === "visible") playMood(root, role);
-			timer = setTimeout(idle, 7000 + Math.random() * 9000);
-		};
-		timer = setTimeout(idle, 4000);
-		const stop = onCheer((role, mood) => playMood(root, role, mood));
-		return () => {
-			clearTimeout(timer);
-			stop();
-		};
-	}, []);
-	const seenCards = useRef<Set<string> | null>(null);
-	useEffect(() => {
-		const root = frameRef.current;
-		const ids = new Set(shown.cards.map((c) => c.id));
-		const before = seenCards.current;
-		seenCards.current = ids;
-		if (!root || !before) return;
-		for (const c of shown.cards) {
-			if (before.has(c.id)) continue;
-			const maker: SwarmRole = c.lane === "todo" || c.lane === "roadmap" ? "planner" : c.lane === "dev" ? "merger" : c.lane === "approved" ? "reviewer" : "prover";
-			playMood(root, maker, "hop");
-		}
-	}, [shown.cards]);
 	// Cards grow to fit their label and title; the board stacks them on what they measure.
 	const [heights, setHeights] = useState(() => new Map<string, number>());
 	const measure = (id: string, h: number) =>
@@ -1307,8 +1272,7 @@ export function SwarmCursor({ role, x, y, say, turn, thinking, side, delay = 0, 
 			className={`pointer-events-none absolute left-0 top-0 z-20 ${MOVE}`}
 			style={{ transform: `translate(${x}px, ${y}px)`, transitionProperty: "transform", transitionDelay: `${delay}ms` }}
 		>
-			{/* The body takes the moods (thinking, dances, hops) so they never fight the move's transform. */}
-			<div data-cursor-body className={`relative ${thinking ? "fm-thinking" : ""}`}>
+			<div className="relative">
 			<svg width="28" height="28" viewBox="0 0 24 24" className="absolute -left-2 -top-[5px] drop-shadow-sm" aria-hidden>
 				<polygon points="7 20 7 4 19 16 12 16 7 21" fill={color} stroke="white" strokeWidth="1.5" strokeLinejoin="round" />
 			</svg>
