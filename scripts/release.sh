@@ -17,6 +17,8 @@ if [ -n "$(git status --porcelain)" ]; then
   exit 1
 fi
 
+bun install --frozen-lockfile
+
 if [ "$TARGET" != desktop ]; then
   echo "release: deploying the website"
   bun run deploy:cf
