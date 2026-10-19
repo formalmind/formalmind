@@ -127,7 +127,8 @@ type Card = {
 };
 
 /** `thinking`: working right now (a running job), so the cursor shows it. */
-type Cursor = { at?: { x: number; y: number }; follow?: string; say?: string; thinking?: boolean; where?: { text: string; card?: string; href: string } };
+/** `until`: a time the bubble counts down to (the dispatcher's next sweep). */
+type Cursor = { at?: { x: number; y: number }; follow?: string; say?: string; thinking?: boolean; where?: { text: string; card?: string; href: string }; until?: number };
 
 type Note = { role: SwarmRole; text: string; done: boolean };
 
@@ -433,6 +434,32 @@ function placeActive(state: SwarmState, cards: Card[], cursors: Scene["cursors"]
 	}
 }
 
+/** The swarm sweeps every ten minutes on the clock (its cron); the next one, as a time. */
+const nextSweep = (now = Date.now()) => Math.ceil((now + 1000) / 600_000) * 600_000;
+
+/**
+ * Between turns nobody stands idle at home: each agent waits by the card that is its next job (the prover by its
+ * issue in progress, the reviewer by a PR to review, the merger by an approved one), the assistant by whatever is
+ * waiting on you, and the dispatcher counts down to its next sweep.
+ */
+function placeWaiting(state: SwarmState, cards: Card[], cursors: Scene["cursors"]) {
+	const first = (lane: Lane, label?: string) => cards.find((c) => c.lane === lane && c.kind !== "doc" && (!label || c.label === label));
+	const blocked = cards.find((c) => c.label === "fm:blocked");
+	const waits: [SwarmRole, Card | undefined, string][] = [
+		["prover", first("progress", "fm:in-progress") ?? first("todo"), "next on my turn"],
+		["reviewer", first("review"), "reviewing on my turn"],
+		["merger", first("approved"), "merging on my turn"],
+		["assistant", blocked, "waiting on you"],
+	];
+	for (const [role, card, say] of waits) {
+		if (!card || cursors[role].say || cursors[role].follow) continue;
+		cursors[role] = { follow: card.id, say };
+	}
+	if (!cursors.dispatcher.say && !(state.active ?? []).some((a) => !a.finished)) {
+		cursors.dispatcher = { ...cursors.dispatcher, say: "next sweep in", until: nextSweep() };
+	}
+}
+
 function liveScene(state: SwarmState, run: SwarmRun | null): Scene {
 	const projects = projectsOf(state);
 	const geo = geometry(projects.length);
@@ -456,6 +483,7 @@ function liveScene(state: SwarmState, run: SwarmRun | null): Scene {
 	const cursorsAtHome = Object.fromEntries(ROLES.map((r) => [r, { at: geo.home[r] }])) as Scene["cursors"];
 	if (!run) {
 		placeActive(state, cards, cursorsAtHome, (repo) => geo.roadmap(groupOf(repo)));
+		placeWaiting(state, cards, cursorsAtHome);
 		const last = state.runs.find((r) => r.note)?.note;
 		return {
 			cards,
@@ -504,6 +532,7 @@ function liveScene(state: SwarmState, run: SwarmRun | null): Scene {
 		cursors[nextRole] = target ? { follow: target.id, say: "My turn next" } : { at: geo.home[nextRole], say: "My turn next" };
 	}
 	placeActive(state, cards, cursors, (repo) => geo.roadmap(groupOf(repo)));
+	placeWaiting(state, cards, cursors);
 	// The job comes from the item's job labels, not from a question label shown on the card.
 	const targetItem = state.work.find((item) => itemRepo(state, item) === noteRepo && item.number === note?.ref);
 	const label = targetItem ? jobLaneOf(targetItem)?.label : target?.label;
@@ -1091,6 +1120,7 @@ export function SwarmCanvas({ state, fill = false, contain = false, title, actio
 							say={cursorOf(role).say}
 							thinking={cursorOf(role).thinking}
 							where={cursorOf(role).where}
+							until={cursorOf(role).until}
 							// The issue or PR in the bubble previews like its card on the board.
 							onWhereEnter={(el, id) => {
 								const c = shown.cards.find((card) => card.id === id);
@@ -1322,7 +1352,7 @@ const MOVE = "transition-transform duration-700 [transition-timing-function:cubi
 
 /** Every role's cursor stays at full strength; the turn pill says who is working. */
 /** `onTalk` makes the name pill a button that opens a chat with this agent. */
-export function SwarmCursor({ role, x, y, say, turn, thinking, where, onWhereEnter, onWhereLeave, side, delay = 0, onTalk }: {
+export function SwarmCursor({ role, x, y, say, turn, thinking, where, onWhereEnter, onWhereLeave, until, side, delay = 0, onTalk }: {
 	role: SwarmRole;
 	x: number;
 	y: number;
@@ -1333,6 +1363,8 @@ export function SwarmCursor({ role, x, y, say, turn, thinking, where, onWhereEnt
 	where?: { text: string; card?: string; href: string };
 	onWhereEnter?: (el: HTMLElement, card: string) => void;
 	onWhereLeave?: () => void;
+	/** Counts down to this time after the words, e.g. "next sweep in 4:12". */
+	until?: number;
 	side?: "left";
 	delay?: number;
 	onTalk?: (role: SwarmRole) => void;
@@ -1376,6 +1408,7 @@ export function SwarmCursor({ role, x, y, say, turn, thinking, where, onWhereEnt
 					<span key={say} className="pointer-events-auto w-max max-w-[240px] cursor-default rounded-lg border bg-popover px-2.5 py-1.5 text-[13px] leading-snug text-popover-foreground shadow-md animate-in fade-in-0 zoom-in-95 duration-200">
 						{thinking ? <span className="fm-dots mr-1.5 inline-flex gap-[3px] align-middle" aria-hidden><i /><i /><i /></span> : null}
 						{say}
+						{until ? <> <Countdown to={until} /></> : null}
 						{where ? (
 							<>
 								{" · "}
@@ -1733,4 +1766,15 @@ function ChiefPanel({ headline, ...mode }: PanelMode & { headline: string }) {
 			<p className="mt-2 text-[14px] font-medium leading-snug text-foreground">{headline}</p>
 		</Panel>
 	);
+}
+
+/** m:ss to a time, ticking by itself so the board doesn't re-render every second. */
+function Countdown({ to }: { to: number }) {
+	const [now, setNow] = useState(Date.now());
+	useEffect(() => {
+		const timer = setInterval(() => setNow(Date.now()), 1000);
+		return () => clearInterval(timer);
+	}, []);
+	const left = Math.max(0, Math.round((to - now) / 1000));
+	return <span className="font-mono tabular-nums">{left ? `${Math.floor(left / 60)}:${String(left % 60).padStart(2, "0")}` : "now"}</span>;
 }
