@@ -237,12 +237,16 @@ export function Onboarding() {
 									<Check className="size-4 text-green-600" /> Proofs repository ready:{" "}
 									<a href={`https://github.com/${proofsRepo}`} target="_blank" rel="noreferrer" className="font-mono underline underline-offset-4">{proofsRepo}</a>
 									<Link to={projectPath(state.repo ?? "")} className="ml-2 text-muted-foreground underline-offset-4 hover:text-foreground hover:underline">Open the project</Link>
+									{/* Links it again: the paying account, the mode and its config, then starts the swarm. Settings already in the repository are kept. */}
+									<button type="button" disabled={init.busy} onClick={() => void initialise()} className="ml-2 text-muted-foreground underline-offset-4 hover:text-foreground hover:underline disabled:opacity-50">
+										{init.busy ? "Linking…" : "Link again"}
+									</button>
 								</p>
-								{/* The swarm runs in the proofs repository's own Actions, on the model key kept there. */}
+								{init.error ? <p role="alert" className="mt-2 max-w-xl text-sm text-red-600 dark:text-red-400">{init.error}</p> : null}
+								{/* No secrets to add: each run gets its tokens from formal.team, and model calls are charged to credits. */}
 								<p className="mt-3 max-w-xl text-sm text-muted-foreground">
-									One step left: add an <span className="font-mono text-foreground">ANTHROPIC_API_KEY</span> secret in{" "}
-									<a href={`https://github.com/${proofsRepo}/settings/secrets/actions/new`} target="_blank" rel="noreferrer" className="underline underline-offset-4">{proofsRepo}'s Actions secrets</a>.{" "}
-									{state.mode === "audit" ? "The audit starts on its next run, and its report is the FM_AUDIT file in the repository's root." : "The swarm then runs every ten minutes."}
+									Nothing to add to the repository: each run signs in to formal.team with GitHub's own token, and its model calls are charged to your credits.{" "}
+									{state.mode === "audit" ? "The audit has started; its report is the FM_AUDIT file in the repository's root." : "The swarm runs every ten minutes."}
 								</p>
 								</>
 							) : (
