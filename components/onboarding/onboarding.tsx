@@ -233,21 +233,23 @@ export function Onboarding() {
 							/>
 							{proofsRepo ? (
 								<>
-								<p role="status" className="mt-5 inline-flex items-center gap-2 text-sm">
-									<Check className="size-4 text-green-600" /> Proofs repository ready:{" "}
-									<a href={`https://github.com/${proofsRepo}`} target="_blank" rel="noreferrer" className="font-mono underline underline-offset-4">{proofsRepo}</a>
-									<Link to={projectPath(state.repo ?? "")} className="ml-2 text-muted-foreground underline-offset-4 hover:text-foreground hover:underline">Open the project</Link>
-									{/* Links it again: the paying account, the mode and its config, then starts the swarm. Settings already in the repository are kept. */}
-									<button type="button" disabled={init.busy} onClick={() => void initialise()} className="ml-2 text-muted-foreground underline-offset-4 hover:text-foreground hover:underline disabled:opacity-50">
+								<p role="status" className="mt-6 flex items-center gap-2 text-sm">
+									<Check className="size-4 shrink-0 text-green-600" />
+									<span>
+										<a href={`https://github.com/${proofsRepo}`} target="_blank" rel="noreferrer" className="font-mono underline underline-offset-4">{proofsRepo}</a>{" "}
+										{state.mode === "audit" ? "is auditing. No keys needed." : "is running. No keys needed."}
+									</span>
+								</p>
+								<div className="mt-4 flex items-center gap-3">
+									<Link to={projectPath(state.repo ?? "")} className="inline-flex h-10 items-center rounded-full bg-primary px-5 text-sm font-medium text-primary-foreground hover:opacity-90">
+										Open the project
+									</Link>
+									{/* Links it again: the paying account and mode, then starts the swarm. Settings in the repository are kept. */}
+									<button type="button" disabled={init.busy} onClick={() => void initialise()} className="inline-flex h-10 items-center rounded-full border px-5 text-sm hover:bg-muted disabled:opacity-50">
 										{init.busy ? "Linking…" : "Link again"}
 									</button>
-								</p>
-								{init.error ? <p role="alert" className="mt-2 max-w-xl text-sm text-red-600 dark:text-red-400">{init.error}</p> : null}
-								{/* No secrets to add: each run gets its tokens from formal.team, and model calls are charged to credits. */}
-								<p className="mt-3 max-w-xl text-sm text-muted-foreground">
-									Nothing to add to the repository: each run signs in to formal.team with GitHub's own token, and its model calls are charged to your credits.{" "}
-									{state.mode === "audit" ? "The audit has started; its report is the FM_AUDIT file in the repository's root." : "The swarm runs every ten minutes."}
-								</p>
+								</div>
+								{init.error ? <p role="alert" className="mt-3 max-w-xl text-sm text-red-600 dark:text-red-400">{init.error}</p> : null}
 								</>
 							) : (
 								<>
