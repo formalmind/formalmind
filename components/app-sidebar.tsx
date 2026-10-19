@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { Link, useLocation } from "react-router";
-import { BookOpen, Folder, FolderOpen, Gauge, ChevronRight, GanttChart, Network, Plus } from "lucide-react"
+import { BookOpen, Folder, FolderOpen, ChevronRight, GanttChart, Network, Plus } from "lucide-react"
 import {
 	Sidebar,
 	SidebarContent,
@@ -185,7 +185,6 @@ export function AppSidebar({ extra, ...props }: React.ComponentProps<typeof Side
 						{/* One swarm, one budget, working across every project: the home page. */}
 						<NavLink item={{ title: "Swarm", url: "/", icon: Network, anim: "network" }} active={pathname === "/" || pathname === "/swarm/chat"} />
 						<NavLink item={{ title: "Roadmap", url: "/roadmap", icon: GanttChart, anim: "roadmap" }} active={pathname === "/roadmap" || pathname.endsWith("/roadmap")} />
-						<NavLink item={{ title: "Usage", url: "/usage", icon: Gauge, anim: "gauge" }} active={pathname === "/usage"} />
 					</SidebarMenu>
 					<Projects pathname={pathname} />
 				</SidebarGroup>

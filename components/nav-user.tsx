@@ -5,6 +5,7 @@ import { forgetLandingProgress } from "@/components/landing/use-plan";
 import {
 	ChevronsUpDown,
 	CreditCard,
+	Gauge,
 	LogIn,
 	LogOut,
 	Monitor,
@@ -103,6 +104,12 @@ export function NavUser() {
 						</DropdownMenuGroup>
 						<DropdownMenuSeparator />
 						<DropdownMenuGroup>
+							<DropdownMenuItem asChild>
+								<Link to="/usage">
+									<Gauge />
+									Usage
+								</Link>
+							</DropdownMenuItem>
 							<DropdownMenuItem asChild>
 								<Link to="/billing">
 									<CreditCard />
