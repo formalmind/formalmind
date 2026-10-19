@@ -10,7 +10,12 @@ const RANGES = [7, 30, 90] as const;
 type Range = (typeof RANGES)[number];
 
 const usd = (n: number) => `$${n.toFixed(2)}`;
-const day = (d: Date) => d.toISOString().slice(0, 10);
+/** A date's day in the viewer's own timezone (YYYY-MM-DD), so "today" matches their clock rather than UTC's. */
+const day = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+const localTime = (iso: string) => {
+	const d = new Date(iso);
+	return `${day(d)} ${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
+};
 
 function sumBy(costs: SwarmCost[], key: (c: SwarmCost) => string) {
 	const totals = new Map<string, number>();
@@ -45,10 +50,10 @@ export function UsagePage() {
 	const { days, inRange, total, peak } = useMemo(() => {
 		const days: { date: string; usd: number }[] = [];
 		const today = new Date();
-		for (let i = range - 1; i >= 0; i--) days.push({ date: day(new Date(today.getTime() - i * 86_400_000)), usd: 0 });
+		for (let i = range - 1; i >= 0; i--) days.push({ date: day(new Date(today.getFullYear(), today.getMonth(), today.getDate() - i)), usd: 0 });
 		const index = new Map(days.map((d, i) => [d.date, i]));
-		const inRange = (costs ?? []).filter((c) => index.has(c.createdAt.slice(0, 10)));
-		for (const c of inRange) days[index.get(c.createdAt.slice(0, 10))!].usd += c.usd;
+		const inRange = (costs ?? []).filter((c) => index.has(day(new Date(c.createdAt))));
+		for (const c of inRange) days[index.get(day(new Date(c.createdAt)))!].usd += c.usd;
 		const total = inRange.reduce((s, c) => s + c.usd, 0);
 		return { days, inRange, total, peak: Math.max(0.01, ...days.map((d) => d.usd)) };
 	}, [costs, range]);
@@ -114,7 +119,7 @@ export function UsagePage() {
 						<ul className="max-h-96 divide-y overflow-y-auto text-sm">
 							{[...inRange].reverse().map((c, i) => (
 								<li key={`${c.createdAt}-${i}`} className="flex items-center gap-4 px-5 py-2.5">
-									<span className="w-32 shrink-0 text-xs text-muted-foreground tabular-nums">{c.createdAt.slice(0, 16).replace("T", " ")}</span>
+									<span className="w-32 shrink-0 text-xs text-muted-foreground tabular-nums">{localTime(c.createdAt)}</span>
 									<span className="min-w-0 flex-1 truncate">
 										{c.role}
 										{c.ref ? <> <span className="text-muted-foreground">on</span> <RefCard repo={c.repo} ref_={c.ref} /></> : null}

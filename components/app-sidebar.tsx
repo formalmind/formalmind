@@ -17,6 +17,7 @@ import {
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible"
 import { NavUser } from "@/components/nav-user"
 import { LogoMark } from "@/components/logo"
+import { BUILD } from "@/lib/build-info"
 import { projectPath, useProjectChats, useProjects, type Project } from "@/components/projects/use-projects"
 
 /** `anim` names the hover animation in globals.css (icon-anim-*). */
@@ -195,6 +196,7 @@ export function AppSidebar({ extra, ...props }: React.ComponentProps<typeof Side
 					{FOOTER.map((item) => <NavLink key={item.url} item={item} active={pathname === item.url} />)}
 				</SidebarMenu>
 				<NavUser />
+				<p className="px-2 text-[11px] text-muted-foreground/70 tabular-nums group-data-[collapsible=icon]:hidden" title="Version and commit">{BUILD}</p>
 			</SidebarFooter>
 		</Sidebar>
 	)
