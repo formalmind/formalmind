@@ -149,6 +149,8 @@ async function startAudit(repo: string, proofsRepo: string): Promise<string> {
 		// Already there: the audit was started before, and the report keeps what it has.
 		if (statusOf(error) !== 422) throw error;
 	}
+	// Only the home repository runs the swarm's workflow so far; other proofs repositories wait for theirs.
+	if (proofsRepo !== SWARM_REPO) return path;
 	const [homeOwner, homeName] = SWARM_REPO.split("/");
 	const home = await installationFor(homeOwner, homeName);
 	await home
