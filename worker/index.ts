@@ -3,6 +3,7 @@ import { auth, handleAuth, type Principal } from "@/lib/auth";
 import { issuer, type Scope } from "@/lib/oauth";
 import { requestContext, type Env } from "./context";
 import { DISCOVERY_LINK_HEADER, handleDiscovery } from "./discovery";
+import { AGENT_CREDITS_PATH, agentCreditsChain } from "./payments";
 import { handleOAuth } from "./oauth";
 import { CONTENT_SIGNAL, isPagePath, markdownResponse, prefersMarkdown } from "./markdown";
 
@@ -123,6 +124,10 @@ app.get("/api/me", async (c) => {
 	const session = await auth.getSession();
 	return c.json(session ? { user: session.user } : { user: null });
 });
+
+// Agents buy credits over HTTP 402: x402 and MPP (worker/payments.ts). Its own auth: a 402 comes before any account.
+const [validatePayment, mppPayment, x402Payment, creditHandler] = agentCreditsChain();
+app.post(AGENT_CREDITS_PATH, validatePayment, mppPayment, x402Payment, creditHandler);
 
 app.all("/api/*", async (c) => {
 	const route = ROUTES[new URL(c.req.url).pathname];

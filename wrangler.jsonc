@@ -19,6 +19,8 @@
 	// once a route exists unless they are set explicitly).
 	"routes": [{ "pattern": "formal.team", "custom_domain": true }],
 	"workers_dev": true,
+	// mppx imports zod 4's "zod/mini"; the repo pins zod 3.25 (package.json overrides), which ships it as zod/v4/mini.
+	"alias": { "zod/mini": "zod/v4/mini" },
 	"preview_urls": true,
 	// The "Formal Mind" OAuth App people sign in with (public); its secret is GITHUB_CLIENT_SECRET.
 	"vars": { "GITHUB_CLIENT_ID": "Ov23liK0RilXoojDmXW1" },
@@ -40,4 +42,7 @@
 	//   OPENAI_API_KEY, GITHUB_CLIENT_SECRET (the formalmind App's client secret, for sign-in), APP_BASE_URL,
 	//   GITHUB_APP_ID, GITHUB_APP_PRIVATE_KEY, GITHUB_WEBHOOK_SECRET, GITHUB_TOKEN,
 	//   STRIPE_SECRET_KEY, STRIPE_WEBHOOK_SECRET, GITHUB_MARKETPLACE_WEBHOOK_SECRET
+	// Agent payments (worker/payments.ts): X402_PAY_TO (receiving EVM wallet), X402_NETWORK (default eip155:84532,
+	//   Base Sepolia), X402_FACILITATOR_URL (default https://x402.org/facilitator), MPP_SECRET_KEY (openssl rand
+	//   -base64 32), MPP_RECIPIENT (default X402_PAY_TO), MPP_TESTNET ("false" for Tempo mainnet)
 }

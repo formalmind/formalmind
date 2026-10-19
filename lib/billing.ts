@@ -12,7 +12,8 @@ export { DEPOSITS_USD } from "@/lib/billing-plans";
 const MIN_USD = 10;
 const MAX_USD = 1_000;
 
-export type CreditEntry = { at: string; cents: number; kind: "deposit"; ref: string };
+/** `via` is how the deposit was paid: Stripe Checkout (absent, the original rail), x402 or MPP (lib/agent-payments.ts). */
+export type CreditEntry = { at: string; cents: number; kind: "deposit"; ref: string; via?: "stripe" | "x402" | "mpp" };
 export type Credits = { cents: number; entries: CreditEntry[] };
 
 const creditPrefix = (sub: string) => `credit:${sub}:`;
@@ -86,6 +87,16 @@ export async function applyCheckout(session: CheckoutSession & { created?: numbe
 	};
 	await (await kv()).put(`${creditPrefix(sub)}${session.id}`, JSON.stringify(entry), { metadata: entry });
 	return true;
+}
+
+/**
+ * Records an agent payment (x402 or MPP) as a deposit, keyed by its on-chain reference, so a replayed credential or a
+ * retried settlement still counts once.
+ */
+export async function applyAgentPayment({ sub, cents, ref, via }: { sub: string; cents: number; ref: string; via: "x402" | "mpp" }) {
+	const entry: CreditEntry = { at: new Date().toISOString(), cents, kind: "deposit", ref, via };
+	await (await kv()).put(`${creditPrefix(sub)}${via}:${ref}`, JSON.stringify(entry), { metadata: entry });
+	return entry;
 }
 
 /** The success redirect: look the session up and credit it if it is the caller's and paid. */

@@ -11,6 +11,7 @@
 
 import { SCOPES } from "@/lib/oauth";
 import { ACCOUNT_MCP_PATH, ACCOUNT_TOOLS, handleAccountMcp } from "./account-mcp";
+import { handleCommerce } from "./commerce";
 import { handleSkills } from "./skills";
 import { handleMcp, serverCard } from "./mcp";
 import { handleWellKnown } from "./wellKnown";
@@ -99,7 +100,8 @@ export const AGENT_LINKS_MARKDOWN = `## For agents
 - [MCP server card](${ORIGIN}/.well-known/mcp/server-card.json): read-only MCP server at ${ORIGIN}/mcp (swarm state, open work, changelog, role documentation) and the account server at ${ORIGIN}/mcp/account (your projects, usage, credits, swarm state, plan and start; OAuth 2.0)
 - [Agent Skills](${ORIGIN}/.well-known/agent-skills/index.json): how to ask the swarm on GitHub, how to onboard a repository, and how to connect Formal Mind as an MCP connector
 - [API catalog](${ORIGIN}/.well-known/api-catalog): the open plan endpoint, the two MCP servers and the token-capable account routes
-- [auth.md](${ORIGIN}/auth.md): GitHub sign-in for people; the OAuth 2.0 authorization server, scopes and tokens for agents`;
+- [auth.md](${ORIGIN}/auth.md): GitHub sign-in for people; the OAuth 2.0 authorization server, scopes and tokens for agents
+- [OpenAPI](${ORIGIN}/openapi.json): \`POST /api/agent/credits?usd=N\` buys credits with an HTTP 402 payment, x402 (USDC on Base) or MPP (Tempo); also [UCP](${ORIGIN}/.well-known/ucp) and [ACP](${ORIGIN}/.well-known/acp.json) discovery`;
 
 /* llmstxt.org: a short orientation plus a curated reading list. */
 function llmsTxt(): Response {
@@ -160,7 +162,7 @@ ${HOW_IT_WORKS}
 - **Plan a repository.** \`POST ${ORIGIN}/api/onboarding/plan\` with body \`{"repo":"owner/name"}\` and no credentials. The response is \`text/plain\`: a JSON object streamed a few characters at a time, with the protocol summary, the contracts found, and the first issues the planner would open. Limits: public repositories with Solidity contracts outside tests and libraries; five plans per hour per address (429 after that); a plan is cached for a week and replayed (header \`X-Plan-Cache: hit\`).
 - **Talk to the swarm on GitHub.** In a proofs repository the swarm works, mention \`@formalmind\` for the bot, or comment \`/ask <role> <question>\` to put a question to one role. This needs a GitHub account; the skill at ${ORIGIN}/.well-known/agent-skills/ask-formalmind/SKILL.md says how replies and reactions work.
 - **Act on a person's account.** With an OAuth access token from ${ORIGIN} (the person signs in with GitHub and allows the client on a consent page), the account MCP server at ${ORIGIN}/mcp/account and the API routes listed in ${ORIGIN}/auth.md give the account's projects, usage, credits and swarm state (\`swarm:read\`), and plan a repository or start the swarm on it (\`swarm:write\`). The section below says how.
-- **Onboard a repository for a person.** Planning and Start can be done with a \`swarm:write\` token (\`plan_repository\`, \`start_swarm\`, or \`POST /api/projects/init\`); setting a budget, buying credits and installing the GitHub App are browser flows behind GitHub sign-in. The skill at ${ORIGIN}/.well-known/agent-skills/onboard-a-repository/SKILL.md walks a person through them.
+- **Onboard a repository for a person.** Planning and Start can be done with a \`swarm:write\` token (\`plan_repository\`, \`start_swarm\`, or \`POST /api/projects/init\`); setting a budget and installing the GitHub App are browser flows behind GitHub sign-in. Credits an agent can buy itself with an HTTP 402 payment (below). The skill at ${ORIGIN}/.well-known/agent-skills/onboard-a-repository/SKILL.md walks a person through them.
 
 ${AGENT_ACCESS}
 
@@ -274,6 +276,15 @@ curl -s ${ORIGIN}/oauth/token -d grant_type=refresh_token -d refresh_token=fmr_�
 curl -s ${ORIGIN}/oauth/revoke -d token=fmr_…
 \`\`\`
 
+## Paying with HTTP 402 (x402 and MPP)
+
+Agents buy credits for an account without a checkout page: \`POST ${ORIGIN}/api/agent/credits?usd=N\` (whole dollars, 1 to 1000; the price equals it, credited 1:1 like a Stripe deposit). Unpaid, it answers 402 with two offers:
+
+- **x402**: the \`PAYMENT-REQUIRED\` header (scheme \`exact\`, USDC on Base). Retry with \`PAYMENT-SIGNATURE\` and the account's access token as \`Authorization: Bearer\`; the response's \`PAYMENT-RESPONSE\` header carries the settlement. Any x402 client works (\`@x402/fetch\`, \`mppx --protocol x402\`).
+- **MPP**: \`WWW-Authenticate: Payment\` (a Tempo charge). Retry with \`Authorization: Payment …\` and the account's access token in \`X-Formal-Mind-Token\`; the receipt is in \`Payment-Receipt\`.
+
+Without a valid account token the paid retry answers 401 and nothing is charged. The operation is described in ${ORIGIN}/openapi.json (MPP \`x-payment-info\`), ${ORIGIN}/.well-known/ucp and ${ORIGIN}/.well-known/acp.json.
+
 ## Error shapes
 
 - Authorization server endpoints: a JSON body \`{"error":"…","error_description":"…"}\` (RFC 6749 §5.2, RFC 7591 §3.2.2): \`invalid_client_metadata\` or \`invalid_redirect_uri\` (400) from registration, \`invalid_request\`, \`invalid_scope\`, \`invalid_target\`, \`unsupported_response_type\` or \`access_denied\` as query parameters on the redirect from authorize, \`invalid_client\` (401), \`invalid_grant\`, \`invalid_scope\` or \`unsupported_grant_type\` (400) from the token endpoint. A client or redirect_uri problem at authorize is an HTML page, never a redirect.
@@ -325,6 +336,11 @@ function apiCatalog(): Response {
         "service-meta": [{ href: `${ORIGIN}/.well-known/oauth-protected-resource`, type: "application/json", title: "RFC 9728 protected resource metadata" }],
       },
       {
+        anchor: `${ORIGIN}/api/agent/credits`,
+        "service-desc": [{ href: `${ORIGIN}/openapi.json`, type: "application/openapi+json", title: "OpenAPI 3.1 with MPP x-payment-info" }],
+        "service-doc": [{ href: `${ORIGIN}/auth.md`, type: "text/markdown", title: "Buy credits with an HTTP 402 payment: x402 (USDC on Base) or MPP (Tempo)" }],
+      },
+      {
         anchor: `${ORIGIN}/api/onboarding/plan`,
         "service-doc": [
           { href: `${ORIGIN}/.well-known/agent-skills/onboard-a-repository/SKILL.md`, type: "text/markdown", title: "POST a repository, receive the planner's first issues as a text stream" },
@@ -351,6 +367,9 @@ export async function handleDiscovery(request: Request): Promise<Response | null
 
   const skills = await handleSkills(pathname);
   if (skills) return skills;
+
+  const commerce = handleCommerce(pathname);
+  if (commerce) return commerce;
 
   const wellKnown = await handleWellKnown(request);
   if (wellKnown) return wellKnown;
