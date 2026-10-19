@@ -9,6 +9,8 @@
     "preview": "vite build && wrangler dev",
     "lint": "eslint .",
     "deploy:cf": "vite build && wrangler deploy",
+    "release": "scripts/release.sh",
+    "prepare": "git config core.hooksPath .githooks || true",
     "desktop:dev": "cd desktop && tauri dev",
     "desktop:build": "cd desktop && tauri build",
     "storybook": "storybook dev -p 6006",

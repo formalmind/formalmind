@@ -1,0 +1,14 @@
+#!/usr/bin/env bash
+# Pushing to main ships it (scripts/release.sh); the push goes through only if the release does.
+# Skip once with SKIP_RELEASE=1 git push, or git push --no-verify.
+[ -n "${SKIP_RELEASE:-}" ] && exit 0
+while read -r _ local_sha remote_ref _; do
+  if [ "$remote_ref" = refs/heads/main ] && [ "$local_sha" != 0000000000000000000000000000000000000000 ]; then
+    if [ "$local_sha" != "$(git rev-parse HEAD)" ]; then
+      echo "pre-push: check out the commit you're pushing to main so the release builds it" >&2
+      exit 1
+    fi
+    exec scripts/release.sh </dev/null
+  fi
+done
+exit 0

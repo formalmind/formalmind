@@ -44,42 +44,21 @@ The landing page's **Download for Mac** links to `releases/latest/download/Forma
 Updates must be signed with the key whose public half is in `tauri.conf.json`. The private key is
 `~/.tauri/formalmind.key` on the maintainer's Mac, not in the repo: back it up, or no future update can install.
 
-`.github/workflows/release.yml` does the whole release, so the website and the app ship from the same commit:
+Releases run on the maintainer's Mac so no key goes to CI: `scripts/release.sh`, run by the pre-push hook
+(`.githooks/pre-push`, turned on by `bun install` through `core.hooksPath`) whenever you push to main. The push
+goes through only if the release does. Skip it once with `SKIP_RELEASE=1 git push` or `git push --no-verify`;
+run it by hand with `bun run release` (or `release web` / `release desktop`).
 
-1. Bump `version` in `src-tauri/tauri.conf.json` and `src-tauri/Cargo.toml` (the workflow refuses if they differ),
-   commit and push to main.
-2. `git tag desktop-vX.Y.Z && git push origin desktop-vX.Y.Z`. On a macos-14 runner the workflow imports the
-   Developer ID certificate into a temporary keychain, builds with `bun run desktop:build` (signed with
-   `signingIdentity` from `tauri.conf.json`), notarizes the .dmg with `notarytool`, staples the .dmg and the .app,
-   re-makes `Formal-Mind-mac.app.tar.gz` from the stapled app, signs it with `tauri signer sign`, writes
-   `latest.json` (`platforms.darwin-aarch64`) and runs `gh release create desktop-vX.Y.Z` with
-   `Formal-Mind-mac.dmg`, `Formal-Mind-mac.app.tar.gz` and `latest.json`. Those names are what the landing page and
-   the updater fetch; don't change them.
+It needs: `wrangler login`, the `formalmind` notarytool keychain profile, the Developer ID certificate in your
+keychain, `~/.tauri/formalmind.key`, and `gh auth login`. It ships what is committed (a dirty tree is refused).
 
-The website deploys from the same workflow (`bun run deploy:cf`) on every push to main once the repository variable
-`AUTO_DEPLOY_WEB` is `true`; until then it only deploys when run by hand.
-
-**Dry run:** Actions > Release > Run workflow, pick `web`, `desktop` or `both`, leave **publish** unchecked. It builds,
-signs and notarizes but deploys and releases nothing; the desktop files are attached to the run as an artifact.
-With **publish** checked, a manual run deploys and releases like the push and tag do.
-
-Secrets to add under Settings > Secrets and variables > Actions (add them yourself; they never go in the repo):
-
-| Secret | What |
-| --- | --- |
-| `CLOUDFLARE_API_TOKEN` | Cloudflare API token that can deploy Workers |
-| `CLOUDFLARE_ACCOUNT_ID` | Cloudflare account id |
-| `APPLE_CERTIFICATE` | Developer ID Application certificate and key, exported as .p12, base64 (`base64 -i cert.p12 \| pbcopy`) |
-| `APPLE_CERTIFICATE_PASSWORD` | the .p12's export password |
-| `APPLE_ID` | Apple ID email for notarization |
-| `APPLE_PASSWORD` | an app-specific password for that Apple ID (appleid.apple.com) |
-| `TAURI_SIGNING_PRIVATE_KEY` | contents of `~/.tauri/formalmind.key` |
-| `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` | its password (empty today; the secret can be left unset) |
-
-The team id (`WA3Q5YSLK6`) is in the workflow. To release by hand instead, the same steps on the maintainer's Mac:
-build with `TAURI_SIGNING_PRIVATE_KEY="$(cat ~/.tauri/formalmind.key)" TAURI_SIGNING_PRIVATE_KEY_PASSWORD="" bun run desktop:build`,
-`xcrun notarytool submit <dmg> --keychain-profile formalmind --wait`, `xcrun stapler staple` the .dmg and .app,
-re-tar and `tauri signer sign -f ~/.tauri/formalmind.key -p "" <tar.gz>`, rename, write `latest.json`, `gh release create`.
+1. The website always deploys (`bun run deploy:cf`).
+2. The app ships only when `desktop-v<version>` isn't released yet, so bump `version` in `src-tauri/tauri.conf.json`
+   and `src-tauri/Cargo.toml` to ship it. Then it builds (signed with `signingIdentity`), notarizes the .dmg,
+   staples the .dmg and the .app, re-makes `Formal-Mind-mac.app.tar.gz` from the stapled app, signs it with
+   `tauri signer sign`, writes `latest.json` (`platforms.darwin-aarch64`) and runs
+   `gh release create desktop-vX.Y.Z` with `Formal-Mind-mac.dmg`, `Formal-Mind-mac.app.tar.gz` and `latest.json`.
+   Those names are what the landing page and the updater fetch; don't change them.
 
 The .dmg opens on a white window with the app, an arrow and Applications (`src-tauri/dmg-background.tiff`).
 
