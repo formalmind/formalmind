@@ -421,7 +421,7 @@ const ACTIVE_PHASE: Partial<Record<SwarmRun["phase"], string>> = { queued: "gett
  */
 function placeActive(state: SwarmState, cards: Card[], cursors: Scene["cursors"], roadmap: (repo: string) => { x: number; y: number }) {
 	for (const a of state.active ?? []) {
-		if (cursors[a.role].say) continue;
+		if (a.finished || cursors[a.role].say) continue;
 		const target = a.ref ? cards.find((c) => c.repo === a.repo && c.number === a.ref && c.kind !== "doc") : undefined;
 		const where = {
 			text: `${a.repo.split("/")[1]?.replace(/-proofs$/, "") ?? a.repo}${a.ref ? `#${a.ref}` : ""}`,
@@ -912,9 +912,13 @@ export function SwarmCanvas({ state, fill = false, contain = false, title, actio
 			const was = before.get(key);
 			if (!was || was.lane === lane) continue;
 			const say = `moving #${key.split("#")[1]} → ${LANE_WORD[lane]}`;
-			// An agent working on this very card moved it itself; any other move is the dispatcher acting on a label.
+			// The agent that worked on this card and tagged the next one carries it (the planner its new issues, the
+			// prover its PR to review, the reviewer to approved); a move no agent made is the dispatcher acting on a label.
 			const [repo, number] = [key.slice(0, key.lastIndexOf("#")), Number(key.split("#")[1])];
-			const worker = state.active?.find((a) => a.repo === repo && a.ref === number)?.role;
+			const home = state.runs.find((r) => r.note && r.note.repo === repo && r.note.ref === number)?.note?.role;
+			const worker = state.active?.find((a) => a.repo === repo && a.ref === number)?.role
+				?? (lane === "todo" ? state.active?.find((a) => a.repo === repo && a.role === "planner")?.role : undefined)
+				?? home;
 			if (worker && !own.some((o) => o.role === worker)) own.push({ role: worker, card: id, say });
 			else errands.current.push({ card: id, say });
 		}

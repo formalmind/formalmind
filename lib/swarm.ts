@@ -153,6 +153,8 @@ export interface SwarmActive {
 	task: string | null;
 	phase: SwarmRunPhase;
 	startedAt: string;
+	/** Finished in the last few minutes: the agent that just handed this item on (it carries the card it moved). */
+	finished?: boolean;
 }
 
 export type GitHubIssue = {
@@ -296,24 +298,30 @@ const JOB_ROLES: Record<string, { role: SwarmRole; task: string | null }> = {
 	chief: { role: "chief", task: null },
 };
 
-/** Who is working now in each proofs repository, read from its running swarm jobs. */
+const JUST_FINISHED_MS = 5 * 60_000;
+
+/** Who is working now in each proofs repository, read from its running swarm jobs, plus who just finished. */
 async function activeAgents(repos: string[]): Promise<SwarmActive[]> {
 	const perRepo = await Promise.all(repos.map(async (repo) => {
 		try {
-			const { workflow_runs } = await github<{ workflow_runs: (GitHubRun & { id: number })[] }>(`/actions/workflows/${SWARM_WORKFLOW}/runs?status=in_progress&per_page=5`, repo);
-			const jobs = await Promise.all(workflow_runs.map((run) => github<{ jobs: (GitHubJob & { started_at?: string })[] }>(`/actions/runs/${run.id}/jobs`, repo).then((r) => r.jobs)));
+			// Running runs, and the ones that ended in the last few minutes (who just handed an item on).
+			const { workflow_runs } = await github<{ workflow_runs: (GitHubRun & { id: number })[] }>(`/actions/workflows/${SWARM_WORKFLOW}/runs?per_page=6`, repo);
+			const recent = workflow_runs.filter((run) => run.status !== "completed" || Date.now() - Date.parse(run.updated_at) < JUST_FINISHED_MS);
+			const jobs = await Promise.all(recent.map((run) => github<{ jobs: (GitHubJob & { started_at?: string; completed_at?: string; conclusion?: string })[] }>(`/actions/runs/${run.id}/jobs`, repo).then((r) => r.jobs)));
 			return jobs.flat().flatMap((job): SwarmActive[] => {
-				if (job.status !== "in_progress" && job.status !== "queued") return [];
+				const finished = job.status === "completed" && job.conclusion === "success" && Boolean(job.completed_at) && Date.now() - Date.parse(job.completed_at!) < JUST_FINISHED_MS;
+				if (job.status !== "in_progress" && job.status !== "queued" && !finished) return [];
 				const match = job.name.match(/^(\w+)(?:\s+#(\d+))?$/);
 				const known = match ? JOB_ROLES[match[1]] : undefined;
 				if (!known) return [];
 				const step = job.steps?.find((s) => s.status === "in_progress")?.name ?? "";
-				const phase: SwarmRunPhase = job.status === "queued" ? "queued"
+				const phase: SwarmRunPhase = finished ? "done"
+					: job.status === "queued" ? "queued"
 					: step.includes("claude-code-action") ? "working"
 					: step.includes("lake") || step.includes("build") || step.includes("Gate") || step.includes("forge") ? "building"
 					: step.includes("cost") ? "recording cost"
 					: "setting up";
-				return [{ repo, role: known.role, ref: match?.[2] ? Number(match[2]) : null, task: known.task, phase, startedAt: job.started_at ?? new Date().toISOString() }];
+				return [{ repo, role: known.role, ref: match?.[2] ? Number(match[2]) : null, task: known.task, phase, startedAt: job.started_at ?? new Date().toISOString(), ...(finished ? { finished: true } : {}) }];
 			});
 		} catch {
 			// A repository we can't read (no workflow yet, no access) has nobody to show.
