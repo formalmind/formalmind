@@ -162,6 +162,8 @@ function geometry(groups: number) {
 	const bench = groupY(groups - 1) + LANE_BOTTOM + 20;
 	const panelTop = bench + 56;
 	const home = Object.fromEntries(ROLES.map((r) => [r, { x: HOME_X[r], y: r === "dispatcher" ? 34 : bench }])) as Record<SwarmRole, { x: number; y: number }>;
+	// The assistant waits in the chief's notebook (lower left; the chief works on its right), not on the bench.
+	home.assistant = { x: panelX(2) + 32, y: panelTop + 92 };
 	return {
 		home,
 		panelTop,
