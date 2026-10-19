@@ -60,7 +60,7 @@ A **proofs repository** holds the Lean 4 + Mathlib specification of a protocol: 
 - **consolidator** owns \`official/\`, the one protocol everyone builds against.
 - **chief** audits the day once, at 23:40 UTC, on the chief notebook issue.
 - **assistant** is the only role that talks to the maintainer, on the assistant notebook issue; other roles ask it with \`/ask assistant\`.
-- **dispatcher** is not a model. Every 30 minutes, or as soon as an \`fm:\` label changes, it sums the ledger and, if the budget allows, gives the turn to one job.
+- **dispatcher** is not a model. Every 10 minutes, or as soon as an \`fm:\` label changes, it sums the ledger and, if the budget allows, gives the turn to one job.
 
 GitHub is the shared memory: issues and \`fm:*\` labels are the task queue, a pinned ledger issue is the spend log, a notebook issue holds one task list per run, and every comment starts with a marker so the state can be rebuilt from GitHub alone. Anyone can ask one role a question by commenting \`/ask <role> <question>\` on an issue or pull request.
 

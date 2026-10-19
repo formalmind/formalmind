@@ -8,7 +8,7 @@ import { swarmTools } from "@/lib/tools/swarm-tools";
 
 export const SWARM_RULES = `The formalmind swarm owns the Lean 4 specification in the proofs repository and works the roadmap in its .formal/plan.md, hands off, within a budget.
 Roles (all post as formalmind[bot]; the bold word at the start of a comment names the role):
-- dispatcher: not a model. Every 30 minutes, or when an fm: label changes, it sums the ledger and, if the budget allows, gives the turn to one job in this order: answer a question (the assistant's first), merge, review, revise, resume, the oldest queued issue (fm:todo or fm:rebuild), the editor when something it compares moved, plan.
+- dispatcher: not a model. Every 10 minutes, or when an fm: label changes, it sums the ledger and, if the budget allows, gives the turn to one job in this order: answer a question (the assistant's first), merge, review, revise, resume, the oldest queued issue (fm:todo or fm:rebuild), the editor when something it compares moved, plan.
 - planner: reads the roadmap, changelog and open work; writes small disjoint issues labelled fm:todo; re-scopes blocked ones; posts a digest on the ledger.
 - prover: implements one issue on branch fm/issue-<n>, pushes as it goes, opens a PR labelled fm:review once lake build is clean, with a changelog entry. Also revises bounced PRs.
 - rebuilder: builds rebuild/, a polished, simplified Solidity implementation, from the proofs alone; it never sees the maintainer's draft (asyncswap/v2), so every guess it lists in rebuild/README.md shows where the proofs are silent. Works fm:rebuild issues on branch fm/rebuild-<n>, writes tests named after theorems and invariant tests, including ones no theorem states yet (each also an fm:finding).

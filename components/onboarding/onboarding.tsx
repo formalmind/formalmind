@@ -8,11 +8,12 @@ import { forgetLandingProgress, readDraft, usePlan } from "@/components/landing/
 import { projectPath, refreshProjects, useProjects } from "@/components/projects/use-projects";
 import { Link, useSearchParams } from "react-router";
 import type { OnboardingState } from "@/server/routes/onboarding/state/route";
-import { TEAM_PRESETS } from "@/lib/teams";
+import { SWARM_MODES, TEAM_PRESETS } from "@/lib/teams";
 import {
 	BudgetCard,
 	CreditsCard,
 	GitHubCard,
+	ModePicker,
 	Panel,
 	RepoForm,
 	SETUP_STEPS as STEPS,
@@ -26,7 +27,7 @@ import {
 
 type Credits = { configured: boolean; cents: number; entries: { at: string; cents: number; ref: string }[]; error?: string };
 
-const EMPTY: OnboardingState = { repo: null, plan: null, team: "pair", squadSize: 4, dailyUsd: 5, updatedAt: "" };
+const EMPTY: OnboardingState = { repo: null, plan: null, mode: "specs", team: "pair", squadSize: 4, dailyUsd: 5, updatedAt: "" };
 
 /** From a repository to a running swarm: plan, team, budget, credits, GitHub App, start. */
 export function Onboarding() {
@@ -113,7 +114,7 @@ export function Onboarding() {
 	const initialise = async () => {
 		if (!state.repo) return;
 		setInit({ busy: true });
-		const res = await fetch("/api/projects/init", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ repo: state.repo }) }).catch(() => null);
+		const res = await fetch("/api/projects/init", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ repo: state.repo, mode: state.mode }) }).catch(() => null);
 		const body = (await res?.json().catch(() => null)) as { proofsRepo?: string; error?: string } | null;
 		if (res?.ok && body?.proofsRepo) {
 			setInit({ busy: false });
@@ -137,6 +138,7 @@ export function Onboarding() {
 	const planned = Boolean(state.plan) && boxRepo === state.repo;
 	const done: Record<StepKey, boolean> = {
 		plan: planned,
+		mode: planned,
 		team: planned,
 		budget: planned,
 		credits: (credits?.cents ?? 0) > 0,
@@ -175,6 +177,11 @@ export function Onboarding() {
 									Plan this repository again
 								</button>
 							) : null}
+						</Panel>
+					) : step === "mode" ? (
+						<Panel {...STEP_COPY.mode}>
+							<ModePicker value={state.mode} onChange={(mode) => update({ mode })} />
+							<Nav onBack={() => go(-1)} onNext={() => go(1)} />
 						</Panel>
 					) : step === "team" ? (
 						<Panel {...STEP_COPY.team}>
@@ -216,6 +223,7 @@ export function Onboarding() {
 								rows={[
 									{ label: "Repository", value: state.repo ?? "not chosen", ok: Boolean(state.repo) },
 									{ label: "Plan", value: state.plan ? `${state.plan.issues.length} issues, ${state.plan.invariants.length} invariants` : "not planned", ok: Boolean(state.plan) },
+									{ label: "Mode", value: SWARM_MODES.find((m) => m.key === state.mode)?.name ?? "", ok: true },
 									{ label: "Team", value: `${TEAM_PRESETS.find((t) => t.key === state.team)?.name}${state.team === "squad" ? ` of ${state.squadSize}` : ""}`, ok: true },
 									{ label: "Daily budget", value: `$${state.dailyUsd} a day`, ok: true },
 									{ label: "Credits", value: credits ? `$${(credits.cents / 100).toFixed(2)}` : "…", ok: (credits?.cents ?? 0) > 0 },

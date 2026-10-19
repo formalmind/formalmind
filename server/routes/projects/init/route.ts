@@ -7,14 +7,14 @@ import { InitError, initProofsRepo } from "@/lib/proofs-repo";
 export async function POST(request: Request) {
 	const session = await auth.getSession();
 	if (!session?.user) return Response.json({ error: "Sign in first." }, { status: 401 });
-	const body = (await request.json().catch(() => ({}))) as { repo?: string };
+	const body = (await request.json().catch(() => ({}))) as { repo?: string; mode?: string };
 	const repo = parseRepo(body.repo ?? "");
 	if (!repo) return Response.json({ error: "Which repository?" }, { status: 400 });
 	const projects = await listProjects(session.user.sub);
 	const project = projects.find((p) => p.repo === repo);
 	if (!project) return Response.json({ error: `${repo} isn't one of your projects yet; plan it first.` }, { status: 404 });
 	try {
-		const result = await initProofsRepo(repo);
+		const result = await initProofsRepo(repo, body.mode === "audit" ? "audit" : "specs");
 		await setProofsRepo(session.user.sub, repo, result.proofsRepo);
 		return Response.json(result);
 	} catch (error) {

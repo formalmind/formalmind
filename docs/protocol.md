@@ -352,7 +352,7 @@ resumes from webhooks. Rebuilding MUST be safe to run twice.
 | --- | --- | --- |
 | 1. New App and accounts | The formalmind organisation's App; user objects and the Directory; fresh D1 | The personal App, `formalmind-users`, Auth0 leftovers |
 | 2. Project objects | One object per project, fed by webhooks; board, Usage and swarm state read from it; live WebSocket | Polling GitHub from the browser; the shared-ledger spend object |
-| 3. Dispatcher | Leases granted by the project object; GitHub Actions as the first executor via claim/report | The 30-minute cron sweep |
+| 3. Dispatcher | Leases granted by the project object; GitHub Actions as the first executor via claim/report | The 10-minute cron sweep |
 | 4. Hosted executors | Containers with Lean and Mathlib warm | Running the swarm on Actions |
 | 5. Local executor | The macOS app claims turns for its user's projects | — |
 

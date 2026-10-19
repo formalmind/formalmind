@@ -2,11 +2,12 @@
 
 import { useEffect, useRef, useState } from "react";
 import { Rocket } from "lucide-react";
-import { TEAM_PRESETS, type TeamPreset } from "@/lib/teams";
+import { DEFAULT_MODE, SWARM_MODES, TEAM_PRESETS, type SwarmMode, type TeamPreset } from "@/lib/teams";
 import {
 	BudgetCard,
 	CreditsCard,
 	GitHubCard,
+	ModePicker,
 	Panel,
 	SETUP_STEPS,
 	STEP_COPY,
@@ -19,7 +20,7 @@ import { PlanBoard, type PartialPlan } from "./plan-board";
 import { LANDING_KEEP_MS } from "./use-plan";
 
 const SETUP_KEY = "fm-landing-setup";
-type SavedSetup = { savedAt?: number; repo: string; step: StepKey; team: TeamPreset; squadSize: number; dailyUsd: number; chosen: { team?: boolean; budget?: boolean } };
+type SavedSetup = { savedAt?: number; repo: string; step: StepKey; mode?: SwarmMode; team: TeamPreset; squadSize: number; dailyUsd: number; chosen: { mode?: boolean; team?: boolean; budget?: boolean } };
 
 function readSetup(repo: string): SavedSetup | null {
 	try {
@@ -46,15 +47,16 @@ export function SetupPreview({ repo, plan, done, failed, startHref }: { repo: st
 	// Where the visitor was and what they picked, kept per repository so leaving the site and coming back resumes it.
 	const saved = readSetup(repo);
 	const [step, setStep] = useState<StepKey>(saved?.step ?? "plan");
+	const [mode, setMode] = useState<SwarmMode>(saved?.mode ?? DEFAULT_MODE);
 	const plannerPick = plan?.team?.preset ?? "pair";
 	const [team, setTeam] = useState<TeamPreset>(saved?.team ?? plannerPick);
 	const [squadSize, setSquadSize] = useState(saved?.squadSize ?? 4);
 	const [dailyUsd, setDailyUsd] = useState(saved?.dailyUsd ?? 5);
 	// A choice turns its step green: picking a team (or continuing past the planner's pick), setting a budget.
-	const [chosen, setChosen] = useState<{ team?: boolean; budget?: boolean }>(saved?.chosen ?? {});
+	const [chosen, setChosen] = useState<{ mode?: boolean; team?: boolean; budget?: boolean }>(saved?.chosen ?? {});
 	useEffect(() => {
-		writeSetup({ repo, step, team, squadSize, dailyUsd, chosen });
-	}, [repo, step, team, squadSize, dailyUsd, chosen]);
+		writeSetup({ repo, step, mode, team, squadSize, dailyUsd, chosen });
+	}, [repo, step, mode, team, squadSize, dailyUsd, chosen]);
 	// A new repository starts over at its plan, with the planner's team suggestion.
 	const firstRepo = useRef(repo);
 	useEffect(() => {
@@ -70,7 +72,7 @@ export function SetupPreview({ repo, plan, done, failed, startHref }: { repo: st
 	}, [plannerPick]);
 	const index = SETUP_STEPS.findIndex((s) => s.key === step);
 	const go = (offset: number) => {
-		if (offset > 0 && (step === "team" || step === "budget")) setChosen((c) => ({ ...c, [step]: true }));
+		if (offset > 0 && (step === "mode" || step === "team" || step === "budget")) setChosen((c) => ({ ...c, [step]: true }));
 		goTo(offset);
 	};
 	const goTo = (offset: number) => setStep(SETUP_STEPS[Math.min(SETUP_STEPS.length - 1, Math.max(0, index + offset))].key);
@@ -83,7 +85,7 @@ export function SetupPreview({ repo, plan, done, failed, startHref }: { repo: st
 			{/* Steps and the way forward stay at the top, pinned while the step below scrolls. */}
 			<div className="sticky top-0 z-10 -mx-4 -mt-4 flex flex-wrap items-center gap-2 rounded-t-2xl border-b bg-card/95 px-4 py-3 backdrop-blur sm:-mx-6 sm:-mt-6 sm:px-6">
 				<div className="min-w-0 flex-1">
-					<StepList step={step} done={{ plan: done, team: chosen.team, budget: chosen.budget }} onSelect={setStep} horizontal />
+					<StepList step={step} done={{ plan: done, mode: chosen.mode, team: chosen.team, budget: chosen.budget }} onSelect={setStep} horizontal />
 				</div>
 				<div className="flex shrink-0 gap-2">
 					{index > 0 ? (
@@ -136,7 +138,8 @@ export function SetupPreview({ repo, plan, done, failed, startHref }: { repo: st
 							rows={[
 								{ label: "Repository", value: repo, ok: true },
 								{ label: "Plan", value: done ? `${plan?.issues?.length ?? 0} issues, ${plan?.invariants?.length ?? 0} invariants` : failed ? "not finished: plan it above" : "planning…", ok: done },
-								{ label: "Team", value: `${TEAM_PRESETS.find((t) => t.key === team)?.name}${team === "squad" ? ` of ${squadSize}` : ""}`, ok: true },
+								{ label: "Mode", value: SWARM_MODES.find((m) => m.key === mode)?.name ?? "", ok: true },
+									{ label: "Team", value: `${TEAM_PRESETS.find((t) => t.key === team)?.name}${team === "squad" ? ` of ${squadSize}` : ""}`, ok: true },
 								{ label: "Daily budget", value: `$${dailyUsd} a day`, ok: true },
 								{ label: "Credits", value: "$0.00", ok: false },
 								{ label: "GitHub App", value: "not installed", ok: false },

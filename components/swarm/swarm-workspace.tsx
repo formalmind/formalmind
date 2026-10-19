@@ -85,7 +85,7 @@ export function SwarmWorkspace({ repo }: { repo: string }) {
 	const run = isLiveRun(latest) ? latest : null;
 	const activity = run
 		? `${run.status === "completed" ? "Just finished" : "Live"}: ${run.note ? `${run.note.role}${run.note.ref ? ` on #${run.note.ref}` : ""}` : "dispatcher"} · ${run.status === "completed" ? "done" : run.phase} · started ${minutesAgo(run.startedAt)}`
-		: "Idle. The dispatcher sweeps every 30 minutes";
+		: "Idle. The dispatcher sweeps every 10 minutes";
 
 	const queued = state?.work.filter((item) => item.labels.includes("fm:todo") || item.labels.includes("fm:rebuild")).length ?? 0;
 	const inFlight = state?.work.filter((item) => item.kind === "pr").length ?? 0;

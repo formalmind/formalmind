@@ -18,7 +18,7 @@ const RELAY = "https://github.com/formalmind/webhook-redis/tree/main/worker";
 
 /** Each agent with its prompt file in .github/formalmind/ (the dispatcher is not a model, so it has none). */
 const ROLES: { role: SwarmRole | "consolidator"; job: string; detail: string; prompt?: string }[] = [
-	{ role: "dispatcher", job: "Picks one job", detail: "Every 30 minutes, or when an fm: label changes. Order: answer, merge, review, revise, resume, new issue, edit, plan. Not a model." },
+	{ role: "dispatcher", job: "Picks one job", detail: "Every 10 minutes, or when an fm: label changes. Order: answer, merge, review, revise, resume, new issue, edit, plan. Not a model." },
 	{ role: "planner", job: "Scopes the work", detail: "Reads the roadmap and the gaps the changelog left, and writes small, disjoint issues labelled fm:todo.", prompt: "plan.md" },
 	{ role: "prover", job: "Writes the Lean", detail: "Takes one issue on its own branch, pushes as it goes, and opens a PR once lake build is clean.", prompt: "prove.md" },
 	{ role: "rebuilder", job: "Rebuilds from the proofs", detail: "Writes a polished, simplified Solidity version of your protocol from the Lean alone, never your code, and lists every guess it had to make.", prompt: "rebuild.md" },

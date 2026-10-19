@@ -1,6 +1,7 @@
 import type { Octokit } from "@octokit/rest";
 import { getAppOctokit, getInstallationOctokit } from "@/lib/octokit";
 import { SWARM_REPO } from "@/lib/swarm-repo";
+import { auditReportName, type SwarmMode } from "@/lib/teams";
 
 /** The template every proofs repository starts from. */
 export const PROOFS_TEMPLATE = { owner: "formalmind", repo: "lean-template" };
@@ -65,11 +66,11 @@ async function createProofsRepo(repo: string): Promise<{ proofsRepo: string; cre
 }
 
 /** Lists the proofs repository in the home's projects.json, so the canvas and dispatcher see it. */
-async function registerWithSwarm(repo: string, proofsRepo: string): Promise<void> {
+async function registerWithSwarm(repo: string, proofsRepo: string, mode: SwarmMode): Promise<void> {
 	const [owner, name] = SWARM_REPO.split("/");
 	const octokit = await installationFor(owner, name);
 	let sha: string | undefined;
-	let projects: { repo: string; protocol: string }[] = [{ repo: SWARM_REPO, protocol: "asyncswap/v2" }];
+	let projects: { repo: string; protocol: string; mode?: SwarmMode }[] = [{ repo: SWARM_REPO, protocol: "asyncswap/v2" }];
 	try {
 		const { data } = await octokit.request("GET /repos/{owner}/{repo}/contents/{path}", { owner, repo: name, path: PROJECTS_FILE });
 		if (!Array.isArray(data) && data.type === "file") {
@@ -80,14 +81,16 @@ async function registerWithSwarm(repo: string, proofsRepo: string): Promise<void
 	} catch (error) {
 		if (statusOf(error) !== 404) throw error;
 	}
-	if (projects.some((p) => p.repo === proofsRepo)) return;
-	const content = `${JSON.stringify({ projects: [...projects, { repo: proofsRepo, protocol: repo }] }, null, "\t")}\n`;
+	const listed = projects.find((p) => p.repo === proofsRepo);
+	if (listed && (listed.mode ?? "specs") === mode) return;
+	const next = listed ? projects.map((p) => (p === listed ? { ...p, mode } : p)) : [...projects, { repo: proofsRepo, protocol: repo, mode }];
+	const content = `${JSON.stringify({ projects: next }, null, "\t")}\n`;
 	try {
 		await octokit.request("PUT /repos/{owner}/{repo}/contents/{path}", {
 			owner,
 			repo: name,
 			path: PROJECTS_FILE,
-			message: `swarm: sweep ${proofsRepo}`,
+			message: listed ? `swarm: ${proofsRepo} in ${mode} mode` : `swarm: sweep ${proofsRepo}`,
 			content: btoa(content),
 			sha,
 		});
@@ -97,8 +100,59 @@ async function registerWithSwarm(repo: string, proofsRepo: string): Promise<void
 }
 
 /** Sets a project up: its proofs repository from the template, listed for the swarm. */
-export async function initProofsRepo(repo: string): Promise<{ proofsRepo: string; created: boolean }> {
+export async function initProofsRepo(repo: string, mode: SwarmMode = "specs"): Promise<{ proofsRepo: string; created: boolean; report?: string }> {
 	const result = await createProofsRepo(repo);
-	await registerWithSwarm(repo, result.proofsRepo);
-	return result;
+	await registerWithSwarm(repo, result.proofsRepo, mode);
+	if (mode !== "audit") return result;
+	const report = await startAudit(repo, result.proofsRepo);
+	return { ...result, report };
+}
+
+/**
+ * An audit starts at once: its report is opened in the proofs repository, then the swarm is dispatched
+ * now instead of at its next sweep. Every finding, POC, fix and proof is added to that one report.
+ */
+async function startAudit(repo: string, proofsRepo: string): Promise<string> {
+	const [owner, name] = proofsRepo.split("/");
+	const octokit = await installationFor(owner, name);
+	const path = auditReportName();
+	const commit = await octokit
+		.request("GET /repos/{owner}/{repo}/commits/{ref}", { owner: repo.split("/")[0], repo: repo.split("/")[1], ref: "HEAD" })
+		.then((r) => r.data.sha)
+		.catch(() => null);
+	const body = [
+		`# Formal Mind audit: ${repo}`,
+		"",
+		`- Commit: ${commit ? `\`${commit}\`` : "the default branch's head when the audit started"}`,
+		`- Started: ${new Date().toISOString().slice(0, 10)}`,
+		"- Status: in progress",
+		"",
+		"Each finding below has a severity, the affected code, a Foundry POC that fails on the audited commit, the fix PR, and the Lean 4 proof that holds after the fix.",
+		"",
+		"## Summary",
+		"",
+		"| # | Title | Severity | POC | Fix | Proof |",
+		"| --- | --- | --- | --- | --- | --- |",
+		"",
+		"## Findings",
+		"",
+		"_None yet._",
+		"",
+		"## Proved invariants",
+		"",
+		"_None yet._",
+		"",
+	].join("\n");
+	try {
+		await octokit.request("PUT /repos/{owner}/{repo}/contents/{path}", { owner, repo: name, path, message: `audit: open ${path}`, content: btoa(unescape(encodeURIComponent(body))) });
+	} catch (error) {
+		// Already there: the audit was started before, and the report keeps what it has.
+		if (statusOf(error) !== 422) throw error;
+	}
+	const [homeOwner, homeName] = SWARM_REPO.split("/");
+	const home = await installationFor(homeOwner, homeName);
+	await home
+		.request("POST /repos/{owner}/{repo}/actions/workflows/{workflow_id}/dispatches", { owner: homeOwner, repo: homeName, workflow_id: "formalmind-swarm.yml", ref: (await home.request("GET /repos/{owner}/{repo}", { owner: homeOwner, repo: homeName })).data.default_branch })
+		.catch((error) => console.error("[audit] dispatching the swarm failed; the next sweep picks it up:", error));
+	return path;
 }

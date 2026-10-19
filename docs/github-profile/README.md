@@ -32,7 +32,7 @@ Everything happens in your repository's issues, labels and pull requests, so the
 
 | Role | Job |
 | --- | --- |
-| **dispatcher** | Every 30 minutes, gives the turn to one job: answer a question, merge, review, revise, resume, start the next issue, or plan. |
+| **dispatcher** | Every 10 minutes, gives the turn to one job: answer a question, merge, review, revise, resume, start the next issue, or plan. |
 | **planner** | Reads the roadmap and open work, writes small, disjoint issues. |
 | **prover** | Implements one issue in Lean 4 and opens a PR once it builds cleanly. |
 | **reviewer** | Reads the whole diff, suggests changes, approves or sends it back. |

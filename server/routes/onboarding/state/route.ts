@@ -2,12 +2,13 @@ import { auth } from "@/lib/auth";
 import { getJSON, putJSON } from "@/lib/kv";
 import { addProject } from "@/lib/projects";
 import type { RepoPlan } from "@/lib/plan";
-import type { TeamPreset } from "@/lib/teams";
+import type { SwarmMode, TeamPreset } from "@/lib/teams";
 
 /** Where a signed-in user is in onboarding; saved as they go so they can come back to it. */
 export type OnboardingState = {
 	repo: string | null;
 	plan: RepoPlan | null;
+	mode: SwarmMode;
 	team: TeamPreset;
 	squadSize: number;
 	dailyUsd: number;
@@ -30,6 +31,7 @@ export async function PUT(request: Request) {
 	const next: OnboardingState = {
 		repo: body.repo ?? previous?.repo ?? null,
 		plan: body.plan ?? previous?.plan ?? null,
+		mode: body.mode === "audit" || body.mode === "specs" ? body.mode : previous?.mode ?? "specs",
 		team: body.team ?? previous?.team ?? "pair",
 		squadSize: Math.min(7, Math.max(4, body.squadSize ?? previous?.squadSize ?? 4)),
 		dailyUsd: Math.min(100, Math.max(2, body.dailyUsd ?? previous?.dailyUsd ?? 5)),

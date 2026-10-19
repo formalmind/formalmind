@@ -14,3 +14,19 @@ export const TEAM_PRESETS: { key: TeamPreset; name: string; agents: string; spli
 ];
 
 export const DEFAULT_TEAM: TeamPreset = "pair";
+
+/**
+ * What a project is for. An audit freezes a commit, starts every agent at once and ends with one
+ * report (findings, POCs, fixes, proofs); specs keep the proofs growing with the code, within a daily budget.
+ */
+export type SwarmMode = "audit" | "specs";
+
+export const SWARM_MODES: { key: SwarmMode; name: string; lead: string; ends: string }[] = [
+	{ key: "audit", name: "Audit this code", lead: "Every agent starts at once on the commit you pick. Invariants are proved in Lean 4 or turned into findings with a Foundry POC and a fix.", ends: "Ends with one report you can submit" },
+	{ key: "specs", name: "Build formal specs", lead: "The swarm writes the Lean 4 spec and proofs one small PR at a time, and keeps them in step with your code.", ends: "Runs every day within your budget" },
+];
+
+export const DEFAULT_MODE: SwarmMode = "specs";
+
+/** The audit report's file name: FM_AUDIT_<MM>_<YYYY>.md, for the month the audit started. */
+export const auditReportName = (at = new Date()) => `FM_AUDIT_${String(at.getUTCMonth() + 1).padStart(2, "0")}_${at.getUTCFullYear()}.md`;

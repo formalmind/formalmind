@@ -1432,12 +1432,12 @@ function NowChip({ job, turn }: { job: string | null; turn: SwarmRole | null }) 
 	return (
 		<div
 			className="flex min-w-0 items-center gap-2 whitespace-nowrap rounded-full border bg-background px-3 py-1.5 text-[12px] shadow-sm"
-			title={`Every 30 min the dispatcher picks one job, in this order: ${JOBS.join(" › ")}`}
+			title={`Every 10 min the dispatcher picks one job, in this order: ${JOBS.join(" › ")}`}
 		>
 			<span className="font-medium" style={{ color: ROLE_COLORS.dispatcher }}>dispatcher</span>
 			<SmoothWidth>
 				<TextSwap value={job}>
-					{(j) => (j ? <span className="rounded bg-foreground px-1.5 py-px text-background">{j}</span> : <span className="text-muted-foreground">sweeps every 30 min</span>)}
+					{(j) => (j ? <span className="rounded bg-foreground px-1.5 py-px text-background">{j}</span> : <span className="text-muted-foreground">sweeps every 10 min</span>)}
 				</TextSwap>
 			</SmoothWidth>
 			{/* On the dispatcher's own turn nothing follows its job. */}
@@ -1489,7 +1489,7 @@ function DispatcherChip({ job }: { job: string | null }) {
 				}}
 			/>
 			<span className="font-medium" style={{ color: ROLE_COLORS.dispatcher }}>dispatcher</span>
-			<span className="text-muted-foreground">every 30 min picks one job:</span>
+			<span className="text-muted-foreground">every 10 min picks one job:</span>
 			{JOBS.map((j, i) => (
 				<span key={j} className="flex items-center gap-2">
 					<span
