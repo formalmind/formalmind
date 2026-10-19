@@ -21,6 +21,7 @@ export async function POST(request: Request) {
 		const saved = await getJSON<OnboardingState>(`onboarding:${session.user.sub}`);
 		const team = saved?.team === "squad" ? saved.squadSize : Number.parseInt(TEAM_PRESETS.find((t) => t.key === (saved?.team ?? "pair"))?.agents ?? "2", 10) || 2;
 		const result = await initProofsRepo(repo, {
+			sub: session.user.sub,
 			mode: body.mode === "audit" ? "audit" : "specs",
 			maintainer: session.user.nickname ?? repo.split("/")[0],
 			team,

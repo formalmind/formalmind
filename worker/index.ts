@@ -9,6 +9,8 @@ import { CONTENT_SIGNAL, isPagePath, markdownResponse, prefersMarkdown } from ".
 import * as billingBalance from "@/server/routes/billing/balance/route";
 import * as billingCheckout from "@/server/routes/billing/checkout/route";
 import * as billingWebhook from "@/server/routes/billing/webhook/route";
+import * as model from "@/server/routes/model/route";
+import * as swarmToken from "@/server/routes/swarm/token/route";
 import * as chat from "@/server/routes/chat/route";
 import * as githubInstallStatus from "@/server/routes/github/install-status/route";
 import * as githubRepos from "@/server/routes/github/repos/route";
@@ -63,6 +65,11 @@ const ROUTES: Record<string, { module: RouteModule; open?: boolean; scope?: Scop
 	"/api/swarm/agent": { module: swarmAgent },
 	"/api/swarm/chat": { module: swarmChat },
 	"/api/swarm/state": { module: swarmState, scope: "swarm:read" },
+	// Zero-secret swarms: a proofs repository's workflow proves itself with its Actions OIDC token (lib/swarm-tokens.ts).
+	"/api/swarm/token": { module: swarmToken, open: true },
+	// The metered model proxy; callers hold a model session minted by /api/swarm/token.
+	"/api/model/v1/messages": { module: model, open: true },
+	"/api/model/v1/messages/count_tokens": { module: model, open: true },
 	"/api/tooltip": { module: tooltip },
 	"/api/usage": { module: usage, scope: "swarm:read" },
 };

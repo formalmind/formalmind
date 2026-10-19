@@ -12,7 +12,7 @@ export { DEPOSITS_USD } from "@/lib/billing-plans";
 const MIN_USD = 10;
 const MAX_USD = 1_000;
 
-export type CreditEntry = { at: string; cents: number; kind: "deposit"; ref: string };
+export type CreditEntry = { at: string; cents: number; kind: "deposit" | "spend"; ref: string };
 export type Credits = { cents: number; entries: CreditEntry[] };
 
 const creditPrefix = (sub: string) => `credit:${sub}:`;
@@ -119,4 +119,14 @@ function timingSafeEqual(a: string, b: string) {
 	let diff = 0;
 	for (let i = 0; i < a.length; i++) diff |= a.charCodeAt(i) ^ b.charCodeAt(i);
 	return diff === 0;
+}
+
+/**
+ * Charges one swarm run to the account, as a negative entry keyed by the run and job, so a report sent twice counts
+ * once. Fractions of a cent are kept: one model call often costs less than a cent.
+ */
+export async function recordSpend(sub: string, cents: number, ref: string) {
+	if (!(cents > 0)) return;
+	const entry: CreditEntry = { at: new Date().toISOString(), cents: -Math.round(cents * 1000) / 1000, kind: "spend", ref };
+	await (await kv()).put(`${creditPrefix(sub)}spend:${ref}`, JSON.stringify(entry), { metadata: entry });
 }

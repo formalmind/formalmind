@@ -1,6 +1,7 @@
 import type { Octokit } from "@octokit/rest";
 import { getAppOctokit, getInstallationOctokit } from "@/lib/octokit";
 import { SWARM_REPO } from "@/lib/swarm-repo";
+import { setProofsOwner } from "@/lib/swarm-tokens";
 import { auditReportName, type SwarmMode } from "@/lib/teams";
 
 /** The template every proofs repository starts from. */
@@ -99,19 +100,24 @@ async function registerWithSwarm(repo: string, proofsRepo: string, mode: SwarmMo
 	}
 }
 
-export type SwarmSetup = { mode: SwarmMode; maintainer: string; team: number; dailyUsd: number };
+export type SwarmSetup = { sub: string; mode: SwarmMode; maintainer: string; team: number; dailyUsd: number };
 
 /** Sets a project up: its proofs repository from the template, configured, listed for the swarm, and started. */
 export async function initProofsRepo(repo: string, setup: SwarmSetup): Promise<{ proofsRepo: string; created: boolean; report?: string }> {
 	const result = await createProofsRepo(repo);
 	await registerWithSwarm(repo, result.proofsRepo, setup.mode);
+	// The account that pays: the repository's runs trade their OIDC token for an App token, and their cost is charged here.
+	await setProofsOwner(result.proofsRepo, setup.sub, repo, setup.dailyUsd);
 	const [owner, name] = result.proofsRepo.split("/");
 	const octokit = await installationFor(owner, name);
 	const report = setup.mode === "audit" ? auditReportName() : "";
 	const commit = setup.mode === "audit" ? await headCommit(octokit, repo) : "";
 	// The home repository runs its own older swarm; every other proofs repository is configured from the template.
 	if (result.proofsRepo !== SWARM_REPO) {
-		const config = { protocol: repo, commit, mode: setup.mode, maintainer: setup.maintainer, team: setup.team, dailyUsd: setup.dailyUsd, monthlyUsd: setup.dailyUsd * 30, report };
+		// Fields someone already set in the repository (an audit commit, a federation rule) are kept.
+		const existing = await readJSON<Record<string, unknown>>(octokit, result.proofsRepo, ".formal/swarm.json");
+		const fresh = { protocol: repo, commit, mode: setup.mode, maintainer: setup.maintainer, team: setup.team, dailyUsd: setup.dailyUsd, monthlyUsd: setup.dailyUsd * 30, report };
+		const config = existing && existing.protocol === repo ? { ...fresh, ...existing, mode: setup.mode } : fresh;
 		await putFile(octokit, result.proofsRepo, ".formal/swarm.json", `${JSON.stringify(config, null, "\t")}\n`, `swarm: ${setup.mode} for ${repo}`, true);
 	}
 	if (report) await putFile(octokit, result.proofsRepo, report, reportBody(repo, commit), `audit: open ${report}`, false);
@@ -119,6 +125,16 @@ export async function initProofsRepo(repo: string, setup: SwarmSetup): Promise<{
 		.request("POST /repos/{owner}/{repo}/actions/workflows/{workflow_id}/dispatches", { owner, repo: name, workflow_id: "formalmind-swarm.yml", ref: (await octokit.request("GET /repos/{owner}/{repo}", { owner, repo: name })).data.default_branch })
 		.catch((error) => console.error("[init] starting the swarm failed; its next sweep starts it:", error));
 	return report ? { ...result, report } : result;
+}
+
+async function readJSON<T>(octokit: Octokit, repo: string, path: string): Promise<T | null> {
+	const [owner, name] = repo.split("/");
+	try {
+		const { data } = await octokit.request("GET /repos/{owner}/{repo}/contents/{path}", { owner, repo: name, path });
+		return !Array.isArray(data) && data.type === "file" ? (JSON.parse(decodeURIComponent(escape(atob(data.content.replace(/\s/g, ""))))) as T) : null;
+	} catch {
+		return null;
+	}
 }
 
 async function headCommit(octokit: Octokit, repo: string): Promise<string> {
