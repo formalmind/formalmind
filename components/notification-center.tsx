@@ -68,7 +68,7 @@ export function NotificationCenter() {
   }, [active, all, headerOpen]);
 
   return (
-    <div className="relative shrink-0">
+    <div data-fm-bell className="relative shrink-0">
       <button
         type="button"
         aria-label={
@@ -127,6 +127,15 @@ export function NotificationCenter() {
                   <span>{relativeTime(n.createdAt, now)}</span>
                   {n.description != null && <> {n.description}</>}
                 </div>
+                {n.action && (
+                  <button
+                    type="button"
+                    className="btn-dark mt-2 h-7 px-3 text-xs"
+                    onClick={() => window.dispatchEvent(new Event(n.action!.event))}
+                  >
+                    {n.action.label}
+                  </button>
+                )}
               </div>
                 ))}
                 {(headerShowReadHistory ? readHistory : unread).length === 0 && (

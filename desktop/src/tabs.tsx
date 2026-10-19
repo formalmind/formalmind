@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { useLocation, useNavigate } from "react-router";
 import { Gauge, GanttChart, HardDrive, MessageSquare, Network, PanelLeft, Plus, X, type LucideIcon } from "lucide-react";
+import { NotificationCenter } from "@/components/notification-center";
 import { useSidebar } from "@/components/ui/sidebar";
 
 type Tab = { id: string; path: string };
@@ -135,6 +136,8 @@ export function TabBar() {
 					<Plus className="size-4" />
 				</button>
 			</div>
+			{/* The bell lives here on every page (app updates land in it too); the Swarm page's own copy is hidden. */}
+			<NotificationCenter />
 		</div>
 	);
 }

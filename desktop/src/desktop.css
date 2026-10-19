@@ -41,3 +41,6 @@
 		animation: none;
 	}
 }
+.fm-shell main [data-fm-bell] {
+	display: none;
+}
