@@ -12,7 +12,7 @@ export const proofsRepoFor = (repo: string) => `${repo}-proofs`;
 
 /** A failure the person can act on: which step broke and what to change. */
 export class InitError extends Error {
-	constructor(readonly step: "install" | "create" | "register", message: string) {
+	constructor(readonly step: "install" | "create" | "register" | "configure", message: string) {
 		super(message);
 	}
 }
@@ -99,35 +99,68 @@ async function registerWithSwarm(repo: string, proofsRepo: string, mode: SwarmMo
 	}
 }
 
-/** Sets a project up: its proofs repository from the template, listed for the swarm. */
-export async function initProofsRepo(repo: string, mode: SwarmMode = "specs"): Promise<{ proofsRepo: string; created: boolean; report?: string }> {
+export type SwarmSetup = { mode: SwarmMode; maintainer: string; team: number; dailyUsd: number };
+
+/** Sets a project up: its proofs repository from the template, configured, listed for the swarm, and started. */
+export async function initProofsRepo(repo: string, setup: SwarmSetup): Promise<{ proofsRepo: string; created: boolean; report?: string }> {
 	const result = await createProofsRepo(repo);
-	await registerWithSwarm(repo, result.proofsRepo, mode);
-	if (mode !== "audit") return result;
-	const report = await startAudit(repo, result.proofsRepo);
-	return { ...result, report };
+	await registerWithSwarm(repo, result.proofsRepo, setup.mode);
+	const [owner, name] = result.proofsRepo.split("/");
+	const octokit = await installationFor(owner, name);
+	const report = setup.mode === "audit" ? auditReportName() : "";
+	const commit = setup.mode === "audit" ? await headCommit(octokit, repo) : "";
+	// The home repository runs its own older swarm; every other proofs repository is configured from the template.
+	if (result.proofsRepo !== SWARM_REPO) {
+		const config = { protocol: repo, commit, mode: setup.mode, maintainer: setup.maintainer, team: setup.team, dailyUsd: setup.dailyUsd, monthlyUsd: setup.dailyUsd * 30, report };
+		await putFile(octokit, result.proofsRepo, ".formal/swarm.json", `${JSON.stringify(config, null, "\t")}\n`, `swarm: ${setup.mode} for ${repo}`, true);
+	}
+	if (report) await putFile(octokit, result.proofsRepo, report, reportBody(repo, commit), `audit: open ${report}`, false);
+	await octokit
+		.request("POST /repos/{owner}/{repo}/actions/workflows/{workflow_id}/dispatches", { owner, repo: name, workflow_id: "formalmind-swarm.yml", ref: (await octokit.request("GET /repos/{owner}/{repo}", { owner, repo: name })).data.default_branch })
+		.catch((error) => console.error("[init] starting the swarm failed; its next sweep starts it:", error));
+	return report ? { ...result, report } : result;
+}
+
+async function headCommit(octokit: Octokit, repo: string): Promise<string> {
+	const [owner, name] = repo.split("/");
+	return octokit.request("GET /repos/{owner}/{repo}/commits/{ref}", { owner, repo: name, ref: "HEAD" }).then((r) => r.data.sha).catch(() => "");
 }
 
 /**
- * An audit starts at once: its report is opened in the proofs repository, then the swarm is dispatched
- * now instead of at its next sweep. Every finding, POC, fix and proof is added to that one report.
+ * Writes one file on the default branch. A repository just generated from the template takes a moment to have
+ * its first commit, so a missing branch is retried. `replace` overwrites; otherwise an existing file is kept.
  */
-async function startAudit(repo: string, proofsRepo: string): Promise<string> {
-	const [owner, name] = proofsRepo.split("/");
-	const octokit = await installationFor(owner, name);
-	const path = auditReportName();
-	const commit = await octokit
-		.request("GET /repos/{owner}/{repo}/commits/{ref}", { owner: repo.split("/")[0], repo: repo.split("/")[1], ref: "HEAD" })
-		.then((r) => r.data.sha)
-		.catch(() => null);
-	const body = [
+async function putFile(octokit: Octokit, repo: string, path: string, body: string, message: string, replace: boolean): Promise<void> {
+	const [owner, name] = repo.split("/");
+	for (let attempt = 0; ; attempt++) {
+		let sha: string | undefined;
+		try {
+			const { data } = await octokit.request("GET /repos/{owner}/{repo}/contents/{path}", { owner, repo: name, path });
+			if (!replace) return;
+			if (!Array.isArray(data)) sha = data.sha;
+		} catch (error) {
+			if (statusOf(error) !== 404) throw error;
+		}
+		try {
+			await octokit.request("PUT /repos/{owner}/{repo}/contents/{path}", { owner, repo: name, path, message, sha, content: btoa(unescape(encodeURIComponent(body))) });
+			return;
+		} catch (error) {
+			if (attempt >= 5 || (statusOf(error) !== 404 && statusOf(error) !== 409)) throw new InitError("configure", `${repo} exists, but writing ${path} failed (${(error as Error).message}).`);
+			await new Promise((r) => setTimeout(r, 1500));
+		}
+	}
+}
+
+/** The audit report as it starts: the merger adds each finding and proved invariant, the chief keeps the header. */
+function reportBody(repo: string, commit: string): string {
+	return [
 		`# Formal Mind audit: ${repo}`,
 		"",
 		`- Commit: ${commit ? `\`${commit}\`` : "the default branch's head when the audit started"}`,
 		`- Started: ${new Date().toISOString().slice(0, 10)}`,
 		"- Status: in progress",
 		"",
-		"Each finding below has a severity, the affected code, a Foundry POC that fails on the audited commit, the fix PR, and the Lean 4 proof that holds after the fix.",
+		"Each finding has a severity, the affected code, a Foundry POC that fails on the audited commit, the fix, and the Lean 4 proof that holds after the fix.",
 		"",
 		"## Summary",
 		"",
@@ -143,18 +176,4 @@ async function startAudit(repo: string, proofsRepo: string): Promise<string> {
 		"_None yet._",
 		"",
 	].join("\n");
-	try {
-		await octokit.request("PUT /repos/{owner}/{repo}/contents/{path}", { owner, repo: name, path, message: `audit: open ${path}`, content: btoa(unescape(encodeURIComponent(body))) });
-	} catch (error) {
-		// Already there: the audit was started before, and the report keeps what it has.
-		if (statusOf(error) !== 422) throw error;
-	}
-	// Only the home repository runs the swarm's workflow so far; other proofs repositories wait for theirs.
-	if (proofsRepo !== SWARM_REPO) return path;
-	const [homeOwner, homeName] = SWARM_REPO.split("/");
-	const home = await installationFor(homeOwner, homeName);
-	await home
-		.request("POST /repos/{owner}/{repo}/actions/workflows/{workflow_id}/dispatches", { owner: homeOwner, repo: homeName, workflow_id: "formalmind-swarm.yml", ref: (await home.request("GET /repos/{owner}/{repo}", { owner: homeOwner, repo: homeName })).data.default_branch })
-		.catch((error) => console.error("[audit] dispatching the swarm failed; the next sweep picks it up:", error));
-	return path;
 }

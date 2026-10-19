@@ -232,11 +232,19 @@ export function Onboarding() {
 								]}
 							/>
 							{proofsRepo ? (
+								<>
 								<p role="status" className="mt-5 inline-flex items-center gap-2 text-sm">
 									<Check className="size-4 text-green-600" /> Proofs repository ready:{" "}
 									<a href={`https://github.com/${proofsRepo}`} target="_blank" rel="noreferrer" className="font-mono underline underline-offset-4">{proofsRepo}</a>
 									<Link to={projectPath(state.repo ?? "")} className="ml-2 text-muted-foreground underline-offset-4 hover:text-foreground hover:underline">Open the project</Link>
 								</p>
+								{/* The swarm runs in the proofs repository's own Actions, on the model key kept there. */}
+								<p className="mt-3 max-w-xl text-sm text-muted-foreground">
+									One step left: add an <span className="font-mono text-foreground">ANTHROPIC_API_KEY</span> secret in{" "}
+									<a href={`https://github.com/${proofsRepo}/settings/secrets/actions/new`} target="_blank" rel="noreferrer" className="underline underline-offset-4">{proofsRepo}'s Actions secrets</a>.{" "}
+									{state.mode === "audit" ? "The audit starts on its next run, and its report is the FM_AUDIT file in the repository's root." : "The swarm then runs every ten minutes."}
+								</p>
+								</>
 							) : (
 								<>
 									<button
