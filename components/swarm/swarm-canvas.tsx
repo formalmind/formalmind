@@ -33,6 +33,7 @@ function clip(text: string, max = 120) {
 const ROLES = Object.keys(ROLE_COLORS) as SwarmRole[];
 
 type Lane = "roadmap" | "todo" | "progress" | "review" | "approved" | "dev";
+const LANE_WORD: Record<Lane, string> = { roadmap: "roadmap", todo: "todo", progress: "in progress", review: "review", approved: "approved", dev: "done" };
 
 const LANES: { key: Lane; title: string }[] = [
 	{ key: "roadmap", title: "Roadmap" },
@@ -886,6 +887,29 @@ export function SwarmCanvas({ state, fill = false, contain = false, title, actio
 	}, [arrival?.at]);
 
 	const shown = arrival && live ? welcome(live, arrival.repo, arrival.group) : live ?? scene;
+	const [carry, setCarry] = useState<{ role: SwarmRole; card: string; say: string }[]>([]);
+	const lanesSeen = useRef<Map<string, { lane: Lane; id: string }> | null>(null);
+	useEffect(() => {
+		// Only the live board: the demo moves its own cards with its own cursors.
+		if (!state) return;
+		const now = new Map(shown.cards.filter((c) => c.repo && c.kind !== "doc").map((c) => [itemKey(c.repo!, c.number), { lane: c.lane, id: c.id }]));
+		const before = lanesSeen.current;
+		lanesSeen.current = now;
+		if (!before) return;
+		const moved: { role: SwarmRole; card: string; say: string }[] = [];
+		for (const [key, { lane, id }] of now) {
+			const was = before.get(key);
+			if (!was || was.lane === lane) continue;
+			const role: SwarmRole = lane === "dev" ? "merger" : lane === "approved" ? "reviewer" : lane === "todo" || lane === "roadmap" ? "planner" : "prover";
+			if (moved.some((m) => m.role === role)) continue;
+			moved.push({ role, card: id, say: `moving #${key.split("#")[1]} → ${LANE_WORD[lane]}` });
+		}
+		if (!moved.length) return;
+		setCarry((c) => [...c.filter((x) => !moved.some((m) => m.role === x.role)), ...moved]);
+		// Not cleaned up on the next refresh: a carry always ends, even if the board updates meanwhile.
+		setTimeout(() => setCarry((c) => c.filter((x) => !moved.includes(x))), 3200);
+		// eslint-disable-next-line react-hooks/exhaustive-deps
+	}, [shown.cards]);
 
 	// Cards grow to fit their label and title; the board stacks them on what they measure.
 	const [heights, setHeights] = useState(() => new Map<string, number>());
@@ -935,9 +959,14 @@ export function SwarmCanvas({ state, fill = false, contain = false, title, actio
 		const sharing = ROLES.filter((r) => shown.cursors[r].follow === follow && (r === shown.turn || ROLES.indexOf(r) < ROLES.indexOf(role)));
 		if (sharing.length) waiting.set(role, sharing.length);
 	}
+	// Who just moved a card carries it: the agent rides along to the new column with a word, then goes back to work.
+	const cursorOf = (role: SwarmRole): Cursor => {
+		const c = carry.find((x) => x.role === role);
+		return c && shown.cards.some((card) => card.id === c.card) ? { follow: c.card, say: c.say } : shown.cursors[role];
+	};
 	const cursorPos = (role: SwarmRole) => {
 		// The assistant is yours: while your pointer is on the board it keeps you company, a step behind.
-		const cursor = shown.cursors[role];
+		const cursor = cursorOf(role);
 		const p = cursor.follow ? positions.get(cursor.follow) : undefined;
 		if (!p) return { ...(cursor.at ?? { x: 0, y: 0 }), side: undefined };
 		const slot = waiting.get(role);
@@ -1039,9 +1068,9 @@ export function SwarmCanvas({ state, fill = false, contain = false, title, actio
 							key={role}
 							role={role}
 							{...cursorPos(role)}
-							say={shown.cursors[role].say}
-							thinking={shown.cursors[role].thinking}
-							where={shown.cursors[role].where}
+							say={cursorOf(role).say}
+							thinking={cursorOf(role).thinking}
+							where={cursorOf(role).where}
 							// The issue or PR in the bubble previews like its card on the board.
 							onWhereEnter={(el, id) => {
 								const c = shown.cards.find((card) => card.id === id);
