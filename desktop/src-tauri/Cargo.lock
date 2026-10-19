@@ -1134,7 +1134,7 @@ dependencies = [
 
 [[package]]
 name = "formalmind-desktop"
-version = "0.1.2"
+version = "0.1.3"
 dependencies = [
  "keyring",
  "reqwest 0.12.28",
