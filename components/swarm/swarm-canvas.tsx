@@ -889,6 +889,17 @@ export function SwarmCanvas({ state, fill = false, contain = false, title, actio
 	const shown = arrival && live ? welcome(live, arrival.repo, arrival.group) : live ?? scene;
 	const [carry, setCarry] = useState<{ role: SwarmRole; card: string; say: string }[]>([]);
 	const lanesSeen = useRef<Map<string, { lane: Lane; id: string }> | null>(null);
+	// The dispatcher's errands: label changes it carries out, one card at a time.
+	const errands = useRef<{ card: string; say: string }[]>([]);
+	const errandTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+	const nextErrand = () => {
+		const errand = errands.current.shift();
+		setCarry((c) => [...c.filter((x) => x.role !== "dispatcher"), ...(errand ? [{ role: "dispatcher" as const, ...errand }] : [])]);
+		errandTimer.current = errand ? setTimeout(nextErrand, 2600) : null;
+	};
+	useEffect(() => () => {
+		if (errandTimer.current) clearTimeout(errandTimer.current);
+	}, []);
 	useEffect(() => {
 		// Only the live board: the demo moves its own cards with its own cursors.
 		if (!state) return;
@@ -896,18 +907,23 @@ export function SwarmCanvas({ state, fill = false, contain = false, title, actio
 		const before = lanesSeen.current;
 		lanesSeen.current = now;
 		if (!before) return;
-		const moved: { role: SwarmRole; card: string; say: string }[] = [];
+		const own: { role: SwarmRole; card: string; say: string }[] = [];
 		for (const [key, { lane, id }] of now) {
 			const was = before.get(key);
 			if (!was || was.lane === lane) continue;
-			const role: SwarmRole = lane === "dev" ? "merger" : lane === "approved" ? "reviewer" : lane === "todo" || lane === "roadmap" ? "planner" : "prover";
-			if (moved.some((m) => m.role === role)) continue;
-			moved.push({ role, card: id, say: `moving #${key.split("#")[1]} → ${LANE_WORD[lane]}` });
+			const say = `moving #${key.split("#")[1]} → ${LANE_WORD[lane]}`;
+			// An agent working on this very card moved it itself; any other move is the dispatcher acting on a label.
+			const [repo, number] = [key.slice(0, key.lastIndexOf("#")), Number(key.split("#")[1])];
+			const worker = state.active?.find((a) => a.repo === repo && a.ref === number)?.role;
+			if (worker && !own.some((o) => o.role === worker)) own.push({ role: worker, card: id, say });
+			else errands.current.push({ card: id, say });
 		}
-		if (!moved.length) return;
-		setCarry((c) => [...c.filter((x) => !moved.some((m) => m.role === x.role)), ...moved]);
-		// Not cleaned up on the next refresh: a carry always ends, even if the board updates meanwhile.
-		setTimeout(() => setCarry((c) => c.filter((x) => !moved.includes(x))), 3200);
+		if (own.length) {
+			setCarry((c) => [...c.filter((x) => !own.some((o) => o.role === x.role)), ...own]);
+			// Not cleaned up on the next refresh: a carry always ends, even if the board updates meanwhile.
+			setTimeout(() => setCarry((c) => c.filter((x) => !own.includes(x))), 3200);
+		}
+		if (errands.current.length && !errandTimer.current) nextErrand();
 		// eslint-disable-next-line react-hooks/exhaustive-deps
 	}, [shown.cards]);
 
