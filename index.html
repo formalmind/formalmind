@@ -15,6 +15,16 @@
 		<link rel="api-catalog" href="/.well-known/api-catalog" />
 		<link rel="ai-catalog" href="/.well-known/ai-catalog.json" />
 		<link rel="alternate" type="application/mcp-server-card+json" href="/.well-known/mcp/server-card.json" />
+		<!-- The theme before the first paint, so dark mode doesn't flash white while the app loads. -->
+		<script>
+			try {
+				var t = localStorage.getItem("formal-mind-theme") || "system";
+				if (t === "dark" || (t === "system" && matchMedia("(prefers-color-scheme: dark)").matches)) {
+					document.documentElement.classList.add("dark");
+					document.documentElement.style.colorScheme = "dark";
+				}
+			} catch (e) {}
+		</script>
 	</head>
 	<body class="antialiased">
 		<div id="root"></div>

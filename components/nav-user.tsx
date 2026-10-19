@@ -7,8 +7,12 @@ import {
 	CreditCard,
 	LogIn,
 	LogOut,
+	Monitor,
+	Moon,
 	Sparkles,
+	Sun,
 } from "lucide-react"
+import { useTheme } from "next-themes"
 
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
 import {
@@ -107,6 +111,8 @@ export function NavUser() {
 							</DropdownMenuItem>
 						</DropdownMenuGroup>
 						<DropdownMenuSeparator />
+						<ThemeSwitch />
+						<DropdownMenuSeparator />
 						<DropdownMenuItem asChild>
 							{/* Logging out also resets the landing page to its demo. */}
 							<a href="/auth/logout" onClick={forgetLandingProgress} className="flex items-center gap-2">
@@ -118,5 +124,36 @@ export function NavUser() {
 				</DropdownMenu>
 			</SidebarMenuItem>
 		</SidebarMenu>
+	)
+}
+
+/** Light, dark, or whatever the system uses; a row of three, kept open so the change shows straight away. */
+function ThemeSwitch() {
+	const { theme, setTheme } = useTheme()
+	const options = [
+		{ key: "light", label: "Light", icon: Sun },
+		{ key: "dark", label: "Dark", icon: Moon },
+		{ key: "system", label: "System", icon: Monitor },
+	] as const
+	return (
+		<div className="flex items-center justify-between gap-2 px-2 py-1.5 text-sm">
+			<span>Theme</span>
+			<div role="radiogroup" aria-label="Theme" className="flex rounded-full bg-muted p-0.5">
+				{options.map(({ key, label, icon: Icon }) => (
+					<button
+						key={key}
+						type="button"
+						role="radio"
+						aria-checked={(theme ?? "system") === key}
+						aria-label={label}
+						title={label}
+						onClick={() => setTheme(key)}
+						className={`flex size-6 items-center justify-center rounded-full transition-colors ${(theme ?? "system") === key ? "bg-background text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"}`}
+					>
+						<Icon className="size-3.5" />
+					</button>
+				))}
+			</div>
+		</div>
 	)
 }
