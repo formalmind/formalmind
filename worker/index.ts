@@ -1,7 +1,9 @@
 import { Hono, type ExecutionContext } from "hono";
-import { auth, handleAuth } from "@/lib/auth";
+import { auth, handleAuth, type Principal } from "@/lib/auth";
+import { issuer, type Scope } from "@/lib/oauth";
 import { requestContext, type Env } from "./context";
 import { DISCOVERY_LINK_HEADER, handleDiscovery } from "./discovery";
+import { handleOAuth } from "./oauth";
 import { CONTENT_SIGNAL, isPagePath, markdownResponse, prefersMarkdown } from "./markdown";
 
 import * as billingBalance from "@/server/routes/billing/balance/route";
@@ -33,10 +35,14 @@ export { ProjectDO } from "./project-do";
 type Handler = (request: Request) => Response | Promise<Response>;
 type RouteModule = Partial<Record<"GET" | "POST" | "PUT" | "DELETE", Handler>>;
 
-/** The API, path for path what the Next.js app served; `open` routes need no session. */
-const ROUTES: Record<string, { module: RouteModule; open?: boolean }> = {
+/**
+ * The API, path for path what the Next.js app served; `open` routes need no session. A route with a `scope` also
+ * accepts an OAuth access token carrying that scope (lib/oauth.ts); every other route is the person's own (cookie or
+ * desktop session) and answers 403 to a token.
+ */
+const ROUTES: Record<string, { module: RouteModule; open?: boolean; scope?: Scope }> = {
 	"/api/assistant": { module: assistant },
-	"/api/billing/balance": { module: billingBalance },
+	"/api/billing/balance": { module: billingBalance, scope: "swarm:read" },
 	"/api/billing/checkout": { module: billingCheckout },
 	"/api/billing/webhook": { module: billingWebhook, open: true },
 	"/api/chat": { module: chat },
@@ -52,14 +58,22 @@ const ROUTES: Record<string, { module: RouteModule; open?: boolean }> = {
 	"/api/onboarding/plan": { module: onboardingPlan, open: true },
 	"/api/onboarding/state": { module: onboardingState },
 	"/api/project": { module: project },
-	"/api/projects": { module: projects },
-	"/api/projects/init": { module: projectsInit },
+	"/api/projects": { module: projects, scope: "swarm:read" },
+	"/api/projects/init": { module: projectsInit, scope: "swarm:write" },
 	"/api/swarm/agent": { module: swarmAgent },
 	"/api/swarm/chat": { module: swarmChat },
-	"/api/swarm/state": { module: swarmState },
+	"/api/swarm/state": { module: swarmState, scope: "swarm:read" },
 	"/api/tooltip": { module: tooltip },
-	"/api/usage": { module: usage },
+	"/api/usage": { module: usage, scope: "swarm:read" },
 };
+
+/** RFC 6750 §3: where a client finds the authorization server (RFC 9728), and why its token was refused. */
+function wwwAuthenticate(principal: Principal, scope?: Scope): string {
+	const parts = [`resource_metadata="${issuer()}/.well-known/oauth-protected-resource"`];
+	if (principal.via === "invalid") parts.push('error="invalid_token"', `error_description="${(principal.reason ?? "invalid token").replace(/"/g, "'")}"`);
+	if (scope) parts.push(`scope="${scope}"`);
+	return `Bearer ${parts.join(", ")}`;
+}
 
 const app = new Hono<{ Bindings: Env }>();
 
@@ -90,7 +104,7 @@ app.use("/api/*", async (c, next) => {
 });
 
 // Agent discovery (worker/discovery.ts): robots.txt, sitemap.xml, llms.txt, auth.md, /.well-known/* and the MCP
-// server at /mcp must never fall through to the SPA's index.html. A page requested with Accept: text/markdown gets a
+// servers at /mcp and /mcp/account must never fall through to the SPA's index.html. A page requested with Accept: text/markdown gets a
 // markdown rendering instead of the app shell (worker/markdown.ts). Both run before the API and the assets.
 app.use("*", async (c, next) => {
 	const discovery = await handleDiscovery(c.req.raw);
@@ -114,9 +128,29 @@ app.all("/api/*", async (c) => {
 	const route = ROUTES[new URL(c.req.url).pathname];
 	const handler = route?.module[c.req.method as keyof RouteModule];
 	if (!route || !handler) return c.json({ error: "Not found" }, 404);
-	if (!route.open && !(await auth.getSession())) return c.json({ error: "unauthenticated" }, 401);
+	if (!route.open) {
+		const principal = await auth.getPrincipal();
+		if (!principal.session) {
+			// A token-capable route tells the client where to get one; the others stay as they were.
+			const headers = route.scope || principal.via === "invalid" ? { "WWW-Authenticate": wwwAuthenticate(principal, route.scope) } : undefined;
+			return c.json({ error: "unauthenticated", ...(principal.reason ? { error_description: principal.reason } : {}) }, 401, headers);
+		}
+		if (principal.via === "token") {
+			if (!route.scope) {
+				return c.json({ error: "insufficient_scope", error_description: "This route is not open to OAuth tokens; it needs the person's own session." }, 403, { "WWW-Authenticate": 'Bearer error="insufficient_scope"' });
+			}
+			if (!principal.scopes.includes(route.scope)) {
+				return c.json({ error: "insufficient_scope", error_description: `This route needs the ${route.scope} scope.`, scope: route.scope }, 403, {
+					"WWW-Authenticate": `Bearer error="insufficient_scope", scope="${route.scope}"`,
+				});
+			}
+		}
+	}
 	return handler(c.req.raw);
 });
+
+// The OAuth 2.0 authorization server (worker/oauth.ts): registration, authorize, token, revoke.
+app.all("/oauth/*", (c) => handleOAuth(c.req.raw));
 
 // Built files. A chunk from an older deploy is gone: answer 404 rather than the app's index.html, which a browser
 // would try to run as a script.

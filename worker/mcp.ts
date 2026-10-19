@@ -27,7 +27,8 @@ import { APP_REPO, CHANGELOG_RAW, ORIGIN, ROLE_DOCS_RAW, SHORT, STATUS_LINE } fr
 z.config({ jitless: true });
 
 const MCP_URL = `${ORIGIN}/mcp`;
-export const MCP_VERSION = "0.1.0";
+export const MCP_VERSION = "0.2.0";
+const PROTOCOL_VERSIONS = ["2025-03-26", "2025-06-18", "2025-11-25"];
 
 /* Role documentation files in asyncswap/v2-proofs/.github/formalmind/. */
 const ROLE_DOCS: Record<string, string> = {
@@ -188,10 +189,25 @@ export function serverCard(): Response {
     version: MCP_VERSION,
     title: "Formal Mind swarm",
     description:
-      "Read-only tools over the Formal Mind swarm's public record on GitHub: its live state, open issues and pull requests by fm: label, the proofs changelog (FORMAL_MIND.md) and each role's instructions. No authentication. Asking the swarm something or onboarding a repository happens on GitHub and at formal.team; see the Agent Skills at /.well-known/agent-skills/index.json.",
+      "Two remotes. /mcp: read-only tools over the Formal Mind swarm's public record on GitHub (its live state, open issues and pull requests by fm: label, the proofs changelog FORMAL_MIND.md and each role's instructions), no authentication. /mcp/account: the signed-in person's own projects, usage, credits and swarm state, plus planning a repository and starting the swarm on it, behind an OAuth 2.0 access token from this host's authorization server (GitHub sign-in; RFC 9728 metadata at /.well-known/oauth-protected-resource/mcp/account, RFC 8414 at /.well-known/oauth-authorization-server). Talking to the swarm itself happens on GitHub; see the Agent Skills at /.well-known/agent-skills/index.json.",
     websiteUrl: ORIGIN,
     repository: { source: "github", url: APP_REPO },
-    remotes: [{ type: "streamable-http", url: MCP_URL, supportedProtocolVersions: ["2025-03-26", "2025-06-18", "2025-11-25"] }],
+    remotes: [
+      { type: "streamable-http", url: MCP_URL, supportedProtocolVersions: PROTOCOL_VERSIONS, authentication: { required: false } },
+      {
+        type: "streamable-http",
+        url: `${ORIGIN}/mcp/account`,
+        supportedProtocolVersions: PROTOCOL_VERSIONS,
+        authentication: {
+          required: true,
+          type: "oauth2",
+          authorizationServer: ORIGIN,
+          resourceMetadata: `${ORIGIN}/.well-known/oauth-protected-resource/mcp/account`,
+          scopes: ["swarm:read", "swarm:write"],
+          description: "Unauthenticated requests get 401 with WWW-Authenticate: Bearer resource_metadata=…; the client registers at /oauth/register, authorizes with PKCE at /oauth/authorize (GitHub sign-in and a consent page), and exchanges the code at /oauth/token. Documented at /auth.md.",
+        },
+      },
+    ],
     serverInfo: { name: "formalmind", version: MCP_VERSION },
     url: MCP_URL,
     transport: { type: "streamable-http" },

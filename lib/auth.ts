@@ -1,5 +1,6 @@
 import { cookie, currentRequest, readCookie } from "@/worker/context";
 import { kv } from "@/lib/kv";
+import { isScope, looksLikeJwt, verifyAccessToken, type AccessClaims, type Scope } from "@/lib/oauth";
 import type { SessionData } from "@/lib/session";
 
 /**
@@ -82,22 +83,67 @@ async function saveUser(user: SessionData["user"] & { githubId: number; login: s
 }
 
 /**
- * The session id: the desktop app sends its token as `Authorization: Bearer fmd_…` (a session of its own, minted by
- * /api/desktop/token); the browser sends the httpOnly cookie.
+ * The stored session's id: the desktop app sends its token as `Authorization: Bearer fmd_…` (a session of its own,
+ * minted by /api/desktop/token); the browser sends the httpOnly cookie. OAuth access tokens carry no stored session.
  */
 function sessionId(): string | null {
 	const bearer = currentRequest().request.headers.get("authorization")?.match(/^Bearer (fmd_[\w-]+)$/)?.[1];
 	return bearer ?? readCookie(SESSION_COOKIE);
 }
 
-async function getSession(): Promise<SessionData | null> {
-	if (isDevPreview) return devSession;
-	const id = sessionId();
-	if (!id) return null;
+/**
+ * Who is calling. `cookie` and `desktop` sessions are the person's own and may do everything; a `token` is an OAuth
+ * access token (lib/oauth.ts) acting for the person within its `scopes`. `invalid` is a bearer token that did not
+ * verify, with the reason a 401 can carry; `none` is no credential at all.
+ */
+export type Principal =
+	| { session: SessionData; via: "cookie" | "desktop"; scopes: null }
+	| { session: SessionData; via: "token"; scopes: Scope[]; claims: AccessClaims }
+	| { session: null; via: "none" | "invalid"; scopes: null; reason?: string };
+
+async function storedSession(id: string): Promise<SessionData | null> {
 	const raw = await (await kv()).get(`session:${id}`);
 	const session = raw ? (JSON.parse(raw) as SessionData & { scope?: string }) : null;
 	// A session from before the sign-in scopes changed lacks permissions the app now relies on: sign in again.
 	return session?.scope === SCOPE ? session : null;
+}
+
+async function resolvePrincipal(): Promise<Principal> {
+	const header = currentRequest().request.headers.get("authorization");
+	const bearer = header?.match(/^Bearer\s+(\S+)$/i)?.[1];
+	if (bearer) {
+		if (bearer.startsWith("fmd_")) {
+			const session = isDevPreview ? devSession : await storedSession(bearer);
+			return session ? { session, via: "desktop", scopes: null } : { session: null, via: "invalid", scopes: null, reason: "unknown desktop token" };
+		}
+		if (looksLikeJwt(bearer)) {
+			const result = await verifyAccessToken(bearer);
+			if (!result.claims) return { session: null, via: "invalid", scopes: null, reason: result.reason };
+			const { claims } = result;
+			const session: SessionData = {
+				user: { sub: claims.sub, name: claims.name, nickname: claims.nickname, email: claims.email },
+				// No GitHub token travels with an OAuth token: what needs one (chat, the App) is not open to tokens.
+				tokenSet: { accessToken: "", expiresAt: 0 },
+			};
+			return { session, via: "token", scopes: claims.scope.split(" ").filter(isScope), claims };
+		}
+		return { session: null, via: "invalid", scopes: null, reason: "unrecognised bearer token" };
+	}
+	if (isDevPreview) return { session: devSession, via: "cookie", scopes: null };
+	const id = readCookie(SESSION_COOKIE);
+	const session = id ? await storedSession(id) : null;
+	return session ? { session, via: "cookie", scopes: null } : { session: null, via: "none", scopes: null };
+}
+
+/** Resolved once per request; every later call shares the answer. */
+function getPrincipal(): Promise<Principal> {
+	const ctx = currentRequest();
+	if (!ctx.principal) ctx.principal = resolvePrincipal();
+	return ctx.principal as Promise<Principal>;
+}
+
+async function getSession(): Promise<SessionData | null> {
+	return (await getPrincipal()).session;
 }
 
 /** The signed-in person's GitHub token (from the formalmind App), refreshed when it has expired. */
@@ -113,7 +159,7 @@ async function getGitHubToken(): Promise<string> {
 	return next.tokenSet.accessToken;
 }
 
-export const auth = { getSession, getGitHubToken };
+export const auth = { getSession, getPrincipal, getGitHubToken };
 
 /** A desktop session: a copy of the browser's, under its own id, so signing out of one leaves the other. */
 export async function createDesktopSession(session: SessionData): Promise<string> {

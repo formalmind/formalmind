@@ -16,6 +16,8 @@ export interface RequestContext {
 	waitUntil(promise: Promise<unknown>): void;
 	/** Cookies to set on the response, collected while the request runs. */
 	setCookies: string[];
+	/** Who is calling, resolved once per request (lib/auth.ts getPrincipal). */
+	principal?: Promise<unknown>;
 }
 
 export const requestContext = new AsyncLocalStorage<RequestContext>();

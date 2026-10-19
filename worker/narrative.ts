@@ -38,7 +38,7 @@ ${STATUS_LINE}
 - The swarm's work is public: its issues, pull requests, notebooks and spend ledger are on GitHub in ${PROOFS_REPO}, and the swarm's own documentation is ${SWARM_DOC}.
 - The live swarm's budget is $5 a day and $150 a month, enforced by the dispatcher from the ledger issue (asyncswap/v2-proofs/.github/formalmind/README.md, "Budget").
 - Prepaid credits bought on formal.team are recorded per account (lib/billing.ts); metering them against the swarm's model calls is planned, not live.
-- There is no API key, token or OAuth client for agents yet; see ${ORIGIN}/auth.md.`;
+- Agents and MCP connectors act on an account with OAuth 2.0 access tokens from formal.team's own authorization server (GitHub sign-in, a consent page, PKCE; worker/oauth.ts), at ${ORIGIN}/mcp/account and on the API routes named in ${ORIGIN}/auth.md. A public verification-work API is planned.`;
 
 /* The swarm, in the swarm's own words (asyncswap/v2-proofs/.github/formalmind/README.md). */
 export const HOW_IT_WORKS = `## How the swarm works
@@ -69,10 +69,23 @@ GitHub is the shared memory: issues and \`fm:*\` labels are the task queue, a pi
 ## The app at formal.team
 
 - **Landing page** (${ORIGIN}/welcome, also / when signed out): paste a public GitHub repository and the planner drafts the swarm's first issues for it, live. The same call is open to anyone without signing in: \`POST ${ORIGIN}/api/onboarding/plan\` with \`{"repo":"owner/name"}\` streams the plan as text (a JSON object); five plans per hour per address, and a plan is cached for a week (server/routes/onboarding/plan/route.ts).
-- **Sign in** with GitHub (${ORIGIN}/login). Sessions are an httpOnly cookie; there is no password and no API key.
+- **Sign in** with GitHub (${ORIGIN}/login). Sessions are an httpOnly cookie; there is no password. An agent acting for you holds an OAuth access token instead (${ORIGIN}/auth.md).
 - **Onboarding** (signed in): your plan, team size, daily budget, prepaid credits through Stripe Checkout ($10 to $1,000), installing the formalmind GitHub App, and Start, which creates \`<owner>/<name>-proofs\` from the formalmind/lean-template repository and lists it in the swarm's \`projects.json\` so the dispatcher sweeps it (lib/proofs-repo.ts).
 - **Swarm workspace** (signed in): the live board of the swarm's open work, merged pull requests, spend today, the chief's and the assistant's latest notes, and a chat that posts on the swarm's public notebook issues as you.
 - **Mac app**: ${MAC_DOWNLOAD}. It signs in through the browser and can run agent turns on folders on your machine.`;
+
+/* What an agent may do on a person's account, and how a person connects one.
+ * Sources: worker/oauth.ts, lib/oauth.ts, lib/auth.ts, worker/account-mcp.ts,
+ * worker/index.ts (ROUTES). */
+export const AGENT_ACCESS = `## Agents on your account
+
+Formal Mind runs an OAuth 2.0 authorization server at ${ORIGIN} (RFC 8414 metadata at ${ORIGIN}/.well-known/oauth-authorization-server; dynamic client registration, authorization code with PKCE, refresh tokens, revocation). A client registers itself, sends you to ${ORIGIN}/oauth/authorize, you sign in with GitHub and allow it on a consent page that names the client and the scopes, and it receives an access token for your account, good for an hour and renewable until you revoke it. Two scopes: \`swarm:read\` (your projects, usage, credits and the swarm's state) and \`swarm:write\` (plan a repository for your account, start the swarm on it). Everything else, including chat and billing, stays behind your own sign-in.
+
+**Account MCP server**, ${ORIGIN}/mcp/account (Streamable HTTP, JSON responses): \`my_projects\`, \`my_usage\` (spend today, this month and overall, and the latest cost lines), \`my_credits\`, \`swarm_state\` (swarm:read), \`plan_repository\` and \`start_swarm\` (swarm:write). Without a token it answers 401 with a \`WWW-Authenticate\` header pointing at ${ORIGIN}/.well-known/oauth-protected-resource/mcp/account, which is how MCP clients find the authorization server on their own.
+
+**API routes that take the same token** (\`Authorization: Bearer\`): \`GET /api/projects\`, \`GET /api/usage\`, \`GET /api/billing/balance\`, \`GET /api/swarm/state\` (swarm:read) and \`POST /api/projects/init\` (swarm:write). A token without the scope gets 403 \`insufficient_scope\`.
+
+**Connect it as an MCP connector.** Claude: Settings → Connectors → Add custom connector, name "Formal Mind", URL \`${ORIGIN}/mcp/account\`; Claude registers itself and opens the GitHub sign-in. ChatGPT: Settings → Connectors (or Apps) → Create, the same URL, authentication OAuth, no client id or secret (it registers dynamically). Cursor: Settings → MCP → Add new MCP server, \`{"url":"${ORIGIN}/mcp/account"}\`, then Authenticate. Then ask: "what did my swarm spend today", "what are my projects", "plan owner/repo", "start the swarm on owner/repo". Full details: ${ORIGIN}/auth.md and the skill at ${ORIGIN}/.well-known/agent-skills/connect-formal-mind-as-mcp/SKILL.md.`;
 
 /* Roadmap, kept apart from what exists. Sources: lib/billing.ts (metering
  * "comes next"), wrangler.jsonc (per-project lease, queue and dispatcher
@@ -81,5 +94,5 @@ export const PLANNED = `## Planned, not built
 
 - **Credit metering.** Prepaid credits are recorded today; routing the swarm's model calls through a metering proxy that spends them is next (lib/billing.ts).
 - **One Durable Object per project** holding the project's event log, queue, lease and budget, as described in the protocol v1 draft (docs/protocol.md). Today one object holds the spend ledger of the live swarm.
-- **An agent API and credentials.** No token issuer, API key or OAuth client exists for agents; when one does, ${ORIGIN}/.well-known/oauth-protected-resource and ${ORIGIN}/auth.md will say so.
+- **A public verification-work API.** The credential layer exists (OAuth 2.0 tokens from ${ORIGIN}, see ${ORIGIN}/auth.md) and covers an account's projects, usage, credits, swarm state, planning and starting the swarm. An API for submitting verification work and reading its results outside GitHub is next, and will take the same tokens.
 - **An A2A agent card.** None is published, because there is no agent-to-agent endpoint to describe.`;
