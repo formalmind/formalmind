@@ -83,6 +83,16 @@ export function SwarmWorkspace({ repo }: { repo: string }) {
 
 	const latest = state?.runs[0];
 	const run = isLiveRun(latest) ? latest : null;
+	// While any agent is working, the logo's bar breathes (CSS reads this flag on the root).
+	const working = Boolean((run && run.status !== "completed") || state?.active?.some((a) => !a.finished));
+	useEffect(() => {
+		const root = document.documentElement;
+		if (working) root.dataset.swarmWorking = "";
+		else delete root.dataset.swarmWorking;
+		return () => {
+			delete root.dataset.swarmWorking;
+		};
+	}, [working]);
 	const activity = run
 		? `${run.status === "completed" ? "Just finished" : "Live"}: ${run.note ? `${run.note.role}${run.note.ref ? ` on #${run.note.ref}` : ""}` : "dispatcher"} · ${run.status === "completed" ? "done" : run.phase} · started ${minutesAgo(run.startedAt)}`
 		: "Idle. The dispatcher sweeps every 10 minutes";

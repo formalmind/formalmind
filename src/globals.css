@@ -389,3 +389,23 @@
 @media (prefers-reduced-motion: reduce) {
 	.fm-shimmer { animation: none; }
 }
+
+/* The logo: hovering its link rebuilds the F, the stem first, then the top and the bar sliding into place. */
+@keyframes fm-logo-in { from { opacity: 0; transform: translate(-40px, 30px); } to { opacity: 1; transform: none; } }
+@keyframes fm-logo-breathe { 0%, 100% { opacity: 1; } 50% { opacity: 0.55; } }
+a:is(:hover, :focus-visible) > .fm-logo :is(.fm-logo-stem, .fm-logo-top, .fm-logo-bar) { animation: fm-logo-in 0.45s cubic-bezier(0.22, 1, 0.36, 1) both; }
+a:is(:hover, :focus-visible) > .fm-logo .fm-logo-top { animation-delay: 0.08s; }
+a:is(:hover, :focus-visible) > .fm-logo .fm-logo-bar { animation-delay: 0.16s; }
+/* While agents are working (set by the swarm page), the bar breathes slowly. */
+:root[data-swarm-working] .fm-logo .fm-logo-bar { animation: fm-logo-breathe 2.8s ease-in-out infinite; }
+@media (prefers-reduced-motion: reduce) {
+	.fm-logo * { animation: none !important; }
+}
+
+/* The bell: a short swing on hover, a ring when something new arrives. It pivots from its top. */
+@keyframes fm-bell { 0%, 100% { transform: rotate(0); } 15% { transform: rotate(14deg); } 30% { transform: rotate(-12deg); } 45% { transform: rotate(8deg); } 60% { transform: rotate(-5deg); } 75% { transform: rotate(2deg); } }
+.fm-bell { transform-origin: 50% 8%; }
+button:is(:hover, :focus-visible) > .fm-bell, .fm-bell-ring { animation: fm-bell 0.7s ease-in-out; }
+@media (prefers-reduced-motion: reduce) {
+	.fm-bell { animation: none !important; }
+}
