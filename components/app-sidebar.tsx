@@ -181,7 +181,8 @@ export function AppSidebar({ extra, ...props }: React.ComponentProps<typeof Side
 						{/* One swarm, one budget, working across every project: the home page. */}
 						<NavLink item={{ title: "Swarm", url: "/", icon: Network, anim: "network" }} active={pathname === "/" || pathname === "/swarm/chat"} />
 						<NavLink item={{ title: "Roadmap", url: "/roadmap", icon: GanttChart, anim: "roadmap" }} active={pathname === "/roadmap" || pathname.endsWith("/roadmap")} />
-						{/* Right above the folders it adds to. */}
+						{/* The app's pages above, your projects below: New project starts that group. */}
+						<li role="separator" aria-hidden className="mx-2 my-2 h-px bg-sidebar-border group-data-[collapsible=icon]:mx-1" />
 						<SidebarMenuItem>
 							<SidebarMenuButton asChild isActive={pathname === "/onboarding" && window.location.search.includes("new=1")} tooltip="New project" className="font-normal data-[active=true]:font-normal">
 								<Link to="/onboarding?new=1" className="icon-anim-host">
