@@ -51,7 +51,8 @@ xcrun stapler staple "$APP"
 OUT=$(mktemp -d)
 cp "$DMG" "$OUT/Formal-Mind-mac.dmg"
 tar -czf "$OUT/Formal-Mind-mac.app.tar.gz" -C "$BUNDLE/macos" "Formal Mind.app"
-bunx tauri signer sign -f "$KEY" -p "" "$OUT/Formal-Mind-mac.app.tar.gz"
+# An inherited TAURI_SIGNING_PRIVATE_KEY makes `signer sign -f` refuse to run; sign with the key file only.
+env -u TAURI_SIGNING_PRIVATE_KEY -u TAURI_SIGNING_PRIVATE_KEY_PASSWORD bunx tauri signer sign -f "$KEY" -p "" "$OUT/Formal-Mind-mac.app.tar.gz"
 jq -n \
   --arg version "$VERSION" \
   --arg notes "Formal Mind $VERSION" \
