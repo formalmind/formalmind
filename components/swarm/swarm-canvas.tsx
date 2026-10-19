@@ -782,8 +782,6 @@ export function SwarmCanvas({ state, fill = false, contain = false, title, actio
 	const ox = fit.x + view.x;
 	const oy = fit.y + view.y;
 
-	// Where your pointer is on the board (in board units), for the assistant to follow; null when it's off the board.
-	const [companion, setCompanion] = useState<{ x: number; y: number } | null>(null);
 	// The demo always has the assistant follow you; in the app it's opt-in (it can get in the way), remembered here.
 	const [followPref, setFollowPref] = useState(() => {
 		try {
@@ -796,14 +794,17 @@ export function SwarmCanvas({ state, fill = false, contain = false, title, actio
 	const toggleFollow = () => {
 		const next = !followPref;
 		setFollowPref(next);
-		if (!next) setCompanion(null);
+		if (!next) releaseAssistant();
 		try {
 			localStorage.setItem("fm:assistant-follows", next ? "1" : "0");
 		} catch {
 			// Storage refused: the choice lasts for this visit.
 		}
 	};
+	// The assistant follows your pointer by moving its own element each frame, on a short ease: re-rendering the
+	// board per mouse move, with the cursors' long 700ms glide restarting each time, made it flicker.
 	const companionFrame = useRef(0);
+	const assistantEl = () => frameRef.current?.querySelector<HTMLElement>('[data-cursor="assistant"]') ?? null;
 	const followPointer = (e: React.PointerEvent<HTMLDivElement>) => {
 		const box = frameRef.current?.getBoundingClientRect();
 		if (!follows || !box || companionFrame.current) return;
@@ -811,8 +812,22 @@ export function SwarmCanvas({ state, fill = false, contain = false, title, actio
 		const y = (e.clientY - box.top - oy) / s + 26;
 		companionFrame.current = requestAnimationFrame(() => {
 			companionFrame.current = 0;
-			setCompanion({ x, y });
+			const el = assistantEl();
+			if (!el) return;
+			if (el.dataset.home === undefined) el.dataset.home = el.style.transform;
+			el.style.transition = "transform 150ms cubic-bezier(0.22, 1, 0.36, 1)";
+			el.style.transform = `translate(${x}px, ${y}px)`;
 		});
+	};
+	// Back to its own spot, on the cursors' usual glide.
+	const releaseAssistant = () => {
+		cancelAnimationFrame(companionFrame.current);
+		companionFrame.current = 0;
+		const el = assistantEl();
+		if (!el || el.dataset.home === undefined) return;
+		el.style.transition = "";
+		el.style.transform = el.dataset.home;
+		delete el.dataset.home;
 	};
 
 	// A project that shows up while the board is open (its plan was just saved) gets a welcome: its lanes
@@ -896,7 +911,6 @@ export function SwarmCanvas({ state, fill = false, contain = false, title, actio
 	}
 	const cursorPos = (role: SwarmRole) => {
 		// The assistant is yours: while your pointer is on the board it keeps you company, a step behind.
-		if (role === "assistant" && companion) return { ...companion, side: companion.x > W - 260 ? ("left" as const) : undefined };
 		const cursor = shown.cursors[role];
 		const p = cursor.follow ? positions.get(cursor.follow) : undefined;
 		if (!p) return { ...(cursor.at ?? { x: 0, y: 0 }), side: undefined };
@@ -926,7 +940,7 @@ export function SwarmCanvas({ state, fill = false, contain = false, title, actio
 					onPointerMove(e);
 					followPointer(e);
 				}}
-				onPointerLeave={() => setCompanion(null)}
+				onPointerLeave={releaseAssistant}
 				onPointerUp={endDrag}
 				onPointerCancel={endDrag}
 				onLostPointerCapture={endDrag}
@@ -1231,6 +1245,7 @@ export function SwarmCursor({ role, x, y, say, turn, side, delay = 0, onTalk }: 
 	const flip = side === "left" || x > W - 260;
 	return (
 		<div
+			data-cursor={role}
 			className={`pointer-events-none absolute left-0 top-0 z-20 ${MOVE}`}
 			style={{ transform: `translate(${x}px, ${y}px)`, transitionProperty: "transform", transitionDelay: `${delay}ms` }}
 		>
