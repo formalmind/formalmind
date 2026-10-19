@@ -51,12 +51,19 @@ export async function proxy(request: Request, path: string): Promise<Response> {
 		if (value) headers.set(name, value);
 	}
 	headers.set("x-api-key", upstreamKey);
+	// An organization-wide key must name the workspace its usage is billed to.
+	if (process.env.ANTHROPIC_WORKSPACE_ID) headers.set("anthropic-workspace-id", process.env.ANTHROPIC_WORKSPACE_ID);
 	const upstream = await fetch(`https://api.anthropic.com${path}${new URL(request.url).search}`, {
 		method: request.method,
 		headers,
 		body: request.method === "GET" ? undefined : await request.text(),
 	});
-	if (!metered || !upstream.ok || !upstream.body) return upstream;
+	if (!upstream.ok) {
+		const text = await upstream.text();
+		console.error(`[model] ${caller.repo} ${path} → ${upstream.status}: ${text.slice(0, 500)}`);
+		return new Response(text, { status: upstream.status, headers: upstream.headers });
+	}
+	if (!metered || !upstream.body) return upstream;
 
 	const ref = `${caller.repo}:${caller.run}:${crypto.randomUUID().slice(0, 8)}`;
 	const charge = (model: string, usage: Usage) => recordSpend(caller.sub, costCents(model, usage), ref).catch((error) => console.error("[model] charging failed:", error));
