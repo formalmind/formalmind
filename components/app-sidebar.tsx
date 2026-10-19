@@ -181,16 +181,18 @@ export function AppSidebar({ extra, ...props }: React.ComponentProps<typeof Side
 						{/* One swarm, one budget, working across every project: the home page. */}
 						<NavLink item={{ title: "Swarm", url: "/", icon: Network, anim: "network" }} active={pathname === "/" || pathname === "/swarm/chat"} />
 						<NavLink item={{ title: "Roadmap", url: "/roadmap", icon: GanttChart, anim: "roadmap" }} active={pathname === "/roadmap" || pathname.endsWith("/roadmap")} />
-						{/* The app's pages above, your projects below: New project starts that group. */}
-						<li role="separator" aria-hidden className="mx-2 my-2 h-px bg-sidebar-border group-data-[collapsible=icon]:mx-1" />
-						<SidebarMenuItem>
-							<SidebarMenuButton asChild isActive={pathname === "/onboarding" && window.location.search.includes("new=1")} tooltip="New project" className="font-normal data-[active=true]:font-normal">
-								<Link to="/onboarding?new=1" className="icon-anim-host">
-									<Plus className="icon-anim-plus" />
-									<span>New project</span>
-								</Link>
-							</SidebarMenuButton>
-						</SidebarMenuItem>
+						{/* Your projects below the app's pages: a gap, a quiet heading, and + to add one (like a section header). */}
+						<li className="mt-4 flex h-7 items-center justify-between pl-2 pr-1 text-xs font-medium text-sidebar-foreground/60 group-data-[collapsible=icon]:justify-center group-data-[collapsible=icon]:p-0">
+							<span className="group-data-[collapsible=icon]:hidden">Projects</span>
+							<Link
+								to="/onboarding?new=1"
+								aria-label="New project"
+								title="New project"
+								className="icon-anim-host flex size-6 items-center justify-center rounded-md text-sidebar-foreground/60 outline-none hover:bg-sidebar-accent hover:text-sidebar-foreground focus-visible:ring-2 focus-visible:ring-sidebar-ring"
+							>
+								<Plus className="icon-anim-plus size-4" />
+							</Link>
+						</li>
 					</SidebarMenu>
 					<Projects pathname={pathname} />
 				</SidebarGroup>
