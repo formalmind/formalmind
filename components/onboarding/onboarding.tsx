@@ -6,7 +6,7 @@ import { SidebarTrigger } from "@/components/ui/sidebar";
 import { PlanBoard } from "@/components/landing/plan-board";
 import { forgetLandingProgress, readDraft, usePlan } from "@/components/landing/use-plan";
 import { projectPath, refreshProjects, useProjects } from "@/components/projects/use-projects";
-import { Link, useSearchParams } from "react-router";
+import { Link, useNavigate, useSearchParams } from "react-router";
 import type { OnboardingState } from "@/server/routes/onboarding/state/route";
 import { SWARM_MODES, TEAM_PRESETS } from "@/lib/teams";
 import {
@@ -111,6 +111,7 @@ export function Onboarding() {
 	const projects = useProjects();
 	const proofsRepo = projects?.find((p) => p.repo === state.repo)?.proofsRepo ?? null;
 	const [init, setInit] = useState<{ busy: boolean; error?: string }>({ busy: false });
+	const navigate = useNavigate();
 	const initialise = async () => {
 		if (!state.repo) return;
 		setInit({ busy: true });
@@ -119,6 +120,8 @@ export function Onboarding() {
 		if (res?.ok && body?.proofsRepo) {
 			setInit({ busy: false });
 			refreshProjects();
+			// Set up: straight into a new chat about the project, with the swarm a click away.
+			navigate(projectPath(state.repo, "chat"));
 		} else setInit({ busy: false, error: body?.error ?? "Couldn't reach the server; try again." });
 	};
 
@@ -237,15 +240,18 @@ export function Onboarding() {
 									<Check className="size-4 shrink-0 text-green-600" />
 									<span>
 										<a href={`https://github.com/${proofsRepo}`} target="_blank" rel="noreferrer" className="font-mono underline underline-offset-4">{proofsRepo}</a>{" "}
-										{state.mode === "audit" ? "is auditing. No keys needed." : "is running. No keys needed."}
+										{state.mode === "audit" ? "is auditing. No keys needed; the report is in audit/." : "is running. No keys needed."}
 									</span>
 								</p>
-								<div className="mt-4 flex items-center gap-3">
-									<Link to={projectPath(state.repo ?? "")} className="inline-flex h-10 items-center rounded-full bg-primary px-5 text-sm font-medium text-primary-foreground hover:opacity-90">
-										Open the project
+								<div className="mt-4 flex flex-wrap items-center gap-3">
+									<Link to={projectPath(state.repo ?? "", "chat")} className="inline-flex h-10 items-center rounded-full bg-primary px-5 text-sm font-medium text-primary-foreground hover:opacity-90">
+										Chat about it
+									</Link>
+									<Link to={projectPath(state.repo ?? "")} className="inline-flex h-10 items-center rounded-full border px-5 text-sm hover:bg-muted">
+										Watch the swarm
 									</Link>
 									{/* Links it again: the paying account and mode, then starts the swarm. Settings in the repository are kept. */}
-									<button type="button" disabled={init.busy} onClick={() => void initialise()} className="inline-flex h-10 items-center rounded-full border px-5 text-sm hover:bg-muted disabled:opacity-50">
+									<button type="button" disabled={init.busy} onClick={() => void initialise()} className="text-sm text-muted-foreground underline-offset-4 hover:text-foreground hover:underline disabled:opacity-50">
 										{init.busy ? "Linking…" : "Link again"}
 									</button>
 								</div>

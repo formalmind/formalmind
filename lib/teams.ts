@@ -28,5 +28,5 @@ export const SWARM_MODES: { key: SwarmMode; name: string; lead: string; ends: st
 
 export const DEFAULT_MODE: SwarmMode = "specs";
 
-/** The audit report's file name: FM_AUDIT_<MM>_<YYYY>.md, for the month the audit started. */
-export const auditReportName = (at = new Date()) => `FM_AUDIT_${String(at.getUTCMonth() + 1).padStart(2, "0")}_${at.getUTCFullYear()}.md`;
+/** The audit report's path: audit/FM_AUDIT_<MM>_<YYYY>.md, for the month the audit started. */
+export const auditReportName = (at = new Date()) => `audit/FM_AUDIT_${String(at.getUTCMonth() + 1).padStart(2, "0")}_${at.getUTCFullYear()}.md`;

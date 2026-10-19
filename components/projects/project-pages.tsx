@@ -1,3 +1,4 @@
+import type { ThinkLevel } from "@/lib/models";
 import { Suspense, lazy, useEffect, useMemo, useRef, useState } from "react";
 import { ChatMarkdown } from "@/components/chat-markdown";
 import { Link, Navigate, useNavigate, useParams } from "react-router";
@@ -88,8 +89,10 @@ export function ProjectRoadmapPage() {
 function ProjectChat({ repo, chatId }: { repo: string; chatId: string }) {
 	const saved = useMemo(() => getProjectChat(repo, chatId), [repo, chatId]);
 	const [model, setModel] = useState<OpenAIModel>("gpt-6-luna");
+	const [think, setThink] = useState<ThinkLevel>("medium");
 	const { messages, input, setInput, handleInputChange, handleSubmit, stop, isLoading, error } = useChatWithInterruptions({
 		model,
+		think,
 		id: `${repo}:${chatId}`,
 		initialMessages: saved?.messages ?? [],
 		project: repo,
@@ -134,6 +137,8 @@ function ProjectChat({ repo, chatId }: { repo: string; chatId: string }) {
 						isLoading={isLoading}
 						model={model}
 						onModelChange={setModel}
+							think={think}
+							onThinkChange={setThink}
 						placeholder={`Ask about ${repo}…`}
 						context={<ProjectPicker repo={repo} />}
 					/>

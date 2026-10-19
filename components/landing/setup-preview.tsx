@@ -105,6 +105,16 @@ export function SetupPreview({ repo, plan, done, failed, startHref }: { repo: st
 					<Panel {...STEP_COPY.plan}>
 						<PlanBoard repo={repo} plan={plan} status={done ? "done" : "planning"} />
 					</Panel>
+				) : step === "mode" ? (
+					<Panel {...STEP_COPY.mode}>
+						<ModePicker
+							value={mode}
+							onChange={(next) => {
+								setMode(next);
+								setChosen((c) => ({ ...c, mode: true }));
+							}}
+						/>
+					</Panel>
 				) : step === "team" ? (
 					<Panel {...STEP_COPY.team}>
 						<TeamPicker

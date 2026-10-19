@@ -1,4 +1,4 @@
-import { ChevronDown, FolderGit2 } from "lucide-react";
+import { Check, ChevronDown, FolderGit2 } from "lucide-react";
 import { useNavigate } from "react-router";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { projectPath, useProjects } from "@/components/projects/use-projects";
@@ -19,11 +19,15 @@ export function ProjectPicker({ repo, onSelect }: { repo: string; onSelect?: (re
 			</DropdownMenuTrigger>
 			<DropdownMenuContent side="top" align="start" sideOffset={6}>
 				{projects.map((p) => (
-					<DropdownMenuItem key={p.repo} onSelect={() => p.repo !== repo && (onSelect ? onSelect(p.repo) : navigate(projectPath(p.repo, "chat")))}>
+					<DropdownMenuItem key={p.repo} aria-current={p.repo === repo ? "true" : undefined} className={p.repo === repo ? "font-medium" : undefined} onSelect={() => p.repo !== repo && (onSelect ? onSelect(p.repo) : navigate(projectPath(p.repo, "chat")))}>
+						<Check className={`size-4 ${p.repo === repo ? "" : "invisible"}`} />
 						{p.repo}
 					</DropdownMenuItem>
 				))}
-				<DropdownMenuItem onSelect={() => navigate("/onboarding?new=1")}>New project…</DropdownMenuItem>
+				<DropdownMenuItem onSelect={() => navigate("/onboarding?new=1")}>
+					<span className="size-4" />
+					New project…
+				</DropdownMenuItem>
 			</DropdownMenuContent>
 		</DropdownMenu>
 	);

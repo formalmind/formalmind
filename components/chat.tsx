@@ -1,5 +1,6 @@
 "use client";
 
+import type { ThinkLevel } from "@/lib/models";
 import { FederatedConnectionInterrupt } from "@auth0/ai/interrupts";
 import { EnsureAPIAccessPopup } from "@/components/auth0-ai/FederatedConnections/popup";
 import { Check, Copy, Share2 } from "lucide-react"
@@ -58,10 +59,12 @@ function ChatConversationView({
 	onMessagesChange: (id: string, messages: import("ai").Message[]) => void;
 }) {
 	const [model, setModel] = useState<OpenAIModel>("gpt-6-luna")
+	const [think, setThink] = useState<ThinkLevel>("medium")
 	const [copiedMessageId, setCopiedMessageId] = useState<string | null>(null)
 	const [sharedMessageId, setSharedMessageId] = useState<string | null>(null)
 	const { messages, input, handleInputChange, handleSubmit, stop, isLoading, toolInterrupt, error } = useChatWithInterruptions({
 		model,
+		think,
 		id: conversation.id,
 		initialMessages: conversation.messages,
 	})
@@ -221,6 +224,8 @@ function ChatConversationView({
 							isLoading={isLoading}
 							model={model}
 							onModelChange={setModel}
+							think={think}
+							onThinkChange={setThink}
 							repo={repo}
 						/>
 					</div>

@@ -8,11 +8,13 @@ import { cn } from "@/lib/utils";
 import {
 	DropdownMenu,
 	DropdownMenuContent,
+	DropdownMenuLabel,
 	DropdownMenuRadioGroup,
 	DropdownMenuRadioItem,
+	DropdownMenuSeparator,
 	DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { openAIModelNames, type OpenAIModel } from "@/lib/models";
+import { openAIModelNames, THINK_LABELS, thinkLevels, type OpenAIModel, type ThinkLevel } from "@/lib/models";
 
 /**
  * Concentric corners, same rule as the Mike composer: chips are 32px tall
@@ -36,6 +38,9 @@ export interface ChatComposerProps {
 	/** The model pill; left out where the model isn't the person's choice (agent chats). */
 	model?: OpenAIModel;
 	onModelChange?: (model: OpenAIModel) => void;
+	/** How hard the model thinks; shown in the model pill's menu when given. */
+	think?: ThinkLevel;
+	onThinkChange?: (think: ThinkLevel) => void;
 	/** "owner/repo" the chat is scoped to, if any. */
 	repo?: { owner: string; name: string } | null;
 	/** Replaces the repo chip on the shelf. */
@@ -52,6 +57,8 @@ export function ChatComposer({
 	isLoading,
 	model,
 	onModelChange,
+	think,
+	onThinkChange,
 	repo,
 	context,
 	placeholder = "Ask about this repo…",
@@ -134,6 +141,7 @@ export function ChatComposer({
 						>
 							<Sparkles className="h-3.5 w-3.5" />
 							{MODEL_LABELS[model]}
+							{think ? <span className="font-normal text-muted-foreground">· {THINK_LABELS[think]}</span> : null}
 							<ChevronDown className="h-3 w-3 text-muted-foreground" />
 						</DropdownMenuTrigger>
 						<DropdownMenuContent align="start">
@@ -144,6 +152,19 @@ export function ChatComposer({
 									</DropdownMenuRadioItem>
 								))}
 							</DropdownMenuRadioGroup>
+							{think && onThinkChange ? (
+								<>
+									<DropdownMenuSeparator />
+									<DropdownMenuLabel className="text-xs font-normal text-muted-foreground">Thinking</DropdownMenuLabel>
+									<DropdownMenuRadioGroup value={think} onValueChange={(v) => onThinkChange(v as ThinkLevel)}>
+										{thinkLevels.map((t) => (
+											<DropdownMenuRadioItem key={t} value={t}>
+												{THINK_LABELS[t]}
+											</DropdownMenuRadioItem>
+										))}
+									</DropdownMenuRadioGroup>
+								</>
+							) : null}
 						</DropdownMenuContent>
 					</DropdownMenu>
 				) : null}

@@ -7,7 +7,7 @@ export async function POST(request: Request) {
 	if (!process.env.OPENAI_API_KEY) {
 		return new Response("Chat is not configured. Set OPENAI_API_KEY in .env.local to enable responses.", { status: 503 });
 	}
-	const { messages, model: requested, project } = await request.json();
+	const { messages, model: requested, think, project } = await request.json();
 	// A project chat is about one repository; say which, so answers stay on it.
 	const scope =
 		typeof project === "string" && /^[\w.-]+\/[\w.-]+$/.test(project)
@@ -24,6 +24,8 @@ export async function POST(request: Request) {
 				messages,
 				maxSteps: 5,
 				tools,
+				// The composer's thinking level; the model's default when it isn't one we offer.
+				...(["low", "medium", "high"].includes(think) ? { providerOptions: { openai: { reasoningEffort: think } } } : {}),
 			});
 
 			result.mergeIntoDataStream(dataStream, {

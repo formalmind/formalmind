@@ -5,3 +5,8 @@ export const openAIModelNames = [
 	"gpt-6-astra",
 ] as const;
 export type OpenAIModel = (typeof openAIModelNames)[number]
+
+/** How hard the model thinks before answering (OpenAI reasoning effort). */
+export const thinkLevels = ["low", "medium", "high"] as const;
+export type ThinkLevel = (typeof thinkLevels)[number];
+export const THINK_LABELS: Record<ThinkLevel, string> = { low: "Low", medium: "Medium", high: "High" };
