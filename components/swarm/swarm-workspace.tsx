@@ -162,7 +162,8 @@ export function SwarmWorkspace({ repo }: { repo: string }) {
 					</>
 				}
 			/>
-			{talkTo !== "swarm" ? (
+			{/* One composer at a time: while the side panel holds a chat (the swarm's or an agent's), it has its own. */}
+			{talkTo === null ? (
 				<div className="pointer-events-none absolute inset-x-0 bottom-0 z-20 flex justify-center px-4 pb-4">
 					<div className="pointer-events-auto w-full max-w-2xl">
 						<ChatComposer
