@@ -1,6 +1,6 @@
 "use client";
 
-import { Fragment, useEffect, useMemo, useRef, useState } from "react";
+import { Fragment, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { ChevronDown, ChevronRight } from "lucide-react";
 import { CheckCircleFillIcon, MilestoneIcon } from "@primer/octicons-react";
 import type { ProjectItem, ProjectMilestone } from "@/lib/project";
@@ -19,8 +19,8 @@ const DAY = 86_400_000;
 const PX_PER_DAY: Record<RoadmapZoom, number> = { day: 960, week: 180, month: 48 };
 /** Days of empty timeline after the last item, so there is room to read the end of the bars. */
 const TAIL_DAYS: Record<RoadmapZoom, number> = { day: 1, week: 7, month: 30 };
-const LEFT = 320;
-const ROW = 36;
+export const LEFT = 320;
+export const ROW = 36;
 
 type Group = { key: string; title: React.ReactNode; count: number; items: ProjectItem[] };
 
@@ -99,13 +99,17 @@ export function ProjectRoadmap({ repo, items, milestones, now = Date.now() }: {
 			.sort((a, b) => latest(b) - latest(a));
 	}, [items, milestones, groupBy]);
 
-	const scrollToToday = () => {
+	const scrollToToday = (behavior: ScrollBehavior = "smooth") => {
 		const el = scrollRef.current;
-		if (el) el.scrollTo({ left: Math.max(0, x(now) + LEFT - el.clientWidth * 0.75), behavior: "smooth" });
+		if (el) el.scrollTo({ left: Math.max(0, x(now) + LEFT - el.clientWidth * 0.75), behavior });
 	};
-	// Open on today, the way GitHub does.
-	// eslint-disable-next-line react-hooks/exhaustive-deps
-	useEffect(scrollToToday, [zoom]);
+	// Open on today, the way GitHub does: at once the first time, so the timeline doesn't slide in.
+	const scrolled = useRef(false);
+	useLayoutEffect(() => {
+		scrollToToday(scrolled.current ? "smooth" : "instant");
+		scrolled.current = true;
+		// eslint-disable-next-line react-hooks/exhaustive-deps
+	}, [zoom]);
 
 	const toggle = (key: string) => setCollapsed((prev) => {
 		const next = new Set(prev);
@@ -119,7 +123,7 @@ export function ProjectRoadmap({ repo, items, milestones, now = Date.now() }: {
 			<div className="flex flex-wrap items-center gap-2 pb-3 text-sm">
 				<Segmented label="Group by" value={groupBy} onChange={setGroupBy} options={[["milestone", "Roadmap item"], ["status", "Status"], ["none", "None"]]} />
 				<Segmented label="Zoom" value={zoom} onChange={setZoom} options={[["day", "Day"], ["week", "Week"], ["month", "Month"]]} />
-				<button type="button" onClick={scrollToToday} className="h-7 rounded-md border px-2.5 font-medium transition-colors hover:bg-muted">Today</button>
+				<button type="button" onClick={() => scrollToToday()} className="h-7 rounded-md border px-2.5 font-medium transition-colors hover:bg-muted">Today</button>
 				<span className="ml-auto text-muted-foreground">Bars run from opened to merged or closed; open work runs to today.</span>
 			</div>
 

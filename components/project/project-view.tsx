@@ -7,6 +7,7 @@ import { SidebarTrigger } from "@/components/ui/sidebar";
 import type { ProjectData } from "@/lib/project";
 import { matchesFilter } from "./project-meta";
 import { ProjectRoadmap } from "./project-roadmap";
+import { RoadmapSkeleton } from "./roadmap-skeleton";
 
 const POLL_MS = 30_000;
 
@@ -52,7 +53,7 @@ export function ProjectView({ repo, now }: { repo: string; now?: number }) {
 				<div className="min-w-0">
 					<h1 className="truncate text-sm font-semibold">{repo}</h1>
 					<p className="text-sm text-muted-foreground">
-						{data ? `${data.items.length} items · ${open} open · roadmap ${done}/${data.milestones.length} done` : error ?? "Loading the project…"}
+						{data ? `${data.items.length} items · ${open} open · roadmap ${done}/${data.milestones.length} done` : error ?? <span className="fm-shimmer mt-1 inline-block h-3.5 w-56 rounded align-middle" aria-label="Loading" />}
 					</p>
 				</div>
 				<button
@@ -85,9 +86,7 @@ export function ProjectView({ repo, now }: { repo: string; now?: number }) {
 				{data ? (
 					<ProjectRoadmap repo={repo} items={items} milestones={data.milestones} now={now} />
 				) : (
-					<div className="flex h-full gap-3">
-						{Array.from({ length: 4 }, (_, i) => <div key={i} className="h-64 w-[300px] shrink-0 animate-pulse rounded-lg bg-muted/60" />)}
-					</div>
+					<RoadmapSkeleton />
 				)}
 			</div>
 		</div>

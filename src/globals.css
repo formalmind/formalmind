@@ -373,6 +373,19 @@
 .fm-folder[data-open] > .fm-folder-open { opacity: 1; transform: scale(1); filter: blur(0); }
 .fm-folder[data-open] > .fm-folder-closed { opacity: 0; transform: scale(0.85); filter: blur(2px); }
 :is(button, a):is(:hover, :focus-visible) > .fm-folder:not([data-open]) > .fm-folder-closed { transform: rotate(-8deg); }
+:is(button, a):is(:hover, :focus-visible) > .fm-folder[data-open] > .fm-folder-open { transform: rotate(6deg) translateY(-1px); }
 @media (prefers-reduced-motion: reduce) {
 	.fm-folder > svg { transition: none; }
+}
+
+/* Loading placeholders: a soft band sweeps across muted shapes while the content is on its way. */
+@keyframes fm-shimmer { 0% { background-position: 150% 0; } 100% { background-position: -50% 0; } }
+.fm-shimmer {
+	background-color: hsl(var(--muted));
+	background-image: linear-gradient(100deg, transparent 30%, hsl(var(--foreground) / 0.06) 50%, transparent 70%);
+	background-size: 200% 100%;
+	animation: fm-shimmer 1.6s linear infinite;
+}
+@media (prefers-reduced-motion: reduce) {
+	.fm-shimmer { animation: none; }
 }
