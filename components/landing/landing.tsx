@@ -156,6 +156,7 @@ export function Landing({ signedIn }: { signedIn: boolean }) {
 							</span>
 						))}
 					</p>
+					<JoinCount />
 				</section>
 
 				{/* The demo takes the width (up to the board's own 1200px) and its height follows; the page scrolls. */}
@@ -200,5 +201,21 @@ export function Landing({ signedIn }: { signedIn: boolean }) {
 
 
 		</div>
+	);
+}
+
+/** "Join 9 others": how many people have signed up, fading in once known; its line is reserved so nothing shifts. */
+function JoinCount() {
+	const [users, setUsers] = useState<number | null>(null);
+	useEffect(() => {
+		void fetch("/api/stats")
+			.then((r) => (r.ok ? r.json() : null))
+			.then((body: { users?: number } | null) => setUsers(body?.users ?? null))
+			.catch(() => setUsers(null));
+	}, []);
+	return (
+		<p className={`mt-4 h-5 text-sm text-muted-foreground transition-opacity duration-500 ${users ? "opacity-100" : "opacity-0"}`}>
+			{users ? <>Join <span className="font-medium tabular-nums text-foreground">{users}</span> {users === 1 ? "other" : "others"} verifying their contracts</> : null}
+		</p>
 	);
 }

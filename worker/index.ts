@@ -11,6 +11,7 @@ import * as billingCheckout from "@/server/routes/billing/checkout/route";
 import * as billingWebhook from "@/server/routes/billing/webhook/route";
 import * as model from "@/server/routes/model/route";
 import * as swarmToken from "@/server/routes/swarm/token/route";
+import * as stats from "@/server/routes/stats/route";
 import * as chat from "@/server/routes/chat/route";
 import * as githubInstallStatus from "@/server/routes/github/install-status/route";
 import * as githubRepos from "@/server/routes/github/repos/route";
@@ -64,6 +65,7 @@ const ROUTES: Record<string, { module: RouteModule; open?: boolean; scope?: Scop
 	"/api/projects/init": { module: projectsInit, scope: "swarm:write" },
 	"/api/swarm/agent": { module: swarmAgent },
 	"/api/swarm/chat": { module: swarmChat },
+	"/api/stats": { module: stats, open: true },
 	"/api/swarm/state": { module: swarmState, scope: "swarm:read" },
 	// Zero-secret swarms: a proofs repository's workflow proves itself with its Actions OIDC token (lib/swarm-tokens.ts).
 	"/api/swarm/token": { module: swarmToken, open: true },
