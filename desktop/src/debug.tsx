@@ -158,7 +158,7 @@ function Calls({ calls, view, go }: { calls: Call[]; view: StepView; go: (step: 
 function Opcodes({ view }: { view: StepView }) {
 	const ref = useScrollTo(view.step);
 	return (
-		<Pane title="Opcodes" meta={`pc ${view.pc}`} scrollRef={ref}>
+		<Pane title="Opcodes" meta={`pc ${view.pc}`} scrollRef={ref} className="w-[13.5rem] flex-none !basis-auto">
 			{view.ops.length === 0 ? <p className="p-2 text-muted-foreground">Code not from this compile</p> : null}
 			<ul className="py-1">
 				{view.ops.map((o) => (
@@ -176,7 +176,7 @@ function Opcodes({ view }: { view: StepView }) {
 
 function Stack({ view }: { view: StepView }) {
 	return (
-		<Pane title="Stack" className="flex-[0.7]" meta={view.result ? `result ${view.result.short}` : `${view.stack.length}`}>
+		<Pane title="Stack" className="w-[15rem] flex-none !basis-auto" meta={view.result ? `result ${view.result.short}` : `${view.stack.length}`}>
 			<ul className="py-1">
 				{view.stack.map((w, i) => (
 					<li key={i} title={w.full} className="flex gap-2 px-2">
@@ -193,12 +193,16 @@ function Stack({ view }: { view: StepView }) {
 function Memory({ view }: { view: StepView }) {
 	const ref = useScrollTo(view.step);
 	return (
-		<Pane title="Memory" meta={`${view.memory_size} bytes`} className="flex-[1.3]" scrollRef={ref}>
+		<Pane title="Memory" meta={`${view.memory_size} bytes`} className="flex-1" scrollRef={ref}>
 			<ul className="py-1">
 				{view.memory.map((m) => (
 					<li key={m.offset} data-current={m.fresh || undefined} className={`flex gap-2 px-2 ${m.fresh ? "bg-amber-500/15 text-amber-700 dark:text-amber-300" : ""}`}>
 						<span className="w-10 shrink-0 text-right text-muted-foreground">{m.offset.toString(16)}{m.offset === 0x40 ? "·fp" : ""}</span>
-						<span className="break-all">{m.hex}</span>
+						{/* 32 bytes as two halves of 16, so a word reads at a glance. */}
+						<span className="break-all">
+							{m.hex.slice(0, 32)}
+							<span className="ml-2">{m.hex.slice(32)}</span>
+						</span>
 					</li>
 				))}
 				{view.memory.length === 0 ? <li className="px-2 text-muted-foreground">empty</li> : null}
