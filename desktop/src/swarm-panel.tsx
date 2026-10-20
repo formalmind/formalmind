@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { ChevronDown, FileCode2, Play, Square, Wrench } from "lucide-react";
+import { Check, ChevronDown, Copy, FileCode2, Play, Square, Wrench } from "lucide-react";
 import { ChatComposer } from "@/components/chat-composer";
 import { ChatMarkdown } from "@/components/chat-markdown";
 import { SwarmCanvas } from "@/components/swarm/swarm-canvas";
@@ -18,6 +18,29 @@ type Ev = { run: string; kind: "status" | "say" | "tool" | "result" | "you" | "b
 type Item = { index: number; mark: string; text: string };
 type Bug = { file: string; title: string; body: string };
 type Provider = "formal" | "anthropic";
+type Proof = { item: string; files: string[]; summary: string; at: string };
+
+/** Copies text, showing a tick for a moment. */
+function CopyButton({ text, label = "Copy" }: { text: string; label?: string }) {
+	const [done, setDone] = useState(false);
+	return (
+		<button
+			type="button"
+			title={label}
+			onClick={(e) => {
+				e.stopPropagation();
+				void navigator.clipboard.writeText(text).then(() => {
+					setDone(true);
+					setTimeout(() => setDone(false), 1200);
+				});
+			}}
+			className="grid size-6 shrink-0 place-items-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground"
+		>
+			{done ? <Check className="size-3.5 text-emerald-600" /> : <Copy className="size-3.5" />}
+		</button>
+	);
+}
+
 type Session = { run: string; outcome: string; spent: number; events: number };
 
 const BUDGETS = [2, 5, 10, 20];
@@ -27,14 +50,16 @@ const store = { get: (k: string) => { try { return localStorage.getItem(k); } ca
 const pill = "inline-flex h-8 items-center rounded-full border bg-background/90 shadow-sm backdrop-blur";
 
 /** A card floating over the canvas; its header toggles it, and opening one closes the others. */
-function Floating({ id, open, onOpen, title, meta, tone, children }: { id: string; open: string | null; onOpen: (id: string | null) => void; title: string; meta?: string; tone?: "red"; children: React.ReactNode }) {
+function Floating({ id, open, onOpen, title, meta, tone, action, children }: { id: string; open: string | null; onOpen: (id: string | null) => void; title: string; meta?: string; tone?: "red"; action?: React.ReactNode; children: React.ReactNode }) {
 	const isOpen = open === id;
 	return (
 		<section className={`pointer-events-auto flex min-h-0 flex-col overflow-hidden rounded-2xl border p-1 shadow-pop backdrop-blur ${tone === "red" ? "border-red-500/30 bg-red-50/90 dark:bg-red-950/60" : "bg-muted/80"} ${isOpen ? "flex-1" : "shrink-0"}`}>
 			<button type="button" onClick={() => onOpen(isOpen ? null : id)} aria-expanded={isOpen} className="flex h-8 shrink-0 items-center gap-2 px-2.5 text-left">
 				<span className={`font-mono text-[11px] font-medium uppercase tracking-wider ${tone === "red" ? "text-red-700 dark:text-red-400" : "text-muted-foreground"}`}>{title}</span>
-				{meta ? <span className="text-[11px] text-muted-foreground">{meta}</span> : null}
-				<ChevronDown className={`ml-auto size-3.5 text-muted-foreground transition-transform duration-200 ${isOpen ? "rotate-180" : ""}`} />
+				{meta ? <span className="min-w-0 truncate text-[11px] text-muted-foreground">{meta}</span> : null}
+				<span className="ml-auto" />
+				{isOpen && action ? action : null}
+				<ChevronDown className={`size-3.5 text-muted-foreground transition-transform duration-200 ${isOpen ? "rotate-180" : ""}`} />
 			</button>
 			<div className={`grid min-h-0 transition-[grid-template-rows] duration-200 ease-out motion-reduce:transition-none ${isOpen ? "flex-1 grid-rows-[1fr]" : "grid-rows-[0fr]"}`}>
 				<div className={`min-h-0 overflow-y-auto rounded-xl bg-card ${isOpen ? "border shadow-card" : ""}`}>{children}</div>
@@ -69,6 +94,18 @@ export function SwarmPanel({ folder, name, scan, bridge }: { folder: string; nam
 	const [provider] = useState<Provider>(() => (store.get("fm:provider") === "anthropic" ? "anthropic" : "formal"));
 	const [hasKey, setHasKey] = useState(false);
 	const [sessions, setSessions] = useState<Session[]>([]);
+	const [proofs, setProofs] = useState<Record<string, Proof>>({});
+	const [openItem, setOpenItem] = useState<number | null>(null);
+	const [file, setFile] = useState<{ path: string; text: string } | null>(null);
+	const view = (path: string) => {
+		void invoke<string>("folder_read", { folder, path }).then(
+			(text) => {
+				setFile({ path, text });
+				setPanel("file");
+			},
+			(e) => setError(String(e)),
+		);
+	};
 	const [viewing, setViewing] = useState<string | null>(null);
 	const runRef = useRef<string | null>(null);
 	const chat = useRef<HTMLDivElement>(null);
@@ -83,6 +120,7 @@ export function SwarmPanel({ folder, name, scan, bridge }: { folder: string; nam
 	const refresh = () => {
 		void invoke<Item[]>("swarm_plan", { folder }).then(setPlan, () => {});
 		void invoke<Bug[]>("swarm_bugs", { folder }).then(setBugs, () => {});
+		void invoke<Record<string, Proof>>("swarm_proofs", { folder }).then(setProofs, () => {});
 	};
 
 	useEffect(() => {
@@ -162,21 +200,46 @@ export function SwarmPanel({ folder, name, scan, bridge }: { folder: string; nam
 					<Floating id="plan" open={panel} onOpen={setPanel} title="Plan" meta={plan.length ? `${done}/${plan.length}` : ""}>
 						<ul className="space-y-0.5 p-2 text-[13px]">
 							{plan.length === 0 ? <li className="p-2 text-muted-foreground">The planner writes .formal/plan.md on the first run.</li> : null}
-							{plan.map((i) => (
-								<li key={i.index} className={`flex gap-2 rounded-md px-2 py-1 ${working && working.item === String(i.index) ? "bg-muted" : ""}`}>
-									<span className={`mt-0.5 grid size-4 shrink-0 place-items-center rounded border text-[10px] ${i.mark === "x" ? "border-emerald-500 bg-emerald-500 text-white" : i.mark === "!" ? "border-amber-500 text-amber-600" : ""}`}>{i.mark === "x" ? "✓" : i.mark === "!" ? "!" : ""}</span>
-									<span className={i.mark === "x" ? "text-muted-foreground" : ""}>{i.text}</span>
-								</li>
-							))}
+							{plan.map((i) => {
+								const proof = proofs[String(i.index)];
+								const expanded = openItem === i.index;
+								return (
+									<li key={i.index} className={`rounded-md ${working && working.item === String(i.index) ? "bg-muted" : ""}`}>
+										<button type="button" disabled={!proof} onClick={() => setOpenItem(expanded ? null : i.index)} className="flex w-full gap-2 px-2 py-1 text-left enabled:hover:bg-muted/60 rounded-md">
+											<span className={`mt-0.5 grid size-4 shrink-0 place-items-center rounded border text-[10px] ${i.mark === "x" ? "border-emerald-500 bg-emerald-500 text-white" : i.mark === "!" ? "border-amber-500 text-amber-600" : ""}`}>{i.mark === "x" ? "✓" : i.mark === "!" ? "!" : ""}</span>
+											<span className={`flex-1 ${i.mark === "x" ? "text-muted-foreground" : ""}`}>{i.text}</span>
+											{proof ? <ChevronDown className={`mt-0.5 size-3.5 shrink-0 text-muted-foreground transition-transform ${expanded ? "rotate-180" : ""}`} /> : null}
+										</button>
+										{expanded && proof ? (
+											<div className="mb-1 ml-8 mr-2 space-y-1.5 rounded-lg border bg-muted/40 p-2 text-xs">
+												<p className="font-mono text-[10px] uppercase tracking-wider text-muted-foreground">Proved by</p>
+												{proof.files.length ? (
+													proof.files.map((f) => (
+														<button key={f} type="button" onClick={() => view(f)} className="flex w-full items-center gap-1.5 truncate rounded px-1 py-0.5 text-left font-mono text-[11px] hover:bg-muted" title={`Open ${f}`}>
+															<FileCode2 className={`size-3 shrink-0 ${f.endsWith(".lean") ? "text-violet-500" : "text-sky-500"}`} />
+															<span className="truncate">{f}</span>
+														</button>
+													))
+												) : (
+													<p className="text-muted-foreground">No files recorded for this item.</p>
+												)}
+												{proof.summary ? <p className="whitespace-pre-wrap leading-5 text-muted-foreground">{proof.summary}</p> : null}
+											</div>
+										) : null}
+									</li>
+								);
+							})}
 						</ul>
 					</Floating>
 					<Floating id="files" open={panel} onOpen={setPanel} title="Files" meta={scan ? `${scan.solidity.length} sol · ${scan.lean.length} lean` : ""}>
 						<ul className="p-2 font-mono text-[11px]">
 							{scan === null ? <li className="p-2 text-muted-foreground">Reading the folder…</li> : null}
 							{[...(scan?.solidity ?? []), ...(scan?.lean ?? [])].map((f) => (
-								<li key={f} className="flex items-center gap-1.5 truncate rounded px-1.5 py-1 hover:bg-muted" title={f}>
-									<FileCode2 className={`size-3 shrink-0 ${f.endsWith(".lean") ? "text-violet-500" : "text-sky-500"}`} />
-									<span className="truncate">{f}</span>
+								<li key={f}>
+									<button type="button" onClick={() => view(f)} className="flex w-full items-center gap-1.5 truncate rounded px-1.5 py-1 text-left hover:bg-muted" title={`Open ${f}`}>
+										<FileCode2 className={`size-3 shrink-0 ${f.endsWith(".lean") ? "text-violet-500" : "text-sky-500"}`} />
+										<span className="truncate">{f}</span>
+									</button>
 								</li>
 							))}
 						</ul>
@@ -188,12 +251,18 @@ export function SwarmPanel({ folder, name, scan, bridge }: { folder: string; nam
 									<li key={b.file}>
 										<button type="button" onClick={() => setOpenBug(openBug === b.file ? null : b.file)} className="flex w-full items-center gap-2 px-3 py-2 text-left text-[13px]">
 											<span className="flex-1 font-medium">{b.title}</span>
+											<CopyButton text={b.body} label="Copy the report as Markdown" />
 											<ChevronDown className={`size-3.5 text-muted-foreground transition-transform ${openBug === b.file ? "rotate-180" : ""}`} />
 										</button>
 										{openBug === b.file ? <div className="prose prose-sm max-w-none border-t px-3 py-2 text-[13px] dark:prose-invert"><ChatMarkdown>{b.body.replace(/^# .*\n/, "")}</ChatMarkdown></div> : null}
 									</li>
 								))}
 							</ul>
+						</Floating>
+					) : null}
+					{file ? (
+						<Floating id="file" open={panel} onOpen={setPanel} title={file.path.split("/").pop() ?? "File"} meta={file.path} action={<CopyButton text={file.text} label="Copy the file" />}>
+							<pre className="whitespace-pre overflow-x-auto p-3 font-mono text-[11px] leading-5">{file.text}</pre>
 						</Floating>
 					) : null}
 				</div>

@@ -224,6 +224,8 @@ fn tools(role: &str) -> Value {
 #[derive(Default)]
 struct Outcome {
     summary: String,
+    /// Files the agent wrote this turn (the proof, a PoC), folder-relative.
+    files: Vec<String>,
     verdict: Option<(bool, String)>,
     bug: Option<String>,
 }
@@ -337,6 +339,12 @@ impl Turn<'_> {
                                 "error: the planner only writes under .formal/".to_string()
                             }
                             _ => {
+                                if name == "write_file" {
+                                    let path = input["path"].as_str().unwrap_or("").trim_start_matches("./").to_string();
+                                    if !path.is_empty() && !path.starts_with(".formal/") && !out.files.contains(&path) {
+                                        out.files.push(path);
+                                    }
+                                }
                                 self.emit("tool", role, item, format!("{name} {shown}"));
                                 let r = call_tool(&root, name, input).await;
                                 self.emit("result", role, item, r.chars().take(500).collect());
@@ -355,6 +363,36 @@ impl Turn<'_> {
         }
         Ok(out)
     }
+}
+
+/// .formal/proofs.json: for each proven plan item, the files that prove it and the prover's summary.
+fn proofs_path(root: &Path) -> PathBuf {
+    root.join(".formal").join("proofs.json")
+}
+
+fn record_proof(root: &Path, index: usize, text: &str, files: Vec<String>, summary: &str) {
+    let mut all: Value = std::fs::read_to_string(proofs_path(root)).ok().and_then(|t| serde_json::from_str(&t).ok()).unwrap_or(json!({}));
+    all[index.to_string()] = json!({ "item": text, "files": files, "summary": summary, "at": now_ms().to_string() });
+    let _ = std::fs::write(proofs_path(root), serde_json::to_string_pretty(&all).unwrap_or_default());
+}
+
+/// What proves each plan item, by item number.
+#[tauri::command]
+pub fn swarm_proofs(folder: String) -> Result<Value, String> {
+    if !local::read()?.folders.contains(&folder) {
+        return Err("Add the folder first".into());
+    }
+    Ok(std::fs::read_to_string(proofs_path(Path::new(&folder))).ok().and_then(|t| serde_json::from_str(&t).ok()).unwrap_or(json!({})))
+}
+
+/// A text file in an added folder, for viewing a proof or a PoC.
+#[tauri::command]
+pub fn folder_read(folder: String, path: String) -> Result<String, String> {
+    if !local::read()?.folders.contains(&folder) {
+        return Err("Add the folder first".into());
+    }
+    let p = inside(Path::new(&folder), &path)?;
+    std::fs::read_to_string(p).map_err(|e| e.to_string())
 }
 
 fn write_bug(root: &Path, input: &Value) -> String {
@@ -381,6 +419,7 @@ async fn run_swarm(turn: &Turn<'_>) -> String {
     let _ = std::fs::create_dir_all(root.join(".formal"));
     let mut attempts: HashMap<usize, usize> = HashMap::new();
     let mut notes: HashMap<usize, String> = HashMap::new();
+    let mut written: HashMap<usize, Vec<String>> = HashMap::new();
     loop {
         if turn.swarm.stop.load(Ordering::SeqCst) {
             return "stopped".into();
@@ -431,6 +470,12 @@ async fn run_swarm(turn: &Turn<'_>) -> String {
             Ok(o) => o,
             Err(e) => return format!("failed: {e}"),
         };
+        let files = written.entry(item.index).or_default();
+        for f in &proved.files {
+            if !files.contains(f) {
+                files.push(f.clone());
+            }
+        }
         if let Some(bug) = proved.bug {
             return format!("bug found: {bug}");
         }
@@ -448,6 +493,7 @@ async fn run_swarm(turn: &Turn<'_>) -> String {
         match reviewed.verdict {
             Some((true, _)) => {
                 set_mark(&root, item.index, 'x');
+                record_proof(&root, item.index, &item.text, written.get(&item.index).cloned().unwrap_or_default(), &proved.summary);
                 turn.emit("plan", "reviewer", &id, format!("item {id} proven"));
             }
             Some((false, n)) => {

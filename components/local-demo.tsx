@@ -17,9 +17,31 @@ const BUGS = [
 	{
 		file: ".formal/bugs/001-liquidation-penalty-can-exceed-cap.md",
 		title: "Liquidation penalty can exceed the 10% cap when the oracle price moves mid-call",
-		body: "# Liquidation penalty can exceed the 10% cap when the oracle price moves mid-call\n\n**Severity:** medium\n**Location:** src/Lending.sol:412\n\n## Scenario\n\nThe penalty is computed from the price read before the swap callback and paid with the price after it…\n\n## Evidence\n\ntest/formal/PoC_Liquidate.t.sol — forge test shows the liquidator receiving 11.8%.",
+		body: "# Liquidation penalty can exceed the 10% cap when the oracle price moves mid-call\n\n**Severity:** medium\n**Location:** src/Lending.sol:412\n\n## Scenario\n\nThe penalty is computed from the oracle price read at the start of liquidate(), but the payout is computed from the price after the collateral swap callback. A liquidator who moves the pool inside the callback can widen that gap, so the penalty paid exceeds the 10% cap: on a 100k position the liquidator receives 111.8k instead of at most 110k.\n\n## Evidence\n\ntest/formal/PoC_Liquidate.t.sol: `forge test --match-path test/formal/PoC_Liquidate.t.sol` passes, showing the liquidator receiving 11.8% over the debt repaid.",
 	},
 ];
+const PROOFS = {
+	"1": { item: PLAN[0].text, files: ["formal/Formal/Vault.lean"], summary: "Modelled deposit with floor rounding and proved shares·price ≤ assets for every input. lake build is clean, no sorry.", at: "" },
+	"2": { item: PLAN[1].text, files: ["formal/Formal/Vault.lean"], summary: "Withdraw proved the same way; the ceil rounding on shares holds.", at: "" },
+};
+const SOURCES: Record<string, string> = {
+	"formal/Formal/Vault.lean": `namespace Vault
+
+/-- shares minted for a deposit: floor(assets * supply / total), or assets when empty -/
+def sharesFor (assets supply total : Nat) : Nat :=
+  if supply = 0 then assets else assets * supply / total
+
+/-- Depositing never mints shares worth more than the assets brought in. -/
+theorem deposit_rounds_down (assets supply total : Nat) (h : 0 < total) (hs : 0 < supply) :
+    sharesFor assets supply total * total ≤ assets * supply := by
+  unfold sharesFor
+  simp [Nat.pos_iff_ne_zero.mp hs]
+  exact Nat.div_mul_le_self _ _
+
+end Vault
+`,
+};
+
 const RUN = "local-19a2b3c4d5e";
 const ev = (kind: string, role: string, item: string, text: string, spent: number) => ({ run: RUN, kind, role, item, text, spent });
 const EVENTS = [
@@ -58,6 +80,8 @@ const demo: Bridge = {
 			swarm_bugs: BUGS,
 			swarm_sessions: [{ run: RUN, outcome: "", spent: 1.84, events: EVENTS.length }],
 			swarm_history: EVENTS,
+			swarm_proofs: PROOFS,
+			folder_read: SOURCES[String(args?.path ?? "")] ?? "// (demo: no contents)\n",
 			swarm_running: RUN,
 			anthropic_key_status: false,
 		};
