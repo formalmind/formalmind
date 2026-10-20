@@ -73,7 +73,7 @@ pub struct Scan {
     pub git: bool,
 }
 
-const SKIP: [&str; 8] = [".git", "node_modules", "lib", "out", "cache", "target", ".lake", "dist"];
+const SKIP: [&str; 9] = [".git", "node_modules", "lib", "dependencies", "out", "cache", "target", ".lake", "dist"];
 const LIMIT: usize = 5000;
 
 /// The Solidity and Lean files in a folder that's been added (only those may be read).

@@ -1,7 +1,9 @@
 //! The Formal Mind desktop shell: a webview over the shared React app, plus the bits only a native app can do.
 //! Today that's the sign-in token in the OS keychain, the formalmind:// deep link, and local folders
-//! with settings in ~/.formalmind (local.rs), and the local executor that runs agent turns here (executor.rs).
+//! with settings in ~/.formalmind (local.rs), the local executor that runs agent turns here (executor.rs), and debug
+//! mode over the sol-debug engine (debug.rs).
 
+mod debug;
 mod executor;
 mod swarm;
 mod local;
@@ -59,6 +61,7 @@ pub fn run() {
         .plugin(tauri_plugin_process::init())
         .manage(executor::Runs::default())
         .manage(swarm::Swarms::default())
+        .manage(debug::Debuggers::default())
         .setup(|app| {
             // Installed builds register formalmind:// from tauri.conf.json; this covers `tauri dev` on Windows/Linux.
             #[cfg(any(windows, target_os = "linux"))]
@@ -93,7 +96,14 @@ pub fn run() {
             swarm::swarm_proofs,
             swarm::folder_read,
             swarm::swarm_set_budget,
-            swarm::swarm_queue
+            swarm::swarm_queue,
+            debug::debug_open,
+            debug::debug_close,
+            debug::debug_run,
+            debug::debug_nav,
+            debug::debug_break,
+            debug::debug_watch,
+            debug::debug_file
         ])
         // Closing the window hides it: a running swarm keeps working, and the Dock icon brings the window back.
         .on_window_event(|window, event| {
