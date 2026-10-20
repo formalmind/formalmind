@@ -2,11 +2,12 @@
 //!
 //!   j / k      next / previous opcode          s / S   step into / back
 //!   n / N      next / previous line (over)     f / F   step out / back to the call
+//!   h / l, ←/→ scroll the focused pane sideways (H / L a page, 0 / $ the start / end of its longest line)
 //!   c / C      continue to breakpoint, watch or revert (forward / back)
 //!   g / G      first / last step               /text   search source lines (then ; and , for next / previous)
 //!   :b 58  :b File.sol:58   line breakpoint    :w name  break on storage writes naming it
 //!   :pc 1621   jump to that pc in this frame   :step 1200  jump to a step     :q  quit
-//!   [ / ]      focus previous / next pane      H J K L  scroll the focused pane (mouse wheel: the pane under it)
+//!   [ / ]      focus previous / next pane      J / K, PgDn / PgUp  scroll it up and down (mouse wheel: the pane under it)
 //!   z          zoom the focused pane           0        reset its scroll
 //!   T / :theme dracula   next theme / a theme by name (opaline's builtins; --theme or $SOL_DEBUG_THEME at start)
 
@@ -60,6 +61,9 @@ pub struct App<'a> {
     hx: [u16; 6],
     /// Per pane, from the last draw: how far `vy` can go (min, max), and where the pane is (for the mouse).
     bounds: Cell<[(isize, isize); 6]>,
+    /// Per pane, from the last draw: the furthest it can scroll right, and (first line, lines, rows) for its scrollbar.
+    hmax: Cell<[u16; 6]>,
+    vview: Cell<[(usize, usize, usize); 6]>,
     rects: RefCell<Vec<(Pane, Rect)>>,
 }
 
@@ -90,6 +94,8 @@ impl<'a> App<'a> {
             vy: [0; 6],
             hx: [0; 6],
             bounds: Cell::new([(0, 0); 6]),
+            hmax: Cell::new([0; 6]),
+            vview: Cell::new([(0, 0, 0); 6]),
             rects: RefCell::new(vec![]),
         }
     }
@@ -99,7 +105,8 @@ impl<'a> App<'a> {
         let i = pane as usize;
         let (lo, hi) = self.bounds.get()[i];
         self.vy[i] = (self.vy[i] + dy).clamp(lo.min(0), hi.max(0));
-        self.hx[i] = (self.hx[i] as isize + dx).clamp(0, 2000) as u16;
+        let max = self.hmax.get()[i] as isize;
+        self.hx[i] = (self.hx[i] as isize + dx).clamp(0, max.max(0)) as u16;
     }
 
     /// The pane at a screen position (from the last draw).
@@ -114,14 +121,19 @@ impl<'a> App<'a> {
         let mut b = self.bounds.get();
         b[pane as usize] = (-auto, max_top - auto);
         self.bounds.set(b);
-        (auto + self.vy[pane as usize]).clamp(0, max_top) as usize
+        let top = (auto + self.vy[pane as usize]).clamp(0, max_top) as usize;
+        let mut v = self.vview.get();
+        v[pane as usize] = (top, total, height);
+        self.vview.set(v);
+        top
     }
 
     /// A pane's frame: the accent border and a marker when it has focus, and its horizontal scroll in the title.
     fn pane_block(&self, pane: Pane, title: impl Into<String>) -> Block<'static> {
         let focused = self.focus == pane;
         let hx = self.hx[pane as usize];
-        let title = format!("{}{}{}", if focused { "▸" } else { "" }, title.into(), if hx > 0 { format!("→{hx} ") } else { String::new() });
+        let hmax = self.hmax.get()[pane as usize];
+        let title = format!("{}{}{}", if focused { "▸" } else { "" }, title.into(), if hx > 0 { format!("→{hx}/{hmax} ") } else { String::new() });
         let border = if focused { self.theme.border_focused } else { self.theme.border };
         Block::bordered()
             .border_style(Style::new().fg(border))
@@ -131,8 +143,32 @@ impl<'a> App<'a> {
 
     /// Draws a pane's lines (already windowed vertically) with its horizontal scroll, and remembers where it is.
     fn render_pane(&self, f: &mut Frame, area: Rect, pane: Pane, title: impl Into<String>, lines: Vec<Line<'static>>) {
+        use ratatui::layout::Margin;
+        use ratatui::widgets::{Scrollbar, ScrollbarOrientation, ScrollbarState};
         self.rects.borrow_mut().push((pane, area));
-        f.render_widget(Paragraph::new(lines).block(self.pane_block(pane, title)).scroll((0, self.hx[pane as usize])), area);
+        let i = pane as usize;
+        // How far right this pane can go: its widest line past the inside width.
+        let inner = area.width.saturating_sub(2) as usize;
+        let widest = lines.iter().map(Line::width).max().unwrap_or(0);
+        let mut hmax = self.hmax.get();
+        hmax[i] = widest.saturating_sub(inner) as u16;
+        self.hmax.set(hmax);
+        let hx = self.hx[i].min(hmax[i]);
+        f.render_widget(Paragraph::new(lines).block(self.pane_block(pane, title)).scroll((0, hx)), area);
+        // Scrollbars on the frame wherever there is more to see.
+        let thumb = Style::new().fg(if self.focus == pane { self.theme.accent } else { self.theme.dim });
+        let track = Style::new().fg(self.theme.border);
+        if hmax[i] > 0 {
+            let bar = Scrollbar::new(ScrollbarOrientation::HorizontalBottom).thumb_style(thumb).track_style(track).begin_symbol(None).end_symbol(None).thumb_symbol("▬");
+            let mut state = ScrollbarState::new(hmax[i] as usize).position(hx as usize).viewport_content_length(inner);
+            f.render_stateful_widget(bar, area.inner(Margin { vertical: 0, horizontal: 1 }), &mut state);
+        }
+        let (top, total, rows) = self.vview.get()[i];
+        if total > rows && rows > 0 {
+            let bar = Scrollbar::new(ScrollbarOrientation::VerticalRight).thumb_style(thumb).track_style(track).begin_symbol(None).end_symbol(None);
+            let mut state = ScrollbarState::new(total - rows).position(top).viewport_content_length(rows);
+            f.render_stateful_widget(bar, area.inner(Margin { vertical: 1, horizontal: 0 }), &mut state);
+        }
     }
 
     pub fn with_theme(mut self, theme: Theme) -> Self {
@@ -238,8 +274,11 @@ impl<'a> App<'a> {
             KeyCode::Char('k') | KeyCode::Up => Some(self.cur.saturating_sub(1)),
             KeyCode::Char('s') => self.nav.step_into(self.cur, Dir::Forward),
             KeyCode::Char('S') => self.nav.step_into(self.cur, Dir::Back),
-            KeyCode::Char('n') | KeyCode::Char('l') | KeyCode::Right => self.nav.step_over(self.cur, Dir::Forward),
-            KeyCode::Char('N') | KeyCode::Char('h') | KeyCode::Left => self.nav.step_over(self.cur, Dir::Back),
+            KeyCode::Char('n') => self.nav.step_over(self.cur, Dir::Forward),
+            KeyCode::Char('N') => self.nav.step_over(self.cur, Dir::Back),
+            KeyCode::Char('l') | KeyCode::Right => return self.scrolled(0, 4),
+            KeyCode::Char('h') | KeyCode::Left => return self.scrolled(0, -4),
+            KeyCode::Char('$') => return self.scrolled(0, 10_000),
             KeyCode::Char('f') => self.nav.step_out(self.cur, Dir::Forward),
             KeyCode::Char('F') => self.nav.step_out(self.cur, Dir::Back),
             KeyCode::Char('c') => self.nav.continue_to(self.cur, Dir::Forward, steps),
@@ -264,8 +303,8 @@ impl<'a> App<'a> {
             }
             KeyCode::Char('J') => return self.scrolled(1, 0),
             KeyCode::Char('K') => return self.scrolled(-1, 0),
-            KeyCode::Char('L') => return self.scrolled(0, 8),
-            KeyCode::Char('H') => return self.scrolled(0, -8),
+            KeyCode::Char('L') => return self.scrolled(0, 32),
+            KeyCode::Char('H') => return self.scrolled(0, -32),
             KeyCode::PageDown => return self.scrolled(10, 0),
             KeyCode::PageUp => return self.scrolled(-10, 0),
             KeyCode::Char('0') => {
@@ -647,7 +686,7 @@ impl<'a> App<'a> {
     }
 
     fn draw_footer(&self, f: &mut Frame, area: Rect) {
-        let help = "[ ] pane  HJKL scroll  z zoom  T theme  Tab/= split  j/k op  n/N line  s/S into  f/F out  c/C continue  g/G ends  /search ;,  :b line  :w var  :pc n  :q";
+        let help = "[ ] pane  h/l ←/→ sideways  J/K up/down  $ 0  z zoom  T theme  Tab/= split  j/k op  n/N line  s/S into  f/F out  c/C continue  g/G ends  /search ;,  :b line  :w var  :pc n  :q";
         let second = match &self.input {
             Some(i) => Line::styled(i.clone(), Style::new().fg(self.theme.text).add_modifier(Modifier::BOLD)),
             None => Line::styled(self.status.clone(), Style::new().fg(self.theme.accent)),
@@ -808,8 +847,18 @@ mod tests {
         app.press("KKK"); // scroll the source up (it already shows the end of this short file)
         let scrolled = app.render_text(100, 30);
         assert_ne!(before, scrolled);
-        app.press("LL"); // and sideways
-        assert!(app.render_text(100, 30).contains("→16"));
+        // Sideways, on a screen too narrow for the source: l moves 4 columns, $ to the end of the longest line, and
+        // never past it.
+        app.render_text(60, 30);
+        app.press("l");
+        assert!(app.render_text(60, 30).contains("→4/"));
+        app.press("$l");
+        let end = app.hmax.get()[Pane::Source as usize];
+        assert!(end > 0);
+        assert_eq!(app.hx[Pane::Source as usize], end);
+        assert!(app.render_text(60, 30).contains(&format!("→{end}/{end}")));
+        app.press("0");
+        assert_eq!(app.hx[Pane::Source as usize], 0);
         app.press("z");
         let zoomed = app.render_text(100, 30);
         assert!(!zoomed.contains(" calls "), "zoom shows only the focused pane");

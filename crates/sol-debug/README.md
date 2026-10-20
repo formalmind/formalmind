@@ -20,7 +20,8 @@ Drop `--tui` to print the trace (`--lines` for one line per Solidity line) and t
 | Key | |
 |---|---|
 | `j` / `k` | next / previous opcode |
-| `n` / `N` (or `l` / `h`) | next / previous line, stepping over calls |
+| `n` / `N` | next / previous line, stepping over calls |
+| `h` / `l`, `←` / `→` | scroll the focused pane sideways (`H` / `L` a page, `0` / `$` start / end) |
 | `s` / `S` | step into / back |
 | `f` / `F` | step out / back to the call |
 | `c` / `C` | continue to a breakpoint, watched write or revert |
@@ -30,7 +31,7 @@ Drop `--tui` to print the trace (`--lines` for one line per Solidity line) and t
 | `:w priceBooks` | stop on storage writes whose name contains it |
 | `:pc 1621`, `:step 1200` | jump |
 | `[` / `]` | focus the previous / next pane |
-| `H` `J` `K` `L`, PgUp/PgDn | scroll the focused pane (the mouse wheel scrolls the pane under it; shift-wheel sideways) |
+| `J` / `K`, PgDn/PgUp | scroll the focused pane up and down (the mouse wheel scrolls the pane under it; shift-wheel sideways) |
 | `z` / `0` | zoom the focused pane / reset its scroll |
 | `T`, `:theme dracula` | next theme / a theme by name (`--theme` at start) |
 | `q` | quit |
