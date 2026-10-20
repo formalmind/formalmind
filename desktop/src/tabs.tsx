@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { useLocation, useNavigate } from "react-router";
-import { Gauge, GanttChart, HardDrive, MessageSquare, Network, PanelLeft, Plus, X, type LucideIcon } from "lucide-react";
+import { Gauge, GanttChart, HardDrive, MessageSquare, Network, PanelLeft, Plus, Settings, X, type LucideIcon } from "lucide-react";
 import { NotificationCenter } from "@/components/notification-center";
 import { useSidebar } from "@/components/ui/sidebar";
 
@@ -13,6 +13,7 @@ const newId = () => Math.random().toString(36).slice(2, 10);
 function describe(path: string): { title: string; icon: LucideIcon } {
 	const [pathname, search = ""] = path.split("?");
 	if (pathname === "/usage") return { title: "Usage", icon: Gauge };
+	if (pathname === "/settings") return { title: "Settings", icon: Settings };
 	if (pathname === "/swarm/chat") return { title: "Ask the swarm", icon: MessageSquare };
 	if (pathname === "/roadmap" || pathname.endsWith("/roadmap")) return { title: "Roadmap", icon: GanttChart };
 	if (pathname === "/local") {
@@ -136,6 +137,9 @@ export function TabBar() {
 					<Plus className="size-4" />
 				</button>
 			</div>
+			<button type="button" onClick={() => navigate("/settings")} title="Settings" className="grid size-7 shrink-0 place-items-center rounded-md text-muted-foreground hover:bg-sidebar-accent hover:text-foreground">
+				<Settings className="size-4" />
+			</button>
 			{/* The bell lives here on every page (app updates land in it too); the Swarm page's own copy is hidden. */}
 			<NotificationCenter />
 		</div>

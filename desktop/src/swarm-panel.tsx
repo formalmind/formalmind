@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { ChevronDown, FileCode2, Play, Square } from "lucide-react";
+import { ChevronDown, FileCode2, Play, Square, Wrench } from "lucide-react";
 import { ChatComposer } from "@/components/chat-composer";
 import { ChatMarkdown } from "@/components/chat-markdown";
 import { SwarmCanvas } from "@/components/swarm/swarm-canvas";
@@ -65,9 +65,9 @@ export function SwarmPanel({ folder, name, scan, bridge }: { folder: string; nam
 	// One floating card open at a time, like an accordion; a bug report opens the bugs card.
 	const [panel, setPanel] = useState<string | null>("plan");
 	const [showTools, setShowTools] = useState(false);
-	const [provider, setProvider] = useState<Provider>(() => (store.get("fm:provider") === "anthropic" ? "anthropic" : "formal"));
+	// Set in Settings (desktop/src/settings.tsx).
+	const [provider] = useState<Provider>(() => (store.get("fm:provider") === "anthropic" ? "anthropic" : "formal"));
 	const [hasKey, setHasKey] = useState(false);
-	const [key, setKey] = useState("");
 	const [sessions, setSessions] = useState<Session[]>([]);
 	const [viewing, setViewing] = useState<string | null>(null);
 	const runRef = useRef<string | null>(null);
@@ -83,10 +83,6 @@ export function SwarmPanel({ folder, name, scan, bridge }: { folder: string; nam
 	const refresh = () => {
 		void invoke<Item[]>("swarm_plan", { folder }).then(setPlan, () => {});
 		void invoke<Bug[]>("swarm_bugs", { folder }).then(setBugs, () => {});
-	};
-	const pick = (p: Provider) => {
-		setProvider(p);
-		store.set("fm:provider", p);
 	};
 
 	useEffect(() => {
@@ -148,7 +144,7 @@ export function SwarmPanel({ folder, name, scan, bridge }: { folder: string; nam
 	return (
 		<div className="flex h-full min-h-0 flex-1">
 			{/* The canvas, as on the Swarm page, with the plan, files and bugs floating over it as one accordion. */}
-			<div className="relative flex min-w-0 flex-1 flex-col">
+			<div className="relative flex min-w-0 flex-1 flex-col overflow-hidden">
 				<SwarmCanvas
 					state={localBoard(folder, plan, events, Boolean(run))}
 					fill
@@ -162,7 +158,7 @@ export function SwarmPanel({ folder, name, scan, bridge }: { folder: string; nam
 						</span>
 					}
 				/>
-				<div className="pointer-events-none absolute left-3 top-[6.5rem] z-10 flex max-h-[calc(100%-7.5rem)] w-72 flex-col gap-2">
+				<div className="pointer-events-none absolute left-3 top-[6.5rem] z-10 flex max-h-[calc(100%-7.5rem)] w-[min(18rem,calc(100%-1.5rem))] flex-col gap-2">
 					<Floating id="plan" open={panel} onOpen={setPanel} title="Plan" meta={plan.length ? `${done}/${plan.length}` : ""}>
 						<ul className="space-y-0.5 p-2 text-[13px]">
 							{plan.length === 0 ? <li className="p-2 text-muted-foreground">The planner writes .formal/plan.md on the first run.</li> : null}
@@ -204,8 +200,8 @@ export function SwarmPanel({ folder, name, scan, bridge }: { folder: string; nam
 			</div>
 
 			{/* The chat: start and steer the swarm, the plan, and the agents' messages. */}
-			<aside className="flex w-[24rem] shrink-0 flex-col border-l bg-background">
-				{sessions.length ? (
+			<aside className="relative z-20 flex w-[24rem] shrink-0 flex-col border-l bg-background">
+				{sessions.length || run ? (
 					<div className="flex h-10 shrink-0 items-center gap-2 border-b px-3">
 						<Label>Session</Label>
 						<select value={viewing ?? ""} onChange={(e) => load(e.target.value)} disabled={Boolean(run)} className="h-7 min-w-0 flex-1 rounded-lg border bg-background px-1.5 text-xs outline-none">
@@ -215,6 +211,17 @@ export function SwarmPanel({ folder, name, scan, bridge }: { folder: string; nam
 								</option>
 							))}
 						</select>
+						{run ? (
+							<div className="flex shrink-0 items-center gap-1 text-[11px] text-muted-foreground">
+								<span className="tabular-nums" title="Spent of the cap">${spent.toFixed(2)}/${budget}</span>
+								<button type="button" onClick={() => setShowTools(!showTools)} title={showTools ? "Hide tool calls" : "Show tool calls"} aria-pressed={showTools} className={`grid size-7 place-items-center rounded-md hover:bg-muted ${showTools ? "bg-muted text-foreground" : ""}`}>
+									<Wrench className="size-3.5" />
+								</button>
+								<button type="button" onClick={() => void invoke("swarm_stop", { run })} title="Stop the swarm" className="inline-flex h-7 items-center gap-1 rounded-md border px-2 text-foreground hover:bg-muted">
+									<Square className="size-3" />Stop
+								</button>
+							</div>
+						) : null}
 					</div>
 				) : null}
 				<div ref={chat} className="min-h-0 flex-1 space-y-3 overflow-y-auto p-4 text-sm">
@@ -270,39 +277,15 @@ export function SwarmPanel({ folder, name, scan, bridge }: { folder: string; nam
 							</span>
 						}
 					/>
-					{run ? (
-						<div className="flex items-center justify-between px-1 text-[11px] text-muted-foreground">
-							<button type="button" onClick={() => setShowTools(!showTools)} className="hover:text-foreground">{showTools ? "Hide" : "Show"} tool calls</button>
-							<span>${spent.toFixed(2)} of ${budget}</span>
-							<button type="button" onClick={() => void invoke("swarm_stop", { run })} className="inline-flex items-center gap-1 hover:text-foreground"><Square className="size-3" />Stop</button>
-						</div>
-					) : (
+					{run ? null : (
 						<div className="flex flex-wrap items-center gap-1.5 px-1 text-xs">
-							{provider === "anthropic" && !hasKey ? (
-								<form
-									className="inline-flex h-7 flex-1 items-center overflow-hidden rounded-lg border"
-									onSubmit={(e) => {
-										e.preventDefault();
-										if (key.trim()) void invoke("anthropic_key_set", { key }).then(() => { setKey(""); setHasKey(true); });
-									}}
-								>
-									<input type="password" autoFocus value={key} onChange={(e) => setKey(e.target.value)} placeholder="Anthropic key (sk-ant-…)" className="h-full min-w-0 flex-1 bg-transparent px-2 outline-none" />
-									<button type="submit" disabled={!key.trim()} className="h-full border-l px-2 font-medium disabled:opacity-40">Save</button>
-									<button type="button" onClick={() => pick("formal")} className="h-full border-l px-2 text-muted-foreground">×</button>
-								</form>
-							) : (
-								<select value={provider} onChange={(e) => pick(e.target.value as Provider)} className="h-7 rounded-lg border bg-background px-1.5 outline-none">
-									<option value="formal">formal.team credits</option>
-									<option value="anthropic">My Anthropic key{hasKey ? " (saved)" : ""}</option>
-								</select>
-							)}
+							<a href="#/settings" className="text-muted-foreground hover:text-foreground hover:underline" title="Change in Settings">
+								Claude via {provider === "anthropic" ? (hasKey ? "your Anthropic key" : "your Anthropic key (not set)") : "formal.team credits"}
+							</a>
 							<select value={budget} onChange={(e) => setBudget(Number(e.target.value))} className="h-7 rounded-lg border bg-background px-1.5 outline-none" title="Stop at">
 								{BUDGETS.map((b) => <option key={b} value={b}>stop at ${b}</option>)}
 							</select>
 							<button type="button" onClick={() => void start()} disabled={provider === "anthropic" && !hasKey} className="btn-dark ml-auto h-7 gap-1.5 px-3 disabled:opacity-50"><Play className="size-3" />{plan.some((i) => i.mark === " ") ? "Resume" : "Start"}</button>
-							{provider === "anthropic" && hasKey ? (
-								<button type="button" onClick={() => void invoke("anthropic_key_set", { key: "" }).then(() => setHasKey(false))} className="w-full text-left text-[11px] text-muted-foreground hover:underline">Forget Anthropic key</button>
-							) : null}
 						</div>
 					)}
 				</div>

@@ -16,6 +16,7 @@ import { apiBase, clearToken, exchangeCode, loadToken } from "./api";
 
 import { LocalFolderPage, LocalFolders } from "./local";
 import { onboarded, SetupSteps, SignInStep } from "./onboarding";
+import { SettingsPage } from "./settings";
 import { TabBar } from "./tabs";
 import { UpdateNotice } from "./update";
 
@@ -53,6 +54,7 @@ function Shell({ user }: { user: User }) {
 								<Route path="/usage" element={<UsagePage />} />
 								<Route path="/projects/:owner/:name" element={<ProjectHomePage />} />
 								<Route path="/local" element={<LocalFolderPage />} />
+								<Route path="/settings" element={<SettingsPage />} />
 								{/* Other pages come over from the web app as the desktop app grows. */}
 								<Route path="*" element={<Navigate to="/" replace />} />
 							</Routes>
