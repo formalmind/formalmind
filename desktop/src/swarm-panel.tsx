@@ -1,9 +1,12 @@
 import { MarkGithubIcon } from "@primer/octicons-react";
 import { useEffect, useRef, useState } from "react";
-import { Check, ChevronDown, Copy, FileCode2, Play, Square, WandSparkles } from "lucide-react";
+import { Check, ChevronDown, Copy, FileCode2, Play, Square, WandSparkles, Wrench } from "lucide-react";
 import { ChatComposer } from "@/components/chat-composer";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuLabel, DropdownMenuRadioGroup, DropdownMenuRadioItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { ChatMarkdown } from "@/components/chat-markdown";
+import { CodeBlock, CodeBlockContent } from "@/components/ui/code-block";
+import { Message, MessageContent, MessageHeader } from "@/components/ui/message";
+import { Trace, TraceCollapsible, TraceCollapsibleContent, TraceCollapsibleTrigger, TraceIcon, TraceLine, TraceTitle } from "@/components/ui/trace";
 import { SwarmCanvas } from "@/components/swarm/swarm-canvas";
 import { ROLE_COLORS } from "@/lib/swarm-roles";
 import { localBoard } from "./local-board";
@@ -55,6 +58,79 @@ const MODELS = [
 const colorOf = (role: string) => (ROLE_COLORS as Record<string, string>)[role] ?? "hsl(var(--muted-foreground))";
 const store = { get: (k: string) => { try { return localStorage.getItem(k); } catch { return null; } }, set: (k: string, v: string) => { try { localStorage.setItem(k, v); } catch { /* not kept */ } } };
 
+
+type Block = { e: Ev } | { steps: { call: Ev; result?: Ev }[] };
+
+/** The chat as blocks: messages stand alone; a run of tool calls (each with its result) folds into one trace. */
+function blocks(events: Ev[]): Block[] {
+	const out: Block[] = [];
+	for (const e of events) {
+		const last = out.at(-1);
+		if (e.kind === "tool") {
+			if (last && "steps" in last) last.steps.push({ call: e });
+			else out.push({ steps: [{ call: e }] });
+		} else if (e.kind === "result") {
+			const step = last && "steps" in last ? last.steps.at(-1) : undefined;
+			if (step && !step.result) step.result = e;
+		} else out.push({ e });
+	}
+	return out;
+}
+
+/** A run of tool calls: "Used 4 tools", opening to each call and the start of its output. */
+function Steps({ steps, running }: { steps: { call: Ev; result?: Ev }[]; running: boolean }) {
+	const one = steps.length === 1 ? steps[0].call.text : null;
+	return (
+		<Trace className="pl-1">
+			<TraceCollapsible>
+				<TraceCollapsibleTrigger>
+					<TraceLine status={running ? "running" : undefined}>
+						<TraceIcon><Wrench className="size-3.5" /></TraceIcon>
+						<TraceTitle className="font-mono text-[11px]">{one ?? `Used ${steps.length} tools`}</TraceTitle>
+					</TraceLine>
+				</TraceCollapsibleTrigger>
+				<TraceCollapsibleContent className="ml-2 space-y-2">
+					{steps.map((s, i) => (
+						<div key={i} className="space-y-1">
+							<p className="truncate font-mono text-[11px] text-foreground/80">› {s.call.text}</p>
+							{s.result?.text.trim() ? (
+								<CodeBlock size="sm" className="text-[11px]">
+									<CodeBlockContent className="max-h-40" wrap>{s.result.text.split("\n").slice(0, 30).join("\n")}</CodeBlockContent>
+								</CodeBlock>
+							) : null}
+						</div>
+					))}
+				</TraceCollapsibleContent>
+			</TraceCollapsible>
+		</Trace>
+	);
+}
+
+/** One agent's message: who said it (and on which item), then the text flat as Markdown; a bug opens its report. */
+function AgentMessage({ e, onBug }: { e: Ev; onBug: () => void }) {
+	const color = e.kind === "bug" ? "#dc2626" : colorOf(e.role);
+	return (
+		<Message>
+			<MessageContent className="gap-1">
+				<MessageHeader className="gap-1.5 px-0 capitalize" style={{ color }}>
+					<span className="size-1.5 rounded-full" style={{ background: color }} />
+					{e.kind === "bug" ? "bug reported" : e.role}
+					{/^\d+$/.test(e.item) ? <span className="font-normal normal-case text-muted-foreground">· item {e.item}</span> : null}
+				</MessageHeader>
+				{e.kind === "bug" ? (
+					<button type="button" onClick={onBug} className="w-fit whitespace-pre-wrap rounded-2xl rounded-tl-md bg-red-500/10 px-3 py-2 text-left hover:bg-red-500/15">
+						{e.text.split(" — ")[0]}
+						<span className="mt-1 block text-xs text-red-700/70 dark:text-red-400/70">Open the report →</span>
+					</button>
+				) : e.kind === "plan" || e.kind === "done" ? (
+					<p className="text-[13px] text-muted-foreground">{e.text}</p>
+				) : (
+					<ChatMarkdown>{e.text}</ChatMarkdown>
+				)}
+			</MessageContent>
+		</Message>
+	);
+}
 
 /** A card floating over the canvas; its header toggles it, and opening one closes the others. */
 function Floating({ id, open, onOpen, title, meta, tone, action, children }: { id: string; open: string | null; onOpen: (id: string | null) => void; title: string; meta?: string; tone?: "red"; action?: React.ReactNode; children: React.ReactNode }) {
@@ -231,7 +307,7 @@ export function SwarmPanel({ folder, name, scan, bridge, session, actions }: { f
 	const working = [...events].reverse().find((e) => e.kind === "status" && e.role !== "swarm");
 	const done = plan.filter((i) => i.mark === "x").length;
 	const finished = !run ? events.find((e) => e.kind === "done") : undefined;
-	const shown = events.filter((e) => e.kind !== "status" && e.kind !== "result");
+	const shown = events.filter((e) => e.kind !== "status");
 
 	return (
 		<div className="relative flex h-full min-h-0 flex-1">
@@ -356,41 +432,22 @@ export function SwarmPanel({ folder, name, scan, bridge, session, actions }: { f
 				<div className="shadow-card mt-1 flex min-h-0 flex-1 flex-col overflow-hidden rounded-xl border bg-card">
 				<div ref={chat} className="min-h-0 flex-1 space-y-3 overflow-y-auto p-4 text-sm">
 					{shown.length === 0 && !run ? <p className="text-muted-foreground">Start the swarm and its agents talk here. Message them anytime to steer.</p> : null}
-					{shown.map((e, i) =>
-						e.kind === "you" ? (
-							<div key={i} className="ml-auto w-fit max-w-[85%] whitespace-pre-wrap rounded-2xl rounded-br-md bg-foreground px-3 py-2 text-background">{e.text}</div>
-						) : e.kind === "tool" || e.kind === "result" ? (
-							<p key={i} className="truncate pl-4 font-mono text-[11px] text-muted-foreground">{e.kind === "tool" ? `› ${e.text}` : e.text.split("\n")[0]}</p>
+					{blocks(shown).map((block, i) =>
+						"steps" in block ? (
+							<Steps key={i} steps={block.steps} running={Boolean(run) && i === blocks(shown).length - 1} />
+						) : block.e.kind === "you" ? (
+							<Message key={i} align="end">
+								<MessageContent>
+									<div className="ml-auto w-fit max-w-[85%] whitespace-pre-wrap rounded-2xl rounded-br-md bg-foreground px-3 py-2 text-background">{block.e.text}</div>
+								</MessageContent>
+							</Message>
 						) : (
-							<div key={i}>
-								<p className="mb-1 flex items-center gap-1.5 text-xs font-medium capitalize" style={{ color: e.kind === "bug" ? "#dc2626" : colorOf(e.role) }}>
-									<span className="size-1.5 rounded-full" style={{ background: e.kind === "bug" ? "#dc2626" : colorOf(e.role) }} />
-									{e.kind === "bug" ? "bug reported" : e.role}
-									{/^\d+$/.test(e.item) ? <span className="font-normal text-muted-foreground">· item {e.item}</span> : null}
-								</p>
-								{e.kind === "bug" ? (
-									<button
-										type="button"
-										onClick={() => {
-											// Open the bugs card on this report.
-											const hit = bugs.find((b) => e.text.includes(b.file));
-											setPanel("bugs");
-											if (hit) setOpenBug(hit.file);
-										}}
-										className="whitespace-pre-wrap rounded-2xl rounded-tl-md bg-red-500/10 px-3 py-2 text-left hover:bg-red-500/15"
-									>
-										{e.text.split(" — ")[0]}
-										<span className="mt-1 block text-xs text-red-700/70 dark:text-red-400/70">Open the report →</span>
-									</button>
-								) : (
-									e.kind === "plan" || e.kind === "done" ? (
-										<p className="text-[13px] text-muted-foreground">{e.text}</p>
-									) : (
-										// Flat on the page, as Markdown, like the web chats.
-										<ChatMarkdown>{e.text}</ChatMarkdown>
-									)
-								)}
-							</div>
+							<AgentMessage key={i} e={block.e} onBug={() => {
+								// Open the bugs card on this report.
+								const hit = bugs.find((b) => block.e.text.includes(b.file));
+								setPanel("bugs");
+								if (hit) setOpenBug(hit.file);
+							}} />
 						),
 					)}
 					{finished ? <p className="rounded-lg border px-3 py-2 text-xs text-muted-foreground">Finished: {finished.text}</p> : null}
@@ -421,7 +478,7 @@ export function SwarmPanel({ folder, name, scan, bridge, session, actions }: { f
 							</span>
 						}
 						extra={run ? (
-							<button type="button" onClick={() => void draft()} disabled={drafting} title="Draft a reply for me" className="inline-flex h-8 items-center gap-1.5 rounded-full px-2.5 text-sm text-muted-foreground hover:bg-muted hover:text-foreground disabled:opacity-50">
+							<button type="button" onClick={() => void draft()} disabled={drafting} title="Draft a reply for me" className="inline-flex h-8 shrink-0 items-center whitespace-nowrap gap-1.5 rounded-full px-2.5 text-sm text-muted-foreground hover:bg-muted hover:text-foreground disabled:opacity-50">
 								<WandSparkles className={`size-3.5 ${drafting ? "animate-pulse" : ""}`} />
 								{drafting ? "Drafting…" : "Draft reply"}
 							</button>
