@@ -298,7 +298,7 @@ export function SwarmPanel({ folder, name, scan, bridge }: { folder: string; nam
 						<select value={viewing ?? ""} onChange={(e) => load(e.target.value)} disabled={Boolean(run)} title="Session" className="h-7 min-w-0 flex-1 rounded-lg border bg-background px-1.5 text-xs outline-none">
 							{sessions.map((x) => (
 								<option key={x.run} value={x.run}>
-									{new Date(parseInt(x.run.replace("local-", ""), 16)).toLocaleString(undefined, { dateStyle: "short", timeStyle: "short" })} · ${x.spent.toFixed(2)}{x.run === run ? " · running" : x.outcome ? ` · ${x.outcome.slice(0, 28)}` : " · stopped"}
+									{new Date(parseInt(x.run.replace("local-", ""), 16)).toLocaleString(undefined, { dateStyle: "short", timeStyle: "short" })} · ${x.spent.toFixed(2)}{x.run === run ? "" : x.outcome ? ` · ${x.outcome.slice(0, 28)}` : " · stopped"}
 								</option>
 							))}
 						</select>
