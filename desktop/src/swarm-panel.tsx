@@ -1,6 +1,6 @@
 import { MarkGithubIcon } from "@primer/octicons-react";
 import { useEffect, useRef, useState } from "react";
-import { Check, ChevronDown, Copy, FileCode2, Play, Square } from "lucide-react";
+import { Check, ChevronDown, Copy, FileCode2, Play, Square, WandSparkles } from "lucide-react";
 import { ChatComposer } from "@/components/chat-composer";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuLabel, DropdownMenuRadioGroup, DropdownMenuRadioItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { ChatMarkdown } from "@/components/chat-markdown";
@@ -201,6 +201,17 @@ export function SwarmPanel({ folder, name, scan, bridge, session, actions }: { f
 		} catch (e) {
 			setError(String(e));
 		}
+	};
+	// A cheap model drafts your next message from the recent chat; it lands in the composer for you to edit or send.
+	const [drafting, setDrafting] = useState(false);
+	const draft = async () => {
+		if (!run || drafting) return;
+		setDrafting(true);
+		const transcript = events.filter((e) => e.kind === "say" || e.kind === "you" || e.kind === "bug" || e.kind === "done").slice(-20).map((e) => `${e.role}${e.item ? ` (item ${e.item})` : ""}: ${e.text}`).join("\n");
+		await invoke<string>("swarm_suggest", { folder, apiBase: apiBase(), provider, run, transcript })
+			.then((text) => text && setSay(text))
+			.catch((e) => setError(String(e)))
+			.finally(() => setDrafting(false));
 	};
 	const send = async () => {
 		const text = say.trim();
@@ -409,6 +420,12 @@ export function SwarmPanel({ folder, name, scan, bridge, session, actions }: { f
 								{name} swarm
 							</span>
 						}
+						extra={run ? (
+							<button type="button" onClick={() => void draft()} disabled={drafting} title="Draft a reply for me" className="inline-flex h-8 items-center gap-1.5 rounded-full px-2.5 text-sm text-muted-foreground hover:bg-muted hover:text-foreground disabled:opacity-50">
+								<WandSparkles className={`size-3.5 ${drafting ? "animate-pulse" : ""}`} />
+								{drafting ? "Drafting…" : "Draft reply"}
+							</button>
+						) : null}
 					/>
 					{run ? null : (
 						<div className="flex flex-wrap items-center gap-1.5 px-1 text-xs">

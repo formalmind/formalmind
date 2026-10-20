@@ -99,6 +99,7 @@ const demo: Bridge = {
 			swarm_running: RUN,
 			anthropic_key_status: false,
 		};
+		if (cmd === "swarm_suggest") return new Promise((done) => setTimeout(() => done("Good catch on the penalty cap. Write the PoC for that bug, then move on to the oracle item." as T), 700));
 		if (cmd === "swarm_say") {
 			setTimeout(() => {
 				for (const l of listeners) l({ payload: ev("say", "assistant", "you", `(demo) Noted: “${String(args?.text ?? "")}”. In the app the assistant answers before the next turn.`, 1.84) });

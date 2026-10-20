@@ -48,6 +48,8 @@ export interface ChatComposerProps {
 	/** A model pill for other providers' models (the local swarm's Claude models), in place of `model`. */
 	modelPicker?: { value: string; options: { value: string; label: string }[]; onChange: (value: string) => void; disabled?: boolean };
 	placeholder?: string;
+	/** Extra controls in the bottom row, after the model picker. */
+	extra?: React.ReactNode;
 	textareaRef?: React.Ref<HTMLTextAreaElement>;
 }
 
@@ -63,6 +65,7 @@ export function ChatComposer({
 	onThinkChange,
 	repo,
 	context,
+	extra,
 	modelPicker,
 	placeholder = "Ask about this repo…",
 	textareaRef,
@@ -193,6 +196,7 @@ export function ChatComposer({
 						</DropdownMenuContent>
 					</DropdownMenu>
 				) : null}
+				{extra}
 
 				<div className="flex-1" />
 

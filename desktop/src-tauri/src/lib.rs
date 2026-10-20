@@ -82,6 +82,7 @@ pub fn run() {
             swarm::swarm_stop,
             swarm::swarm_say,
             swarm::swarm_running,
+            swarm::swarm_suggest,
             swarm::swarm_plan,
             swarm::swarm_bugs,
             swarm::anthropic_key_set,

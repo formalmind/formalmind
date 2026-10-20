@@ -390,16 +390,21 @@ impl Turn<'_> {
     }
 
     async fn session(&self, role: &str, item: &str) -> Result<(String, String), String> {
-        if self.req.provider.as_deref() == Some("anthropic") {
+        model_access(&self.client, &self.req.folder, &self.req.api_base, self.req.provider.as_deref(), self.run, role, item).await
+    }
+}
+
+/// A key and base URL for one model call: your own Anthropic key, or a formal.team session billed to your credits.
+async fn model_access(client: &reqwest::Client, folder_path: &str, api_base: &str, provider: Option<&str>, run: &str, role: &str, item: &str) -> Result<(String, String), String> {
+        if provider == Some("anthropic") {
             let key = anthropic_entry()?.get_password().map_err(|_| "Add your Anthropic key first".to_string())?;
             return Ok((key, "https://api.anthropic.com".into()));
         }
-        let folder = Path::new(&self.req.folder).file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default();
-        let res = self
-            .client
-            .post(format!("{}/api/desktop/model-session", self.req.api_base))
+        let folder = Path::new(folder_path).file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default();
+        let res = client
+            .post(format!("{api_base}/api/desktop/model-session"))
             .bearer_auth(token()?)
-            .json(&json!({ "folder": folder, "run": self.run, "role": role, "ref": item }))
+            .json(&json!({ "folder": folder, "run": run, "role": role, "ref": item }))
             .send()
             .await
             .map_err(|e| e.to_string())?;
@@ -409,7 +414,9 @@ impl Turn<'_> {
             return Err(body["error"].as_str().unwrap_or("formal.team refused the model session").to_string());
         }
         Ok((body["key"].as_str().unwrap_or("").to_string(), body["base_url"].as_str().unwrap_or("").to_string()))
-    }
+}
+
+impl Turn<'_> {
 
     /// One agent turn: a tool loop against Claude until it stops calling tools.
     async fn agent(&self, role: &str, item: &str, task: String) -> Result<Outcome, String> {
@@ -973,4 +980,23 @@ mod tests {
         assert!(std::fs::read_to_string(plan_path(&root)).unwrap().contains("  - [x] third"));
         std::fs::remove_dir_all(root).unwrap();
     }
+}
+
+/// Drafts what you might say next in the swarm chat, from its recent lines; you edit or send it yourself.
+#[tauri::command]
+pub async fn swarm_suggest(folder: String, api_base: String, provider: Option<String>, run: String, transcript: String) -> Result<String, String> {
+    let client = reqwest::Client::builder().timeout(Duration::from_secs(60)).build().unwrap_or_default();
+    let (key, base) = model_access(&client, &folder, &api_base, provider.as_deref(), &run, "assistant", "suggest").await?;
+    let body = json!({
+        "model": "claude-haiku-5-5", "max_tokens": 400,
+        "system": "You draft the user's next message to a swarm of agents (planner, prover, reviewer) proving a codebase correct. Reply to what the agents last asked or reported, as the user, in one to three plain sentences. Output only the message.",
+        "messages": [{ "role": "user", "content": format!("The chat so far:\n{transcript}\n\nDraft my next message.") }],
+    });
+    let res = client.post(format!("{base}/v1/messages")).header("x-api-key", &key).header("anthropic-version", "2023-06-01").json(&body).send().await.map_err(|e| e.to_string())?;
+    let status = res.status();
+    let reply: Value = res.json().await.map_err(|e| e.to_string())?;
+    if !status.is_success() {
+        return Err(reply["error"]["message"].as_str().unwrap_or("The model call failed").to_string());
+    }
+    Ok(reply["content"].as_array().into_iter().flatten().filter_map(|b| b["text"].as_str()).collect::<Vec<_>>().join("").trim().to_string())
 }
