@@ -1,12 +1,16 @@
 import { useEffect, useRef, useState } from "react";
-import { invoke } from "@tauri-apps/api/core";
-import { listen } from "@tauri-apps/api/event";
-import { Bug as BugIcon, ChevronDown, FileCode2, Play, Send, Square } from "lucide-react";
+import { ChevronDown, FileCode2, Play, Send, Square } from "lucide-react";
 import { SwarmCanvas } from "@/components/swarm/swarm-canvas";
 import { ROLE_COLORS } from "@/lib/swarm-roles";
-import { apiBase } from "./api";
 import { localBoard } from "./local-board";
 import type { Scan } from "./local";
+
+/** What the panel needs from its host: the desktop app's Tauri commands and events, or the web demo's stand-ins. */
+export type Bridge = {
+	invoke: <T>(cmd: string, args?: Record<string, unknown>) => Promise<T>;
+	listen: <T>(event: string, cb: (e: { payload: T }) => void) => Promise<() => void>;
+	apiBase: () => string;
+};
 
 type Ev = { run: string; kind: "status" | "say" | "tool" | "result" | "you" | "bug" | "plan" | "done"; role: string; item: string; text: string; spent: number };
 type Item = { index: number; mark: string; text: string };
@@ -18,25 +22,35 @@ const BUDGETS = [2, 5, 10, 20];
 const colorOf = (role: string) => (ROLE_COLORS as Record<string, string>)[role] ?? "hsl(var(--muted-foreground))";
 const store = { get: (k: string) => { try { return localStorage.getItem(k); } catch { return null; } }, set: (k: string, v: string) => { try { localStorage.setItem(k, v); } catch { /* not kept */ } } };
 
-const Label = ({ children }: { children: React.ReactNode }) => (
-	<span className="font-mono text-[11px] font-medium uppercase tracking-wider text-muted-foreground">{children}</span>
-);
+const pill = "inline-flex h-8 items-center rounded-full border bg-background/90 shadow-sm backdrop-blur";
 
-/** A card on the canvas: gray container with its title, white card inside. */
-function Card({ title, right, className = "", children }: { title: React.ReactNode; right?: React.ReactNode; className?: string; children: React.ReactNode }) {
+/** A card floating over the canvas; its header toggles it, and opening one closes the others. */
+function Floating({ id, open, onOpen, title, meta, tone, children }: { id: string; open: string | null; onOpen: (id: string | null) => void; title: string; meta?: string; tone?: "red"; children: React.ReactNode }) {
+	const isOpen = open === id;
 	return (
-		<section className={`flex min-h-0 flex-col rounded-2xl border bg-muted/60 p-1.5 ${className}`}>
-			<header className="flex h-8 shrink-0 items-center justify-between gap-2 pl-2 pr-1">{title}{right}</header>
-			<div className="shadow-card flex min-h-0 flex-1 flex-col overflow-hidden rounded-xl border bg-card">{children}</div>
+		<section className={`pointer-events-auto flex min-h-0 flex-col overflow-hidden rounded-2xl border p-1 shadow-pop backdrop-blur ${tone === "red" ? "border-red-500/30 bg-red-50/90 dark:bg-red-950/60" : "bg-muted/80"} ${isOpen ? "flex-1" : "shrink-0"}`}>
+			<button type="button" onClick={() => onOpen(isOpen ? null : id)} aria-expanded={isOpen} className="flex h-8 shrink-0 items-center gap-2 px-2.5 text-left">
+				<span className={`font-mono text-[11px] font-medium uppercase tracking-wider ${tone === "red" ? "text-red-700 dark:text-red-400" : "text-muted-foreground"}`}>{title}</span>
+				{meta ? <span className="text-[11px] text-muted-foreground">{meta}</span> : null}
+				<ChevronDown className={`ml-auto size-3.5 text-muted-foreground transition-transform duration-200 ${isOpen ? "rotate-180" : ""}`} />
+			</button>
+			<div className={`grid min-h-0 transition-[grid-template-rows] duration-200 ease-out motion-reduce:transition-none ${isOpen ? "flex-1 grid-rows-[1fr]" : "grid-rows-[0fr]"}`}>
+				<div className={`min-h-0 overflow-y-auto rounded-xl bg-card ${isOpen ? "border shadow-card" : ""}`}>{children}</div>
+			</div>
 		</section>
 	);
 }
+
+const Label = ({ children }: { children: React.ReactNode }) => (
+	<span className="font-mono text-[11px] font-medium uppercase tracking-wider text-muted-foreground">{children}</span>
+);
 
 /**
  * A local folder's swarm: the canvas on the left (the board, the contract files, bugs) and the chat on the right (start
  * and steer the swarm, the plan, and what each agent says as it works).
  */
-export function SwarmPanel({ folder, name, scan }: { folder: string; name: string; scan: Scan | null }) {
+export function SwarmPanel({ folder, name, scan, bridge }: { folder: string; name: string; scan: Scan | null; bridge: Bridge }) {
+	const { invoke, listen, apiBase } = bridge;
 	const [run, setRun] = useState<string | null>(null);
 	const [events, setEvents] = useState<Ev[]>([]);
 	const [plan, setPlan] = useState<Item[]>([]);
@@ -46,7 +60,8 @@ export function SwarmPanel({ folder, name, scan }: { folder: string; name: strin
 	const [say, setSay] = useState("");
 	const [error, setError] = useState<string | null>(null);
 	const [openBug, setOpenBug] = useState<string | null>(null);
-	const [showPlan, setShowPlan] = useState(true);
+	// One floating card open at a time, like an accordion; a bug report opens the bugs card.
+	const [panel, setPanel] = useState<string | null>("plan");
 	const [showTools, setShowTools] = useState(false);
 	const [provider, setProvider] = useState<Provider>(() => (store.get("fm:provider") === "anthropic" ? "anthropic" : "formal"));
 	const [hasKey, setHasKey] = useState(false);
@@ -87,6 +102,7 @@ export function SwarmPanel({ folder, name, scan }: { folder: string; name: strin
 			if (runRef.current && payload.run !== runRef.current) return;
 			setEvents((all) => [...all.slice(-600), payload]);
 			if (["plan", "bug", "done", "status"].includes(payload.kind)) refresh();
+			if (payload.kind === "bug") setPanel("bugs");
 			if (payload.kind === "done") {
 				setRun(null);
 				void listSessions();
@@ -95,7 +111,10 @@ export function SwarmPanel({ folder, name, scan }: { folder: string; name: strin
 		return () => void off.then((f) => f());
 		// eslint-disable-next-line react-hooks/exhaustive-deps
 	}, [folder]);
-	useEffect(() => chat.current?.scrollTo({ top: chat.current.scrollHeight }), [events, showTools]);
+	useEffect(() => {
+		// Braces matter: scrollTo returns a Promise in newer browsers, and an effect must return nothing or a cleanup.
+		chat.current?.scrollTo({ top: chat.current.scrollHeight });
+	}, [events, showTools]);
 
 	const start = async () => {
 		setError(null);
@@ -126,25 +145,35 @@ export function SwarmPanel({ folder, name, scan }: { folder: string; name: strin
 
 	return (
 		<div className="flex h-full min-h-0 flex-1">
-			{/* The canvas: a dotted field with cards on it. */}
-			<div className="min-w-0 flex-1 overflow-auto bg-[radial-gradient(hsl(var(--border))_1px,transparent_1px)] p-4 [background-size:16px_16px]">
-				<div className="grid min-h-full grid-cols-[minmax(0,1fr)_16rem] grid-rows-[minmax(28rem,1fr)_auto] gap-4">
-					<Card
-						className="col-span-2 xl:col-span-1"
-						title={<Label>{name} · swarm</Label>}
-						right={run ? (
-							<span className="flex items-center gap-1.5 text-xs text-muted-foreground">
-								<span className="size-1.5 animate-pulse rounded-full bg-emerald-500" />
-								{working ? `${working.role}${/^\d+$/.test(working.item) ? ` · item ${working.item}` : ""}` : "starting"}
+			{/* The canvas, as on the Swarm page, with the plan, files and bugs floating over it as one accordion. */}
+			<div className="relative flex min-w-0 flex-1 flex-col">
+				<SwarmCanvas
+					state={localBoard(folder, plan, events, Boolean(run))}
+					fill
+					repo={folder}
+					title={
+						<span className={`${pill} min-w-0 gap-2 px-3 text-sm text-muted-foreground`}>
+							<span className={`size-1.5 shrink-0 rounded-full ${run ? "animate-pulse bg-emerald-500" : "bg-muted-foreground/50"}`} />
+							<span className="truncate">
+								{name} · {run ? (working ? `${working.role}${/^\d+$/.test(working.item) ? ` on item ${working.item}` : ""}` : "starting") : "idle"} · ${spent.toFixed(2)}
 							</span>
-						) : null}
-					>
-						<div className="relative flex min-h-0 flex-1">
-							<SwarmCanvas state={localBoard(folder, plan, events, Boolean(run))} fill repo={folder} />
-						</div>
-					</Card>
-					<Card className="col-span-2 xl:col-span-1 xl:row-span-2" title={<Label>Files</Label>} right={scan ? <span className="text-[11px] text-muted-foreground">{scan.solidity.length} sol · {scan.lean.length} lean</span> : null}>
-						<ul className="min-h-0 flex-1 overflow-y-auto p-2 font-mono text-[11px]">
+						</span>
+					}
+				/>
+				<div className="pointer-events-none absolute left-3 top-14 z-10 flex max-h-[calc(100%-4.5rem)] w-80 flex-col gap-2">
+					<Floating id="plan" open={panel} onOpen={setPanel} title="Plan" meta={plan.length ? `${done}/${plan.length}` : ""}>
+						<ul className="space-y-0.5 p-2 text-[13px]">
+							{plan.length === 0 ? <li className="p-2 text-muted-foreground">The planner writes .formal/plan.md on the first run.</li> : null}
+							{plan.map((i) => (
+								<li key={i.index} className={`flex gap-2 rounded-md px-2 py-1 ${working && working.item === String(i.index) ? "bg-muted" : ""}`}>
+									<span className={`mt-0.5 grid size-4 shrink-0 place-items-center rounded border text-[10px] ${i.mark === "x" ? "border-emerald-500 bg-emerald-500 text-white" : i.mark === "!" ? "border-amber-500 text-amber-600" : ""}`}>{i.mark === "x" ? "✓" : i.mark === "!" ? "!" : ""}</span>
+									<span className={i.mark === "x" ? "text-muted-foreground" : ""}>{i.text}</span>
+								</li>
+							))}
+						</ul>
+					</Floating>
+					<Floating id="files" open={panel} onOpen={setPanel} title="Files" meta={scan ? `${scan.solidity.length} sol · ${scan.lean.length} lean` : ""}>
+						<ul className="p-2 font-mono text-[11px]">
 							{scan === null ? <li className="p-2 text-muted-foreground">Reading the folder…</li> : null}
 							{[...(scan?.solidity ?? []), ...(scan?.lean ?? [])].map((f) => (
 								<li key={f} className="flex items-center gap-1.5 truncate rounded px-1.5 py-1 hover:bg-muted" title={f}>
@@ -153,22 +182,21 @@ export function SwarmPanel({ folder, name, scan }: { folder: string; name: strin
 								</li>
 							))}
 						</ul>
-					</Card>
+					</Floating>
 					{bugs.length ? (
-						<Card className="col-span-2 xl:col-span-1 border-red-500/30 bg-red-500/5" title={<span className="flex items-center gap-1.5 font-mono text-[11px] font-medium uppercase tracking-wider text-red-700 dark:text-red-400"><BugIcon className="size-3.5" />Bugs · {bugs.length}</span>}>
+						<Floating id="bugs" open={panel} onOpen={setPanel} title="Bugs" meta={String(bugs.length)} tone="red">
 							<ul className="divide-y">
 								{bugs.map((b) => (
 									<li key={b.file}>
-										<button type="button" onClick={() => setOpenBug(openBug === b.file ? null : b.file)} className="flex w-full items-center gap-2 px-4 py-2.5 text-left text-sm">
+										<button type="button" onClick={() => setOpenBug(openBug === b.file ? null : b.file)} className="flex w-full items-center gap-2 px-3 py-2 text-left text-[13px]">
 											<span className="flex-1 font-medium">{b.title}</span>
-											<span className="font-mono text-[11px] text-muted-foreground">{b.file}</span>
-											<ChevronDown className={`size-4 text-muted-foreground transition-transform ${openBug === b.file ? "rotate-180" : ""}`} />
+											<ChevronDown className={`size-3.5 text-muted-foreground transition-transform ${openBug === b.file ? "rotate-180" : ""}`} />
 										</button>
-										{openBug === b.file ? <pre className="whitespace-pre-wrap border-t px-4 py-3 font-sans text-sm leading-6">{b.body}</pre> : null}
+										{openBug === b.file ? <pre className="whitespace-pre-wrap border-t px-3 py-2 font-sans text-[13px] leading-5">{b.body}</pre> : null}
 									</li>
 								))}
 							</ul>
-						</Card>
+						</Floating>
 					) : null}
 				</div>
 			</div>
@@ -187,22 +215,6 @@ export function SwarmPanel({ folder, name, scan }: { folder: string; name: strin
 						</select>
 					</div>
 				) : null}
-				<button type="button" onClick={() => setShowPlan(!showPlan)} className="flex h-11 shrink-0 items-center justify-between border-b px-4 text-left">
-					<Label>Plan {plan.length ? `· ${done}/${plan.length}` : ""}</Label>
-					<ChevronDown className={`size-4 text-muted-foreground transition-transform ${showPlan ? "rotate-180" : ""}`} />
-				</button>
-				{showPlan ? (
-					<ul className="max-h-[38%] shrink-0 space-y-0.5 overflow-y-auto border-b p-2 text-[13px]">
-						{plan.length === 0 ? <li className="p-2 text-muted-foreground">The planner writes .formal/plan.md on the first run.</li> : null}
-						{plan.map((i) => (
-							<li key={i.index} className={`flex gap-2 rounded-md px-2 py-1 ${working && working.item === String(i.index) ? "bg-muted" : ""}`}>
-								<span className={`mt-0.5 grid size-4 shrink-0 place-items-center rounded border text-[10px] ${i.mark === "x" ? "border-emerald-500 bg-emerald-500 text-white" : i.mark === "!" ? "border-amber-500 text-amber-600" : ""}`}>{i.mark === "x" ? "✓" : i.mark === "!" ? "!" : ""}</span>
-								<span className={`line-clamp-2 ${i.mark === "x" ? "text-muted-foreground" : ""}`} title={i.text}>{i.text}</span>
-							</li>
-						))}
-					</ul>
-				) : null}
-
 				<div ref={chat} className="min-h-0 flex-1 space-y-3 overflow-y-auto p-4 text-sm">
 					{shown.length === 0 && !run ? <p className="text-muted-foreground">Start the swarm and its agents talk here. Message them anytime to steer.</p> : null}
 					{shown.map((e, i) =>

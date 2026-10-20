@@ -3,7 +3,11 @@ import { Link, useLocation, useSearchParams } from "react-router";
 import { invoke } from "@tauri-apps/api/core";
 import { open } from "@tauri-apps/plugin-dialog";
 import { HardDrive, Plus, X } from "lucide-react";
-import { SwarmPanel } from "./swarm-panel";
+import { listen } from "@tauri-apps/api/event";
+import { apiBase } from "./api";
+import { SwarmPanel, type Bridge } from "./swarm-panel";
+
+const tauri: Bridge = { invoke, listen, apiBase };
 import { SidebarGroup, SidebarGroupAction, SidebarGroupLabel, SidebarMenu, SidebarMenuAction, SidebarMenuButton, SidebarMenuItem } from "@/components/ui/sidebar";
 
 type Config = { folders: string[] };
@@ -82,5 +86,5 @@ export function LocalFolderPage() {
 		invoke<Scan>("folder_scan", { path }).then(setScan, (e) => setError(String(e)));
 	}, [path]);
 	if (error) return <p className="p-6 text-sm text-red-600">{error}</p>;
-	return path ? <SwarmPanel folder={path} name={name(path)} scan={scan} /> : null;
+	return path ? <SwarmPanel folder={path} name={name(path)} scan={scan} bridge={tauri} /> : null;
 }

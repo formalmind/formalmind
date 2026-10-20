@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { Link, useLocation, useNavigate } from "react-router";
-import { BookOpen, Folder, FolderOpen, ChevronRight, GanttChart, Network, Plus } from "lucide-react"
+import { BookOpen, Folder, FolderOpen, HardDrive, ChevronRight, GanttChart, Network, Plus } from "lucide-react"
 import {
 	Sidebar,
 	SidebarContent,
@@ -209,6 +209,14 @@ export function AppSidebar({ extra, ...props }: React.ComponentProps<typeof Side
 					<Projects pathname={pathname} />
 				</SidebarGroup>
 				{extra}
+				{/* On localhost, the desktop app's local-folder page with demo data, for design feedback. */}
+				{!extra && typeof window !== "undefined" && window.location.hostname === "localhost" ? (
+					<SidebarGroup>
+						<SidebarMenu>
+							<NavLink item={{ title: "lending-protocol (local demo)", url: "/local-demo", icon: HardDrive, anim: "" }} active={pathname === "/local-demo"} />
+						</SidebarMenu>
+					</SidebarGroup>
+				) : null}
 			</SidebarContent>
 			<SidebarFooter>
 				<SidebarMenu>

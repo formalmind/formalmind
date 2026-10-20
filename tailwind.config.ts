@@ -8,6 +8,8 @@ export default {
 		"./index.html",
 		"./src/**/*.{ts,tsx}",
 		"./components/**/*.{js,ts,jsx,tsx,mdx,md}",
+		// The desktop app's pages are shown on the web too (the local demo).
+		"./desktop/src/**/*.{ts,tsx}",
 		"./stories/**/*.{ts,tsx}",
 		"./.storybook/**/*.{ts,tsx}",
 	],
