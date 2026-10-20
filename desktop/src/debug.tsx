@@ -761,7 +761,8 @@ export function DebugView({ folder, file, test: wanted, onPick, embedded }: { fo
 				<div className="mb-2 flex shrink-0 items-center gap-2 text-[11px] text-muted-foreground">
 					<label className="inline-flex items-center gap-1.5" title="Where runs happen: a running Anvil fork (state read from it), or an empty local chain">
 						<span className="font-mono uppercase tracking-wider">Chain</span>
-						<span className={`size-1.5 rounded-full ${fork ? "bg-emerald-500" : "bg-muted-foreground/40"}`} />
+						{/* Green: the chain runs are on is up (the local one always is; a fork while it answers). */}
+						<span className={`size-2 rounded-full ${!fork || running_.some((f) => `http://127.0.0.1:${f.port}` === fork) ? "bg-emerald-500" : "bg-amber-500"}`} />
 						<select
 							value={fork ?? (chain === 31337 ? "local" : `id:${chain}`)}
 							onChange={(e) => {

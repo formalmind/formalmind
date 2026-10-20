@@ -1,3 +1,4 @@
+import { createPortal } from "react-dom";
 import { useEffect, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { Loader2, Play, Trash2, X } from "lucide-react";
@@ -105,7 +106,8 @@ export function ScriptRunDialog({ folder, file, fn, onRun, onClose }: { folder: 
 		}
 	};
 
-	return (
+	// On the page itself: inside the sidebar (or any clipped parent) a fixed overlay would be cut off or hidden.
+	return createPortal(
 		<div className="fixed inset-0 z-[100] grid place-items-center bg-black/30 p-4" onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
 			<div role="dialog" aria-label={`Run ${file}`} className="w-[min(28rem,100%)] rounded-2xl border bg-muted p-1.5 shadow-pop">
 				<div className="flex h-8 items-center gap-2 px-2.5">
@@ -180,6 +182,7 @@ export function ScriptRunDialog({ folder, file, fn, onRun, onClose }: { folder: 
 					</div>
 				</div>
 			</div>
-		</div>
+		</div>,
+		document.body,
 	);
 }
