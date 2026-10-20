@@ -83,6 +83,24 @@ export function FileTree({ paths, selected, onOpen, storageKey, truncated, runna
 		}
 		setFnsOpen(next);
 	};
+	// The row's play button: a file with one function runs it; otherwise its functions are listed to pick from.
+	const play = (path: string) => {
+		if (!runnables) return;
+		const known = fns[path];
+		const go = (list: Runnable[]) => {
+			if (list.length === 1) runnables.onRun(path, list[0]);
+			else setFnsOpen((o) => new Set(o).add(path));
+		};
+		if (Array.isArray(known)) return go(known);
+		setFns((f) => ({ ...f, [path]: "loading" }));
+		void runnables.list(path).then(
+			(list) => {
+				setFns((f) => ({ ...f, [path]: list }));
+				go(list);
+			},
+			() => setFns((f) => ({ ...f, [path]: [] })),
+		);
+	};
 	const tree = useMemo(() => build(paths), [paths]);
 	const [open, setOpen] = useState<Set<string>>(() => {
 		const saved = readOpen(storageKey);
@@ -189,6 +207,21 @@ export function FileTree({ paths, selected, onOpen, storageKey, truncated, runna
 								</>
 							)}
 							<span className="truncate">{node.name}</span>
+							{runs ? (
+								<span
+									role="button"
+									tabIndex={-1}
+									aria-label={`Debug ${node.name}`}
+									title={node.path.endsWith(".s.sol") ? "Debug this script" : "Debug a test in this file"}
+									onClick={(e) => {
+										e.stopPropagation();
+										play(node.path);
+									}}
+									className="-my-1 -mr-1 ml-auto grid shrink-0 place-items-center rounded p-1 text-emerald-600 hover:bg-emerald-500/15"
+								>
+									{listed === "loading" ? <Loader2 className="size-3 animate-spin" /> : <Play className="size-3 fill-current" />}
+								</span>
+							) : null}
 						</button>
 						{fnOpen ? (
 							<ul className="flex flex-col">
@@ -209,7 +242,7 @@ export function FileTree({ paths, selected, onOpen, storageKey, truncated, runna
 													style={{ paddingLeft: 32 + depth * 12 }}
 													className={`flex h-6 w-full items-center gap-1.5 rounded-md pr-2 text-left font-mono text-[12px] outline-none hover:bg-sidebar-accent focus-visible:ring-2 focus-visible:ring-sidebar-ring ${runnables?.current === key ? "bg-amber-500/15 text-sidebar-foreground" : "text-sidebar-foreground/80"}`}
 												>
-													<Play className="size-3 shrink-0 text-emerald-600" />
+													<Play className="size-3 shrink-0 fill-current text-emerald-600" />
 													<span className="truncate">{r.fn}</span>
 												</button>
 											</li>
