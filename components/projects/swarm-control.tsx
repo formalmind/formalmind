@@ -1,7 +1,8 @@
 import { useState } from "react";
 import { Link } from "react-router";
+import { setVimMode, useVimMode } from "@/components/vim-mode";
 import { Gauge, MoreHorizontal, Play, Settings, Square, Wallet } from "lucide-react";
-import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
+import { DropdownMenu, DropdownMenuCheckboxItem, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 
 /** A project's swarm, stopped or running: stopping turns its workflow off and cancels runs in flight. */
 function useSwarmControl(repo: string) {
@@ -104,6 +105,7 @@ export function SwarmContextMenu({ repos, children }: { repos: string[]; childre
 /** The gear beside the bell: account pages, and stopping or resuming each project's swarm. */
 export function SettingsMenu({ repos, className }: { repos: string[]; className?: string }) {
 	const [open, setOpen] = useState(false);
+	const vim = useVimMode();
 	return (
 		<DropdownMenu open={open} onOpenChange={setOpen}>
 			<DropdownMenuTrigger aria-label="Settings" title="Settings" className={className}>
@@ -122,6 +124,11 @@ export function SettingsMenu({ repos, className }: { repos: string[]; className?
 				<DropdownMenuItem asChild>
 					<Link to="/billing"><Wallet className="size-3.5" /> Billing</Link>
 				</DropdownMenuItem>
+				<DropdownMenuSeparator />
+				{/* Keeps the menu open so the change shows. */}
+				<DropdownMenuCheckboxItem checked={vim} onCheckedChange={(on) => setVimMode(on)} onSelect={(e) => e.preventDefault()}>
+					Vim mode in code
+				</DropdownMenuCheckboxItem>
 				{repos.map((repo) => (
 					<div key={repo}>
 						<DropdownMenuSeparator />

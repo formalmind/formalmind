@@ -3,6 +3,7 @@ import { Suspense, lazy, useEffect, useRef, useState } from "react";
 import { Bug, Check, ChevronDown, Code2, Copy, FileCode2, GanttChart, MessagesSquare, Network, Play, Plus, ScanSearch, Square, WandSparkles, Wrench } from "lucide-react";
 
 // The project roadmap (GitHub Projects-style), the same view the web app had on its own page.
+import { motion as vimMotion, search as vimSearch, useVimMode, type Cursor } from "@/components/vim-mode";
 const ProjectView = lazy(() => import("@/components/project/project-view").then((m) => ({ default: m.ProjectView })));
 import { useSearchParams } from "react-router";
 import { ChatComposer } from "@/components/chat-composer";
@@ -168,18 +169,23 @@ function AgentMessage({ e, onBug }: { e: Ev; onBug: () => void }) {
  * and steer the swarm, the plan, and what each agent says as it works).
  */
 /** A whole file, highlighted by its extension, with a line-number gutter. */
-function FileView({ path, text, big, start = 1, mark }: { path: string; text: string; big?: boolean; start?: number; mark?: number | null }) {
+function FileView({ path, text, big, start = 1, mark, cursor }: { path: string; text: string; big?: boolean; start?: number; mark?: number | null; cursor?: Cursor | null }) {
 	const lines = useHighlightedCode(text, EXT[path.split(".").pop() ?? ""] ?? "text");
 	const marked = useRef<HTMLSpanElement | null>(null);
 	useEffect(() => {
 		marked.current?.scrollIntoView({ block: "center" });
 	}, [mark, path, lines.length]);
+	const caret = useRef<HTMLSpanElement | null>(null);
+	useEffect(() => {
+		caret.current?.scrollIntoView({ block: "nearest", inline: "nearest" });
+	}, [cursor?.line, cursor?.col]);
 	return (
 		<pre className={`overflow-x-auto py-2 font-mono ${big ? "text-[12.5px] leading-6" : "text-[11px] leading-5"}`}>
 			{lines.map((line, i) => (
-				<span key={i} ref={i === mark ? marked : undefined} data-line={i} className={`block whitespace-pre pr-3 ${i === mark ? "bg-amber-300/25" : ""}`}>
+				<span key={i} ref={i === mark ? marked : undefined} data-line={i} className={`relative block whitespace-pre pr-3 ${i === mark ? "bg-amber-300/25" : cursor?.line === i ? "bg-muted/60" : ""}`}>
 					<span className="mr-3 inline-block w-9 select-none text-right text-muted-foreground/60">{i + start}</span>
 					<span data-code>{line}</span>
+					{cursor?.line === i ? <span ref={caret} data-vim-cursor className="pointer-events-none absolute top-0 h-full w-[1ch] bg-foreground/35" style={{ left: `calc(3rem + ${cursor.col}ch)` }} /> : null}
 				</span>
 			))}
 		</pre>
@@ -763,6 +769,67 @@ export function SwarmPanel({ folder, name, scan, bridge, session, file: openPath
 	const hoverTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 	const hoverAt = useRef<string>("");
 	const navigable = (path: string) => path.endsWith(".sol");
+	// Vim keys (a setting): a cursor over the read-only file.
+	const vim = useVimMode();
+	const [cursor, setCursor] = useState<Cursor>({ line: 0, col: 0 });
+	const [vimSearchText, setVimSearchText] = useState<string | null>(null);
+	const lastSearch = useRef("");
+	const pending = useRef("");
+	const codeBox = useRef<HTMLDivElement | null>(null);
+	useEffect(() => {
+		setCursor({ line: markLine ? markLine - 1 : 0, col: 0 });
+		// eslint-disable-next-line react-hooks/exhaustive-deps
+	}, [file?.path, markLine]);
+	const lspAt = (path: string, pos: { line: number; character: number }, then: "definition" | "hover") => {
+		if (!navigable(path)) return;
+		if (then === "definition") {
+			void invoke<{ path: string; line: number; character: number }[]>("lsp_definition", { folder, path, ...pos }).then((defs) => defs[0] && view(defs[0].path, defs[0].line + 1), (err) => setError(String(err)));
+			return;
+		}
+		const r = codeBox.current?.querySelector("[data-vim-cursor]")?.getBoundingClientRect();
+		void invoke<string | null>("lsp_hover", { folder, path, ...pos }).then((text) => setHover(text && r ? { x: r.left, y: r.top, text } : null), () => setHover(null));
+	};
+	const vimKey = (e: React.KeyboardEvent) => {
+		if (!vim || !file || e.metaKey || e.altKey) return;
+		const lines = file.text.split("\n");
+		if (vimSearchText !== null) return;
+		const key = e.ctrlKey ? `ctrl+${e.key}` : e.key;
+		const page = Math.max(1, Math.floor((codeBox.current?.clientHeight ?? 480) / 24 / 2));
+		const done = () => {
+			e.preventDefault();
+			pending.current = "";
+		};
+		if (key === "Escape") return done(), setHover(null);
+		if (key === "ctrl+o") return done(), window.history.back();
+		if (key === "ctrl+i") return done(), window.history.forward();
+		if (/^[1-9]$/.test(key) || (key === "0" && /\d$/.test(pending.current))) {
+			pending.current += key;
+			return e.preventDefault();
+		}
+		const count = Number(pending.current.match(/\d+/)?.[0] ?? 1);
+		const seq = pending.current.replace(/\d+/, "") + key;
+		if (seq === "g" || seq === "y") {
+			pending.current = pending.current + key;
+			return e.preventDefault();
+		}
+		const pos = { line: cursor.line, character: cursor.col };
+		if (seq === "gd" || key === "F12") return done(), lspAt(file.path, pos, "definition");
+		if (seq === "K") return done(), lspAt(file.path, pos, "hover");
+		if (seq === "yy") return done(), void navigator.clipboard?.writeText(lines[cursor.line] ?? "");
+		if (seq === "/") return done(), setVimSearchText("");
+		if (seq === "n" || seq === "N") {
+			const to = vimSearch(lines, cursor, lastSearch.current, seq === "N");
+			if (to) setCursor(to);
+			return done();
+		}
+		const to = vimMotion(lines, cursor, seq === "gg" ? "gg" : key, pending.current.match(/\d+/) ? count : seq === "G" || seq === "gg" ? 1 : count, page);
+		pending.current = "";
+		if (to) {
+			e.preventDefault();
+			setHover(null);
+			setCursor(to);
+		}
+	};
 	const goToDefinition = (path: string, e: React.MouseEvent) => {
 		if (!(e.metaKey || e.ctrlKey) || !navigable(path)) return;
 		const pos = codePosition(e.clientX, e.clientY);
@@ -1105,7 +1172,16 @@ export function SwarmPanel({ folder, name, scan, bridge, session, file: openPath
 								</div>
 								<div
 									className={`min-h-0 flex-1 overflow-auto ${navigable(file.path) ? "[&_[data-code]]:cursor-text" : ""}`}
-									onClick={(e) => goToDefinition(file.path, e)}
+									ref={codeBox}
+									tabIndex={vim ? 0 : undefined}
+									onKeyDown={vimKey}
+									onClick={(e) => {
+										if (vim) {
+											const pos = codePosition(e.clientX, e.clientY);
+											if (pos) setCursor({ line: pos.line, col: pos.character });
+										}
+										goToDefinition(file.path, e);
+									}}
 									onMouseMove={(e) => hoverMove(file.path, e)}
 									onMouseLeave={() => {
 										if (hoverTimer.current) clearTimeout(hoverTimer.current);
@@ -1117,12 +1193,46 @@ export function SwarmPanel({ folder, name, scan, bridge, session, file: openPath
 									{/\.(md|markdown)$/i.test(file.path) && !mdSource ? (
 										<ChatMarkdown className="mx-auto max-w-3xl px-6 py-6 text-[14px]" image={(src) => { const p = imagePath(src, file.path); return p === null ? src : images[p]; }}>{file.text}</ChatMarkdown>
 									) : (
-										<FileView path={file.path} text={file.text} big mark={markLine ? markLine - 1 : null} />
+										<FileView path={file.path} text={file.text} big mark={markLine ? markLine - 1 : null} cursor={vim ? cursor : null} />
 									)}
 									{hover ? (
 										<div className="pointer-events-none fixed z-50 max-h-72 max-w-xl overflow-hidden rounded-lg border bg-popover p-2 shadow-pop" style={{ left: Math.min(hover.x + 8, window.innerWidth - 580), top: hover.y + 16 }}>
 											<ChatMarkdown className="text-[12px] [&_pre]:my-0 [&_pre]:p-2">{hover.text}</ChatMarkdown>
-											<p className="mt-1 text-[10px] text-muted-foreground">⌘-click to go to the definition</p>
+											<p className="mt-1 text-[10px] text-muted-foreground">{vim ? "gd goes to the definition · ctrl-o comes back" : "⌘-click to go to the definition"}</p>
+										</div>
+									) : null}
+									{vim ? (
+										<div className="sticky bottom-0 left-0 flex h-6 items-center gap-3 border-t bg-background/95 px-3 font-mono text-[11px] text-muted-foreground backdrop-blur">
+											{vimSearchText !== null ? (
+												<label className="flex flex-1 items-center">
+													/
+													<input
+														autoFocus
+														value={vimSearchText}
+														onChange={(e) => setVimSearchText(e.target.value)}
+														onKeyDown={(e) => {
+															e.stopPropagation();
+															if (e.key === "Enter") {
+																lastSearch.current = vimSearchText;
+																const to = vimSearch(file.text.split("\n"), cursor, vimSearchText);
+																if (to) setCursor(to);
+																setVimSearchText(null);
+																codeBox.current?.focus();
+															} else if (e.key === "Escape") {
+																setVimSearchText(null);
+																codeBox.current?.focus();
+															}
+														}}
+														className="ml-0.5 min-w-0 flex-1 bg-transparent text-foreground outline-none"
+													/>
+												</label>
+											) : (
+												<>
+													<span className="font-medium text-foreground">NORMAL</span>
+													<span>{lastSearch.current ? `/${lastSearch.current}` : ""}</span>
+													<span className="ml-auto">{cursor.line + 1}:{cursor.col + 1}</span>
+												</>
+											)}
 										</div>
 									) : null}
 								</div>
