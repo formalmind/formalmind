@@ -115,6 +115,23 @@ const makeDemo = (data: DemoData | null): Bridge => ({
 			if (!url) throw "Not in the demo data.";
 			return url as T;
 		}
+		// Code navigation without a language server: the word under the cursor, declared somewhere in the sources.
+		if ((cmd === "lsp_definition" || cmd === "lsp_hover") && data) {
+			const text = data.sources[String(args?.path ?? "")] ?? "";
+			const line = text.split("\n")[Number(args?.line ?? 0)] ?? "";
+			const at = Number(args?.character ?? 0);
+			const word = (line.slice(0, at + 1).match(/[\w$]+$/)?.[0] ?? "") + (line.slice(at + 1).match(/^[\w$]+/)?.[0] ?? "");
+			const decl = new RegExp(`^\\s*(?:abstract\\s+)?(?:contract|interface|library|struct|enum|error|event|function|modifier|type)\\s+${word}\\b`);
+			for (const [path, src] of Object.entries(data.sources)) {
+				if (!path.endsWith(".sol") || !word) continue;
+				const lines = src.split("\n");
+				const i = lines.findIndex((l) => decl.test(l));
+				if (i < 0) continue;
+				if (cmd === "lsp_definition") return [{ path, line: i, character: lines[i].indexOf(word) }] as T;
+				return `\`\`\`solidity\n${lines[i].trim()}\n\`\`\`\n\n${path}:${i + 1}` as T;
+			}
+			return (cmd === "lsp_definition" ? [] : null) as T;
+		}
 		if (cmd === "ast_scripts") {
 			if (!data?.scripts) throw "No scripts in the demo data.";
 			return data.scripts as T;

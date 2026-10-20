@@ -8,6 +8,7 @@ mod debug;
 mod executor;
 mod swarm;
 mod local;
+mod lsp;
 
 use keyring::Entry;
 use tauri::Manager;
@@ -83,6 +84,8 @@ pub fn run() {
             ast::ast_slice,
             ast::ast_formal,
             ast::ast_scripts,
+            lsp::lsp_definition,
+            lsp::lsp_hover,
             executor::model_key_set,
             executor::model_key_status,
             executor::turn_start,

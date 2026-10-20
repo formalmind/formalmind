@@ -168,18 +168,48 @@ function AgentMessage({ e, onBug }: { e: Ev; onBug: () => void }) {
  * and steer the swarm, the plan, and what each agent says as it works).
  */
 /** A whole file, highlighted by its extension, with a line-number gutter. */
-function FileView({ path, text, big, start = 1 }: { path: string; text: string; big?: boolean; start?: number }) {
+function FileView({ path, text, big, start = 1, mark }: { path: string; text: string; big?: boolean; start?: number; mark?: number | null }) {
 	const lines = useHighlightedCode(text, EXT[path.split(".").pop() ?? ""] ?? "text");
+	const marked = useRef<HTMLSpanElement | null>(null);
+	useEffect(() => {
+		marked.current?.scrollIntoView({ block: "center" });
+	}, [mark, path, lines.length]);
 	return (
 		<pre className={`overflow-x-auto py-2 font-mono ${big ? "text-[12.5px] leading-6" : "text-[11px] leading-5"}`}>
 			{lines.map((line, i) => (
-				<span key={i} className="block whitespace-pre pr-3">
+				<span key={i} ref={i === mark ? marked : undefined} data-line={i} className={`block whitespace-pre pr-3 ${i === mark ? "bg-amber-300/25" : ""}`}>
 					<span className="mr-3 inline-block w-9 select-none text-right text-muted-foreground/60">{i + start}</span>
-					{line}
+					<span data-code>{line}</span>
 				</span>
 			))}
 		</pre>
 	);
+}
+
+/** The 0-based line and UTF-16 character under a point in a FileView, when it is on a word. */
+function codePosition(x: number, y: number): { line: number; character: number } | null {
+	const doc = document as Document & { caretPositionFromPoint?: (x: number, y: number) => { offsetNode: Node; offset: number } | null };
+	let node: Node | null = null;
+	let offset = 0;
+	if (doc.caretPositionFromPoint) {
+		const p = doc.caretPositionFromPoint(x, y);
+		if (p) [node, offset] = [p.offsetNode, p.offset];
+	} else if (document.caretRangeFromPoint) {
+		const r = document.caretRangeFromPoint(x, y);
+		if (r) [node, offset] = [r.startContainer, r.startOffset];
+	}
+	if (!node || node.nodeType !== Node.TEXT_NODE) return null;
+	const code = node.parentElement?.closest("[data-code]");
+	const row = code?.parentElement;
+	if (!code || !row?.dataset.line) return null;
+	let character = 0;
+	const walk = document.createTreeWalker(code, NodeFilter.SHOW_TEXT);
+	for (let t = walk.nextNode(); t && t !== node; t = walk.nextNode()) character += t.textContent?.length ?? 0;
+	character += offset;
+	const text = code.textContent ?? "";
+	// On a word: the character under the pointer, or the one before it at a word's end.
+	if (!/[\w$]/.test(text[character] ?? "") && !/[\w$]/.test(text[character - 1] ?? "")) return null;
+	return { line: Number(row.dataset.line), character: /[\w$]/.test(text[character] ?? "") ? character : character - 1 };
 }
 
 /** A folder's direct entries among `files`: subfolders and files, each sorted by name. */
@@ -718,11 +748,50 @@ export function SwarmPanel({ folder, name, scan, bridge, session, file: openPath
 		);
 	};
 	/** Opens a file in the Code tab. */
-	const view = (path: string) => {
+	const view = (path: string, line?: number) => {
 		const next = new URLSearchParams(params);
 		next.set("file", path);
 		next.set("mode", "code");
+		if (line) next.set("line", String(line));
+		else next.delete("line");
 		setParams(next);
+	};
+	const markLine = Number(params.get("line")) || null;
+	// Code navigation (solidity-language-server in the app): ⌘/Ctrl-click goes to the definition; resting on a
+	// symbol shows its hover.
+	const [hover, setHover] = useState<{ x: number; y: number; text: string } | null>(null);
+	const hoverTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+	const hoverAt = useRef<string>("");
+	const navigable = (path: string) => path.endsWith(".sol");
+	const goToDefinition = (path: string, e: React.MouseEvent) => {
+		if (!(e.metaKey || e.ctrlKey) || !navigable(path)) return;
+		const pos = codePosition(e.clientX, e.clientY);
+		if (!pos) return;
+		e.preventDefault();
+		setHover(null);
+		void invoke<{ path: string; line: number; character: number }[]>("lsp_definition", { folder, path, ...pos }).then(
+			(defs) => {
+				const d = defs[0];
+				if (d) view(d.path, d.line + 1);
+			},
+			(err) => setError(String(err)),
+		);
+	};
+	const hoverMove = (path: string, e: React.MouseEvent) => {
+		if (!navigable(path)) return;
+		if (hoverTimer.current) clearTimeout(hoverTimer.current);
+		const { clientX: x, clientY: y } = e;
+		hoverTimer.current = setTimeout(() => {
+			const pos = codePosition(x, y);
+			const key = pos ? `${path}:${pos.line}:${pos.character}` : "";
+			if (!pos) return setHover(null);
+			if (key === hoverAt.current) return;
+			hoverAt.current = key;
+			void invoke<string | null>("lsp_hover", { folder, path, ...pos }).then(
+				(text) => setHover(text && hoverAt.current === key ? { x, y, text } : null),
+				() => setHover(null),
+			);
+		}, 450);
 	};
 	const [viewing, setViewing] = useState<string | null>(null);
 	const runRef = useRef<string | null>(null);
@@ -1034,12 +1103,28 @@ export function SwarmPanel({ folder, name, scan, bridge, session, file: openPath
 										<CopyButton text={file.text} label="Copy the file" />
 									</span>
 								</div>
-								<div className="min-h-0 flex-1 overflow-auto">
+								<div
+									className={`min-h-0 flex-1 overflow-auto ${navigable(file.path) ? "[&_[data-code]]:cursor-text" : ""}`}
+									onClick={(e) => goToDefinition(file.path, e)}
+									onMouseMove={(e) => hoverMove(file.path, e)}
+									onMouseLeave={() => {
+										if (hoverTimer.current) clearTimeout(hoverTimer.current);
+										hoverAt.current = "";
+										setHover(null);
+									}}
+									onScroll={() => setHover(null)}
+								>
 									{/\.(md|markdown)$/i.test(file.path) && !mdSource ? (
 										<ChatMarkdown className="mx-auto max-w-3xl px-6 py-6 text-[14px]" image={(src) => { const p = imagePath(src, file.path); return p === null ? src : images[p]; }}>{file.text}</ChatMarkdown>
 									) : (
-										<FileView path={file.path} text={file.text} big />
+										<FileView path={file.path} text={file.text} big mark={markLine ? markLine - 1 : null} />
 									)}
+									{hover ? (
+										<div className="pointer-events-none fixed z-50 max-h-72 max-w-xl overflow-hidden rounded-lg border bg-popover p-2 shadow-pop" style={{ left: Math.min(hover.x + 8, window.innerWidth - 580), top: hover.y + 16 }}>
+											<ChatMarkdown className="text-[12px] [&_pre]:my-0 [&_pre]:p-2">{hover.text}</ChatMarkdown>
+											<p className="mt-1 text-[10px] text-muted-foreground">⌘-click to go to the definition</p>
+										</div>
+									) : null}
 								</div>
 							</>
 						) : (
