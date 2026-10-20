@@ -1192,7 +1192,7 @@ export function SwarmCanvas({ state, fill = false, contain = false, title, actio
 			{title ? <div className="absolute left-3 top-3 flex min-w-0 max-w-[calc(100%-14rem)] items-center gap-2">{title}</div> : null}
 			<div className="absolute right-3 top-3 flex items-center gap-2">
 			{actions}
-			{live && run ? (
+			{live && run && !local ? (
 				<a
 					href={run.url}
 					target="_blank"
@@ -1202,7 +1202,7 @@ export function SwarmCanvas({ state, fill = false, contain = false, title, actio
 					<span className={`size-2 rounded-full ${run.status === "completed" ? "bg-muted-foreground" : "animate-pulse bg-red-500"}`} />
 					{run.status === "completed" ? "Just finished" : "Live"}
 				</a>
-			) : fill ? null : (
+			) : fill || local ? null : (
 				<button
 					type="button"
 					onClick={() => setPlaying((p) => !p)}

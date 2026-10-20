@@ -42,6 +42,7 @@ function load(): { tabs: Tab[]; active: string } {
 export function TabBar() {
 	const location = useLocation();
 	const navigate = useNavigate();
+	const onLocal = location.pathname === "/local";
 	const { toggleSidebar } = useSidebar();
 	const [state, setState] = useState(load);
 	const here = location.pathname + location.search;
@@ -137,10 +138,23 @@ export function TabBar() {
 					<Plus className="size-4" />
 				</button>
 			</div>
-			<button type="button" onClick={() => navigate("/settings")} title="Settings" className="grid size-7 shrink-0 place-items-center rounded-md text-muted-foreground hover:bg-sidebar-accent hover:text-foreground">
+			{onLocal ? null : <button type="button" onClick={() => navigate("/settings")} title="Settings" className="grid size-7 shrink-0 place-items-center rounded-md text-muted-foreground hover:bg-sidebar-accent hover:text-foreground">
+				<Settings className="size-4" />
+			</button>}
+			{/* The bell lives here on every page but a local folder, whose canvas carries it (app updates land in it too). */}
+			{onLocal ? null : <NotificationCenter />}
+		</div>
+	);
+}
+
+/** Settings and the bell, pinned top-right on a local folder's canvas. */
+export function CanvasActions() {
+	const navigate = useNavigate();
+	return (
+		<div className="flex items-center gap-1 rounded-full border bg-background/90 px-1 shadow-sm backdrop-blur">
+			<button type="button" onClick={() => navigate("/settings")} title="Settings" className="grid size-7 place-items-center rounded-full text-muted-foreground hover:bg-muted hover:text-foreground">
 				<Settings className="size-4" />
 			</button>
-			{/* The bell lives here on every page (app updates land in it too); the Swarm page's own copy is hidden. */}
 			<NotificationCenter />
 		</div>
 	);

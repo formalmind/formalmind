@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
+import { CanvasActions } from "./tabs";
 import { useLocation, useSearchParams } from "react-router";
 import { invoke } from "@tauri-apps/api/core";
 import { open } from "@tauri-apps/plugin-dialog";
@@ -113,5 +114,5 @@ export function LocalFolderPage() {
 		invoke<Scan>("folder_scan", { path }).then(setScan, (e) => setError(String(e)));
 	}, [path]);
 	if (error) return <p className="p-6 text-sm text-red-600">{error}</p>;
-	return path ? <SwarmPanel folder={path} name={name(path)} scan={scan} bridge={tauri} session={params.get("run")} /> : null;
+	return path ? <SwarmPanel folder={path} name={name(path)} scan={scan} bridge={tauri} session={params.get("run")} actions={<CanvasActions />} /> : null;
 }

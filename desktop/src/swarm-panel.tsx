@@ -54,7 +54,6 @@ const MODELS = [
 const colorOf = (role: string) => (ROLE_COLORS as Record<string, string>)[role] ?? "hsl(var(--muted-foreground))";
 const store = { get: (k: string) => { try { return localStorage.getItem(k); } catch { return null; } }, set: (k: string, v: string) => { try { localStorage.setItem(k, v); } catch { /* not kept */ } } };
 
-const pill = "inline-flex h-8 items-center rounded-full border bg-background/90 shadow-sm backdrop-blur";
 
 /** A card floating over the canvas; its header toggles it, and opening one closes the others. */
 function Floating({ id, open, onOpen, title, meta, tone, action, children }: { id: string; open: string | null; onOpen: (id: string | null) => void; title: string; meta?: string; tone?: "red"; action?: React.ReactNode; children: React.ReactNode }) {
@@ -80,7 +79,7 @@ function Floating({ id, open, onOpen, title, meta, tone, action, children }: { i
  * A local folder's swarm: the canvas on the left (the board, the contract files, bugs) and the chat on the right (start
  * and steer the swarm, the plan, and what each agent says as it works).
  */
-export function SwarmPanel({ folder, name, scan, bridge, session }: { folder: string; name: string; scan: Scan | null; bridge: Bridge; session?: string | null }) {
+export function SwarmPanel({ folder, name, scan, bridge, session, actions }: { folder: string; name: string; scan: Scan | null; bridge: Bridge; session?: string | null; actions?: React.ReactNode }) {
 	const { invoke, listen, apiBase } = bridge;
 	const [run, setRun] = useState<string | null>(null);
 	const [events, setEvents] = useState<Ev[]>([]);
@@ -231,16 +230,10 @@ export function SwarmPanel({ folder, name, scan, bridge, session }: { folder: st
 					fill
 					local
 					repo={folder}
-					title={
-						<span className={`${pill} min-w-0 gap-2 px-3 text-sm text-muted-foreground`}>
-							<span className={`size-1.5 shrink-0 rounded-full ${run ? "animate-pulse bg-emerald-500" : "bg-muted-foreground/50"}`} />
-							<span className="truncate">
-								{name} · {run ? (working ? `${working.role}${/^\d+$/.test(working.item) ? ` on item ${working.item}` : ""}` : "starting") : "idle"} · ${spent.toFixed(2)}
-							</span>
-						</span>
-					}
+					actions={actions}
+					title={<span className="inline-flex h-8 min-w-0 items-center rounded-full border bg-background/90 px-3 text-sm shadow-sm backdrop-blur"><span className="truncate">{name}</span></span>}
 				/>
-				<div className="pointer-events-none absolute left-3 top-[6.5rem] z-10 flex max-h-[calc(100%-7.5rem)] w-[min(18rem,calc(100%-1.5rem))] flex-col gap-2">
+				<div className="pointer-events-none absolute left-3 top-14 z-10 flex max-h-[calc(100%-4.5rem)] w-[min(18rem,calc(100%-1.5rem))] flex-col gap-2">
 					<Floating id="plan" open={panel} onOpen={setPanel} title="Plan" meta={plan.length ? `${done}/${plan.length}` : ""}>
 						<ul className="space-y-0.5 p-2 text-[13px]">
 							{plan.length === 0 ? <li className="p-2 text-muted-foreground">The planner writes .formal/plan.md on the first run.</li> : null}
