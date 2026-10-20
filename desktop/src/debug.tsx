@@ -546,7 +546,7 @@ export function DebugPage() {
 }
 
 /** A folder's Foundry tests: pick a file, run a test, step through it (also Debug mode of a folder's page). */
-export function DebugView({ folder, file, test: wanted, onPick }: { folder: string; file: string | null; test?: string | null; onPick: (file: string) => void }) {
+export function DebugView({ folder, file, test: wanted, onPick, embedded }: { folder: string; file: string | null; test?: string | null; onPick: (file: string) => void; embedded?: boolean }) {
 	const [scan, setScan] = useState<Scan | null>(null);
 	const [session, setSession] = useState<{ id: number; file: string; tests: TestFn[] } | null>(null);
 	const [opening, setOpening] = useState(false);
@@ -609,12 +609,12 @@ export function DebugView({ folder, file, test: wanted, onPick }: { folder: stri
 		},
 		[session],
 	);
-	// A test named in the URL (`&test=Contract::test`) runs as soon as its file has compiled.
+	// A test named in the URL (`&test=Contract::test`) runs once its file has compiled, and again when it changes.
 	useEffect(() => {
 		const t = session?.tests.find((x) => `${x.name}::${x.test}` === wanted || x.test === wanted);
-		if (t && !run && !running) void start(t);
+		if (t && run?.key !== `${t.contract}::${t.test}` && !running) void start(t);
 		// eslint-disable-next-line react-hooks/exhaustive-deps
-	}, [session]);
+	}, [session, wanted]);
 
 	// Scripts first (what production runs), then tests.
 	const tests = useMemo(() => {
@@ -692,7 +692,8 @@ export function DebugView({ folder, file, test: wanted, onPick }: { folder: stri
 
 	return (
 		<div className="flex h-full min-h-0 flex-1 gap-2 p-2">
-			<aside className="flex w-60 shrink-0 flex-col rounded-2xl border bg-muted/80 p-1">
+			{/* In a folder's Debug mode the sidebar's file tree lists the scripts and tests instead. */}
+			{embedded ? null : <aside className="flex w-60 shrink-0 flex-col rounded-2xl border bg-muted/80 p-1">
 				<div className="flex h-7 shrink-0 items-center gap-2 px-2.5">
 					<FlaskConical className="size-3.5 text-muted-foreground" />
 					<span className="font-mono text-[11px] font-medium uppercase tracking-wider text-muted-foreground">Tests</span>
@@ -703,7 +704,7 @@ export function DebugView({ folder, file, test: wanted, onPick }: { folder: stri
 						<TestTree files={tests} selected={file} tests={session?.file === file ? session.tests : null} opening={opening} running={running} current={run?.key ?? null} onFile={pick} onTest={(t) => void start(t)} />
 					)}
 				</div>
-			</aside>
+			</aside>}
 			<main className="flex min-h-0 min-w-0 flex-1 flex-col">
 				{error ? <p className="mb-2 whitespace-pre-wrap rounded-xl border border-red-500/30 bg-red-50/80 p-3 font-mono text-[11px] text-red-700 dark:bg-red-950/40 dark:text-red-400">{error}</p> : null}
 				{cmp && session ? (
@@ -724,8 +725,9 @@ export function DebugView({ folder, file, test: wanted, onPick }: { folder: stri
 					<div className="grid flex-1 place-items-center">
 						<div className="max-w-sm space-y-2 text-center text-[13px] text-muted-foreground">
 							<Bug className="mx-auto size-6" />
-							<p className="font-medium text-foreground">{running ? "Running the test…" : file ? "Pick a test to debug" : "Pick a test file"}</p>
-							<p>The test runs in an embedded EVM after solc compiles it (no forge). Every opcode is mapped to its line and AST node, and storage is named by the layout. Step with vim keys: {KEYS}.</p>
+							<p className="font-medium text-foreground">{running || opening ? "Compiling and running…" : embedded ? "Pick a script or test in the sidebar" : file ? "Pick a test to debug" : "Pick a test file"}</p>
+							{embedded ? <p>Open the ›  beside a file under script/ or test/ to list its run…() and test…() functions; click one to debug it.</p> : null}
+							<p>It runs in an embedded EVM after solc compiles it (no forge). Every opcode is mapped to its line and AST node, and storage is named by the layout. Step with vim keys: {KEYS}.</p>
 						</div>
 					</div>
 				)}

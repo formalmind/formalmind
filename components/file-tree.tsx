@@ -1,7 +1,19 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { ChevronRight, File, FileCode2, Folder, FolderOpen } from "lucide-react";
+import { ChevronRight, File, FileCode2, Folder, FolderOpen, Loader2, Play } from "lucide-react";
 
 type Node = { name: string; path: string; dir: boolean; children: Node[] };
+
+/** A function a file can run in the debugger: a script's run…() or a test's test…(). */
+export type Runnable = { contract: string; fn: string };
+
+/** Files that list runnable functions under them, and what running one does. */
+export type Runnables = {
+	has: (path: string) => boolean;
+	list: (path: string) => Promise<Runnable[]>;
+	onRun: (path: string, r: Runnable) => void;
+	/** The function being debugged, as `path::Contract::fn`. */
+	current?: string | null;
+};
 
 /** A tree from flat file paths (`src/vault/Vault.sol`): folders first, then files, each by name. */
 function build(paths: string[]): Node[] {
@@ -43,14 +55,34 @@ function readOpen(key: string): Set<string> | null {
  * A project's files in the sidebar. Folders fold (remembered per project); a file opens with `onOpen`. Arrow keys
  * move between rows, → / ← open and close a folder, Enter opens a file.
  */
-export function FileTree({ paths, selected, onOpen, storageKey, truncated }: {
+export function FileTree({ paths, selected, onOpen, storageKey, truncated, runnables }: {
 	paths: string[];
 	selected?: string | null;
 	onOpen: (path: string) => void;
 	/** Where open folders are remembered. */
 	storageKey: string;
 	truncated?: boolean;
+	/** Scripts and tests: a chevron lists their functions; clicking one debugs it. */
+	runnables?: Runnables;
 }) {
+	// Files whose functions are listed, and the functions read from them.
+	const [fnsOpen, setFnsOpen] = useState<Set<string>>(new Set());
+	const [fns, setFns] = useState<Record<string, Runnable[] | "loading">>({});
+	const toggleFns = (path: string) => {
+		const next = new Set(fnsOpen);
+		if (next.has(path)) next.delete(path);
+		else {
+			next.add(path);
+			if (!fns[path] && runnables) {
+				setFns((f) => ({ ...f, [path]: "loading" }));
+				void runnables.list(path).then(
+					(list) => setFns((f) => ({ ...f, [path]: list })),
+					() => setFns((f) => ({ ...f, [path]: [] })),
+				);
+			}
+		}
+		setFnsOpen(next);
+	};
 	const tree = useMemo(() => build(paths), [paths]);
 	const [open, setOpen] = useState<Set<string>>(() => {
 		const saved = readOpen(storageKey);
@@ -116,6 +148,9 @@ export function FileTree({ paths, selected, onOpen, storageKey, truncated }: {
 			{rows.map(({ node, depth }, i) => {
 				const isOpen = node.dir && open.has(node.path);
 				const active = !node.dir && node.path === selected;
+				const runs = !node.dir && runnables?.has(node.path);
+				const fnOpen = runs && fnsOpen.has(node.path);
+				const listed = fns[node.path];
 				return (
 					<li key={node.path} role="treeitem" aria-expanded={node.dir ? isOpen : undefined} aria-selected={active}>
 						<button
@@ -134,12 +169,59 @@ export function FileTree({ paths, selected, onOpen, storageKey, truncated }: {
 								</>
 							) : (
 								<>
-									<span className="w-3 shrink-0" />
+									{runs ? (
+										<span
+											role="button"
+											tabIndex={-1}
+											aria-label={fnOpen ? "Hide its functions" : "Show its functions"}
+											onClick={(e) => {
+												e.stopPropagation();
+												toggleFns(node.path);
+											}}
+											className="-m-1 grid shrink-0 place-items-center rounded p-1 hover:bg-background/60"
+										>
+											<ChevronRight className={`size-3 text-muted-foreground transition-transform ${fnOpen ? "rotate-90" : ""}`} />
+										</span>
+									) : (
+										<span className="w-3 shrink-0" />
+									)}
 									{CODE.test(node.name) ? <FileCode2 className="size-3.5 shrink-0 text-muted-foreground" /> : <File className="size-3.5 shrink-0 text-muted-foreground" />}
 								</>
 							)}
 							<span className="truncate">{node.name}</span>
 						</button>
+						{fnOpen ? (
+							<ul className="flex flex-col">
+								{listed === "loading" ? (
+									<li style={{ paddingLeft: 32 + depth * 12 }} className="flex h-6 items-center gap-1.5 text-[12px] text-muted-foreground">
+										<Loader2 className="size-3 animate-spin" />
+										Reading…
+									</li>
+								) : listed?.length ? (
+									listed.map((r) => {
+										const key = `${node.path}::${r.contract}::${r.fn}`;
+										return (
+											<li key={key}>
+												<button
+													type="button"
+													onClick={() => runnables?.onRun(node.path, r)}
+													title={`Debug ${r.contract}.${r.fn}()`}
+													style={{ paddingLeft: 32 + depth * 12 }}
+													className={`flex h-6 w-full items-center gap-1.5 rounded-md pr-2 text-left font-mono text-[12px] outline-none hover:bg-sidebar-accent focus-visible:ring-2 focus-visible:ring-sidebar-ring ${runnables?.current === key ? "bg-amber-500/15 text-sidebar-foreground" : "text-sidebar-foreground/80"}`}
+												>
+													<Play className="size-3 shrink-0 text-emerald-600" />
+													<span className="truncate">{r.fn}</span>
+												</button>
+											</li>
+										);
+									})
+								) : (
+									<li style={{ paddingLeft: 32 + depth * 12 }} className="flex h-6 items-center text-[12px] text-muted-foreground">
+										{node.path.endsWith(".s.sol") ? "No run…() without arguments" : "No test…() without arguments"}
+									</li>
+								)}
+							</ul>
+						) : null}
 					</li>
 				);
 			})}

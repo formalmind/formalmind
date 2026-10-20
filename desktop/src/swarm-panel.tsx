@@ -699,7 +699,7 @@ function AuditView({ folder, scan, invoke, preferred, onOpenFile }: { folder: st
  * `debug` (the desktop app) renders Debug mode — the folder's Foundry tests in the debugger — for a test file;
  * without it there is no Debug mode.
  */
-export function SwarmPanel({ folder, name, scan, bridge, session, file: openPath, actions, debug }: { folder: string; name: string; scan: Scan | null; bridge: Bridge; session?: string | null; file?: string | null; actions?: React.ReactNode; debug?: (file: string | null, onPick: (file: string) => void) => React.ReactNode }) {
+export function SwarmPanel({ folder, name, scan, bridge, session, file: openPath, actions, debug }: { folder: string; name: string; scan: Scan | null; bridge: Bridge; session?: string | null; file?: string | null; actions?: React.ReactNode; debug?: (file: string | null, test: string | null, onPick: (file: string) => void) => React.ReactNode }) {
 	const { invoke, listen, apiBase } = bridge;
 	const [run, setRun] = useState<string | null>(null);
 	const [events, setEvents] = useState<Ev[]>([]);
@@ -1332,7 +1332,7 @@ export function SwarmPanel({ folder, name, scan, bridge, session, file: openPath
 				) : null}
 				{mode === "debug" && debug ? (
 					<div className="pointer-events-auto absolute inset-x-0 bottom-0 top-[var(--fm-top)] z-10 flex min-h-0 bg-background">
-						{debug(openPath && /\.[ts]\.sol$/.test(openPath) ? openPath : null, debugFile)}
+						{debug(openPath && /\.[ts]\.sol$/.test(openPath) ? openPath : null, params.get("test"), debugFile)}
 					</div>
 				) : null}
 				{mode === "roadmap" ? (

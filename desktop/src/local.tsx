@@ -6,7 +6,7 @@ import { Plus } from "lucide-react";
 import { listen } from "@tauri-apps/api/event";
 import { apiBase } from "./api";
 import { LocalHeading, TreeFolder } from "@/components/session-folder";
-import { FileTree } from "@/components/file-tree";
+import { FileTree, type Runnable } from "@/components/file-tree";
 import { SwarmPanel, type Bridge } from "./swarm-panel";
 import { DebugView } from "./debug";
 
@@ -53,6 +53,23 @@ function useTree(folder: string, on: boolean) {
 	return tree;
 }
 
+/**
+ * The functions a script or test file can run as it is: `run…()` or `test…()` without arguments, with the contract
+ * each sits in (read from the text; the debugger compiles when one runs).
+ */
+function runnablesIn(text: string, prefix: "run" | "test"): Runnable[] {
+	const clean = text.replace(/\/\*[\s\S]*?\*\//g, "").replace(/\/\/[^\n]*/g, "");
+	const out: Runnable[] = [];
+	// Abstract contracts can't be deployed to run; their functions run through the contracts that inherit them.
+	let contract = "";
+	const re = new RegExp(`\\b(abstract\\s+)?contract\\s+(\\w+)|\\bfunction\\s+(${prefix}\\w*)\\s*\\(\\s*\\)`, "g");
+	for (const m of clean.matchAll(re)) {
+		if (m[2]) contract = m[1] ? "" : m[2];
+		else if (m[3] && contract) out.push({ contract, fn: m[3] });
+	}
+	return out;
+}
+
 /** A folder in the sidebar: selected, its file tree; a file opens in the canvas's file card. */
 function FolderItem({ path, current, file }: { path: string; current: boolean; file: string | null }) {
 	const tree = useTree(path, current);
@@ -72,6 +89,20 @@ function FolderItem({ path, current, file }: { path: string; current: boolean; f
 						next.delete("line");
 						next.set("mode", "code");
 						navigate(`/local?${next.toString()}`);
+					}}
+					runnables={{
+						has: (f) => /\.[ts]\.sol$/.test(f),
+						list: (f) => invoke<string>("folder_read", { folder: path, path: f }).then((text) => runnablesIn(text, f.endsWith(".s.sol") ? "run" : "test")),
+						onRun: (f, r) => {
+							const next = new URLSearchParams(params);
+							next.set("path", path);
+							next.set("file", f);
+							next.set("test", `${r.contract}::${r.fn}`);
+							next.set("mode", "debug");
+							next.delete("line");
+							navigate(`/local?${next.toString()}`);
+						},
+						current: params.get("mode") === "debug" && file && params.get("test") ? `${file}::${params.get("test")}` : null,
 					}}
 				/>
 			) : null}
@@ -118,5 +149,5 @@ export function LocalFolderPage() {
 		invoke<Scan>("folder_scan", { path }).then(setScan, (e) => setError(String(e)));
 	}, [path]);
 	if (error) return <p className="p-6 text-sm text-red-600">{error}</p>;
-	return path ? <SwarmPanel folder={path} name={name(path)} scan={scan} bridge={tauri} session={params.get("run")} file={params.get("file")} debug={(file, onPick) => <DebugView folder={path} file={file} onPick={onPick} />} /> : null;
+	return path ? <SwarmPanel folder={path} name={name(path)} scan={scan} bridge={tauri} session={params.get("run")} file={params.get("file")} debug={(file, test, onPick) => <DebugView folder={path} file={file} test={test} onPick={onPick} embedded />} /> : null;
 }
