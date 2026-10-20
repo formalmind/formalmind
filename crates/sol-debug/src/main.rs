@@ -62,6 +62,9 @@ struct Args {
     /// Open the terminal debugger on the run instead of printing the trace.
     #[arg(long)]
     tui: bool,
+    /// Colour theme for --tui (an opaline builtin: dracula, catppuccin-mocha, …; T cycles them live).
+    #[arg(long)]
+    theme: Option<String>,
     /// One line per change of Solidity line instead of one per opcode.
     #[arg(long)]
     lines: bool,
@@ -75,6 +78,12 @@ struct Args {
 
 fn main() -> Result<()> {
     let a = Args::parse();
+    if let Some(t) = &a.theme {
+        if sol_debug::theme::Theme::load(t).is_none() {
+            anyhow::bail!("no theme {t}; themes: {}", sol_debug::theme::Theme::names().join(" "));
+        }
+        std::env::set_var("SOL_DEBUG_THEME", t);
+    }
     let mut s = Session::compile(&a.root, &a.entry)?;
     let ci = s.artifact(&a.contract)?;
 

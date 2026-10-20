@@ -39,6 +39,11 @@ impl SourceFile {
         self.line_starts.partition_point(|&s| s <= offset)
     }
 
+    /// Byte offset where a 1-based line starts.
+    pub fn line_start(&self, line: usize) -> usize {
+        self.line_starts.get(line.wrapping_sub(1)).copied().unwrap_or(self.text.len())
+    }
+
     /// The text of a 1-based line, without its newline.
     pub fn line_text(&self, line: usize) -> &str {
         let start = self.line_starts.get(line.wrapping_sub(1)).copied().unwrap_or(self.text.len());

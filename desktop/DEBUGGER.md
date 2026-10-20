@@ -356,6 +356,11 @@ vim keys:
 | `:call 2` | Jump to a frame |
 | `:q` | Quit |
 
+Source is highlighted with tree-sitter's Solidity grammar (`highlight.rs`, the grammar's own `highlights.scm`), and
+the current AST node is marked on top of the syntax colours. Colours come from opaline's builtin themes, the same
+engine and themes as the trenches TUI (`theme.rs`): `--theme dracula`, `$SOL_DEBUG_THEME`, `T` to cycle live, or
+`:theme <name>`.
+
 The engine (`Session`, `Trace`, `CodeMap`, `Layout`) has no UI code, so the TUI is a separate binary target on the
 same library.
 

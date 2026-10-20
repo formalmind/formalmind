@@ -4,12 +4,14 @@
 
 pub mod cheats;
 pub mod diff;
+pub mod highlight;
 pub mod layout;
 pub mod nav;
 pub mod session;
 pub mod solc;
 pub mod source;
 pub mod srcmap;
+pub mod theme;
 pub mod trace;
 pub mod tui;
 

@@ -6,14 +6,19 @@
 //!   g / G      first / last step               /text   search source lines (then ; and , for next / previous)
 //!   :b 58  :b File.sol:58   line breakpoint    :w name  break on storage writes naming it
 //!   :pc 1621   jump to that pc in this frame   :step 1200  jump to a step     :q  quit
+//!   T / :theme dracula   next theme / a theme by name (opaline's builtins; --theme or $SOL_DEBUG_THEME at start)
 
+use crate::highlight::Solidity;
 use crate::nav::{Dir, Navigator};
+use crate::theme::Theme;
+use std::cell::RefCell;
+use std::collections::HashMap;
 use crate::session::{short_word, Run, Session};
 use crate::srcmap::Jump;
 use crate::trace::StorageAccess;
 use ratatui::crossterm::event::{self, Event, KeyCode, KeyEventKind, KeyModifiers};
 use ratatui::layout::{Constraint, Layout, Rect};
-use ratatui::style::{Color, Modifier, Style};
+use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Paragraph};
 use ratatui::Frame;
@@ -29,6 +34,10 @@ pub struct App<'a> {
     pub input: Option<String>,
     last_search: Option<String>,
     status: String,
+    pub theme: Theme,
+    highlighter: Option<Solidity>,
+    /// Highlight classes per source file, computed the first time a file is shown.
+    classes: RefCell<HashMap<i64, Vec<Option<u8>>>>,
 }
 
 impl<'a> App<'a> {
@@ -41,7 +50,31 @@ impl<'a> App<'a> {
         };
         let cur = (0..nav.len()).find(|&i| in_body(i)).or_else(|| (0..nav.len()).find(|&i| nav.locs[i].is_some())).unwrap_or(0);
         let verdict = if run.success { "ok".to_string() } else { format!("reverted: {}", run.revert_reason().unwrap_or_default()) };
-        App { s, run, title, nav, cur, input: None, last_search: None, status: verdict }
+        App {
+            s,
+            run,
+            title,
+            nav,
+            cur,
+            input: None,
+            last_search: None,
+            status: verdict,
+            theme: Theme::initial(None),
+            highlighter: Solidity::new(),
+            classes: RefCell::new(HashMap::new()),
+        }
+    }
+
+    pub fn with_theme(mut self, theme: Theme) -> Self {
+        self.theme = theme;
+        self
+    }
+
+    fn block(&self, title: impl Into<String>) -> Block<'static> {
+        Block::bordered()
+            .border_style(Style::new().fg(self.theme.border))
+            .title(Span::styled(title.into(), Style::new().fg(self.theme.accent).add_modifier(Modifier::BOLD)))
+            .style(Style::new().bg(self.theme.bg).fg(self.theme.text))
     }
 
     /// Moves to a step and presses keys, as the UI would (for tests and scripted views).
@@ -140,6 +173,11 @@ impl<'a> App<'a> {
                 self.input = Some("/".into());
                 None
             }
+            KeyCode::Char('T') => {
+                self.theme = self.theme.cycle(1);
+                self.status = format!("theme {}", self.theme.name);
+                return false;
+            }
             _ => None,
         };
         match to {
@@ -184,6 +222,13 @@ impl<'a> App<'a> {
                     _ => self.status = "usage: :b 58  or  :b File.sol:58".into(),
                 }
             }
+            "theme" => match Theme::load(arg) {
+                Some(t) => {
+                    self.theme = t;
+                    self.status = format!("theme {arg}");
+                }
+                None => self.status = format!("themes: {}", Theme::names().join(" ")),
+            },
             "w" | "watch" if !arg.is_empty() => {
                 self.nav.watches.push(arg.to_string());
                 self.status = format!("watching writes to {arg}; c continues to the next one");
@@ -212,6 +257,7 @@ impl<'a> App<'a> {
 
     /// Draws into part of the screen (the split view gives each run half). An unfocused view dims its header.
     pub fn draw_in(&self, f: &mut Frame, area: Rect, focused: bool) {
+        f.render_widget(Block::new().style(Style::new().bg(self.theme.bg).fg(self.theme.text)), area);
         let [header, body, footer] = Layout::vertical([Constraint::Length(2), Constraint::Min(6), Constraint::Length(if focused { 2 } else { 0 })]).areas(area);
         let [top, bottom] = Layout::vertical([Constraint::Percentage(55), Constraint::Percentage(45)]).areas(body);
         let [source, calls] = Layout::horizontal([Constraint::Percentage(62), Constraint::Percentage(38)]).areas(top);
@@ -240,45 +286,75 @@ impl<'a> App<'a> {
         let line1 = Line::from(vec![
             Span::styled(
                 format!(" {} ", self.title),
-                if focused { Style::new().add_modifier(Modifier::BOLD | Modifier::REVERSED) } else { Style::new().fg(Color::DarkGray).add_modifier(Modifier::REVERSED) },
+                if focused {
+                    Style::new().fg(self.theme.bg).bg(self.theme.accent).add_modifier(Modifier::BOLD)
+                } else {
+                    Style::new().fg(self.theme.bg).bg(self.theme.dim)
+                },
             ),
-            Span::raw(format!("  step {}/{}  depth {}  pc {}  {op}  gas {}", self.cur, self.nav.len() - 1, st.depth, st.pc, st.gas_left)),
+            Span::styled(format!("  step {}/{}  depth {}  pc {}  {op}  gas {}", self.cur, self.nav.len() - 1, st.depth, st.pc, st.gas_left), Style::new().fg(self.theme.muted)),
         ]);
-        let line2 = Line::from(vec![Span::styled(format!(" {place}"), Style::new().fg(Color::Cyan)), Span::raw(format!("   {}", loc.as_ref().map(|l| l.node_type.as_str()).unwrap_or("")))]);
+        let line2 = Line::from(vec![
+            Span::styled(format!(" {place}"), Style::new().fg(self.theme.accent2).add_modifier(Modifier::BOLD)),
+            Span::styled(format!("   {}", loc.as_ref().map(|l| l.node_type.as_str()).unwrap_or("")), Style::new().fg(self.theme.muted)),
+        ]);
         f.render_widget(Paragraph::new(vec![line1, line2]), area);
     }
 
     fn draw_source(&self, f: &mut Frame, area: Rect) {
         let loc = self.nav.locs[self.cur].as_ref().or_else(|| (0..self.cur).rev().find_map(|i| self.nav.locs[i].as_ref()));
         let Some(loc) = loc else {
-            f.render_widget(Paragraph::new("no source for this step").block(Block::bordered().title(" source ")), area);
+            f.render_widget(Paragraph::new("no source for this step").block(self.block(" source ")), area);
             return;
         };
         let file = &self.s.sources.files[&loc.entry.file];
+        let mut cache = self.classes.borrow_mut();
+        let classes = cache.entry(file.id).or_insert_with(|| match &self.highlighter {
+            Some(h) if file.name.ends_with(".sol") => h.classes(&file.text),
+            _ => vec![None; file.text.len()],
+        });
         let height = area.height.saturating_sub(2) as usize;
         let first = loc.line.saturating_sub(height / 2).max(1);
         let exact = self.nav.locs[self.cur].is_some();
         let (start, end) = (loc.entry.start as usize, (loc.entry.start + loc.entry.length) as usize);
+        let t = &self.theme;
         let mut lines = Vec::new();
         for n in first..(first + height).min(file.line_count() + 1) {
             let text = file.line_text(n);
+            let offset = file.line_start(n);
+            let here = n == loc.line;
             let bp = if self.nav.breakpoints.contains(&(file.id, n)) { "●" } else { " " };
-            let gutter = Span::styled(format!("{bp}{n:>5} "), Style::new().fg(if n == loc.line { Color::Yellow } else { Color::DarkGray }));
-            if n != loc.line {
-                lines.push(Line::from(vec![gutter, Span::raw(text.to_string())]));
-                continue;
+            let gutter_style = if here { Style::new().fg(t.warn).add_modifier(Modifier::BOLD) } else { Style::new().fg(t.dim) };
+            let mut spans = vec![Span::styled(format!("{bp}{n:>5} "), gutter_style)];
+            // Runs of bytes that share a colour and a background: syntax from tree-sitter, the current line and the
+            // current AST node's src on top.
+            let style_at = |i: usize| {
+                let mut st = Style::new().fg(t.code_color(classes.get(i).copied().flatten()));
+                if here {
+                    st = st.bg(t.line_bg);
+                    if i >= start && i < end {
+                        st = if exact { st.bg(t.node_bg).add_modifier(Modifier::BOLD) } else { st.bg(t.node_bg) };
+                    }
+                }
+                st
+            };
+            let mut run_start = 0;
+            let bytes = text.len();
+            for i in 1..=bytes {
+                let boundary = i == bytes || (text.is_char_boundary(i) && style_at(offset + i) != style_at(offset + run_start));
+                if boundary && text.is_char_boundary(i) {
+                    spans.push(Span::styled(text[run_start..i].to_string(), style_at(offset + run_start)));
+                    run_start = i;
+                }
             }
-            // Highlight the part of the line that is the current node's src.
-            let line_start = (0..start).rev().find(|&i| file.text.as_bytes().get(i) == Some(&b'\n')).map(|i| i + 1).unwrap_or(0);
-            let a = start.saturating_sub(line_start).min(text.len());
-            let b = end.saturating_sub(line_start).min(text.len()).max(a);
-            let (pre, mid, post) = (text.get(..a).unwrap_or(""), text.get(a..b).unwrap_or(""), text.get(b..).unwrap_or(""));
-            let base = Style::new().bg(Color::Rgb(40, 40, 60));
-            let node = if exact { base.fg(Color::Yellow).add_modifier(Modifier::BOLD) } else { base.fg(Color::Gray) };
-            lines.push(Line::from(vec![gutter, Span::styled(pre.to_string(), base), Span::styled(mid.to_string(), node), Span::styled(post.to_string(), base)]));
+            if here {
+                // Fill the rest of the current line.
+                spans.push(Span::styled(" ".repeat(area.width as usize), Style::new().bg(t.line_bg)));
+            }
+            lines.push(Line::from(spans));
         }
         let title = format!(" {} ", file.name);
-        f.render_widget(Paragraph::new(lines).block(Block::bordered().title(title)), area);
+        f.render_widget(Paragraph::new(lines).block(self.block(title)), area);
     }
 
     fn draw_calls(&self, f: &mut Frame, area: Rect) {
@@ -297,11 +373,11 @@ impl<'a> App<'a> {
         for (i, fr) in frames.iter().enumerate() {
             let is_open = open.contains(&i);
             let style = if i == cur_frame {
-                Style::new().fg(Color::Yellow).add_modifier(Modifier::BOLD)
+                Style::new().fg(self.theme.warn).add_modifier(Modifier::BOLD)
             } else if is_open {
-                Style::new().fg(Color::White)
+                Style::new().fg(self.theme.text)
             } else {
-                Style::new().fg(Color::DarkGray)
+                Style::new().fg(self.theme.dim)
             };
             let who = if fr.kind == "DELEGATECALL" {
                 format!("{} ⇒ {}", self.s.name_of(fr.target), self.s.name_of(fr.code_address))
@@ -319,7 +395,7 @@ impl<'a> App<'a> {
         let height = area.height.saturating_sub(2) as usize;
         let skip = cur_frame.saturating_sub(height / 2).min(lines.len().saturating_sub(height));
         let lines: Vec<Line> = lines.into_iter().skip(skip).collect();
-        f.render_widget(Paragraph::new(lines).block(Block::bordered().title(" calls ")), area);
+        f.render_widget(Paragraph::new(lines).block(self.block(" calls ")), area);
     }
 
     fn draw_ops(&self, f: &mut Frame, area: Rect) {
@@ -346,13 +422,21 @@ impl<'a> App<'a> {
                         _ => "",
                     };
                     let text = shorten(&format!("{pc:>5} {name}{imm}{jump}"), area.width.saturating_sub(3) as usize);
-                    let style = if pc == st.pc { Style::new().fg(Color::Black).bg(Color::Yellow) } else { Style::new() };
+                    let style = if pc == st.pc {
+                        Style::new().fg(self.theme.bg).bg(self.theme.warn).add_modifier(Modifier::BOLD)
+                    } else if matches!(op, 0x55 | 0x54) {
+                        Style::new().fg(self.theme.accent2)
+                    } else if matches!(op, 0xf0..=0xff) {
+                        Style::new().fg(self.theme.accent)
+                    } else {
+                        Style::new().fg(self.theme.text)
+                    };
                     lines.push(Line::styled(text, style));
                 }
             }
             None => lines.push(Line::raw("code not from this compile")),
         }
-        f.render_widget(Paragraph::new(lines).block(Block::bordered().title(" opcodes ")), area);
+        f.render_widget(Paragraph::new(lines).block(self.block(" opcodes ")), area);
     }
 
     fn draw_stack(&self, f: &mut Frame, area: Rect) {
@@ -363,13 +447,13 @@ impl<'a> App<'a> {
             .rev()
             .enumerate()
             .take(area.height.saturating_sub(2) as usize)
-            .map(|(i, v)| Line::from(vec![Span::styled(format!("{i:>2} "), Style::new().fg(Color::DarkGray)), Span::raw(short_word(*v))]))
+            .map(|(i, v)| Line::from(vec![Span::styled(format!("{i:>2} "), Style::new().fg(self.theme.dim)), Span::styled(short_word(*v), Style::new().fg(self.theme.code_color(None)))]))
             .collect();
         let title = match st.result {
             Some(r) => format!(" stack · result {} ", short_word(r)),
             None => " stack ".into(),
         };
-        f.render_widget(Paragraph::new(lines).block(Block::bordered().title(title)), area);
+        f.render_widget(Paragraph::new(lines).block(self.block(title)), area);
     }
 
     fn draw_memory(&self, f: &mut Frame, area: Rect) {
@@ -398,17 +482,17 @@ impl<'a> App<'a> {
         for (row, chunk) in mem.chunks(32).enumerate() {
             let off = row * 32;
             let hex = revm::primitives::hex::encode(chunk);
-            let style = if fresh.contains(&off) { Style::new().fg(Color::Yellow) } else { Style::new() };
+            let style = if fresh.contains(&off) { Style::new().fg(self.theme.warn) } else { Style::new().fg(self.theme.muted) };
             let label = if off == 0x40 { "fp" } else { "  " };
             lines.push(Line::from(vec![
-                Span::styled(format!("{off:>4x}{label} "), Style::new().fg(Color::DarkGray)),
+                Span::styled(format!("{off:>4x}{label} "), Style::new().fg(self.theme.dim)),
                 Span::styled(shorten_mid(&hex, area.width.saturating_sub(10) as usize), style),
             ]));
         }
         let height = area.height.saturating_sub(2) as usize;
         let skip = lines.len().saturating_sub(height).min(fresh.first().map(|o| o / 32).unwrap_or(0).saturating_sub(height / 2));
         let lines: Vec<Line> = lines.into_iter().skip(skip).collect();
-        f.render_widget(Paragraph::new(lines).block(Block::bordered().title(format!(" memory · {} bytes ", st.memory_size))), area);
+        f.render_widget(Paragraph::new(lines).block(self.block(format!(" memory · {} bytes ", st.memory_size))), area);
     }
 
     fn draw_storage(&self, f: &mut Frame, area: Rect) {
@@ -419,8 +503,8 @@ impl<'a> App<'a> {
         for i in (0..=self.cur).rev() {
             let (Some(text), Some(access)) = (&self.nav.storage[i], &steps[i].storage) else { continue };
             let color = match access {
-                StorageAccess::Write { .. } => Color::Magenta,
-                StorageAccess::Read { .. } => Color::Gray,
+                StorageAccess::Write { .. } => self.theme.accent2,
+                StorageAccess::Read { .. } => self.theme.muted,
             };
             let style = if i == self.cur { Style::new().fg(color).add_modifier(Modifier::BOLD | Modifier::REVERSED) } else { Style::new().fg(color) };
             let who = self.s.name_of(steps[i].address);
@@ -429,16 +513,17 @@ impl<'a> App<'a> {
                 break;
             }
         }
-        f.render_widget(Paragraph::new(lines).block(Block::bordered().title(" storage (newest first) ")), area);
+        f.render_widget(Paragraph::new(lines).block(self.block(" storage (newest first) ")), area);
     }
 
     fn draw_footer(&self, f: &mut Frame, area: Rect) {
-        let help = "Tab other run (split)  = divergence  j/k op  n/N line  s/S into  f/F out  c/C continue  g/G ends  /search ;,  :b line  :w var  :pc n  :q";
+        let help = "Tab other run (split)  = divergence  T theme  j/k op  n/N line  s/S into  f/F out  c/C continue  g/G ends  /search ;,  :b line  :w var  :pc n  :q";
         let second = match &self.input {
-            Some(i) => Line::styled(i.clone(), Style::new().fg(Color::White).add_modifier(Modifier::BOLD)),
-            None => Line::styled(self.status.clone(), Style::new().fg(Color::Cyan)),
+            Some(i) => Line::styled(i.clone(), Style::new().fg(self.theme.text).add_modifier(Modifier::BOLD)),
+            None => Line::styled(self.status.clone(), Style::new().fg(self.theme.accent)),
         };
-        f.render_widget(Paragraph::new(vec![Line::styled(help, Style::new().fg(Color::DarkGray)), second]).block(Block::new().borders(Borders::NONE)), area);
+        let style = Style::new().bg(self.theme.bg);
+        f.render_widget(Paragraph::new(vec![Line::styled(help, Style::new().fg(self.theme.dim)), second]).block(Block::new().borders(Borders::NONE).style(style)), area);
     }
 }
 
@@ -540,6 +625,10 @@ pub fn split(sa: &Session, ra: &Run, la: &str, sb: &Session, rb: &Run, lb: &str,
                 let typing = if focus_b { b.input.is_some() } else { a.input.is_some() };
                 match k.code {
                     KeyCode::Tab if !typing => focus_b = !focus_b,
+                    KeyCode::Char('T') if !typing => {
+                        a.theme = a.theme.cycle(1);
+                        b.theme = a.theme.clone();
+                    }
                     KeyCode::Char('=') if !typing => {
                         if let Some(i) = home.0 {
                             a.cur = i;
@@ -562,4 +651,29 @@ pub fn split(sa: &Session, ra: &Run, la: &str, sb: &Session, rb: &Run, lb: &str,
     };
     ratatui::restore();
     result
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The source pane colours Solidity by the theme's code tokens.
+    #[test]
+    fn source_pane_is_syntax_highlighted() {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/diff_fixture/a");
+        let Ok(mut s) = Session::compile(&root, "test/Counter.t.sol") else { return };
+        let run = s.run_test("CounterTest", "test_bumpTwice", false).unwrap();
+        let theme = Theme::load("dracula").unwrap();
+        let app = App::new(&s, &run.test, "t".into()).with_theme(theme.clone());
+        let mut term = ratatui::Terminal::new(ratatui::backend::TestBackend::new(160, 48)).unwrap();
+        term.draw(|f| app.draw(f)).unwrap();
+        let buf = term.backend().buffer().clone();
+        // Find a `function` keyword on screen and check its colour.
+        let keyword = theme.code[crate::highlight::CLASSES.iter().position(|c| *c == "keyword").unwrap()];
+        let found = (0..48).any(|y| {
+            let row: String = (0..160).map(|x| buf[(x, y)].symbol().to_string()).collect();
+            row.find("function").is_some_and(|x| buf[(row[..x].chars().count() as u16, y)].fg == keyword)
+        });
+        assert!(found, "no `function` keyword drawn in the theme's keyword colour");
+    }
 }
