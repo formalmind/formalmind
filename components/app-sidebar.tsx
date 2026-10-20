@@ -1,7 +1,7 @@
 "use client"
 
 import { useEffect, useState } from "react";
-import { Link, useLocation } from "react-router";
+import { Link, useLocation, useNavigate } from "react-router";
 import { BookOpen, Folder, FolderOpen, ChevronRight, GanttChart, Network, Plus } from "lucide-react"
 import {
 	Sidebar,
@@ -70,6 +70,8 @@ function useOpenFolders() {
 function ProjectFolder({ project, open, onOpenChange, pathname, collapsed, onExpand }: { project: Project; open: boolean; onOpenChange: (open: boolean) => void; pathname: string; collapsed: boolean; onExpand: () => void }) {
 	const chats = useProjectChats(project.repo)
 	const name = project.repo.split("/")[1] ?? project.repo
+	const navigate = useNavigate()
+	const home = projectPath(project.repo)
 
 	return (
 		<Collapsible open={open} onOpenChange={onOpenChange} asChild>
@@ -81,9 +83,14 @@ function ProjectFolder({ project, open, onOpenChange, pathname, collapsed, onExp
 							if (collapsed) {
 								e.preventDefault()
 								onExpand()
+							} else if (pathname !== home) {
+								// From elsewhere, a click opens the project's map; on it, the click folds the folder.
+								e.preventDefault()
+								onOpenChange(true)
+								navigate(home)
 							}
 						}}
-						className="flex h-8 min-w-0 flex-1 items-center gap-2 px-2 text-left text-sm font-normal text-sidebar-foreground/90 outline-none focus-visible:ring-2 focus-visible:ring-sidebar-ring"
+						className={`flex h-8 min-w-0 flex-1 items-center gap-2 px-2 text-left text-sm font-normal outline-none ${pathname === home ? "font-medium text-sidebar-foreground" : "text-sidebar-foreground/90"} focus-visible:ring-2 focus-visible:ring-sidebar-ring`}
 						title={project.repo}
 					>
 						{/* Closed and open folders cross-fade; hovering lifts the lid a little. */}

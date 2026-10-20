@@ -26,7 +26,22 @@ function minutesAgo(iso: string) {
 	return hours < 24 ? `${hours} h ago` : `${Math.round(hours / 24)} d ago`;
 }
 
-export function SwarmWorkspace({ repo }: { repo: string }) {
+/** The board narrowed to one project: its card in `projects`, and the items, merges and agents in its proofs repo. */
+function onlyProject(state: SwarmState, repo: string): SwarmState {
+	const project = state.projects.find((p) => p.repo === repo);
+	const proofs = project?.proofsRepo?.toLowerCase();
+	const mine = (r: string) => Boolean(proofs) && r.toLowerCase() === proofs;
+	return {
+		...state,
+		projects: project ? [project] : [],
+		work: state.work.filter((i) => mine(i.repo)),
+		merged: state.merged.filter((i) => mine(i.repo)),
+		active: state.active.filter((a) => mine(a.repo)),
+	};
+}
+
+/** The swarm's board; with `only` (a project's repository), just that project's agents and work. */
+export function SwarmWorkspace({ repo, only }: { repo: string; only?: string }) {
 	// The chat open beside the canvas: an agent (a click on its name) or the whole swarm ("Ask the swarm").
 	const [talkTo, setTalkTo] = useState<SwarmRole | "swarm" | null>(null);
 	// What was typed into the canvas's composer, handed to the swarm chat in the panel.
@@ -122,7 +137,7 @@ export function SwarmWorkspace({ repo }: { repo: string }) {
 		<div className="relative flex min-h-0 flex-1">
 			<div className="relative flex min-w-0 flex-1 flex-col">
 			<SwarmCanvas
-				state={state}
+				state={state && only ? onlyProject(state, only) : state}
 				repo={repo}
 				fill
 				onTalk={setTalkTo}

@@ -5,6 +5,7 @@ import { Link, Navigate, useNavigate, useParams } from "react-router";
 import type { UIMessage } from "ai";
 import { Loader2 } from "lucide-react";
 import { SwarmChat } from "@/components/swarm/swarm-chat";
+import { SwarmWorkspace } from "@/components/swarm/swarm-workspace";
 import { ChatComposer } from "@/components/chat-composer";
 import { ProjectPicker } from "@/components/projects/project-picker";
 import { useChatWithInterruptions } from "@/hooks/useChatWithInterruptions";
@@ -68,9 +69,16 @@ function Unknown() {
 }
 
 /** A project's own page is its roadmap; the swarm is one board across every project, on the home page. */
+/** A project's home: the swarm's map, narrowed to this project's agents and work. */
 export function ProjectHomePage() {
-	const { owner, name } = useParams<{ owner: string; name: string }>();
-	return <Navigate to={`/projects/${owner}/${name}/roadmap`} replace />;
+	const { project, repo, loading } = useRouteProject();
+	useEffect(() => {
+		if (repo) document.title = `${repo.split("/")[1]} · Formal Mind`;
+	}, [repo]);
+	if (loading) return <Loading />;
+	if (!project || !repo) return <Unknown />;
+	if (!project.proofsRepo) return <NotStarted repo={repo} what="swarm" />;
+	return <SwarmWorkspace repo={project.proofsRepo} only={repo} />;
 }
 
 export function ProjectRoadmapPage() {

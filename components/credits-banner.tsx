@@ -8,7 +8,7 @@ export function CreditsBanner() {
 		const look = () =>
 			fetch("/api/billing/balance")
 				.then((res) => (res.ok ? res.json() : null))
-				.then((body: { configured?: boolean; cents?: number } | null) => setOut(Boolean(body && typeof body.cents === "number" && body.cents <= 0)))
+				.then((body: { configured?: boolean; cents?: number } | null) => setOut(Boolean(body?.configured && typeof body.cents === "number" && body.cents <= 0)))
 				.catch(() => {});
 		look();
 		const timer = setInterval(look, 5 * 60 * 1000);
