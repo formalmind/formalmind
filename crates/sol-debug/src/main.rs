@@ -28,6 +28,13 @@ struct Args {
     /// Run a Foundry test of --contract: setUp() then this function, with cheatcodes.
     #[arg(long)]
     test: Option<String>,
+    /// With --test: run the same test file in this second project too (a port of the first, e.g. to Huff) and
+    /// report where the two runs first disagree on calls, events or storage.
+    #[arg(long)]
+    diff: Option<PathBuf>,
+    /// With --diff: the second project's slots, as solc storageLayout JSON per contract name.
+    #[arg(long)]
+    slot_map: Option<PathBuf>,
     /// Trace setUp() too (slow on big fixtures).
     #[arg(long)]
     trace_setup: bool,
@@ -101,6 +108,29 @@ fn main() -> Result<()> {
         return Ok(());
     }
 
+    if let (Some(test), Some(other)) = (&a.test, &a.diff) {
+        let run_a = s.run_test(&a.contract, test, false)?;
+        let mut sb = Session::compile(other, &a.entry)?;
+        let run_b = sb.run_test(&a.contract, test, false)?;
+        let slot_map: sol_debug::diff::SlotMap = match &a.slot_map {
+            Some(p) => serde_json::from_str(&std::fs::read_to_string(p)?)?,
+            None => Default::default(),
+        };
+        let report = sol_debug::diff::compare(&s, &run_a.test, &sb, &run_b.test, &slot_map);
+        let name = |p: &std::path::Path| p.canonicalize().ok().and_then(|p| p.file_name().map(|f| f.to_string_lossy().to_string())).unwrap_or("b".into());
+        let (la, lb) = (name(&a.root), name(other));
+        if a.tui {
+            sol_debug::tui::split(&s, &run_a.test, &la, &sb, &run_b.test, &lb, &report)?;
+            return Ok(());
+        }
+        let verdict = |r: &sol_debug::Run| if r.success { "pass".to_string() } else { format!("FAIL {}", r.revert_reason().unwrap_or_default()) };
+        println!("{}::{test}   {la}: {} ({} steps)   {lb}: {} ({} steps)\n", a.contract, verdict(&run_a.test), run_a.test.trace.steps.len(), verdict(&run_b.test), run_b.test.trace.steps.len());
+        print!("{}", sol_debug::diff::render(&report, &la, &lb));
+        if !report.equivalent() {
+            std::process::exit(1);
+        }
+        return Ok(());
+    }
     if let Some(test) = &a.test {
         let t = std::time::Instant::now();
         let run = s.run_test(&a.contract, test, a.trace_setup)?;

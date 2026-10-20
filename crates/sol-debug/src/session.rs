@@ -44,6 +44,9 @@ pub struct Session {
     pub libraries: HashMap<usize, Address>,
     /// Code hash → which artifact's code it is (None: not code from this compile).
     pub code_index: HashMap<B256, Option<(usize, CodeKind)>>,
+    /// Every selector any compiled contract or interface declares (hex, no 0x) → signature: names calls into code
+    /// solc didn't build (a Huff port called through its Solidity interfaces).
+    pub selectors: HashMap<String, String>,
     pub evm: Evm,
 }
 
@@ -97,8 +100,12 @@ impl Session {
         let output = solc::compile(&project, entry)?;
         let sources = Sources::load(&output, &project.root, &project.remappings);
         let mut artifacts = Vec::new();
+        let mut selectors = HashMap::new();
         for (file, contracts) in output["contracts"].as_object().into_iter().flatten() {
             for (name, c) in contracts.as_object().into_iter().flatten() {
+                for (sig, sel) in c["evm"]["methodIdentifiers"].as_object().into_iter().flatten() {
+                    selectors.entry(sel.as_str().unwrap_or("").to_string()).or_insert_with(|| sig.clone());
+                }
                 if c["evm"]["bytecode"]["object"].as_str().is_some_and(|s| !s.is_empty()) {
                     artifacts.push(Artifact::load(&output, &sources, file, name)?);
                 }
@@ -120,7 +127,10 @@ impl Session {
         // Like forge: one byte of code at `vm`, so Solidity's extcodesize check before a call without return
         // values (vm.label, vm.prank) passes. The calls themselves never run it.
         evm.ctx.db_mut().insert_account_info(HEVM, AccountInfo::default().with_code(Bytecode::new_raw(vec![0x00].into())));
-        Ok(Session { project, sources, artifacts, libraries: HashMap::new(), code_index: HashMap::new(), evm })
+        // ffi runs only compilers a test needs to build its contracts (a Huff port compiles with hnc).
+        evm.inspector.cheats.ffi_allow = vec!["hnc".into()];
+        evm.inspector.cheats.ffi_dir = project.root.clone();
+        Ok(Session { project, sources, artifacts, libraries: HashMap::new(), code_index: HashMap::new(), selectors, evm })
     }
 
     /// A contract by name, or `File.sol:Name` when the name is ambiguous.
@@ -239,6 +249,40 @@ impl Session {
             Some(_) => None,
             None => self.identify(&bytes).filter(|(_, k)| *k == CodeKind::Runtime).map(|(i, _)| i),
         }
+    }
+
+    /// For code a compiler other than solc printed through ffi (Huff via hnc): the source file it came from. The
+    /// runtime is copied out of the creation code, though a constructor may append immutables or trim it, so its
+    /// first 64 bytes are what is looked for.
+    pub fn foreign_code_at(&self, at: Address) -> Option<String> {
+        let code = self.evm.ctx.db().basic_ref(at).ok().flatten()?.code?.original_bytes();
+        if code.len() < 64 {
+            return None;
+        }
+        let head = &code[..64];
+        self.evm.inspector.cheats.compiled.iter().find(|(_, creation)| creation.windows(64).any(|w| w == head)).map(|(file, _)| {
+            file.rsplit('/').next().unwrap_or(file).to_string()
+        })
+    }
+
+    /// Every account with code, and the name the session gives it (label, contract, or source file without its
+    /// extension): what two runs of a port are paired by.
+    pub fn contracts(&self) -> Vec<(Address, String)> {
+        let mut out: Vec<(Address, String)> = self
+            .evm
+            .ctx
+            .db()
+            .cache
+            .accounts
+            .iter()
+            .filter(|(a, acc)| **a != HEVM && acc.info.code.as_ref().is_some_and(|c| !c.is_empty()))
+            .map(|(a, _)| {
+                let name = self.name_of(*a);
+                (*a, name.rsplit_once('.').filter(|(_, ext)| *ext == "huff").map(|(n, _)| n.to_string()).unwrap_or(name))
+            })
+            .collect();
+        out.sort();
+        out
     }
 
     /// Calls `sig` (`deposit` or `deposit(uint256)`) on a deployed contract with arguments written as Solidity
@@ -440,6 +484,9 @@ impl Session {
         if let Some(i) = self.artifact_at(a) {
             return self.artifacts[i].name.clone();
         }
+        if let Some(file) = self.foreign_code_at(a) {
+            return file;
+        }
         let s = a.to_checksum(None);
         format!("{}…{}", &s[..6], &s[s.len() - 4..])
     }
@@ -505,7 +552,7 @@ impl Session {
         let sig = cheat
             .as_ref()
             .or_else(|| self.artifact_at(to).and_then(|i| self.artifacts[i].methods.get(&selector)))
-            .or_else(|| self.artifacts.iter().find_map(|a| a.methods.get(&selector)));
+            .or_else(|| self.selectors.get(&selector));
         let Some(sig) = sig else { return format!("0x{selector}…") };
         let params = sig.split_once('(').map(|(_, p)| format!("({p}")).unwrap_or_default();
         let decoded = DynSolType::parse(&params).ok().and_then(|t| t.abi_decode_params(&input[4..]).ok());

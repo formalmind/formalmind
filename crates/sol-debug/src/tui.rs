@@ -24,9 +24,9 @@ pub struct App<'a> {
     run: &'a Run,
     title: String,
     nav: Navigator,
-    cur: usize,
+    pub cur: usize,
     /// The `:` or `/` line being typed.
-    input: Option<String>,
+    pub input: Option<String>,
     last_search: Option<String>,
     status: String,
 }
@@ -95,7 +95,7 @@ impl<'a> App<'a> {
     }
 
     /// Handles a key; true to quit.
-    fn key(&mut self, code: KeyCode) -> bool {
+    pub fn key(&mut self, code: KeyCode) -> bool {
         if let Some(input) = &mut self.input {
             match code {
                 KeyCode::Esc => self.input = None,
@@ -207,7 +207,12 @@ impl<'a> App<'a> {
     }
 
     fn draw(&self, f: &mut Frame) {
-        let [header, body, footer] = Layout::vertical([Constraint::Length(2), Constraint::Min(10), Constraint::Length(2)]).areas(f.area());
+        self.draw_in(f, f.area(), true);
+    }
+
+    /// Draws into part of the screen (the split view gives each run half). An unfocused view dims its header.
+    pub fn draw_in(&self, f: &mut Frame, area: Rect, focused: bool) {
+        let [header, body, footer] = Layout::vertical([Constraint::Length(2), Constraint::Min(6), Constraint::Length(if focused { 2 } else { 0 })]).areas(area);
         let [top, bottom] = Layout::vertical([Constraint::Percentage(55), Constraint::Percentage(45)]).areas(body);
         let [source, calls] = Layout::horizontal([Constraint::Percentage(62), Constraint::Percentage(38)]).areas(top);
         let [ops, stack, memory, storage] = Layout::horizontal([
@@ -217,7 +222,7 @@ impl<'a> App<'a> {
             Constraint::Percentage(30),
         ])
         .areas(bottom);
-        self.draw_header(f, header);
+        self.draw_header(f, header, focused);
         self.draw_source(f, source);
         self.draw_calls(f, calls);
         self.draw_ops(f, ops);
@@ -227,13 +232,16 @@ impl<'a> App<'a> {
         self.draw_footer(f, footer);
     }
 
-    fn draw_header(&self, f: &mut Frame, area: Rect) {
+    fn draw_header(&self, f: &mut Frame, area: Rect, focused: bool) {
         let st = &self.run.trace.steps[self.cur];
         let loc = &self.nav.locs[self.cur];
         let place = loc.as_ref().map(|l| format!("{}:{}  {}", l.file, l.line, l.scope)).unwrap_or("<no source>".into());
         let op = OpCode::new(st.op).map(|o| o.as_str()).unwrap_or("INVALID");
         let line1 = Line::from(vec![
-            Span::styled(format!(" {} ", self.title), Style::new().add_modifier(Modifier::BOLD | Modifier::REVERSED)),
+            Span::styled(
+                format!(" {} ", self.title),
+                if focused { Style::new().add_modifier(Modifier::BOLD | Modifier::REVERSED) } else { Style::new().fg(Color::DarkGray).add_modifier(Modifier::REVERSED) },
+            ),
             Span::raw(format!("  step {}/{}  depth {}  pc {}  {op}  gas {}", self.cur, self.nav.len() - 1, st.depth, st.pc, st.gas_left)),
         ]);
         let line2 = Line::from(vec![Span::styled(format!(" {place}"), Style::new().fg(Color::Cyan)), Span::raw(format!("   {}", loc.as_ref().map(|l| l.node_type.as_str()).unwrap_or("")))]);
@@ -425,7 +433,7 @@ impl<'a> App<'a> {
     }
 
     fn draw_footer(&self, f: &mut Frame, area: Rect) {
-        let help = "j/k op  n/N line  s/S into  f/F out  c/C continue  g/G ends  /search ;,  :b line  :w var  :pc n  :q";
+        let help = "Tab other run (split)  = divergence  j/k op  n/N line  s/S into  f/F out  c/C continue  g/G ends  /search ;,  :b line  :w var  :pc n  :q";
         let second = match &self.input {
             Some(i) => Line::styled(i.clone(), Style::new().fg(Color::White).add_modifier(Modifier::BOLD)),
             None => Line::styled(self.status.clone(), Style::new().fg(Color::Cyan)),
@@ -478,4 +486,80 @@ fn compact_hex(s: &str) -> String {
     }
     out.push_str(rest);
     out
+}
+
+/// The split view drawn once into a buffer, as text (for snapshots).
+pub fn split_text(a: &App, b: &App, width: u16, height: u16) -> String {
+    let mut term = ratatui::Terminal::new(ratatui::backend::TestBackend::new(width, height)).unwrap();
+    term.draw(|f| {
+        let [top, bottom] = Layout::vertical([Constraint::Percentage(50), Constraint::Percentage(50)]).areas(f.area());
+        a.draw_in(f, top, true);
+        b.draw_in(f, bottom, false);
+    })
+    .unwrap();
+    let buf = term.backend().buffer().clone();
+    let mut out = String::new();
+    for y in 0..height {
+        for x in 0..width {
+            out.push_str(buf[(x, y)].symbol());
+        }
+        out.push('\n');
+    }
+    out
+}
+
+/// Two runs of the same test, one above the other, both opened at their first divergence. Tab switches which one
+/// the keys move; `=` puts both back at the divergence.
+pub fn split(sa: &Session, ra: &Run, la: &str, sb: &Session, rb: &Run, lb: &str, report: &crate::diff::Report) -> std::io::Result<()> {
+    let first = report.first();
+    let mut a = App::new(sa, ra, format!("{la}  {}", first.map(|d| format!("· {} #{} differs", d.what, d.index)).unwrap_or("· no divergence".into())));
+    let mut b = App::new(sb, rb, lb.to_string());
+    let home = (first.and_then(|d| d.a_step), first.and_then(|d| d.b_step));
+    if let Some(i) = home.0 {
+        a.cur = i;
+    }
+    if let Some(i) = home.1 {
+        b.cur = i;
+    }
+    let mut focus_b = false;
+    let mut terminal = ratatui::init();
+    let result = loop {
+        let drawn = terminal.draw(|f| {
+            let [top, bottom] = Layout::vertical([Constraint::Percentage(50), Constraint::Percentage(50)]).areas(f.area());
+            a.draw_in(f, top, !focus_b);
+            b.draw_in(f, bottom, focus_b);
+        });
+        if let Err(e) = drawn {
+            break Err(e);
+        }
+        match event::read() {
+            Ok(Event::Key(k)) if k.kind == KeyEventKind::Press => {
+                if k.modifiers.contains(KeyModifiers::CONTROL) && k.code == KeyCode::Char('c') {
+                    break Ok(());
+                }
+                let typing = if focus_b { b.input.is_some() } else { a.input.is_some() };
+                match k.code {
+                    KeyCode::Tab if !typing => focus_b = !focus_b,
+                    KeyCode::Char('=') if !typing => {
+                        if let Some(i) = home.0 {
+                            a.cur = i;
+                        }
+                        if let Some(i) = home.1 {
+                            b.cur = i;
+                        }
+                    }
+                    code => {
+                        let app = if focus_b { &mut b } else { &mut a };
+                        if app.key(code) {
+                            break Ok(());
+                        }
+                    }
+                }
+            }
+            Ok(_) => {}
+            Err(e) => break Err(e),
+        }
+    };
+    ratatui::restore();
+    result
 }

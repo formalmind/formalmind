@@ -271,6 +271,70 @@ The swarm's fuzzers and mutation runs produce **call sequences**. The debugger t
 - **Coverage for agents:** `pcs_for_node` over all traced steps gives per-node coverage. The planner uses it to see
   which branches a fuzzer never reached.
 
+## 7a. Differential equivalence: a protocol and its port
+
+Async Swap exists twice: Solidity (`asyncswap/contracts`) and a Huff port (`asyncswap/v2-raff`, compiled by `hnc`)
+that passes the Solidity repo's own test suite. Passing the same assertions is a weak check: the suite only asserts
+what its authors thought to assert. The diff compares everything an outside observer can see, on every step of the
+same test:
+
+```
+$ sol-debug ~/developer/asyncswap/contracts test/AsyncSwap.t.sol --contract AsyncSwapTest \
+    --test test_swap_createsOrderWithPrice --diff ~/developer/asyncswap/v2-raff
+AsyncSwapTest::test_swap_createsOrderWithPrice   contracts: pass (32902 steps)   v2-raff: pass (13116 steps)
+
+✓ calls                        18 matched   (contracts 18, v2-raff 18)
+✓ events                       6 matched   (contracts 6, v2-raff 6)
+✓ storage token0               3 matched   (contracts 3, v2-raff 3)
+✓ storage PoolManager          1 matched   (contracts 1, v2-raff 1)
+· storage AsyncSwap            not compared: layouts differ (contracts 24 writes, v2-raff 16); pass --slot-map …
+```
+
+Add `--tui` for a split view (one run above the other) opened at the first divergence. Tab switches which run the
+keys move; `=` returns both to the divergence. The exit code is 1 when the runs diverge, so the diff can gate CI.
+
+**What is compared** (`crates/sol-debug/src/diff.rs`):
+
+| Observation | Compared as |
+|---|---|
+| External calls | Kind, caller, target, value, calldata, success, return data, in order. Not compared: DELEGATECALLs into libraries (the port inlines them), cheatcode calls, console.log. A CREATE is compared by which contract it builds plus its constructor arguments, because the same contract compiled in two projects has a different metadata hash. |
+| Events | Address, topics, data, in order |
+| Storage | Per contract, named writes in order, for contracts both sides run the same solc code for (PoolManager, tokens). For the ported contracts, only with a slot map (below); otherwise counted |
+
+**Making two runs comparable.**
+- Addresses: a contract can sit at different addresses on the two sides (the Huff Router is deployed at another
+  nonce). Contracts are paired by name first (`Router` ↔ `Router.huff`, labels like `token0`), then by position as
+  the call trees are walked. Every address is compared through its pair.
+- Hashes: a slot like `positions[keccak(owner, ticks, salt)]` hashes in a paired address, so the hash itself
+  differs. A 32-byte word whose keccak input the trace recorded is compared by that input, recursively, through the
+  same address pairing.
+
+**Running the port.** The Huff tests compile with `vm.tryFfi(["hnc", file, "-b", …])`. `ffi` runs only allowlisted
+programs (`hnc`), in the project root, and is cached per argv. Code that solc didn't build is named by the `hnc`
+output it came from (`AsyncSwap.huff`): a runtime's first 64 bytes are found in that creation code, because a
+constructor may append immutables. Huff frames get function names from the Solidity interfaces' selectors
+(`Session::selectors` covers every compiled contract and interface).
+
+**The ported contracts' own storage.** The Huff port keeps its own layout: `OWNER_SLOT = 0x00`, hashed slots for
+transient flags, the radix tree at `0x800`. `--slot-map map.json` names the other side's slots with a solc-format
+`storageLayout` per contract name (`{"AsyncSwap": {"storage": [...], "types": {...}}}`). Then those writes are compared
+by name like the shared contracts' writes. This works when the port derives mapping and array slots the way Solidity
+does. A layout that hashes differently (packed keys, other orders) needs its own naming rule, which is the next step
+here.
+
+**What it found.** Across `AsyncSwap.t.sol`, the first sweep reported false divergences: CREATE metadata hashes,
+addresses only seen in calldata, and hashed slots keyed by those addresses. Each became a rule above. After them,
+all 28 tests in `AsyncSwap.t.sol` show the Solidity and Huff builds agreeing on every external call, event
+and shared-contract write. The hook's internal storage isn't compared yet, because that needs the Huff slot map.
+
+**Further levels.**
+1. Equivalence over many inputs: the same comparison over fuzzed and recorded call sequences (the agent-hook format
+   in section 7). Every invariant campaign becomes an equivalence campaign.
+2. Per-selector symbolic equivalence: for each function, both bytecodes give the same storage, return data and logs
+   for all inputs (hevm's `equivalence` mode compares two bytecodes). Differential traces are what make a failed
+   proof readable.
+3. Lean: one model of the protocol, with both implementations shown to refine it.
+
 ## 8. UI plan
 
 ### Terminal first (ratatui)

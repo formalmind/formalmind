@@ -50,6 +50,14 @@ pub struct Cheats {
     pub code: HashMap<String, Vec<u8>>,
     /// Unsupported cheatcodes that were called (for the summary).
     pub missing: Vec<String>,
+    /// Programs `vm.ffi` / `vm.tryFfi` may run (by name: `hnc`), and the folder they run in. Empty: ffi refuses.
+    pub ffi_allow: Vec<String>,
+    pub ffi_dir: std::path::PathBuf,
+    /// ffi results by argv, so a compiler runs once per distinct call.
+    ffi_cache: HashMap<Vec<String>, (i32, Vec<u8>, Vec<u8>)>,
+    /// Bytecode a compiler printed through ffi, by the source file it named (`src/AsyncSwap.huff`): lets the session
+    /// name code that solc didn't build.
+    pub compiled: Vec<(String, Vec<u8>)>,
     /// One entry per open call or create: whether a pending expectRevert is aimed at it.
     armed: Vec<bool>,
     signatures: HashMap<[u8; 4], &'static str>,
@@ -78,6 +86,8 @@ const SIGNATURES: &[&str] = &[
     "expectEmit(bool,bool,bool,bool,address)",
     "expectEmit(address)",
     "recordLogs()",
+    "ffi(string[])",
+    "tryFfi(string[])",
     "assertTrue(bool)",
     "assertTrue(bool,string)",
     "assertFalse(bool)",
@@ -307,10 +317,74 @@ impl Cheats {
                 Answer::Ok(vec![])
             }
             "expectEmit" | "recordLogs" => Answer::Ok(vec![]),
+            "ffi" | "tryFfi" => {
+                let argv: Vec<String> = args[0].as_array().unwrap_or_default().iter().filter_map(|v| v.as_str().map(str::to_string)).collect();
+                match self.ffi(&argv) {
+                    Err(e) => Answer::Revert(e),
+                    Ok((code, out, err)) if name == "ffi" => {
+                        if code != 0 {
+                            Answer::Revert(format!("ffi: {} exited with {code}: {}", argv[0], String::from_utf8_lossy(&err)))
+                        } else {
+                            Answer::Ok(DynSolValue::Bytes(out).abi_encode())
+                        }
+                    }
+                    Ok((code, out, err)) => Answer::Ok(
+                        DynSolValue::Tuple(vec![DynSolValue::Tuple(vec![
+                            DynSolValue::Int(revm::primitives::I256::try_from(code).unwrap_or_default(), 32),
+                            DynSolValue::Bytes(out),
+                            DynSolValue::Bytes(err),
+                        ])])
+                        .abi_encode_params(),
+                    ),
+                }
+            }
             n if n.starts_with("assert") => assert(n, &args),
             _ => Answer::Revert(format!("sol-debug: unsupported cheatcode {sig}")),
         }
     }
+}
+
+impl Cheats {
+    /// Runs an allowed program like forge's ffi: stdout that is hex (with or without 0x) comes back decoded.
+    fn ffi(&mut self, argv: &[String]) -> Result<(i32, Vec<u8>, Vec<u8>), String> {
+        let Some(program) = argv.first() else { return Err("ffi: empty command".into()) };
+        if !self.ffi_allow.iter().any(|p| p == program) {
+            return Err(format!("sol-debug: ffi refused {program:?}; allowed: {:?}", self.ffi_allow));
+        }
+        if let Some(hit) = self.ffi_cache.get(argv) {
+            return Ok(hit.clone());
+        }
+        let out = std::process::Command::new(find_program(program))
+            .args(&argv[1..])
+            .current_dir(&self.ffi_dir)
+            .output()
+            .map_err(|e| format!("ffi: can't run {program}: {e}"))?;
+        let text = String::from_utf8_lossy(&out.stdout).trim().to_string();
+        let hex = text.strip_prefix("0x").unwrap_or(&text);
+        let stdout = if !hex.is_empty() && hex.len().is_multiple_of(2) && hex.bytes().all(|b| b.is_ascii_hexdigit()) {
+            revm::primitives::hex::decode(hex).unwrap_or_default()
+        } else {
+            out.stdout.clone()
+        };
+        if out.status.success() {
+            if let Some(file) = argv.iter().skip(1).find(|a| !a.starts_with('-')) {
+                self.compiled.push((file.clone(), stdout.clone()));
+            }
+        }
+        let result = (out.status.code().unwrap_or(-1), stdout, out.stderr);
+        self.ffi_cache.insert(argv.to_vec(), result.clone());
+        Ok(result)
+    }
+}
+
+/// A program on PATH, or in the usual per-user install folders (`~/.huff-neo/bin` for hnc).
+fn find_program(name: &str) -> std::path::PathBuf {
+    let home = std::env::var("HOME").unwrap_or_default();
+    let mut dirs: Vec<std::path::PathBuf> = std::env::var_os("PATH").map(|p| std::env::split_paths(&p).collect()).unwrap_or_default();
+    for d in [".huff-neo/bin", ".huff/bin", ".cargo/bin", ".foundry/bin"] {
+        dirs.push(std::path::Path::new(&home).join(d));
+    }
+    dirs.into_iter().map(|d| d.join(name)).find(|p| p.is_file()).unwrap_or_else(|| name.into())
 }
 
 fn assert(name: &str, args: &[DynSolValue]) -> Answer {

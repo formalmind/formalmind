@@ -3,6 +3,7 @@
 //! storage layout and the recorded keccak preimages name every storage slot a step touches. See desktop/DEBUGGER.md.
 
 pub mod cheats;
+pub mod diff;
 pub mod layout;
 pub mod nav;
 pub mod session;

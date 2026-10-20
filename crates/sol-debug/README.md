@@ -31,6 +31,19 @@ Drop `--tui` to print the trace (`--lines` for one line per Solidity line) and t
 | `:pc 1621`, `:step 1200` | jump |
 | `q` | quit |
 
+## Compare a protocol with its port
+
+Runs the same test in two projects (e.g. Solidity and its Huff port) and reports the first place they disagree on
+calls, events or storage. Exit code 1 on divergence. `--tui` opens both runs at it (Tab switches, `=` goes back).
+
+```
+./target/release/sol-debug ~/developer/asyncswap/contracts test/AsyncSwap.t.sol --contract AsyncSwapTest \
+  --test test_swap_createsOrderWithPrice --diff ~/developer/asyncswap/v2-raff
+```
+
+`vm.ffi` runs only `hnc` (to compile Huff). `--slot-map` names the port's storage slots (solc storageLayout JSON per
+contract name).
+
 ## One call on one contract
 
 ```
