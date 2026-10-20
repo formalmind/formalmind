@@ -20,7 +20,7 @@ pub enum Ref {
 }
 
 /// A `src` string, `start:length:file`.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize)]
 pub struct Src {
     pub start: usize,
     pub len: usize,
@@ -318,6 +318,14 @@ impl Graph {
                     g.functions.insert(f.id, f);
                 }
             });
+        }
+        // The owning contract from the AST's nesting (modifiers carry no `scope`).
+        for c in g.contracts.values() {
+            for f in &c.functions {
+                if let Some(func) = g.functions.get_mut(f) {
+                    func.contract = c.id;
+                }
+            }
         }
         g
     }

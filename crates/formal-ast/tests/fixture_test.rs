@@ -113,3 +113,32 @@ fn slices_are_small_and_cut_from_source() {
     assert!(!md.contains("return a * b / c"), "dependency code isn't inlined");
     assert!(md.len() < 4000, "slice is {} bytes", md.len());
 }
+
+#[test]
+fn lean_model_type_checks() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixture");
+    let (a, output) = match formal_ast::analyze_full(&root, "src/Vault.sol", None) {
+        Ok(x) => x,
+        Err(e) => return eprintln!("skipped: {e}"),
+    };
+    let model = formal_ast::lean::Gen::new(&output, &a.graph, &a.scope).generate("Model");
+    // Storage parameters are lenses, so deposit → _credit translates; only the assembly is left opaque.
+    assert_eq!(model.report.opaque.len(), 1, "{:?}", model.report.opaque);
+    assert!(model.report.opaque[0].0.ends_with("lockSlot"));
+    assert!(model.text.contains("def Vault.deposit"));
+    assert!(model.text.contains("acc_set"));
+    // OpenZeppelin's mulDiv gets the prelude's semantics; the fixture's own library is translated from its code.
+    assert!(model.text.contains("MathLib.mulDivUp ext"));
+
+    let dir = std::env::temp_dir().join(format!("formal-ast-lean-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(dir.join("Vault.lean"), &model.text).unwrap();
+    std::fs::copy(root.join("lean-toolchain"), dir.join("lean-toolchain")).unwrap();
+    match std::process::Command::new("lean").arg("Vault.lean").current_dir(&dir).output() {
+        Ok(out) => {
+            let text = String::from_utf8_lossy(&out.stdout).to_string() + &String::from_utf8_lossy(&out.stderr);
+            assert!(out.status.success() && !text.contains("error"), "lean rejected the model:\n{text}");
+        }
+        Err(_) => eprintln!("skipped the Lean check: no `lean` on PATH"),
+    }
+}

@@ -110,6 +110,32 @@ The model is **faithful by construction**, and each generated definition carries
 write only **theorems and proofs**. Every proof reports the `opaque`s it depends on, and those dependencies are
 the protocol's security assumptions.
 
+### Step 2 results (V4Vault, Revert v4lend)
+
+`formal-ast lean <out>` writes one self-contained Lean 4 file: the prelude (`crates/formal-ast/src/prelude.lean`),
+structs, `State` in slot order, `Ext`, constants, then every reachable function, callees first.
+
+- **Coverage:** 94 of 120 reachable functions translate in full, including `deposit`/`mint`/`withdraw`/`redeem`,
+  `borrow`, `repay` and `liquidate`. Lean 4.35 checks the 1,537-line model with no errors in about 2s, using core
+  Lean only (no Mathlib).
+- **What stays opaque, each with its reason in the report and in `Ext`:**
+  - assembly (OpenZeppelin `mulDiv` internals, `CurrencyLibrary.transfer`);
+  - ABI encode/decode;
+  - delegatecall and ETH sends with `{value: …}`;
+  - `int24` ticks (signed arithmetic isn't translated yet);
+  - one helper that writes a memory struct shared with its caller.
+- **Storage parameters** translate as lenses (getter + setter for the caller's location). A helper's writes through
+  `Loan storage loan` reach the caller's mapping entry.
+- **Against the hand-written proofs** (`formal/Formal/GenCompare.lean` in the v4lend folder):
+  - `_convertToShares` and `_convertToAssets` as generated **refine** the hand-written `VaultRounding` model.
+    Whenever they don't revert, they return exactly its value and leave storage unchanged.
+  - So the hand-written `deposit_redeem_le` now holds for the code as compiled. The proof depends only on Lean's
+    standard axioms.
+  - The generated model is also more precise. The hand-written one assumed away the zero-rate and overflow reverts,
+    which the generated one states exactly (OpenZeppelin `mulDiv`: `d = 0`, a result ≥ 2²⁵⁶, and the ceil `+1`
+    overflow). And `_deposit`'s order — limit checks, `dailyLendNetInflow`, `safeTransferFrom` before `_mint` — comes
+    from the code instead of being described from reading it.
+
 ## 6. What else the same graph provides
 
 All of these come from the graph and need no model time:

@@ -1,7 +1,7 @@
 use anyhow::{bail, Result};
 use clap::{Parser, Subcommand};
 use formal_ast::graph::Graph;
-use formal_ast::{analyze, scope, slice};
+use formal_ast::{analyze_full, lean, scope, slice};
 use serde_json::json;
 use std::path::PathBuf;
 use std::time::Instant;
@@ -32,12 +32,19 @@ enum Command {
     Slice { function: String },
     /// The whole graph, scope, units and clusters as JSON (writes .formal/ast/graph.json under the root).
     Json,
+    /// The Lean 4 model: writes it to `out` (relative to the root) and prints what was left opaque.
+    Lean {
+        out: PathBuf,
+        /// The Lean namespace.
+        #[arg(long, default_value = "Model")]
+        namespace: String,
+    },
 }
 
 fn main() -> Result<()> {
     let cli = Cli::parse();
     let started = Instant::now();
-    let a = analyze(&cli.root, &cli.entry, cli.contract.as_deref())?;
+    let (a, output) = analyze_full(&cli.root, &cli.entry, cli.contract.as_deref())?;
     let g = &a.graph;
     let took = started.elapsed();
     match cli.command {
@@ -54,6 +61,18 @@ fn main() -> Result<()> {
             };
             let mut sources = slice::Sources::new(&a.project.root, g);
             print!("{}", slice::render(g, &a.scope, unit, &mut sources));
+        }
+        Command::Lean { out, namespace } => {
+            let model = lean::Gen::new(&output, g, &a.scope).generate(&namespace);
+            let path = a.project.root.join(&out);
+            if let Some(dir) = path.parent() {
+                std::fs::create_dir_all(dir)?;
+            }
+            std::fs::write(&path, &model.text)?;
+            println!("{} — {} lines, {} functions translated, {} opaque", path.display(), model.text.lines().count(), model.report.translated.len(), model.report.opaque.len());
+            for (f, why) in &model.report.opaque {
+                println!("  opaque {f}: {why}");
+            }
         }
         Command::Json => {
             let clusters = scope::clusters(&a.units);

@@ -5,6 +5,7 @@
 //! agent reads). See desktop/AUDIT-ENGINE.md.
 
 pub mod graph;
+pub mod lean;
 pub mod scope;
 pub mod slice;
 pub mod solc;
@@ -22,12 +23,16 @@ pub struct Analysis {
 }
 
 pub fn analyze(root: &Path, entry_file: &str, contract: Option<&str>) -> Result<Analysis> {
+    Ok(analyze_full(root, entry_file, contract)?.0)
+}
+
+/// Also returns solc's output, for generators that need the full AST (the Lean model).
+pub fn analyze_full(root: &Path, entry_file: &str, contract: Option<&str>) -> Result<(Analysis, serde_json::Value)> {
     let project = solc::Project::load(root)?;
     let output = solc::compile(&project, entry_file)?;
     let mut graph = graph::Graph::build(&output);
     graph.mark_dependencies(&project.libs);
-    drop(output);
     let scope = scope::Scope::new(&graph, entry_file, contract)?;
     let units = scope.units(&graph);
-    Ok(Analysis { project, entry_file: entry_file.to_string(), graph, scope, units })
+    Ok((Analysis { project, entry_file: entry_file.to_string(), graph, scope, units }, output))
 }
