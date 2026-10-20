@@ -176,12 +176,20 @@ function Opcodes({ view }: { view: StepView }) {
 
 function Stack({ view }: { view: StepView }) {
 	return (
-		<Pane title="Stack" className="w-[15rem] flex-none !basis-auto" meta={view.result ? `result ${view.result.short}` : `${view.stack.length}`}>
+		<Pane title="Stack" className="min-w-[13rem] flex-1" meta={view.result ? `result ${view.result.short}` : `${view.stack.length}`}>
 			<ul className="py-1">
 				{view.stack.map((w, i) => (
-					<li key={i} title={w.full} className="flex gap-2 px-2">
+					<li key={i} className="flex gap-2 whitespace-nowrap px-2">
 						<span className="w-5 shrink-0 text-right text-muted-foreground">{i}</span>
-						<span className="truncate">{w.short}</span>
+						{/* Never cut: small numbers as they are, anything longer as its full hex (leading zeros dropped). */}
+						<button
+							type="button"
+							title="Copy the full word"
+							onClick={() => void navigator.clipboard?.writeText(w.full)}
+							className="rounded px-0.5 text-left hover:bg-muted active:bg-emerald-500/20"
+						>
+							{w.short.includes("…") ? w.full : w.short}
+						</button>
 					</li>
 				))}
 				{view.stack.length === 0 ? <li className="px-2 text-muted-foreground">empty</li> : null}
@@ -193,13 +201,13 @@ function Stack({ view }: { view: StepView }) {
 function Memory({ view }: { view: StepView }) {
 	const ref = useScrollTo(view.step);
 	return (
-		<Pane title="Memory" meta={`${view.memory_size} bytes`} className="flex-1" scrollRef={ref}>
+		<Pane title="Memory" meta={`${view.memory_size} bytes`} className="min-w-[16rem] flex-[1.6]" scrollRef={ref}>
 			<ul className="py-1">
 				{view.memory.map((m) => (
-					<li key={m.offset} data-current={m.fresh || undefined} className={`flex gap-2 px-2 ${m.fresh ? "bg-amber-500/15 text-amber-700 dark:text-amber-300" : ""}`}>
+					<li key={m.offset} data-current={m.fresh || undefined} className={`flex w-max min-w-full gap-2 whitespace-nowrap px-2 ${m.fresh ? "bg-amber-500/15 text-amber-700 dark:text-amber-300" : ""}`}>
 						<span className="w-10 shrink-0 text-right text-muted-foreground">{m.offset.toString(16)}{m.offset === 0x40 ? "·fp" : ""}</span>
 						{/* 32 bytes as two halves of 16, so a word reads at a glance. */}
-						<span className="break-all">
+						<span>
 							{m.hex.slice(0, 32)}
 							<span className="ml-2">{m.hex.slice(32)}</span>
 						</span>
