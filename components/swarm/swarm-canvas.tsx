@@ -619,7 +619,7 @@ function cloneScene(scene: Scene): Scene {
  * `fill` makes the board fill its parent, scaled to fit both ways and centred, below a strip kept clear
  * for the pinned controls; otherwise it scales to the width. `title` and `actions` are pinned top-left and top-right.
  */
-export function SwarmCanvas({ state, fill = false, contain = false, title, actions, repo, onTalk, local = false }: {
+export function SwarmCanvas({ state, fill = false, contain = false, title, actions, repo, onTalk, local = false, below }: {
 	state: SwarmState | null;
 	/** A swarm running on this computer (the desktop app): no dispatcher schedule to show. */
 	local?: boolean;
@@ -632,6 +632,8 @@ export function SwarmCanvas({ state, fill = false, contain = false, title, actio
 	fill?: boolean;
 	title?: ReactNode;
 	actions?: ReactNode;
+	/** A card on the board under the notebooks (the project's roadmap), as wide as the board; it scrolls inside. */
+	below?: { title: string; height: number; node: ReactNode };
 }) {
 	const frameRef = useRef<HTMLDivElement>(null);
 	const [fit, setFit] = useState({ scale: 1, x: 0, y: 0, w: 0, h: 0 });
@@ -643,7 +645,9 @@ export function SwarmCanvas({ state, fill = false, contain = false, title, actio
 	const projects = projectsOf(state);
 	const groups = state && (fill || isLiveRun(state.runs[0])) ? projects.length : 1;
 	const geo = useMemo(() => geometry(groups), [groups]);
-	const boardH = Math.max(geo.height, geo.panelTop + Math.max(...panelHs) + PAD);
+	const panelsEnd = Math.max(geo.height, geo.panelTop + Math.max(...panelHs) + PAD);
+	const BELOW_GAP = 24;
+	const boardH = below ? panelsEnd + BELOW_GAP + below.height + PAD : panelsEnd;
 	// In fill mode people can pan and zoom: `view` sits on top of the fitted placement.
 	const [view, setRawView] = useState({ k: 1, x: 0, y: 0 });
 	// The canvas is unbounded: pan anywhere; the fit button in the zoom pill brings the board back.
@@ -1079,6 +1083,18 @@ export function SwarmCanvas({ state, fill = false, contain = false, title, actio
 							<TurnChip turn={shown.turn} />
 						</>
 					)}
+					{below ? (
+						<section
+							data-canvas-ui
+							className="absolute flex flex-col overflow-hidden rounded-xl border bg-card shadow-card"
+							style={{ left: PAD, top: panelsEnd + BELOW_GAP, width: W - PAD * 2, height: below.height }}
+						>
+							<div className="flex h-9 shrink-0 items-center border-b px-4 font-mono text-[12px] font-medium text-muted-foreground">{below.title}</div>
+							<div data-scroll className="flex min-h-0 flex-1 flex-col overflow-auto">
+								{below.node}
+							</div>
+						</section>
+					) : null}
 
 					{Array.from({ length: groups }, (_, group) => (
 						<div key={group} className="contents">

@@ -4,7 +4,7 @@ import { createPortal } from "react-dom";
 import { NvimTerminal } from "./nvim-terminal";
 import { reportError } from "@/lib/report-error";
 import { JsonTree } from "./json-tree";
-import { Bug, Check, ChevronDown, Code2, Copy, FileCode2, GanttChart, MessagesSquare, Network, Play, Plus, ScanSearch, Square, WandSparkles, Wrench } from "lucide-react";
+import { Bug, Check, ChevronDown, Code2, Copy, FileCode2, MessagesSquare, Network, Play, Plus, ScanSearch, Square, WandSparkles, Wrench } from "lucide-react";
 
 // The project roadmap (GitHub Projects-style), the same view the web app had on its own page.
 import { motion as vimMotion, search as vimSearch, setVimMode, useVimMode, type Cursor } from "@/components/vim-mode";
@@ -386,7 +386,6 @@ const MODES: { id: Mode; label: string; icon: typeof Code2 }[] = [
 	{ id: "swarm", label: "Swarm", icon: Network },
 	{ id: "audit", label: "Audit", icon: ScanSearch },
 	{ id: "bugs", label: "Bugs", icon: Bug },
-	{ id: "roadmap", label: "Roadmap", icon: GanttChart },
 ];
 
 /**
@@ -758,13 +757,14 @@ export function SwarmPanel({ folder, name, scan, bridge, session, file: openPath
 	const [params, setParams] = useSearchParams();
 	// Debug mode exists only where the page is given a debugger; an old link to it opens Code instead.
 	const asked = (params.get("mode") as Mode | null) ?? "swarm";
-	const mode: Mode = asked === "debug" && !debug ? "code" : asked;
+	// The roadmap lives on the Swarm canvas now; an old link to its tab opens Swarm.
+	const mode: Mode = asked === "debug" && !debug ? "code" : asked === "roadmap" ? "swarm" : asked;
 	// The main contract's entry points, read from the AST, so the plan can name the ones each item covers.
 	const [entryUnits, setEntryUnits] = useState<AstUnit[]>([]);
 	const mainSource = (scan?.solidity ?? []).find((f) => f.startsWith("src/") && !f.endsWith(".t.sol") && !f.endsWith(".s.sol")) ?? null;
 	useEffect(() => {
 		setEntryUnits([]);
-		if ((mode !== "swarm" && mode !== "roadmap") || !mainSource) return;
+		if (mode !== "swarm" || !mainSource) return;
 		void invoke<AstUnits>("ast_units", { folder, entry: mainSource }).then(
 			(d) => setEntryUnits(d.units.filter((u) => u.mutability !== "view" && u.mutability !== "pure" && u.function !== "constructor")),
 			() => setEntryUnits([]),
@@ -1152,6 +1152,15 @@ export function SwarmPanel({ folder, name, scan, bridge, session, file: openPath
 						local
 						repo={folder}
 						actions={actions}
+						below={{
+							title: "Roadmap",
+							height: 640,
+							node: (
+								<Suspense fallback={null}>
+									<ProjectView repo={name} />
+								</Suspense>
+							),
+						}}
 					/>
 				) : (
 					<div className="relative h-full w-full bg-background">
@@ -1320,13 +1329,6 @@ export function SwarmPanel({ folder, name, scan, bridge, session, file: openPath
 				{mode === "debug" && debug ? (
 					<div className="pointer-events-auto absolute inset-x-0 bottom-0 top-[var(--fm-top)] z-10 flex min-h-0 bg-background">
 						{debug(openPath && /\.[ts]\.sol$/.test(openPath) ? openPath : null, params.get("test"), debugFile)}
-					</div>
-				) : null}
-				{mode === "roadmap" ? (
-					<div className="pointer-events-auto absolute inset-x-0 bottom-0 top-[var(--fm-top)] z-10 flex min-h-0 flex-col overflow-y-auto bg-background">
-						<Suspense fallback={null}>
-							<ProjectView repo={name} />
-						</Suspense>
 					</div>
 				) : null}
 				{mode === "bugs" ? <BugsView bugs={bugs} openBug={openBug} setOpenBug={setOpenBug} withPoc={withPoc} onOpenFile={view} /> : null}
