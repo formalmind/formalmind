@@ -2,14 +2,17 @@ import { useEffect, useState } from "react";
 import { Link } from "react-router";
 import { DEPOSITS_USD } from "@/lib/billing-plans";
 import { notify } from "@/lib/notifications";
-import type { CreditEntry } from "@/lib/billing";
+import type { CreditEntry, TokenCounts } from "@/lib/billing";
 
 type Balance = { configured: boolean; cents: number; entries: CreditEntry[]; error?: string };
 
 const usd = (cents: number) => `${cents < 0 ? "−" : ""}$${(Math.abs(cents) / 100).toFixed(2)}`;
 
 /** A line of history: a deposit, or one swarm run's model calls added up (they are charged call by call). */
-type Line = { key: string; at: string; cents: number; label: string; detail?: string; href?: string };
+type Line = { key: string; at: string; cents: number; label: string; detail?: string; href?: string; calls?: number; tokens?: TokenCounts };
+
+/** 1234567 → "1.2M". */
+const compact = (n: number) => Intl.NumberFormat(undefined, { notation: "compact", maximumFractionDigits: 1 }).format(n);
 
 function historyLines(entries: CreditEntry[]): Line[] {
 	const runs = new Map<string, Line>();
@@ -23,11 +26,23 @@ function historyLines(entries: CreditEntry[]): Line[] {
 		const [repo, run] = e.ref.split(":");
 		const key = `${repo}:${run}`;
 		const line = runs.get(key);
+		const add = (l: Line) => {
+			l.calls = (l.calls ?? 0) + 1;
+			if (e.tokens) {
+				const t = (l.tokens ??= { in: 0, out: 0, read: 0, write: 0 });
+				t.in += e.tokens.in;
+				t.out += e.tokens.out;
+				t.read += e.tokens.read;
+				t.write += e.tokens.write;
+			}
+		};
 		if (line) {
 			line.cents += e.cents;
 			if (e.at > line.at) line.at = e.at;
+			add(line);
 		} else {
 			const entry: Line = { key, at: e.at, cents: e.cents, label: "Swarm run", detail: repo, href: run ? `https://github.com/${repo}/actions/runs/${run}` : undefined };
+			add(entry);
 			runs.set(key, entry);
 			lines.push(entry);
 		}
@@ -134,6 +149,15 @@ export function BillingPage() {
 													<span className="text-muted-foreground">{l.detail}</span>
 												)}
 											</>
+										) : null}
+										{l.calls ? (
+											<span
+												className="block text-xs text-muted-foreground"
+												title={l.tokens ? `input ${l.tokens.in.toLocaleString()} · output ${l.tokens.out.toLocaleString()} · cache read ${l.tokens.read.toLocaleString()} · cache write ${l.tokens.write.toLocaleString()}` : undefined}
+											>
+												{l.calls} model calls
+												{l.tokens ? ` · ${compact(l.tokens.in + l.tokens.out + l.tokens.read + l.tokens.write)} tokens (${compact(l.tokens.out)} out, ${compact(l.tokens.read)} cached)` : ""}
+											</span>
 										) : null}
 									</span>
 									<span className={`font-mono tabular-nums ${l.cents > 0 ? "text-emerald-600 dark:text-emerald-400" : ""}`}>{l.cents > 0 ? "+" : ""}{usd(l.cents)}</span>

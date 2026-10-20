@@ -82,7 +82,13 @@ export async function proxy(request: Request, path: string): Promise<Response> {
 	if (!metered || !upstream.body) return upstream;
 
 	const ref = `${caller.repo}:${caller.run}:${crypto.randomUUID().slice(0, 8)}`;
-	const charge = (model: string, usage: Usage) => recordSpend(caller.sub, costCents(model, usage), ref).catch((error) => console.error("[model] charging failed:", error));
+	const charge = (model: string, usage: Usage) =>
+		recordSpend(caller.sub, costCents(model, usage), ref, {
+			in: usage.input_tokens ?? 0,
+			out: usage.output_tokens ?? 0,
+			read: usage.cache_read_input_tokens ?? 0,
+			write: usage.cache_creation_input_tokens ?? 0,
+		}).catch((error) => console.error("[model] charging failed:", error));
 
 	if (!(upstream.headers.get("content-type") ?? "").includes("text/event-stream")) {
 		const json = (await upstream.json()) as { model?: string; usage?: Usage };
