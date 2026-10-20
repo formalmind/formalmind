@@ -19,7 +19,7 @@ import { NavUser } from "@/components/nav-user"
 import { SidebarResizer } from "@/components/sidebar-resizer"
 import { LogoMark } from "@/components/logo"
 import { BUILD } from "@/lib/build-info"
-import { projectPath, useProjectChats, useProjects, type Project } from "@/components/projects/use-projects"
+import { projectPath, useProjectChats, useProjects, useWorkingChats, type Project } from "@/components/projects/use-projects"
 
 /** `anim` names the hover animation in globals.css (icon-anim-*). */
 type NavItem = { title: string; url: string; icon: React.ElementType; anim?: string }
@@ -70,6 +70,7 @@ function useOpenFolders() {
 /** One project as a folder: its icon, name, a chevron, and a + for a new chat; inside, its chats. */
 function ProjectFolder({ project, open, onOpenChange, pathname, collapsed, onExpand }: { project: Project; open: boolean; onOpenChange: (open: boolean) => void; pathname: string; collapsed: boolean; onExpand: () => void }) {
 	const chats = useProjectChats(project.repo)
+	const working = useWorkingChats()
 	const name = project.repo.split("/")[1] ?? project.repo
 	const navigate = useNavigate()
 	const home = projectPath(project.repo)
@@ -118,7 +119,10 @@ function ProjectFolder({ project, open, onOpenChange, pathname, collapsed, onExp
 							return (
 								<li key={c.id}>
 									<Link to={url} title={c.title} className={`${ROW} ${pathname === url ? ACTIVE : ""}`}>
-										<span className="truncate">{c.title}</span>
+										<span className="min-w-0 flex-1 truncate">{c.title}</span>
+										{working.has(`${project.repo}:${c.id}`) ? (
+											<span className="ml-auto size-2 shrink-0 rounded-full bg-blue-500 motion-safe:animate-pulse" role="status" aria-label="Agent working" />
+										) : null}
 									</Link>
 								</li>
 							)
