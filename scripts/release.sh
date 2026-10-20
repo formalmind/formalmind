@@ -66,6 +66,7 @@ jq -n \
 # (SKIP_RELEASE stops the hook from running again); the hook's own push then has nothing left to send.
 if ! git branch -r --contains HEAD 2>/dev/null | grep -q "origin/main"; then
   SKIP_RELEASE=1 git push -q origin HEAD:main
+  echo "release: pushed $(git rev-parse --short HEAD) to main; if git then says 'failed to push some refs', that's this push already being there"
 fi
 gh release create "$TAG" -R "$REPO" --title "Formal Mind $VERSION" --notes "Formal Mind $VERSION" \
   --target "$(git rev-parse HEAD)" \
