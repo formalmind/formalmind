@@ -158,7 +158,7 @@ export function SwarmPanel({ folder, name, scan, bridge, session }: { folder: st
 			setRun(r);
 			const list = await listSessions();
 			// Reopen where you left off: the running session, else the latest one.
-			const id = r ?? session ?? list[0]?.run;
+			const id = r ?? (session === "new" ? undefined : session) ?? list[0]?.run;
 			if (id) load(id);
 		});
 		const off = listen<Ev>("swarm", ({ payload }) => {
@@ -174,8 +174,13 @@ export function SwarmPanel({ folder, name, scan, bridge, session }: { folder: st
 		return () => void off.then((f) => f());
 		// eslint-disable-next-line react-hooks/exhaustive-deps
 	}, [folder]);
-	// A session picked in the sidebar.
+	// A session picked in the sidebar; "new" is an empty one that gets its own queue when started.
 	useEffect(() => {
+		if (session === "new" && !run) {
+			setViewing(null);
+			setEvents([]);
+			return;
+		}
 		if (session && session !== viewing && !run) load(session);
 		// eslint-disable-next-line react-hooks/exhaustive-deps
 	}, [session]);
@@ -188,7 +193,7 @@ export function SwarmPanel({ folder, name, scan, bridge, session }: { folder: st
 		setError(null);
 		setEvents([]);
 		try {
-			const id = await invoke<string>("swarm_start", { request: { folder, goal: goal.trim() || null, budget_usd: budget, api_base: apiBase(), provider, model } });
+			const id = await invoke<string>("swarm_start", { request: { folder, goal: goal.trim() || null, budget_usd: budget, api_base: apiBase(), provider, model, session: session === "new" && !viewing ? `s-${Date.now().toString(16)}` : viewing ?? "swarm" } });
 			runRef.current = id;
 			setRun(id);
 			setViewing(id);
@@ -209,7 +214,7 @@ export function SwarmPanel({ folder, name, scan, bridge, session }: { folder: st
 	const sessionTitle = (id: string | null) => {
 		const i = sessions.findIndex((x) => x.run === id);
 		if (i < 0) return run ? goal.trim() || "New session" : "New session";
-		return sessions[i].title || `Session ${sessions.length - i}`;
+		return sessions[i].title || (sessions[i].run === "swarm" ? "Main session" : `Session ${sessions.length - i}`);
 	};
 	const title = sessionTitle(viewing);
 	const working = [...events].reverse().find((e) => e.kind === "status" && e.role !== "swarm");

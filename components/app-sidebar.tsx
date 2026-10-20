@@ -228,6 +228,7 @@ export function AppSidebar({ extra, ...props }: React.ComponentProps<typeof Side
 								current={pathname === "/local-demo"}
 								currentSession={pathname === "/local-demo" ? new URLSearchParams(location.search).get("run") : null}
 								sessions={DEMO_SESSIONS}
+								newHref="/local-demo?run=new"
 							/>
 						</ul>
 					</SidebarGroup>

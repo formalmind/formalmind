@@ -1,6 +1,6 @@
 import { useState } from "react";
-import { Link } from "react-router";
-import { ChevronRight, Folder, FolderOpen, HardDrive, Plus, X } from "lucide-react";
+import { Link, useNavigate } from "react-router";
+import { Folder, FolderOpen, HardDrive, Plus } from "lucide-react";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 
 export type FolderSession = { id: string; title: string; href: string; live?: boolean };
@@ -12,33 +12,41 @@ const ACTIVE = "bg-sidebar-accent text-sidebar-foreground";
  * A folder on this computer in the sidebar, like a project folder: its name opens the folder's swarm, the chevron
  * shows its swarm sessions (long-running, each one opens where it left off), and a live one has a pulsing dot.
  */
-export function SessionFolder({ name, title, href, sessions, current, currentSession, onRemove }: {
+export function SessionFolder({ name, title, href, sessions, current, currentSession, newHref }: {
 	name: string;
 	title?: string;
 	href: string;
 	sessions: FolderSession[];
 	current: boolean;
 	currentSession?: string | null;
-	onRemove?: () => void;
+	/** Where + goes: a new, empty session for this folder. */
+	newHref?: string;
 }) {
 	const [open, setOpen] = useState(true);
+	const navigate = useNavigate();
 	return (
 		<Collapsible open={open} onOpenChange={setOpen} asChild>
 			<li className="list-none">
 				<div className={`group/folder flex h-8 items-center rounded-md pr-1 hover:bg-sidebar-accent ${current && !currentSession ? ACTIVE : ""}`}>
-					<Link to={href} title={title ?? name} className="flex h-8 min-w-0 flex-1 items-center gap-2 px-2 text-sm font-normal text-sidebar-foreground/90 outline-none">
-						{open && sessions.length ? <FolderOpen className="size-4 shrink-0" /> : <Folder className="size-4 shrink-0" />}
+					{/* The name (or the folder icon) opens the folder and folds its sessions, like a project folder. */}
+					<CollapsibleTrigger
+						onClick={(e) => {
+							if (!current) {
+								e.preventDefault();
+								setOpen(true);
+								navigate(href);
+							}
+						}}
+						title={title ?? name}
+						className="flex h-8 min-w-0 flex-1 items-center gap-2 px-2 text-left text-sm font-normal text-sidebar-foreground/90 outline-none"
+					>
+						{open ? <FolderOpen className="size-4 shrink-0" /> : <Folder className="size-4 shrink-0" />}
 						<span className="truncate group-data-[collapsible=icon]:hidden">{name}</span>
-					</Link>
-					{onRemove ? (
-						<button type="button" onClick={onRemove} title="Remove from the list" className="grid size-6 shrink-0 place-items-center rounded-md text-muted-foreground opacity-0 hover:bg-background group-hover/folder:opacity-100 group-data-[collapsible=icon]:hidden">
-							<X className="size-3.5" />
-						</button>
-					) : null}
-					{sessions.length ? (
-						<CollapsibleTrigger className="grid size-6 shrink-0 place-items-center rounded-md text-muted-foreground hover:bg-background group-data-[collapsible=icon]:hidden" aria-label={open ? "Hide sessions" : "Show sessions"}>
-							<ChevronRight className={`size-3.5 transition-transform duration-150 ${open ? "rotate-90" : ""}`} />
-						</CollapsibleTrigger>
+					</CollapsibleTrigger>
+					{newHref ? (
+						<Link to={newHref} title="New session" aria-label={`New session in ${name}`} className="grid size-6 shrink-0 place-items-center rounded-md text-muted-foreground hover:bg-background hover:text-sidebar-foreground group-data-[collapsible=icon]:hidden">
+							<Plus className="size-3.5" />
+						</Link>
 					) : null}
 				</div>
 				<CollapsibleContent className="group-data-[collapsible=icon]:hidden">

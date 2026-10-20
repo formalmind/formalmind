@@ -21,6 +21,8 @@ const MAX_ATTEMPTS: usize = 3;
 
 pub struct Swarm {
     stop: AtomicBool,
+    /// This session's queue file.
+    queue: PathBuf,
     /// Where the run's log lives and what it has spent, so quitting can record the pause.
     folder: String,
     spent: Mutex<f64>,
@@ -43,6 +45,8 @@ pub struct SwarmRequest {
     pub provider: Option<String>,
     /// claude-opus-5-5 (default), claude-sonnet-5-5 or claude-haiku-5-5.
     pub model: Option<String>,
+    /// The session to continue: "swarm" (the folder's default) unless you made another with +.
+    pub session: Option<String>,
 }
 
 fn anthropic_entry() -> Result<keyring::Entry, String> {
@@ -241,29 +245,34 @@ struct Queue {
 /// One writer at a time for every folder's queue (the loop and swarm_say both touch it).
 static QUEUE_LOCK: Mutex<()> = Mutex::new(());
 
-fn queue_path(root: &Path) -> PathBuf {
-    root.join(".formal").join("queue.json")
+/// The queue file for a session: the folder's default session keeps .formal/queue.json; ones you add get their own.
+fn queue_file(root: &Path, session: &str) -> PathBuf {
+    if session == "swarm" { root.join(".formal").join("queue.json") } else { root.join(".formal").join("queues").join(format!("{session}.json")) }
 }
 
-fn load_queue(root: &Path) -> Queue {
-    std::fs::read_to_string(queue_path(root)).ok().and_then(|t| serde_json::from_str(&t).ok()).unwrap_or_default()
+fn load_queue(qf: &Path) -> Queue {
+    std::fs::read_to_string(qf).ok().and_then(|t| serde_json::from_str(&t).ok()).unwrap_or_default()
 }
 
-fn save_queue(root: &Path, q: &Queue) {
-    let _ = std::fs::create_dir_all(root.join(".formal"));
-    let tmp = root.join(".formal").join("queue.json.tmp");
+fn save_queue(qf: &Path, q: &Queue) {
+    let _ = std::fs::create_dir_all(qf.parent().unwrap_or(qf));
+    let tmp = qf.with_extension("json.tmp");
     if std::fs::write(&tmp, serde_json::to_string_pretty(q).unwrap_or_default()).is_ok() {
-        let _ = std::fs::rename(&tmp, queue_path(root));
+        let _ = std::fs::rename(&tmp, qf);
     }
 }
 
-/// Load, change and save the queue under the lock; returns what `f` returns.
-fn with_queue<T>(root: &Path, f: impl FnOnce(&mut Queue) -> T) -> T {
+/// Load, change and save a queue file under the lock; returns what `f` returns.
+fn with_queue<T>(qf: &Path, f: impl FnOnce(&mut Queue) -> T) -> T {
     let _guard = QUEUE_LOCK.lock().unwrap_or_else(|e| e.into_inner());
-    let mut q = load_queue(root);
+    let mut q = load_queue(qf);
     let out = f(&mut q);
-    save_queue(root, &q);
+    save_queue(qf, &q);
     out
+}
+
+fn session_of(req: &SwarmRequest) -> String {
+    req.session.clone().filter(|s| !s.is_empty() && s.chars().all(|c| c.is_ascii_alphanumeric() || c == '-')).unwrap_or_else(|| "swarm".into())
 }
 
 fn enqueue(q: &mut Queue, kind: &str, item: usize, text: &str, attempt: usize, notes: &str) -> u64 {
@@ -297,7 +306,7 @@ pub fn swarm_queue(folder: String) -> Result<Value, String> {
     if !local::read()?.folders.contains(&folder) {
         return Err("Add the folder first".into());
     }
-    let q = load_queue(Path::new(&folder));
+    let q = load_queue(&queue_file(Path::new(&folder), "swarm"));
     let open: Vec<Value> = q.jobs.iter().filter(|j| j.state != "done").map(|j| json!({ "id": j.id, "kind": j.kind, "item": j.item, "state": j.state, "attempt": j.attempt })).collect();
     Ok(json!({ "open": open, "spent": q.spent, "done": q.jobs.iter().filter(|j| j.state == "done").count() }))
 }
@@ -362,6 +371,8 @@ struct Turn<'a> {
     client: reqwest::Client,
     /// The queue job the current agent turn is working on; its file writes are recorded as they happen.
     job: Mutex<Option<u64>>,
+    /// This session's queue file.
+    queue: PathBuf,
 }
 
 impl Turn<'_> {
@@ -458,7 +469,7 @@ impl Turn<'_> {
                 *spent += cost(model_of(self.req), &reply["usage"]);
                 *spent
             };
-            with_queue(Path::new(&self.req.folder), |q| q.spent = total);
+            with_queue(&self.queue, |q| q.spent = total);
             let content = reply["content"].clone();
             messages.push(json!({ "role": "assistant", "content": content }));
             keep(&messages);
@@ -499,7 +510,7 @@ impl Turn<'_> {
                                         out.files.push(path.clone());
                                         // Recorded now, so a quit mid-turn still knows what was written.
                                         if let Some(job) = *self.job.lock().unwrap() {
-                                            with_queue(&root, |q| {
+                                            with_queue(&self.queue, |q| {
                                                 if let Some(j) = q.jobs.iter_mut().find(|j| j.id == job) {
                                                     if !j.files.contains(&path) {
                                                         j.files.push(path.clone());
@@ -615,7 +626,7 @@ async fn run_swarm(turn: &Turn<'_>) -> String {
         }
 
         // Next job: an interrupted one first, then your messages, then the rest in order; derive one if the queue is empty.
-        let next = with_queue(&root, |q| {
+        let next = with_queue(&turn.queue, |q| {
             let pick = q.jobs.iter().position(|j| j.state == "running")
                 .or_else(|| q.jobs.iter().position(|j| j.state == "queued" && j.kind == "answer"))
                 .or_else(|| q.jobs.iter().position(|j| j.state == "queued"));
@@ -662,7 +673,7 @@ async fn run_swarm(turn: &Turn<'_>) -> String {
                     let added = after.len().saturating_sub(before);
                     turn.emit("plan", "planner", "plan", if before == 0 { format!("{} items", after.len()) } else { format!("{added} new items") });
                     if added == 0 && after.iter().all(|i| i.mark != " ") {
-                        with_queue(&root, |q| if let Some(j) = q.jobs.iter_mut().find(|j| j.id == job.id) { j.state = "done".into(); });
+                        with_queue(&turn.queue, |q| if let Some(j) = q.jobs.iter_mut().find(|j| j.id == job.id) { j.state = "done".into(); });
                         return if after.is_empty() { "failed: the planner wrote no checklist".into() } else { format!("done: the planner found nothing more to check ({} items)", after.len()) };
                     }
                 }
@@ -691,7 +702,7 @@ async fn run_swarm(turn: &Turn<'_>) -> String {
         }
 
         // Finish the job and queue what follows from it.
-        with_queue(&root, |q| {
+        with_queue(&turn.queue, |q| {
             let Some(j) = q.jobs.iter_mut().find(|j| j.id == job.id) else { return };
             j.state = "done".into();
             j.summary = out.summary.clone();
@@ -770,7 +781,7 @@ fn merge_old_sessions(root: &Path) {
         let _ = std::fs::rename(p, archive.join(p.file_name().unwrap_or_default()));
     }
     let _ = std::fs::write(dir.join("swarm.jsonl"), merged);
-    with_queue(root, |q| q.spent += carried);
+    with_queue(&queue_file(root, "swarm"), |q| q.spent += carried);
 }
 
 #[tauri::command]
@@ -787,15 +798,16 @@ pub fn swarm_start(app: AppHandle, swarms: State<'_, Swarms>, request: SwarmRequ
         return Err("A swarm is already running; stop it first".into());
     }
     // One continuous session per folder: every start appends to .formal/runs/swarm.jsonl and the queue carries on.
-    let run = "swarm".to_string();
+    let run = session_of(&request);
     merge_old_sessions(Path::new(&request.folder));
-    let spent = load_queue(Path::new(&request.folder)).spent;
-    let swarm = Arc::new(Swarm { stop: AtomicBool::new(false), folder: request.folder.clone(), spent: Mutex::new(spent), budget: Mutex::new(request.budget_usd.max(spent)) });
+    let qf = queue_file(Path::new(&request.folder), &run);
+    let spent = load_queue(&qf).spent;
+    let swarm = Arc::new(Swarm { stop: AtomicBool::new(false), folder: request.folder.clone(), queue: qf.clone(), spent: Mutex::new(spent), budget: Mutex::new(request.budget_usd.max(spent)) });
     swarms.0.lock().unwrap().insert(run.clone(), swarm.clone());
     let id = run.clone();
     tauri::async_runtime::spawn(async move {
         let client = reqwest::Client::builder().timeout(Duration::from_secs(600)).build().unwrap_or_default();
-        let turn = Turn { app: &app, run: &id, req: &request, swarm: &swarm, client, job: Mutex::new(None) };
+        let turn = Turn { app: &app, run: &id, req: &request, swarm: &swarm, client, job: Mutex::new(None), queue: swarm.queue.clone() };
         // The session's title: the focus it was given (the latest start's focus wins).
         turn.emit("start", "swarm", "", request.goal.clone().unwrap_or_default());
         turn.emit("status", "swarm", "", "resuming".into());
@@ -816,11 +828,11 @@ pub fn swarm_stop(swarms: State<'_, Swarms>, run: String) {
 /// A message to the swarm: queued as an "answer" job (on disk, so a quit can't lose it), answered before the next turn.
 #[tauri::command]
 pub fn swarm_say(swarms: State<'_, Swarms>, run: String, text: String) -> Result<(), String> {
-    let folder = {
+    let qf = {
         let map = swarms.0.lock().unwrap();
-        map.get(&run).ok_or("The swarm isn't running")?.folder.clone()
+        map.get(&run).ok_or("The swarm isn't running")?.queue.clone()
     };
-    with_queue(Path::new(&folder), |q| {
+    with_queue(&qf, |q| {
         enqueue(q, "answer", 0, &text, 1, "");
     });
     Ok(())
@@ -915,14 +927,15 @@ mod tests {
     fn queue_and_transcripts_survive_a_restart() {
         let root = std::env::temp_dir().join(format!("fm-queue-{}", std::process::id()));
         std::fs::create_dir_all(root.join(".formal")).unwrap();
-        let id = with_queue(&root, |q| {
+        let qf = queue_file(&root, "swarm");
+        let id = with_queue(&qf, |q| {
             let id = enqueue(q, "prove", 3, "item three", 1, "");
             q.jobs[0].state = "running".into();
             q.spent = 1.25;
             id
         });
         // Reloaded from disk, as after a quit: the job is still running and the spend kept.
-        let q = load_queue(&root);
+        let q = load_queue(&qf);
         assert_eq!((q.jobs[0].state.as_str(), q.jobs[0].id, q.spent), ("running", id, 1.25));
         save_transcript(&root, id, &[json!({"role": "user", "content": "go"}), json!({"role": "assistant", "content": [{"type": "tool_use"}]})]);
         assert_eq!(load_transcript(&root, id).unwrap().len(), 2);
@@ -941,7 +954,7 @@ mod tests {
         assert_eq!(merged.lines().count(), 2);
         assert!(merged.lines().all(|l| l.contains("\"run\":\"swarm\"")));
         assert!(runs.join("archive").join("local-1.jsonl").exists());
-        assert_eq!(load_queue(&root).spent, 3.5);
+        assert_eq!(load_queue(&queue_file(&root, "swarm")).spent, 3.5);
         std::fs::remove_dir_all(root).unwrap();
     }
 

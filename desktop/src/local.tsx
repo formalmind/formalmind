@@ -52,7 +52,7 @@ function useSessions(folder: string) {
 }
 
 /** A folder in the sidebar with its swarm sessions underneath, like a project's chats on the web. */
-function FolderItem({ path, current, run, onRemove }: { path: string; current: boolean; run: string | null; onRemove: () => void }) {
+function FolderItem({ path, current, run }: { path: string; current: boolean; run: string | null }) {
 	const sessions = useSessions(path);
 	const [live, setLive] = useState<string | null>(null);
 	useEffect(() => {
@@ -68,14 +68,14 @@ function FolderItem({ path, current, run, onRemove }: { path: string; current: b
 			href={href(path)}
 			current={current}
 			currentSession={run}
-			onRemove={onRemove}
-			sessions={sessions.slice(0, 12).map((x, i) => ({ id: x.run, title: x.title || `Session ${sessions.length - i}`, href: `${href(path)}&run=${x.run}`, live: x.run === live }))}
+			newHref={`${href(path)}&run=new`}
+			sessions={sessions.slice(0, 12).map((x, i) => ({ id: x.run, title: x.title || (x.run === "swarm" ? "Main session" : `Session ${sessions.length - i}`), href: `${href(path)}&run=${x.run}`, live: x.run === live }))}
 		/>
 	);
 }
 
 export function LocalFolders() {
-	const { folders, add, remove } = useFolders();
+	const { folders, add } = useFolders();
 	const location = useLocation();
 	const [params] = useSearchParams();
 	const current = location.pathname === "/local" ? params.get("path") : null;
@@ -84,7 +84,7 @@ export function LocalFolders() {
 			<LocalHeading onAdd={() => void add()} />
 			<ul className="flex flex-col gap-0.5">
 				{folders.map((path) => (
-					<FolderItem key={path} path={path} current={current === path} run={current === path ? params.get("run") : null} onRemove={() => void remove(path)} />
+					<FolderItem key={path} path={path} current={current === path} run={current === path ? params.get("run") : null} />
 				))}
 			</ul>
 			<SidebarMenu>
