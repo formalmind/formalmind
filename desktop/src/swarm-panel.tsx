@@ -518,25 +518,6 @@ function CoverageView({ data, scripts, onOpenFile }: { data: Formal; scripts: Sc
 				<span className="text-muted-foreground"><span className="font-mono">{data.theorems.length}</span> theorems{data.theorems.some((t) => t.sorry) ? ` · ${data.theorems.filter((t) => t.sorry).length} with sorry` : ""}</span>
 				<span className="ml-auto text-[11px] text-muted-foreground">{data.namespace} model · {data.modelLines} lines</span>
 			</div>
-			{scripts ? (
-				<div className="flex shrink-0 flex-wrap items-center gap-1.5 rounded-xl border bg-card px-3 py-1.5 text-[11px]">
-					<span className="text-muted-foreground" title="The Foundry scripts under script/ are what runs in production: what they deploy and call is in scope.">
-						Scope from <span className="font-mono text-foreground">{scripts.scripts.length}</span> scripts
-						{scripts.scripts.some((x) => x.error) ? <span className="text-amber-700 dark:text-amber-400"> ({scripts.scripts.filter((x) => x.error).length} didn't compile)</span> : null}:
-					</span>
-					{scripts.contracts.map((c) => (
-						<button
-							key={c.name}
-							type="button"
-							onClick={() => onOpenFile(c.file)}
-							title={c.inScope ? (c.deployedBy.length ? `Deployed by ${c.deployedBy.join(", ")}` : (c.via ?? "Called by a script")) : "No script deploys or calls it"}
-							className={`rounded-md px-1.5 py-0.5 font-mono ${c.inScope ? "bg-emerald-500/10 text-emerald-800 dark:text-emerald-300" : "text-muted-foreground line-through decoration-muted-foreground/50"}`}
-						>
-							{c.name}
-						</button>
-					))}
-				</div>
-			) : null}
 			<div className="flex min-h-0 flex-1 gap-1">
 				<nav className="flex w-72 shrink-0 flex-col overflow-hidden rounded-xl border bg-card">
 					<div className="flex shrink-0 flex-wrap items-center gap-1 border-b p-1.5">
