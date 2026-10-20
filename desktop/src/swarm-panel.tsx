@@ -1,6 +1,6 @@
 import { MarkGithubIcon } from "@primer/octicons-react";
 import { useEffect, useRef, useState } from "react";
-import { Bug, Check, ChevronDown, Copy, FileCode2, Play, Plus, Square, WandSparkles, Wrench } from "lucide-react";
+import { Bug, Check, ChevronDown, Copy, FileCode2, Maximize2, Minimize2, Play, Plus, Square, WandSparkles, Wrench } from "lucide-react";
 import { useSearchParams } from "react-router";
 import { ChatComposer } from "@/components/chat-composer";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuRadioGroup, DropdownMenuRadioItem, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
@@ -227,6 +227,8 @@ export function SwarmPanel({ folder, name, scan, bridge, session, file: openPath
 	const [proofs, setProofs] = useState<Record<string, Proof>>({});
 	const [openItem, setOpenItem] = useState<number | null>(null);
 	const [file, setFile] = useState<{ path: string; text: string } | null>(null);
+	// The file card can widen to read code comfortably; it stops short of the chat card.
+	const [wideFile, setWideFile] = useState(false);
 	/** A report with the PoC tests and proofs it cites inlined (newer reports already carry them). */
 	const withPoc = async (body: string) => {
 		const cited = [...new Set(body.match(/[\w./-]+\.(?:t\.sol|lean)/g) ?? [])].filter((p) => !body.includes(`Proof of concept: \`${p}\``)).slice(0, 3);
@@ -390,7 +392,7 @@ export function SwarmPanel({ folder, name, scan, bridge, session, file: openPath
 						</>
 					}
 				/>
-				<div className="pointer-events-none absolute left-3 top-14 z-10 flex max-h-[calc(100%-4.5rem)] w-[min(18rem,calc(100%-1.5rem))] flex-col gap-2">
+				<div className={`pointer-events-none absolute left-3 top-14 z-10 flex max-h-[calc(100%-4.5rem)] flex-col gap-2 transition-[width] duration-200 ${wideFile && panel === "file" ? "bottom-3 w-[min(48rem,calc(100%-26.5rem))]" : "w-[min(18rem,calc(100%-1.5rem))]"}`}>
 					<Floating id="plan" open={panel} onOpen={setPanel} title="Plan" meta={plan.length ? `${done}/${plan.length}` : ""}>
 						<ul className="space-y-0.5 p-2 text-[13px]">
 							{plan.length === 0 ? <li className="p-2 text-muted-foreground">The planner writes .formal/plan.md on the first run.</li> : null}
@@ -450,6 +452,19 @@ export function SwarmPanel({ folder, name, scan, bridge, session, file: openPath
 									</button>
 								) : null}
 								<CopyButton text={file.text} label="Copy the file" />
+								<button
+									type="button"
+									onClick={(e) => {
+										e.stopPropagation();
+										setWideFile(!wideFile);
+										setPanel("file");
+									}}
+									title={wideFile ? "Make the file card narrow again" : "Expand the file card"}
+									aria-label={wideFile ? "Collapse the file card" : "Expand the file card"}
+									className="grid size-6 shrink-0 place-items-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground"
+								>
+									{wideFile ? <Minimize2 className="size-3.5" /> : <Maximize2 className="size-3.5" />}
+								</button>
 							</span>
 						}>
 							<FileView path={file.path} text={file.text} />
