@@ -1,3 +1,4 @@
+import { MarkGithubIcon } from "@primer/octicons-react";
 import { useEffect, useRef, useState } from "react";
 import { Check, ChevronDown, Copy, FileCode2, Play, Square } from "lucide-react";
 import { ChatComposer } from "@/components/chat-composer";
@@ -231,7 +232,7 @@ export function SwarmPanel({ folder, name, scan, bridge, session, actions }: { f
 					local
 					repo={folder}
 					actions={actions}
-					title={<span className="inline-flex h-8 min-w-0 items-center rounded-full border bg-background/90 px-3 text-sm shadow-sm backdrop-blur"><span className="truncate">{name}</span></span>}
+					title={<span className="inline-flex h-8 min-w-0 items-center rounded-full border bg-background/90 px-3 text-sm shadow-sm backdrop-blur">{scan?.git ? <MarkGithubIcon className="mr-2 size-4 shrink-0" /> : null}<span className="truncate">{name}</span></span>}
 				/>
 				<div className="pointer-events-none absolute left-3 top-14 z-10 flex max-h-[calc(100%-4.5rem)] w-[min(18rem,calc(100%-1.5rem))] flex-col gap-2">
 					<Floating id="plan" open={panel} onOpen={setPanel} title="Plan" meta={plan.length ? `${done}/${plan.length}` : ""}>

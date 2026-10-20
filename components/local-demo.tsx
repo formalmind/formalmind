@@ -12,7 +12,7 @@ const PLAN = [
 	{ index: 5, mark: "!", text: "InterestModel: the exchange rate never decreases across accrual (src/InterestModel.sol)" },
 	{ index: 6, mark: " ", text: "Oracle.getValue rejects pool prices beyond the allowed deviation (src/Oracle.sol)" },
 ];
-const FILES = { solidity: ["src/Vault.sol", "src/Lending.sol", "src/InterestModel.sol", "src/Oracle.sol", "test/Vault.t.sol", "test/formal/PoC_Liquidate.t.sol"], lean: ["formal/Formal/Vault.lean", "formal/Formal/Lending.lean"], truncated: false };
+const FILES = { solidity: ["src/Vault.sol", "src/Lending.sol", "src/InterestModel.sol", "src/Oracle.sol", "test/Vault.t.sol", "test/formal/PoC_Liquidate.t.sol"], lean: ["formal/Formal/Vault.lean", "formal/Formal/Lending.lean"], truncated: false, git: true };
 const BUGS = [
 	{
 		file: ".formal/bugs/001-liquidation-penalty-can-exceed-cap.md",

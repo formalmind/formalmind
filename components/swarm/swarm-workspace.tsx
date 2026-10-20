@@ -5,7 +5,7 @@ import { ROLE_COLORS } from "@/lib/swarm-roles";
 import type { SwarmRole } from "@/lib/swarm";
 import { AgentChat } from "./agent-chat";
 import { SwarmChat } from "./swarm-chat";
-import { RefreshCw, X } from "lucide-react";
+import { X } from "lucide-react";
 import type { SwarmState } from "@/lib/swarm";
 import { ChatComposer } from "@/components/chat-composer";
 import type { OpenAIModel } from "@/lib/models";
@@ -17,14 +17,6 @@ import { notify } from "@/lib/notifications";
 import { HoverCard, HoverCardContent, HoverCardTrigger } from "@/components/ui/hover-card";
 
 const POLL_MS = 10_000;
-
-function minutesAgo(iso: string) {
-	const minutes = Math.round((Date.now() - Date.parse(iso)) / 60_000);
-	if (minutes < 1) return "just now";
-	if (minutes < 60) return `${minutes} min ago`;
-	const hours = Math.round(minutes / 60);
-	return hours < 24 ? `${hours} h ago` : `${Math.round(hours / 24)} d ago`;
-}
 
 /** The board narrowed to one project: its card in `projects`, and the items, merges and agents in its proofs repo. */
 function onlyProject(state: SwarmState, repo: string): SwarmState {
@@ -50,9 +42,8 @@ export function SwarmWorkspace({ repo, only }: { repo: string; only?: string }) 
 	const [model, setModel] = useState<OpenAIModel>("gpt-6-luna");
 	const [state, setState] = useState<SwarmState | null>(null);
 	const [error, setError] = useState<string | null>(null);
-	const [loading, setLoading] = useState(false);
-	const [syncedAt, setSyncedAt] = useState<number | null>(null);
-	const [now, setNow] = useState(() => Date.now());
+	const [, setLoading] = useState(false);
+	const [, setSyncedAt] = useState<number | null>(null);
 
 	useEffect(() => {
 		if (!talkTo) return;
@@ -60,11 +51,6 @@ export function SwarmWorkspace({ repo, only }: { repo: string; only?: string }) 
 		window.addEventListener("keydown", close);
 		return () => window.removeEventListener("keydown", close);
 	}, [talkTo]);
-
-	useEffect(() => {
-		const timer = setInterval(() => setNow(Date.now()), 1000);
-		return () => clearInterval(timer);
-	}, []);
 
 	const load = async (quiet = false) => {
 		if (!quiet) setLoading(true);
@@ -108,10 +94,6 @@ export function SwarmWorkspace({ repo, only }: { repo: string; only?: string }) 
 			delete root.dataset.swarmWorking;
 		};
 	}, [working]);
-	const activity = run
-		? `${run.status === "completed" ? "Just finished" : "Live"}: ${run.note ? `${run.note.role}${run.note.ref ? ` on #${run.note.ref}` : ""}` : "dispatcher"} · ${run.status === "completed" ? "done" : run.phase} · started ${minutesAgo(run.startedAt)}`
-		: "Idle. The dispatcher sweeps every 10 minutes";
-
 	const queued = state?.work.filter((item) => item.labels.includes("fm:todo") || item.labels.includes("fm:rebuild")).length ?? 0;
 	const inFlight = state?.work.filter((item) => item.kind === "pr").length ?? 0;
 	const blocked = state?.work.filter((item) => item.labels.includes("fm:blocked")).length ?? 0;
@@ -131,7 +113,6 @@ export function SwarmWorkspace({ repo, only }: { repo: string; only?: string }) 
 				["Spent today", `$${state.spentToday.toFixed(2)}`],
 			]
 		: [];
-	const synced = syncedAt ? `Synced ${Math.max(0, Math.round((now - syncedAt) / 1000))}s ago. ` : "";
 
 	return (
 		<div className="relative flex min-h-0 flex-1">
@@ -174,15 +155,6 @@ export function SwarmWorkspace({ repo, only }: { repo: string; only?: string }) 
 				}
 				actions={
 					<>
-						<button
-							type="button"
-							onClick={() => void load()}
-							className={`${pill} size-8 justify-center text-muted-foreground transition-colors hover:text-foreground`}
-							aria-label="Refresh"
-							title={`${synced}${activity}. The board re-reads GitHub every 10 seconds while this tab is open.`}
-						>
-							<RefreshCw className={`size-3.5 ${loading ? "animate-spin" : ""}`} />
-						</button>
 						<NotificationCenter />
 					</>
 				}

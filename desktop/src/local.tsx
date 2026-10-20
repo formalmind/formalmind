@@ -13,7 +13,7 @@ const tauri: Bridge = { invoke, listen, apiBase };
 import { SidebarGroup, SidebarMenu, SidebarMenuButton, SidebarMenuItem } from "@/components/ui/sidebar";
 
 type Config = { folders: string[] };
-export type Scan = { solidity: string[]; lean: string[]; truncated: boolean };
+export type Scan = { solidity: string[]; lean: string[]; truncated: boolean; git?: boolean };
 
 const name = (path: string) => path.split(/[\\/]/).filter(Boolean).pop() ?? path;
 const href = (path: string) => `/local?path=${encodeURIComponent(path)}`;

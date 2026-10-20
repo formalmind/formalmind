@@ -69,6 +69,8 @@ pub struct Scan {
     pub lean: Vec<String>,
     /// True when the walk stopped at the limit.
     pub truncated: bool,
+    /// True when the folder is a git repository.
+    pub git: bool,
 }
 
 const SKIP: [&str; 8] = [".git", "node_modules", "lib", "out", "cache", "target", ".lake", "dist"];
@@ -81,7 +83,7 @@ pub fn folder_scan(path: String) -> Result<Scan, String> {
         return Err("Add the folder first".into());
     }
     let root = PathBuf::from(&path);
-    let mut scan = Scan { solidity: vec![], lean: vec![], truncated: false };
+    let mut scan = Scan { solidity: vec![], lean: vec![], truncated: false, git: root.join(".git").exists() };
     let mut stack = vec![root.clone()];
     let mut seen = 0;
     while let Some(dir) = stack.pop() {
