@@ -32,13 +32,22 @@ export function NvimTerminal({ bridge, folder, path, line }: { bridge: Bridge; f
 		const fit = new FitAddon();
 		term.loadAddon(fit);
 		term.open(el);
-		fit.fit();
+		let disposed = false;
+		// xterm measures its renderer; with no size (hidden, collapsed) or after dispose that throws, so skip it then.
+		const refit = () => {
+			if (disposed || el.clientWidth < 20 || el.clientHeight < 20) return;
+			try {
+				fit.fit();
+			} catch {
+				/* the renderer isn't ready yet; the next resize fits */
+			}
+		};
+		requestAnimationFrame(refit);
 		// ⌘ shortcuts belong to the app (new tab, close tab, copy…), not to Neovim.
 		term.attachCustomKeyEventHandler((e) => !e.metaKey);
 
 		let id: number | null = null;
 		let ended = false;
-		let disposed = false;
 		const decode = (b64: string) => Uint8Array.from(atob(b64), (c) => c.charCodeAt(0));
 		const start = (p: string | null, l: number | null) => {
 			ended = false;
@@ -73,7 +82,7 @@ export function NvimTerminal({ bridge, folder, path, line }: { bridge: Bridge; f
 		const resize = term.onResize(({ cols, rows }) => {
 			if (id !== null) void bridge.invoke("term_resize", { id, cols, rows }).catch(() => undefined);
 		});
-		const ro = new ResizeObserver(() => fit.fit());
+		const ro = new ResizeObserver(() => requestAnimationFrame(refit));
 		ro.observe(el);
 
 		api.current = {

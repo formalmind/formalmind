@@ -572,9 +572,12 @@ export function DebugView({ folder, file, test: wanted, onPick, embedded }: { fo
 	const [focusB, setFocusB] = useState(false);
 	const [linked, setLinked] = useState(true);
 	const typing = useRef(false);
+	// Reported when the error changes (not when the file does), named after the file it came from.
+	const where = useRef("");
+	where.current = `Debug · ${file ?? name(folder)}`;
 	useEffect(() => {
-		if (error) reportError(`Debug · ${file ?? name(folder)}`, error);
-	}, [error, file, folder]);
+		if (error) reportError(where.current, error);
+	}, [error]);
 
 	useEffect(() => {
 		setScan(null);

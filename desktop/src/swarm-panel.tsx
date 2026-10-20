@@ -652,9 +652,11 @@ function AuditView({ folder, scan, invoke, preferred, onOpenFile }: { folder: st
 	const [formal, setFormal] = useState<Formal | null>(null);
 	const [scripts, setScripts] = useState<Scripts | null>(null);
 	const [error, setError] = useState<string | null>(null);
+	const errorSource = useRef("");
+	errorSource.current = `Audit · ${entry ?? ""}`;
 	useEffect(() => {
-		if (error) reportError(`Audit · ${entry ?? ""}`, error);
-	}, [error, entry]);
+		if (error) reportError(errorSource.current, error);
+	}, [error]);
 	useEffect(() => {
 		setScripts(null);
 		void invoke<Scripts>("ast_scripts", { folder }).then(setScripts, () => setScripts(null));
@@ -727,9 +729,11 @@ export function SwarmPanel({ folder, name, scan, bridge, session, file: openPath
 	const [mdSource, setMdSource] = useState(() => store.get("fm:md-view") === "source");
 	// JSON files open as a collapsible tree; Raw shows the file as it is.
 	// Every error the page shows also goes to the bell (copyable) and the app's error log.
+	const errorSource = useRef(name);
+	errorSource.current = name;
 	useEffect(() => {
-		if (error) reportError(name, error);
-	}, [error, name]);
+		if (error) reportError(errorSource.current, error);
+	}, [error]);
 	const [jsonRaw, setJsonRaw] = useState(() => store.get("fm:json-view") === "raw");
 	const jsonOk = useMemo(() => Boolean(file && /\.json$/i.test(file.path) && jsonValid(file.text)), [file]);
 	// Images a Markdown file points at, read from the folder (relative to the file), by path.
