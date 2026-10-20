@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
-import { ChevronDown, FileCode2, Play, Send, Square } from "lucide-react";
+import { ChevronDown, FileCode2, Play, Square } from "lucide-react";
+import { ChatComposer } from "@/components/chat-composer";
 import { ChatMarkdown } from "@/components/chat-markdown";
 import { SwarmCanvas } from "@/components/swarm/swarm-canvas";
 import { ROLE_COLORS } from "@/lib/swarm-roles";
@@ -253,69 +254,56 @@ export function SwarmPanel({ folder, name, scan, bridge }: { folder: string; nam
 					{finished ? <p className="rounded-lg border px-3 py-2 text-xs text-muted-foreground">Finished: {finished.text}</p> : null}
 				</div>
 
-				<div className="shrink-0 space-y-2 border-t p-3">
+				<div className="shrink-0 space-y-2 p-3">
 					{error ? <p className="text-xs text-red-600">{error}</p> : null}
+					{/* The Swarm page's composer: steer while it runs; before that, what you type is its focus and ↑ starts it. */}
+					<ChatComposer
+						value={run ? say : goal}
+						onChange={(e) => (run ? setSay(e.target.value) : setGoal(e.target.value))}
+						onSubmit={() => void (run ? send() : start())}
+						onStop={() => {}}
+						isLoading={false}
+						placeholder={run ? "Steer the swarm: a question, a new focus, an idea to check…" : "What should the swarm focus on? (optional) ↑ starts it"}
+						context={
+							<span className="inline-flex h-8 items-center gap-1.5 rounded-full bg-secondary px-3 text-sm font-medium text-secondary-foreground">
+								{name} swarm
+							</span>
+						}
+					/>
 					{run ? (
-						<>
-							<div className="flex items-end gap-2 rounded-2xl border bg-background p-1.5 focus-within:border-foreground/30">
-								<textarea
-									rows={2}
-									value={say}
-									onChange={(e) => setSay(e.target.value)}
-									onKeyDown={(e) => {
-										if (e.key === "Enter" && !e.shiftKey) {
-											e.preventDefault();
-											void send();
-										}
-									}}
-									placeholder="Steer the swarm: a question, a new focus, an idea to check…"
-									className="min-h-0 flex-1 resize-none bg-transparent px-2 py-1 text-sm outline-none"
-								/>
-								<button type="button" onClick={() => void send()} disabled={!say.trim()} className="btn-dark size-8 shrink-0 justify-center p-0 disabled:opacity-40" aria-label="Send"><Send className="size-3.5" /></button>
-							</div>
-							<div className="flex items-center justify-between text-[11px] text-muted-foreground">
-								<button type="button" onClick={() => setShowTools(!showTools)} className="hover:text-foreground">{showTools ? "Hide" : "Show"} tool calls</button>
-								<span>${spent.toFixed(2)} of ${budget}</span>
-								<button type="button" onClick={() => void invoke("swarm_stop", { run })} className="inline-flex items-center gap-1 hover:text-foreground"><Square className="size-3" />Stop</button>
-							</div>
-						</>
+						<div className="flex items-center justify-between px-1 text-[11px] text-muted-foreground">
+							<button type="button" onClick={() => setShowTools(!showTools)} className="hover:text-foreground">{showTools ? "Hide" : "Show"} tool calls</button>
+							<span>${spent.toFixed(2)} of ${budget}</span>
+							<button type="button" onClick={() => void invoke("swarm_stop", { run })} className="inline-flex items-center gap-1 hover:text-foreground"><Square className="size-3" />Stop</button>
+						</div>
 					) : (
-						<>
-							<textarea
-								rows={2}
-								value={goal}
-								onChange={(e) => setGoal(e.target.value)}
-								placeholder="Focus (optional): e.g. liquidations and interest accrual in V4Vault"
-								className="w-full resize-none rounded-xl border bg-transparent px-3 py-2 text-sm outline-none focus:border-foreground/30"
-							/>
-							<div className="flex flex-wrap items-center gap-1.5 text-xs">
-								{provider === "anthropic" && !hasKey ? (
-									<form
-										className="inline-flex h-7 flex-1 items-center overflow-hidden rounded-lg border"
-										onSubmit={(e) => {
-											e.preventDefault();
-											if (key.trim()) void invoke("anthropic_key_set", { key }).then(() => { setKey(""); setHasKey(true); });
-										}}
-									>
-										<input type="password" autoFocus value={key} onChange={(e) => setKey(e.target.value)} placeholder="Anthropic key (sk-ant-…)" className="h-full min-w-0 flex-1 bg-transparent px-2 outline-none" />
-										<button type="submit" disabled={!key.trim()} className="h-full border-l px-2 font-medium disabled:opacity-40">Save</button>
-										<button type="button" onClick={() => pick("formal")} className="h-full border-l px-2 text-muted-foreground">×</button>
-									</form>
-								) : (
-									<select value={provider} onChange={(e) => pick(e.target.value as Provider)} className="h-7 rounded-lg border bg-background px-1.5 outline-none">
-										<option value="formal">formal.team credits</option>
-										<option value="anthropic">My Anthropic key{hasKey ? " (saved)" : ""}</option>
-									</select>
-								)}
-								<select value={budget} onChange={(e) => setBudget(Number(e.target.value))} className="h-7 rounded-lg border bg-background px-1.5 outline-none" title="Stop at">
-									{BUDGETS.map((b) => <option key={b} value={b}>stop at ${b}</option>)}
+						<div className="flex flex-wrap items-center gap-1.5 px-1 text-xs">
+							{provider === "anthropic" && !hasKey ? (
+								<form
+									className="inline-flex h-7 flex-1 items-center overflow-hidden rounded-lg border"
+									onSubmit={(e) => {
+										e.preventDefault();
+										if (key.trim()) void invoke("anthropic_key_set", { key }).then(() => { setKey(""); setHasKey(true); });
+									}}
+								>
+									<input type="password" autoFocus value={key} onChange={(e) => setKey(e.target.value)} placeholder="Anthropic key (sk-ant-…)" className="h-full min-w-0 flex-1 bg-transparent px-2 outline-none" />
+									<button type="submit" disabled={!key.trim()} className="h-full border-l px-2 font-medium disabled:opacity-40">Save</button>
+									<button type="button" onClick={() => pick("formal")} className="h-full border-l px-2 text-muted-foreground">×</button>
+								</form>
+							) : (
+								<select value={provider} onChange={(e) => pick(e.target.value as Provider)} className="h-7 rounded-lg border bg-background px-1.5 outline-none">
+									<option value="formal">formal.team credits</option>
+									<option value="anthropic">My Anthropic key{hasKey ? " (saved)" : ""}</option>
 								</select>
-								<button type="button" onClick={() => void start()} disabled={provider === "anthropic" && !hasKey} className="btn-dark ml-auto h-8 gap-1.5 px-3 disabled:opacity-50"><Play className="size-3.5" />{plan.some((i) => i.mark === " ") ? "Resume" : "Start"}</button>
-							</div>
+							)}
+							<select value={budget} onChange={(e) => setBudget(Number(e.target.value))} className="h-7 rounded-lg border bg-background px-1.5 outline-none" title="Stop at">
+								{BUDGETS.map((b) => <option key={b} value={b}>stop at ${b}</option>)}
+							</select>
+							<button type="button" onClick={() => void start()} disabled={provider === "anthropic" && !hasKey} className="btn-dark ml-auto h-7 gap-1.5 px-3 disabled:opacity-50"><Play className="size-3" />{plan.some((i) => i.mark === " ") ? "Resume" : "Start"}</button>
 							{provider === "anthropic" && hasKey ? (
-								<button type="button" onClick={() => void invoke("anthropic_key_set", { key: "" }).then(() => setHasKey(false))} className="text-[11px] text-muted-foreground hover:underline">Forget Anthropic key</button>
+								<button type="button" onClick={() => void invoke("anthropic_key_set", { key: "" }).then(() => setHasKey(false))} className="w-full text-left text-[11px] text-muted-foreground hover:underline">Forget Anthropic key</button>
 							) : null}
-						</>
+						</div>
 					)}
 				</div>
 			</aside>
