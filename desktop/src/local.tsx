@@ -7,7 +7,7 @@ import { SwarmPanel } from "./swarm-panel";
 import { SidebarGroup, SidebarGroupAction, SidebarGroupLabel, SidebarMenu, SidebarMenuAction, SidebarMenuButton, SidebarMenuItem } from "@/components/ui/sidebar";
 
 type Config = { folders: string[] };
-type Scan = { solidity: string[]; lean: string[]; truncated: boolean };
+export type Scan = { solidity: string[]; lean: string[]; truncated: boolean };
 
 const name = (path: string) => path.split(/[\\/]/).filter(Boolean).pop() ?? path;
 const href = (path: string) => `/local?path=${encodeURIComponent(path)}`;
@@ -70,25 +70,6 @@ export function LocalFolders() {
 	);
 }
 
-function FileList({ title, files }: { title: string; files: string[] }) {
-	return (
-		<section className="space-y-2">
-			<h2 className="text-sm font-medium">
-				{title} <span className="text-muted-foreground">{files.length}</span>
-			</h2>
-			{files.length ? (
-				<ul className="shadow-card max-h-[50vh] overflow-auto rounded-xl bg-card p-2 font-mono text-xs">
-					{files.map((f) => (
-						<li key={f} className="truncate rounded px-2 py-1 hover:bg-muted">{f}</li>
-					))}
-				</ul>
-			) : (
-				<p className="text-sm text-muted-foreground">None here.</p>
-			)}
-		</section>
-	);
-}
-
 /** A local folder: what's in it to prove. The files stay on this machine. */
 export function LocalFolderPage() {
 	const [params] = useSearchParams();
@@ -100,25 +81,6 @@ export function LocalFolderPage() {
 		setError(null);
 		invoke<Scan>("folder_scan", { path }).then(setScan, (e) => setError(String(e)));
 	}, [path]);
-	return (
-		<div className="mx-auto w-full max-w-5xl space-y-6 p-6">
-			<header className="space-y-1">
-				<h1 className="text-xl font-semibold">{name(path)}</h1>
-				<p className="truncate font-mono text-xs text-muted-foreground">{path}</p>
-			</header>
-			{error ? <p className="text-sm text-red-600">{error}</p> : null}
-			{path && !error ? <SwarmPanel folder={path} /> : null}
-			{scan ? (
-				<>
-					<div className="grid gap-6 md:grid-cols-2">
-						<FileList title="Solidity" files={scan.solidity} />
-						<FileList title="Lean" files={scan.lean} />
-					</div>
-					{scan.truncated ? <p className="text-xs text-muted-foreground">Big folder: stopped after 5,000 entries.</p> : null}
-				</>
-			) : !error ? (
-				<p className="text-sm text-muted-foreground">Reading the folder…</p>
-			) : null}
-		</div>
-	);
+	if (error) return <p className="p-6 text-sm text-red-600">{error}</p>;
+	return path ? <SwarmPanel folder={path} name={name(path)} scan={scan} /> : null;
 }

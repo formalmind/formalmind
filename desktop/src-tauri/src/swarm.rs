@@ -502,6 +502,56 @@ pub fn swarm_say(swarms: State<'_, Swarms>, run: String, text: String) -> Result
     Ok(())
 }
 
+#[derive(Serialize)]
+pub struct Session {
+    pub run: String,
+    /// The last line's text when the run finished ("done …", "bug found …"), else "".
+    pub outcome: String,
+    pub spent: f64,
+    pub events: usize,
+}
+
+fn runs_dir(folder: &str) -> PathBuf {
+    Path::new(folder).join(".formal").join("runs")
+}
+
+/// Past swarm sessions in this folder, newest first (from .formal/runs/*.jsonl).
+#[tauri::command]
+pub fn swarm_sessions(folder: String) -> Result<Vec<Session>, String> {
+    if !local::read()?.folders.contains(&folder) {
+        return Err("Add the folder first".into());
+    }
+    let mut out: Vec<Session> = std::fs::read_dir(runs_dir(&folder))
+        .map(|it| {
+            it.flatten()
+                .filter_map(|e| {
+                    let name = e.file_name().to_string_lossy().to_string();
+                    let run = name.strip_suffix(".jsonl")?.to_string();
+                    let text = std::fs::read_to_string(e.path()).ok()?;
+                    let last: Value = text.lines().last().and_then(|l| serde_json::from_str(l).ok()).unwrap_or(json!({}));
+                    let outcome = if last["kind"] == "done" { last["text"].as_str().unwrap_or("").to_string() } else { String::new() };
+                    Some(Session { run, outcome, spent: last["spent"].as_f64().unwrap_or(0.0), events: text.lines().count() })
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+    out.sort_by(|a, b| b.run.cmp(&a.run));
+    Ok(out)
+}
+
+/// One session's events, oldest first.
+#[tauri::command]
+pub fn swarm_history(folder: String, run: String) -> Result<Vec<Value>, String> {
+    if !local::read()?.folders.contains(&folder) {
+        return Err("Add the folder first".into());
+    }
+    if !run.chars().all(|c| c.is_ascii_alphanumeric() || c == '-') {
+        return Err("Bad session id".into());
+    }
+    let text = std::fs::read_to_string(runs_dir(&folder).join(format!("{run}.jsonl"))).map_err(|e| e.to_string())?;
+    Ok(text.lines().filter_map(|l| serde_json::from_str(l).ok()).collect())
+}
+
 /// The running swarm, if any (so the page can reattach after a reload).
 #[tauri::command]
 pub fn swarm_running(swarms: State<'_, Swarms>) -> Option<String> {

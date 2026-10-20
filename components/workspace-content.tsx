@@ -10,7 +10,7 @@ import { CreditsBanner } from "@/components/credits-banner";
 export function WorkspaceContent({ children }: { children: React.ReactNode }) {
 	const pathname = useLocation().pathname;
 	// App pages fill the window; anything else is a document page with a breadcrumb.
-	const isChat = ["/", "/chat", "/roadmap", "/onboarding"].includes(pathname) || pathname.startsWith("/projects/") || pathname === "/swarm/chat";
+	const isChat = ["/", "/chat", "/roadmap", "/onboarding"].includes(pathname) || pathname.startsWith("/projects/") || pathname === "/swarm/chat" || pathname === "/local";
 	// Account pages keep the breadcrumb header but lay themselves out (no document prose).
 	const isPanel = ["/usage", "/billing"].includes(pathname);
 	// The landing page brings its own header and main.

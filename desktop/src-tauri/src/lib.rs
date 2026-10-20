@@ -85,7 +85,9 @@ pub fn run() {
             swarm::swarm_plan,
             swarm::swarm_bugs,
             swarm::anthropic_key_set,
-            swarm::anthropic_key_status
+            swarm::anthropic_key_status,
+            swarm::swarm_sessions,
+            swarm::swarm_history
         ])
         .run(tauri::generate_context!())
         .expect("error while running the Formal Mind desktop app");
