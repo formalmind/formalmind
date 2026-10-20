@@ -362,12 +362,20 @@ const PHASE_TEXT: Record<string, string> = {
 	"recording cost": "Recording the cost on the ledger",
 };
 
+/** An instant's day on the viewer's own clock (YYYY-MM-DD), so "today" means their today, not UTC's. */
+const localDay = (iso: string) => {
+	const d = new Date(iso);
+	return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+};
+/** 23:40 UTC, the chief's audit, in the viewer's time. */
+const CHIEF_TIME = new Date(Date.UTC(2026, 0, 1, 23, 40)).toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" });
+
 /** The board as it really is, with the active run's role at the item it is working on. */
 /** Today's runs one by one, newest first, then a total for each earlier day: every cost the ledger holds. */
 function ledgerRows(state: SwarmState): LedgerRow[] {
-	const today = state.fetchedAt.slice(0, 10);
+	const today = localDay(state.fetchedAt);
 	const rows: LedgerRow[] = state.costs
-		.filter((c) => c.createdAt.startsWith(today))
+		.filter((c) => localDay(c.createdAt) === today)
 		.reverse()
 		.map((c) => {
 			const role = COST_ROLES[c.role] ?? "dispatcher";
@@ -377,13 +385,13 @@ function ledgerRows(state: SwarmState): LedgerRow[] {
 		});
 	const days = new Map<string, { usd: number; runs: number }>();
 	for (const c of state.costs) {
-		const day = c.createdAt.slice(0, 10);
+		const day = localDay(c.createdAt);
 		if (day === today) continue;
 		const d = days.get(day) ?? { usd: 0, runs: 0 };
 		days.set(day, { usd: d.usd + c.usd, runs: d.runs + 1 });
 	}
 	for (const [day, d] of [...days].sort(([a], [b]) => b.localeCompare(a))) {
-		const date = new Date(`${day}T00:00:00Z`).toLocaleDateString("en", { month: "short", day: "numeric", timeZone: "UTC" });
+		const date = new Date(`${day}T12:00:00`).toLocaleDateString(undefined, { month: "short", day: "numeric" });
 		rows.push({ label: `${date} · ${d.runs} run${d.runs === 1 ? "" : "s"}`, usd: d.usd });
 	}
 	return rows;
@@ -1331,8 +1339,8 @@ const count = (n: number, noun: string) => `${n} ${noun}${n === 1 ? "" : "s"}`;
 function ProjectHeader({ project, group, state }: { project: SwarmProject; group: number; state: SwarmState | null }) {
 	const repo = project.proofsRepo;
 	const work = repo ? (state?.work ?? []).filter((item) => itemRepo(state!, item) === repo) : [];
-	const today = state?.fetchedAt.slice(0, 10);
-	const spent = repo ? (state?.costs ?? []).filter((c) => (c.repo ?? state!.repo) === repo && c.createdAt.startsWith(today ?? "")).reduce((sum, c) => sum + c.usd, 0) : 0;
+	const today = state ? localDay(state.fetchedAt) : "";
+	const spent = repo ? (state?.costs ?? []).filter((c) => (c.repo ?? state!.repo) === repo && localDay(c.createdAt) === today).reduce((sum, c) => sum + c.usd, 0) : 0;
 	const summary = !repo
 		? "no proofs repository yet"
 		: !project.inSwarm
@@ -1762,7 +1770,7 @@ function NotebookPanel({ notes, ...mode }: PanelMode & { notes: Note[] }) {
 function ChiefPanel({ headline, ...mode }: PanelMode & { headline: string }) {
 	return (
 		<Panel index={2} title="#53 Chief notebook" {...mode}>
-			<p className="text-[13px] text-muted-foreground">Daily at 23:40 UTC, before the budget resets</p>
+			<p className="text-[13px] text-muted-foreground">Daily at {CHIEF_TIME}, before the budget resets</p>
 			<p className="mt-2 text-[14px] font-medium leading-snug text-foreground">{headline}</p>
 		</Panel>
 	);

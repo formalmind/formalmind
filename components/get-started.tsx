@@ -26,7 +26,7 @@ const ROLES: { role: SwarmRole | "consolidator"; job: string; detail: string; pr
 	{ role: "merger", job: "Verifies and merges", detail: "Builds the exact head, checks every claim in the thread against the code, then merges or holds it for you.", prompt: "merge.md" },
 	{ role: "editor", job: "Compares and polishes", detail: "Holds your code, the rebuild and the proofs side by side, classifies every difference, and runs the cycle until they agree.", prompt: "editor.md" },
 	{ role: "consolidator", job: "Keeps the official protocol", detail: "Carries every decision into one official version, then rewrites its state machine, diagrams and docs, in that order.", prompt: "consolidate.md" },
-	{ role: "chief", job: "Audits the day", detail: "At 23:40 UTC checks every run's claims against what landed, with a headline: Done, Working, Waiting on you or Paused on budget.", prompt: "chief.md" },
+	{ role: "chief", job: "Audits the day", detail: "Each night (23:40 UTC) checks every run's claims against what landed, with a headline: Done, Working, Waiting on you or Paused on budget.", prompt: "chief.md" },
 	{ role: "assistant", job: "Talks to you", detail: "The only agent that does. Asks you one precise question at a time with a recommendation, and carries out your answer.", prompt: "assistant.md" },
 ];
 
