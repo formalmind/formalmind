@@ -2,13 +2,15 @@
 //!
 //!   j / k      next / previous opcode          s / S   step into / back
 //!   n / N      next / previous line (over)     f / F   step out / back to the call
-//!   h / l, ←/→ scroll the focused pane sideways (H / L a page, 0 / $ the start / end of its longest line)
 //!   c / C      continue to breakpoint, watch or revert (forward / back)
 //!   g / G      first / last step               /text   search source lines (then ; and , for next / previous)
 //!   :b 58  :b File.sol:58   line breakpoint    :w name  break on storage writes naming it
 //!   :pc 1621   jump to that pc in this frame   :step 1200  jump to a step     :q  quit
-//!   [ / ]      focus previous / next pane      J / K, PgDn / PgUp  scroll it up and down (mouse wheel: the pane under it)
-//!   z          zoom the focused pane           0        reset its scroll
+//!   wheel      scroll the pane under the pointer (a sideways swipe or shift-wheel: horizontally); over the opcodes
+//!              it moves the current step instead, one opcode per notch. Keys navigate; nothing scrolls by key.
+//!   [ / ]      focus previous / next pane      z        zoom the focused pane
+//!   drag       select text in a pane, copied to the clipboard on release
+//!   y          copy the focused pane's text    m        mouse off (the terminal's own selection) / on
 //!   T / :theme dracula   next theme / a theme by name (opaline's builtins; --theme or $SOL_DEBUG_THEME at start)
 
 use crate::highlight::Solidity;
@@ -26,6 +28,11 @@ use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Paragraph};
 use ratatui::Frame;
 use revm::bytecode::opcode::OpCode;
+
+/// A mouse selection: the pane, where the drag started and where it is now (screen cells), and whether it's live.
+type Selection = (Pane, (u16, u16), (u16, u16), bool);
+/// The cells a selection covers, with its pane and that pane's inside area.
+type SelectedCells = (Pane, Rect, Vec<(u16, u16)>);
 
 /// The panes, in focus order.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -64,6 +71,11 @@ pub struct App<'a> {
     /// Per pane, from the last draw: the furthest it can scroll right.
     hmax: Cell<[u16; 6]>,
     rects: RefCell<Vec<(Pane, Rect)>>,
+    /// Per pane, from the last draw: its inside area and the text on each of its rows, for selection and copying.
+    texts: RefCell<Vec<(Pane, Rect, Vec<String>)>>,
+    sel: Option<Selection>,
+    /// Whether the app takes the mouse (wheel, clicks, selection) or leaves it to the terminal.
+    pub mouse_on: bool,
 }
 
 impl<'a> App<'a> {
@@ -95,6 +107,9 @@ impl<'a> App<'a> {
             bounds: Cell::new([(0, 0); 6]),
             hmax: Cell::new([0; 6]),
             rects: RefCell::new(vec![]),
+            texts: RefCell::new(vec![]),
+            sel: None,
+            mouse_on: true,
         }
     }
 
@@ -146,7 +161,70 @@ impl<'a> App<'a> {
         hmax[i] = widest.saturating_sub(inner) as u16;
         self.hmax.set(hmax);
         let hx = self.hx[i].min(hmax[i]);
+        // The text each row shows, as plain characters, for selecting and copying.
+        let inside = Rect { x: area.x + 1, y: area.y + 1, width: area.width.saturating_sub(2), height: area.height.saturating_sub(2) };
+        let rows: Vec<String> = lines
+            .iter()
+            .take(inside.height as usize)
+            .map(|l| {
+                let text: String = l.spans.iter().map(|s| s.content.as_ref()).collect();
+                text.chars().skip(hx as usize).take(inside.width as usize).collect()
+            })
+            .collect();
+        self.texts.borrow_mut().push((pane, inside, rows));
         f.render_widget(Paragraph::new(lines).block(self.pane_block(pane, title)).scroll((0, hx)), area);
+    }
+
+    /// The cells a selection covers, in reading order: from the start cell to the end cell, whole rows between.
+    fn selected_cells(&self) -> Option<SelectedCells> {
+        let (pane, a, b, _) = self.sel?;
+        let inside = self.texts.borrow().iter().find(|(p, ..)| *p == pane).map(|(_, r, _)| *r)?;
+        let clamp = |(x, y): (u16, u16)| {
+            (x.clamp(inside.x, inside.x + inside.width.saturating_sub(1)), y.clamp(inside.y, inside.y + inside.height.saturating_sub(1)))
+        };
+        let (a, b) = (clamp(a), clamp(b));
+        let (start, end) = if (a.1, a.0) <= (b.1, b.0) { (a, b) } else { (b, a) };
+        let mut cells = vec![];
+        for y in start.1..=end.1 {
+            let from = if y == start.1 { start.0 } else { inside.x };
+            let to = if y == end.1 { end.0 } else { inside.x + inside.width.saturating_sub(1) };
+            cells.extend((from..=to).map(|x| (x, y)));
+        }
+        Some((pane, inside, cells))
+    }
+
+    /// The selected text, rows joined by newlines, trailing spaces trimmed.
+    pub fn selected_text(&self) -> Option<String> {
+        let (pane, inside, cells) = self.selected_cells()?;
+        let texts = self.texts.borrow();
+        let rows = &texts.iter().find(|(p, ..)| *p == pane)?.2;
+        let mut out: Vec<String> = vec![];
+        let mut last_y = None;
+        for (x, y) in cells {
+            if last_y != Some(y) {
+                out.push(String::new());
+                last_y = Some(y);
+            }
+            let row = rows.get((y - inside.y) as usize).map(String::as_str).unwrap_or("");
+            if let Some(c) = row.chars().nth((x - inside.x) as usize) {
+                out.last_mut().unwrap().push(c);
+            }
+        }
+        Some(out.iter().map(|l| l.trim_end()).collect::<Vec<_>>().join("\n"))
+    }
+
+    /// Everything a pane shows right now.
+    pub fn pane_text(&self, pane: Pane) -> String {
+        let texts = self.texts.borrow();
+        let rows = texts.iter().find(|(p, ..)| *p == pane).map(|(_, _, rows)| rows.clone()).unwrap_or_default();
+        rows.iter().map(|l| l.trim_end()).collect::<Vec<_>>().join("\n").trim_end().to_string()
+    }
+
+    fn copied(&mut self, text: &str) {
+        self.status = match copy_to_clipboard(text) {
+            Ok(()) => format!("copied {} characters", text.chars().count()),
+            Err(e) => format!("copy failed: {e}"),
+        };
     }
 
     pub fn with_theme(mut self, theme: Theme) -> Self {
@@ -195,8 +273,12 @@ impl<'a> App<'a> {
                     if k.modifiers.contains(KeyModifiers::CONTROL) && k.code == KeyCode::Char('c') {
                         break Ok(());
                     }
+                    let was = self.mouse_on;
                     if self.key(k.code) {
                         break Ok(());
+                    }
+                    if self.mouse_on != was {
+                        mouse(self.mouse_on);
                     }
                 }
                 Ok(_) => {}
@@ -210,8 +292,42 @@ impl<'a> App<'a> {
 
     /// The wheel scrolls the pane under the pointer (shift or a sideways swipe: horizontally); a click focuses it.
     pub fn mouse(&mut self, m: MouseEvent) {
+        use ratatui::crossterm::event::MouseButton;
+        // A drag keeps selecting in the pane it started in, wherever the pointer goes.
+        if let Some((p, start, _, true)) = self.sel {
+            match m.kind {
+                MouseEventKind::Drag(MouseButton::Left) => {
+                    self.sel = Some((p, start, (m.column, m.row), true));
+                    return;
+                }
+                MouseEventKind::Up(MouseButton::Left) => {
+                    if start == (m.column, m.row) {
+                        self.sel = None; // a click, not a selection
+                    } else {
+                        self.sel = Some((p, start, (m.column, m.row), false));
+                        if let Some(text) = self.selected_text() {
+                            self.copied(&text);
+                        }
+                    }
+                    return;
+                }
+                _ => {}
+            }
+        }
         let Some(pane) = self.pane_at(m.column, m.row) else { return };
         let shift = m.modifiers.contains(KeyModifiers::SHIFT);
+        // Over the opcodes the wheel walks the run, like j / k.
+        if pane == Pane::Opcodes && !shift {
+            let code = match m.kind {
+                MouseEventKind::ScrollDown => Some(KeyCode::Char('j')),
+                MouseEventKind::ScrollUp => Some(KeyCode::Char('k')),
+                _ => None,
+            };
+            if let Some(code) = code {
+                self.key(code);
+                return;
+            }
+        }
         match m.kind {
             MouseEventKind::ScrollDown if shift => self.scroll(pane, 0, 6),
             MouseEventKind::ScrollUp if shift => self.scroll(pane, 0, -6),
@@ -219,6 +335,10 @@ impl<'a> App<'a> {
             MouseEventKind::ScrollUp => self.scroll(pane, -3, 0),
             MouseEventKind::ScrollRight => self.scroll(pane, 0, 6),
             MouseEventKind::ScrollLeft => self.scroll(pane, 0, -6),
+            MouseEventKind::Down(MouseButton::Left) => {
+                self.focus = pane;
+                self.sel = Some((pane, (m.column, m.row), (m.column, m.row), true));
+            }
             MouseEventKind::Down(_) => self.focus = pane,
             _ => {}
         }
@@ -252,11 +372,8 @@ impl<'a> App<'a> {
             KeyCode::Char('k') | KeyCode::Up => Some(self.cur.saturating_sub(1)),
             KeyCode::Char('s') => self.nav.step_into(self.cur, Dir::Forward),
             KeyCode::Char('S') => self.nav.step_into(self.cur, Dir::Back),
-            KeyCode::Char('n') => self.nav.step_over(self.cur, Dir::Forward),
-            KeyCode::Char('N') => self.nav.step_over(self.cur, Dir::Back),
-            KeyCode::Char('l') | KeyCode::Right => return self.scrolled(0, 4),
-            KeyCode::Char('h') | KeyCode::Left => return self.scrolled(0, -4),
-            KeyCode::Char('$') => return self.scrolled(0, 10_000),
+            KeyCode::Char('n') | KeyCode::Char('l') | KeyCode::Right => self.nav.step_over(self.cur, Dir::Forward),
+            KeyCode::Char('N') | KeyCode::Char('h') | KeyCode::Left => self.nav.step_over(self.cur, Dir::Back),
             KeyCode::Char('f') => self.nav.step_out(self.cur, Dir::Forward),
             KeyCode::Char('F') => self.nav.step_out(self.cur, Dir::Back),
             KeyCode::Char('c') => self.nav.continue_to(self.cur, Dir::Forward, steps),
@@ -279,15 +396,25 @@ impl<'a> App<'a> {
                 self.focus = PANES[(i + step).rem_euclid(PANES.len() as isize) as usize];
                 return false;
             }
-            KeyCode::Char('J') => return self.scrolled(1, 0),
-            KeyCode::Char('K') => return self.scrolled(-1, 0),
-            KeyCode::Char('L') => return self.scrolled(0, 32),
-            KeyCode::Char('H') => return self.scrolled(0, -32),
-            KeyCode::PageDown => return self.scrolled(10, 0),
-            KeyCode::PageUp => return self.scrolled(-10, 0),
-            KeyCode::Char('0') => {
-                self.vy[self.focus as usize] = 0;
-                self.hx[self.focus as usize] = 0;
+            KeyCode::Char('y') => {
+                let text = match self.selected_text() {
+                    Some(t) if !t.is_empty() => t,
+                    _ => self.pane_text(self.focus),
+                };
+                self.copied(&text);
+                return false;
+            }
+            KeyCode::Char('m') => {
+                self.mouse_on = !self.mouse_on;
+                self.status = if self.mouse_on {
+                    "mouse on: wheel scrolls panes, drag selects and copies".into()
+                } else {
+                    "mouse off: select with the terminal (wheel and clicks go to it)".into()
+                };
+                return false;
+            }
+            KeyCode::Esc => {
+                self.sel = None;
                 return false;
             }
             KeyCode::Char('z') => {
@@ -307,15 +434,11 @@ impl<'a> App<'a> {
                 self.status.clear();
                 // Panes follow the new step again.
                 self.vy = [0; 6];
+                self.sel = None;
             }
             None if !matches!(code, KeyCode::Char(':') | KeyCode::Char('/')) => self.status = "no further step that way".into(),
             None => {}
         }
-        false
-    }
-
-    fn scrolled(&mut self, dy: isize, dx: isize) -> bool {
-        self.scroll(self.focus, dy, dx);
         false
     }
 
@@ -397,6 +520,7 @@ impl<'a> App<'a> {
         ])
         .areas(bottom);
         self.rects.borrow_mut().clear();
+        self.texts.borrow_mut().clear();
         self.draw_header(f, header, focused);
         let areas = [source, calls, ops, stack, memory, storage];
         for (pane, area) in PANES.into_iter().zip(areas) {
@@ -414,6 +538,14 @@ impl<'a> App<'a> {
             }
         }
         self.draw_footer(f, footer);
+        if let Some((_, _, cells)) = self.selected_cells() {
+            let style = Style::new().fg(self.theme.bg).bg(self.theme.accent);
+            for (x, y) in cells {
+                if let Some(cell) = f.buffer_mut().cell_mut((x, y)) {
+                    cell.set_style(style);
+                }
+            }
+        }
     }
 
     fn draw_header(&self, f: &mut Frame, area: Rect, focused: bool) {
@@ -664,7 +796,7 @@ impl<'a> App<'a> {
     }
 
     fn draw_footer(&self, f: &mut Frame, area: Rect) {
-        let help = "[ ] pane  h/l ←/→ sideways  J/K up/down  $ 0  z zoom  T theme  Tab/= split  j/k op  n/N line  s/S into  f/F out  c/C continue  g/G ends  /search ;,  :b line  :w var  :pc n  :q";
+        let help = "wheel scrolls (opcodes: steps)  drag/y copy  m mouse  [ ] pane  z zoom  T theme  Tab/= split  j/k op  n/N line  s/S into  f/F out  c/C continue  g/G ends  /search ;,  :b line  :w var  :pc n  :q";
         let second = match &self.input {
             Some(i) => Line::styled(i.clone(), Style::new().fg(self.theme.text).add_modifier(Modifier::BOLD)),
             None => Line::styled(self.status.clone(), Style::new().fg(self.theme.accent)),
@@ -758,7 +890,11 @@ pub fn split(sa: &Session, ra: &Run, la: &str, sb: &Session, rb: &Run, lb: &str,
         }
         match event::read() {
             Ok(Event::Mouse(m)) => {
-                if a.pane_at(m.column, m.row).is_some() {
+                if a.sel.is_some_and(|s| s.3) {
+                    a.mouse(m);
+                } else if b.sel.is_some_and(|s| s.3) {
+                    b.mouse(m);
+                } else if a.pane_at(m.column, m.row).is_some() {
                     a.mouse(m);
                 } else {
                     b.mouse(m);
@@ -771,6 +907,11 @@ pub fn split(sa: &Session, ra: &Run, la: &str, sb: &Session, rb: &Run, lb: &str,
                 let typing = if focus_b { b.input.is_some() } else { a.input.is_some() };
                 match k.code {
                     KeyCode::Tab if !typing => focus_b = !focus_b,
+                    KeyCode::Char('m') if !typing => {
+                        a.mouse_on = !a.mouse_on;
+                        b.mouse_on = a.mouse_on;
+                        mouse(a.mouse_on);
+                    }
                     KeyCode::Char('T') if !typing => {
                         a.theme = a.theme.cycle(1);
                         b.theme = a.theme.clone();
@@ -807,41 +948,102 @@ fn mouse(on: bool) {
     let _ = if on { execute!(out, EnableMouseCapture) } else { execute!(out, DisableMouseCapture) };
 }
 
+/// Puts text on the clipboard: pbcopy (macOS), wl-copy or xclip, and OSC 52 for terminals that take it (over SSH too).
+fn copy_to_clipboard(text: &str) -> Result<(), String> {
+    use std::io::Write;
+    let osc = format!("\x1b]52;c;{}\x07", base64(text.as_bytes()));
+    let _ = std::io::stdout().write_all(osc.as_bytes());
+    let _ = std::io::stdout().flush();
+    for (cmd, args) in [("pbcopy", &[][..]), ("wl-copy", &[][..]), ("xclip", &["-selection", "clipboard"][..])] {
+        if let Ok(mut child) = std::process::Command::new(cmd).args(args).stdin(std::process::Stdio::piped()).spawn() {
+            if let Some(mut stdin) = child.stdin.take() {
+                let _ = stdin.write_all(text.as_bytes());
+            }
+            return child.wait().map(|_| ()).map_err(|e| e.to_string());
+        }
+    }
+    Ok(())
+}
+
+fn base64(data: &[u8]) -> String {
+    const T: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    let mut out = String::with_capacity(data.len().div_ceil(3) * 4);
+    for chunk in data.chunks(3) {
+        let b = [chunk[0], *chunk.get(1).unwrap_or(&0), *chunk.get(2).unwrap_or(&0)];
+        let n = (b[0] as u32) << 16 | (b[1] as u32) << 8 | b[2] as u32;
+        for i in 0..4 {
+            if i <= chunk.len() {
+                out.push(T[(n >> (18 - 6 * i) & 63) as usize] as char);
+            } else {
+                out.push('=');
+            }
+        }
+    }
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    /// Panes scroll on their own, sideways too, and zoom; moving to another step re-centres them.
+    /// Panes scroll with the wheel (a sideways swipe: horizontally), on their own; keys don't scroll; zoom.
     #[test]
-    fn panes_scroll_and_zoom() {
+    fn panes_scroll_with_the_wheel_and_zoom() {
+        use ratatui::crossterm::event::MouseEvent;
         let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/diff_fixture/a");
         let Ok(mut s) = Session::compile(&root, "test/Counter.t.sol") else { return };
         let run = s.run_test("CounterTest", "test_bumpTwice", false).unwrap();
         let mut app = App::new(&s, &run.test, "t".into());
-        let before = app.render_text(100, 30);
-        app.press("]"); // focus calls
-        assert_eq!(app.focus, Pane::Calls);
-        app.press("[");
-        app.press("KKK"); // scroll the source up (it already shows the end of this short file)
-        let scrolled = app.render_text(100, 30);
-        assert_ne!(before, scrolled);
-        // Sideways, on a screen too narrow for the source: l moves 4 columns, $ to the end of the longest line, and
-        // never past it.
-        app.render_text(60, 30);
-        app.press("l");
-        assert!(app.render_text(60, 30).contains("→4/"));
-        app.press("$l");
+        let before = app.render_text(60, 30);
+        let src = app.rects.borrow().iter().find(|(p, _)| *p == Pane::Source).unwrap().1;
+        let wheel = |kind| MouseEvent { kind, column: src.x + 2, row: src.y + 2, modifiers: KeyModifiers::NONE };
+        app.mouse(wheel(MouseEventKind::ScrollUp));
+        assert_ne!(app.render_text(60, 30), before, "the wheel scrolls the source");
+        app.mouse(wheel(MouseEventKind::ScrollRight));
+        assert!(app.render_text(60, 30).contains("→6/"), "a sideways swipe scrolls horizontally");
+        for _ in 0..50 {
+            app.mouse(wheel(MouseEventKind::ScrollRight));
+        }
         let end = app.hmax.get()[Pane::Source as usize];
-        assert!(end > 0);
-        assert_eq!(app.hx[Pane::Source as usize], end);
-        assert!(app.render_text(60, 30).contains(&format!("→{end}/{end}")));
-        app.press("0");
-        assert_eq!(app.hx[Pane::Source as usize], 0);
-        app.press("z");
-        let zoomed = app.render_text(100, 30);
-        assert!(!zoomed.contains(" calls "), "zoom shows only the focused pane");
+        assert_eq!(app.hx[Pane::Source as usize], end, "never past the longest line");
+        // Over the opcodes the wheel steps through the run instead.
+        let ops = app.rects.borrow().iter().find(|(p, _)| *p == Pane::Opcodes).unwrap().1;
+        let cur = app.cur;
+        app.mouse(MouseEvent { kind: MouseEventKind::ScrollDown, column: ops.x + 2, row: ops.y + 2, modifiers: KeyModifiers::NONE });
+        assert_eq!(app.cur, cur + 1);
+        app.mouse(MouseEvent { kind: MouseEventKind::ScrollUp, column: ops.x + 2, row: ops.y + 2, modifiers: KeyModifiers::NONE });
+        assert_eq!(app.cur, cur);
+        app.render_text(60, 30);
+        // Keys move through the run, not the panes.
+        let (vy, hx) = (app.vy, app.hx);
+        app.press("JKHL$0");
+        assert_eq!((app.vy, app.hx), (vy, hx));
+        app.press("]");
+        assert_eq!(app.focus, Pane::Calls);
+        app.press("[z");
+        assert!(!app.render_text(100, 30).contains(" calls "), "zoom shows only the focused pane");
         app.press("zk"); // unzoom, step back: panes follow the step again
         assert_eq!(app.vy, [0; 6]);
+    }
+
+    /// A drag selects text inside one pane; y copies a pane.
+    #[test]
+    fn drag_selects_text_in_a_pane() {
+        use ratatui::crossterm::event::{MouseButton, MouseEvent};
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/diff_fixture/a");
+        let Ok(mut s) = Session::compile(&root, "test/Counter.t.sol") else { return };
+        let run = s.run_test("CounterTest", "test_bumpTwice", false).unwrap();
+        let mut app = App::new(&s, &run.test, "t".into());
+        let screen = app.render_text(100, 30);
+        // Find "counter.bump();" on screen and drag across it.
+        let (y, line) = screen.lines().enumerate().find(|(_, l)| l.contains("counter.bump();")).unwrap();
+        let x = line[..line.find("counter.bump();").unwrap()].chars().count() as u16;
+        let ev = |kind, col| MouseEvent { kind, column: col, row: y as u16, modifiers: KeyModifiers::NONE };
+        app.mouse(ev(MouseEventKind::Down(MouseButton::Left), x));
+        app.mouse(ev(MouseEventKind::Drag(MouseButton::Left), x + 14));
+        assert_eq!(app.selected_text().as_deref(), Some("counter.bump();"));
+        assert!(app.pane_text(Pane::Source).contains("function test_bumpTwice()"));
+        assert_eq!(base64(b"hello"), "aGVsbG8=");
     }
 
     /// The source pane colours Solidity by the theme's code tokens.

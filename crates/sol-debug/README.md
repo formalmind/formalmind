@@ -20,8 +20,7 @@ Drop `--tui` to print the trace (`--lines` for one line per Solidity line) and t
 | Key | |
 |---|---|
 | `j` / `k` | next / previous opcode |
-| `n` / `N` | next / previous line, stepping over calls |
-| `h` / `l`, `←` / `→` | scroll the focused pane sideways (`H` / `L` a page, `0` / `$` start / end) |
+| `n` / `N` (or `l` / `h`, `→` / `←`) | next / previous line, stepping over calls |
 | `s` / `S` | step into / back |
 | `f` / `F` | step out / back to the call |
 | `c` / `C` | continue to a breakpoint, watched write or revert |
@@ -30,9 +29,10 @@ Drop `--tui` to print the trace (`--lines` for one line per Solidity line) and t
 | `:b 58`, `:b File.sol:58` | toggle a line breakpoint |
 | `:w priceBooks` | stop on storage writes whose name contains it |
 | `:pc 1621`, `:step 1200` | jump |
-| `[` / `]` | focus the previous / next pane |
-| `J` / `K`, PgDn/PgUp | scroll the focused pane up and down (the mouse wheel scrolls the pane under it; shift-wheel sideways) |
-| `z` / `0` | zoom the focused pane / reset its scroll |
+| mouse wheel | scroll the pane under the pointer; a sideways swipe or shift-wheel scrolls horizontally. Over the opcodes it steps through the run instead. Keys never scroll. |
+| drag, `y` | select text in a pane (copied on release); copy the focused pane |
+| `m` | mouse off, for the terminal's own selection (and back on) |
+| `[` / `]`, `z` | focus the previous / next pane, zoom it |
 | `T`, `:theme dracula` | next theme / a theme by name (`--theme` at start) |
 | `q` | quit |
 
