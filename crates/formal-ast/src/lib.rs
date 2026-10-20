@@ -184,7 +184,7 @@ pub fn theorems(root: &Path) -> Vec<Theorem> {
         // A declaration starts at column 0 (after attributes and modifiers); it runs to the next one.
         let starts_decl = |l: &str| {
             let t = l.trim_start_matches("private ").trim_start_matches("protected ").trim_start_matches("noncomputable ");
-            !l.starts_with(' ') && !l.starts_with('\t') && ["theorem ", "lemma ", "def ", "abbrev ", "structure ", "inductive ", "instance ", "namespace ", "end ", "section ", "open ", "example ", "@["].iter().any(|k| t.starts_with(k))
+            !l.starts_with(' ') && !l.starts_with('\t') && ["theorem ", "lemma ", "def ", "abbrev ", "structure ", "inductive ", "instance ", "namespace ", "end ", "section ", "open ", "example ", "@[", "/--", "/-!", "set_option ", "variable ", "include "].iter().any(|k| t.starts_with(k))
         };
         let mut i = 0;
         while i < lines.len() {
