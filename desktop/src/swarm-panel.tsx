@@ -373,7 +373,6 @@ type AstUnits = {
 	reached?: { name: string; kind: string; visibility: string; dependency: boolean; arith: number; asm: number; calls: number }[];
 	scopeFiles?: { path: string; inScope: boolean; dependency: boolean; imports: number }[];
 };
-type AuditTab = "matrix" | "tree" | "plan" | "entries" | "functions" | "files";
 
 /**
  * Which entry point touches which storage: rows are state variables (most-written first), columns are entry points
@@ -435,7 +434,6 @@ function StorageMatrix({ data, unit, slice, onOpen, onClose }: { data: AstUnits;
 										<span className="flex items-center gap-2">
 											<span className="truncate font-mono text-[12px] text-foreground">{v.name}</span>
 											{n ? <span className="shrink-0 rounded bg-red-500/10 px-1 font-mono text-[10px] text-red-700 dark:text-red-400" title={`written by ${n} entry points`}>{n}w</span> : null}
-											<span className="ml-auto max-w-40 truncate font-mono text-[10px] text-muted-foreground" title={v.type}>{v.type}</span>
 										</span>
 									</th>
 									{cols.map((u) => {
@@ -475,81 +473,8 @@ function StorageMatrix({ data, unit, slice, onOpen, onClose }: { data: AstUnits;
 	);
 }
 
-/** A chip in the AST tree: a bordered, rounded value. */
-function Chip({ children, tone }: { children: React.ReactNode; tone?: "muted" | "amber" | "violet" }) {
-	const color = tone === "amber" ? "text-amber-700 dark:text-amber-400" : tone === "violet" ? "text-violet-700 dark:text-violet-400" : tone === "muted" ? "text-muted-foreground" : "text-foreground";
-	return <span className={`inline-flex h-7 shrink-0 items-center rounded-lg border bg-background px-2.5 font-mono text-[12px] ${color}`}>{children}</span>;
-}
-
-/** One member of a contract in the tree: a row of chips. */
-function TreeRow({ children }: { children: React.ReactNode }) {
-	return <div className="flex min-h-10 flex-wrap items-center gap-2 rounded-xl border bg-muted/40 px-3 py-1.5 text-[13px]">{children}</div>;
-}
-
-/** A contract (or base) as a group: its state, then its functions; the entry contract starts open. */
-function TreeGroup({ c, open: initial }: { c: AstContract; open: boolean }) {
-	const [open, setOpen] = useState(initial);
-	const reached = c.functions.filter((f) => f.reached).length;
-	return (
-		<div className="rounded-2xl border p-3">
-			<button type="button" onClick={() => setOpen(!open)} className="flex w-full items-center gap-2 text-left text-[13px]">
-				<ChevronDown className={`size-3.5 text-muted-foreground transition-transform ${open ? "" : "-rotate-90"}`} />
-				<span className="font-mono font-medium">{c.name}</span>
-				<span className="text-muted-foreground">· {c.kind} · {c.stateVars.length} state · {c.functions.length} functions ({reached} reached)</span>
-				{c.file ? <span className="ml-auto truncate font-mono text-[11px] text-muted-foreground">{c.file}</span> : null}
-			</button>
-			{open ? (
-				<div className="relative mt-3 space-y-2 pl-10">
-					{/* The bracket joining the members, as in a rule builder. */}
-					<span aria-hidden className="absolute bottom-5 left-4 top-5 w-4 rounded-l-lg border-y border-l" />
-					{c.stateVars.map((v) => (
-						<TreeRow key={`v:${v.name}`}>
-							<Chip>{v.name}</Chip>
-							<span className="text-muted-foreground">is</span>
-							<Chip tone="muted">{v.type}</Chip>
-							{v.constant ? <Chip tone="violet">constant</Chip> : v.immutable ? <Chip tone="violet">immutable</Chip> : v.slot != null ? <Chip tone="muted">slot {v.slot}{v.offset ? `+${v.offset}` : ""}</Chip> : null}
-						</TreeRow>
-					))}
-					{c.functions.map((f, i) => (
-						<TreeRow key={`f:${f.name}:${i}`}>
-							<Chip>{f.name}{f.kind === "function" ? "()" : ""}</Chip>
-							<span className="text-muted-foreground">{f.kind === "modifier" ? "modifier" : "is"}</span>
-							{f.kind !== "modifier" ? <Chip tone="muted">{f.visibility}</Chip> : null}
-							{f.mutability && f.mutability !== "nonpayable" ? <Chip tone="muted">{f.mutability}</Chip> : null}
-							{f.modifiers.map((m) => <Chip key={m} tone="violet">{m}</Chip>)}
-							{f.entry ? <Chip tone="amber">entry point</Chip> : f.reached ? null : <span className="text-[11px] text-muted-foreground">not reached</span>}
-						</TreeRow>
-					))}
-					{c.stateVars.length + c.functions.length === 0 ? <p className="text-[12px] text-muted-foreground">No members.</p> : null}
-				</div>
-			) : null}
-		</div>
-	);
-}
-
-/** The entry contract and its bases as the AST has them, in inheritance order, joined by "is". */
-function AstTree({ tree }: { tree: AstContract[] }) {
-	const [entry, ...bases] = tree;
-	return (
-		<div className="min-h-0 overflow-y-auto rounded-xl border bg-card p-5 shadow-card">
-			<p className="mb-3 font-mono text-[12px] font-medium uppercase tracking-wider text-muted-foreground">Contract</p>
-			{entry ? <TreeGroup c={entry} open /> : null}
-			{bases.length ? (
-				<div className="relative mt-3 pl-16">
-					<span aria-hidden className="absolute bottom-6 left-6 top-6 w-6 rounded-l-xl border-y border-l" />
-					<span className="absolute left-0 top-1/2 -translate-y-1/2 rounded-full border bg-background px-2 py-0.5 text-[12px] text-muted-foreground">is</span>
-					<div className="space-y-3">
-						{bases.map((c) => <TreeGroup key={c.name} c={c} open={false} />)}
-					</div>
-				</div>
-			) : null}
-		</div>
-	);
-}
-
-/** Audit mode: the contract as the AST reads it — entry points, their storage footprint and risks, and each one's
- *  slice (what an agent gets). */
-function AuditView({ folder, scan, invoke, preferred, plan, planMeta }: { folder: string; scan: Scan | null; invoke: Bridge["invoke"]; preferred: string | null; plan: React.ReactNode; planMeta: string }) {
+/** Audit mode: which entry point touches which storage, for the contract picked here (read from the AST). */
+function AuditView({ folder, scan, invoke, preferred }: { folder: string; scan: Scan | null; invoke: Bridge["invoke"]; preferred: string | null }) {
 	const sources = (scan?.solidity ?? []).filter((f) => !f.endsWith(".t.sol") && !f.endsWith(".s.sol"));
 	const pick = preferred && sources.includes(preferred) ? preferred : (sources.find((f) => f.startsWith("src/")) ?? sources[0] ?? null);
 	const [entry, setEntry] = useState<string | null>(pick);
@@ -557,7 +482,6 @@ function AuditView({ folder, scan, invoke, preferred, plan, planMeta }: { folder
 	const [error, setError] = useState<string | null>(null);
 	const [unit, setUnit] = useState<string | null>(null);
 	const [slice, setSlice] = useState<string | null>(null);
-	const [tab, setTab] = useState<AuditTab>("matrix");
 	useEffect(() => {
 		if (!entry && pick) setEntry(pick);
 	}, [entry, pick]);
@@ -577,7 +501,7 @@ function AuditView({ folder, scan, invoke, preferred, plan, planMeta }: { folder
 	return (
 		<>
 			<div className="flex h-8 shrink-0 items-center gap-2 px-2.5 text-[12px]">
-				<span className="font-mono text-[11px] font-medium uppercase tracking-wider text-muted-foreground">AST</span>
+				<span className="font-mono text-[11px] font-medium uppercase tracking-wider text-muted-foreground">Storage × entry points</span>
 				<DropdownMenu>
 					<DropdownMenuTrigger className="inline-flex h-6 min-w-0 items-center gap-1 rounded-md border bg-background px-2 font-mono text-[11px] outline-none hover:bg-muted" title="The contract to read">
 						<span className="truncate">{entry ?? "No Solidity sources"}</span>
@@ -591,112 +515,11 @@ function AuditView({ folder, scan, invoke, preferred, plan, planMeta }: { folder
 						</DropdownMenuRadioGroup>
 					</DropdownMenuContent>
 				</DropdownMenu>
-				{data ? (
-					<div role="tablist" aria-label="What to show" className="flex min-w-0 items-center gap-0.5 rounded-lg border bg-background/60 p-0.5">
-						{([
-							["matrix", "Storage × entry points"],
-							["tree", `${data.contract} syntax tree`],
-							["plan", `Plan${planMeta ? ` ${planMeta}` : ""}`],
-							["entries", `${data.units.length} entry points`],
-							["functions", `${data.reachable} functions`],
-							["files", `${data.inScope} of ${data.files} files`],
-						] as [AuditTab, string][]).map(([id, label]) => (
-							<button key={id} type="button" role="tab" aria-selected={tab === id} onClick={() => setTab(id)} className={`h-6 shrink-0 rounded-md px-2.5 text-[12px] transition-colors ${tab === id ? "bg-background font-medium text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"}`}>
-								{label}
-							</button>
-						))}
-					</div>
-				) : null}
-				{data ? <span className="shrink-0 text-[11px] text-muted-foreground">{data.ms} ms</span> : null}
+				{data ? <span className="ml-auto shrink-0 text-[11px] text-muted-foreground">{data.contract} · {data.ms} ms</span> : null}
 			</div>
-			{data && tab === "matrix" ? <StorageMatrix data={data} unit={unit} slice={slice} onOpen={open} onClose={() => setUnit(null)} /> : null}
-			{data && tab === "tree" && data.tree ? <AstTree tree={data.tree} /> : null}
-			{data && tab === "plan" ? <div className="min-h-0 overflow-y-auto rounded-xl border bg-card shadow-card">{plan}</div> : null}
-			{data && tab === "functions" ? (
-				<div className="min-h-0 overflow-y-auto rounded-xl border bg-card p-3 shadow-card">
-					{Object.entries(Object.groupBy(data.reached ?? [], (f) => f.name.split(".")[0])).map(([contract, fns]) => (
-						<div key={contract} className="mb-4">
-							<p className="mb-1.5 flex items-center gap-2 font-mono text-[12px] font-medium">
-								{contract}
-								{fns?.[0]?.dependency ? <span className="font-sans text-[11px] font-normal text-muted-foreground">dependency</span> : null}
-							</p>
-							<div className="flex flex-wrap gap-1.5">
-								{fns?.map((f) => (
-									<span key={f.name} title={`${f.kind} · ${f.visibility} · ${f.calls} calls · ${f.arith} arithmetic${f.asm ? ` · ${f.asm} assembly` : ""}`} className={`inline-flex h-7 items-center rounded-lg border px-2.5 font-mono text-[12px] ${f.dependency ? "text-muted-foreground" : "bg-background"}`}>
-										{f.name.split(".").slice(1).join(".") || f.kind}
-										{f.asm ? <span className="ml-1.5 text-violet-600">asm</span> : null}
-									</span>
-								))}
-							</div>
-						</div>
-					))}
-				</div>
-			) : null}
-			{data && tab === "files" ? (
-				<div className="min-h-0 overflow-y-auto rounded-xl border bg-card p-3 font-mono text-[12px] shadow-card">
-					{[true, false].map((inScope) => (
-						<div key={String(inScope)} className="mb-4">
-							<p className="mb-1.5 font-sans text-[12px] font-medium">{inScope ? "In scope" : "Compiled, not reached"}</p>
-							<ul className="space-y-0.5">
-								{(data.scopeFiles ?? []).filter((f) => f.inScope === inScope).sort((a, b) => Number(a.dependency) - Number(b.dependency) || a.path.localeCompare(b.path)).map((f) => (
-									<li key={f.path} className={`flex items-center gap-2 ${inScope && !f.dependency ? "" : "text-muted-foreground"}`}>
-										<span className="truncate">{f.path}</span>
-										{f.dependency ? <span className="font-sans text-[10px]">dependency</span> : null}
-										{data.unusedImports.includes(f.path) ? <span className="font-sans text-[10px] text-amber-700">unused import</span> : null}
-									</li>
-								))}
-							</ul>
-						</div>
-					))}
-				</div>
-			) : null}
-			<div className={`min-h-0 flex-1 grid-cols-[minmax(0,22rem)_minmax(0,1fr)] gap-1 ${data && tab !== "entries" ? "hidden" : "grid"}`}>
-				<div className="min-h-0 overflow-y-auto rounded-xl border bg-card p-1 shadow-card">
-					{error ? <p className="whitespace-pre-wrap p-3 font-mono text-[11px] text-red-600">{error}</p> : null}
-					{!data && !error ? <p className="p-3 text-[13px] text-muted-foreground">{entry ? "Reading the AST…" : "No Solidity sources in this folder."}</p> : null}
-					{data?.unusedImports.length ? <p className="px-2 py-1.5 text-[11px] text-amber-700 dark:text-amber-400">Unused imports: {data.unusedImports.join(", ")}</p> : null}
-					<ul>
-						{data?.units.map((u) => (
-							<li key={u.name}>
-								<button type="button" onClick={() => open(u.name)} className={`w-full rounded-lg px-2 py-1.5 text-left hover:bg-muted ${unit === u.name ? "bg-muted" : ""}`}>
-									<span className="flex items-center gap-2">
-										<span className="truncate font-mono text-[12px]">{u.name}</span>
-										<span className="ml-auto shrink-0 text-[10px] text-muted-foreground">{u.mutability}</span>
-									</span>
-									<span className="mt-0.5 flex flex-wrap gap-x-2 text-[10.5px] text-muted-foreground">
-										{u.writes.length ? <span className="text-foreground/80">writes {u.writes.join(", ")}</span> : <span>writes nothing</span>}
-										{u.external ? <span className="text-amber-700 dark:text-amber-400">{u.external} external</span> : null}
-										{u.guards ? <span>{u.guards} guards</span> : null}
-										{u.arith ? <span>{u.arith} arith{u.unchecked ? ` (${u.unchecked} unchecked)` : ""}</span> : null}
-										{u.asm ? <span className="text-violet-700 dark:text-violet-400">{u.asm} asm</span> : null}
-									</span>
-								</button>
-							</li>
-						))}
-					</ul>
-				</div>
-				<div className="min-h-0 overflow-y-auto rounded-xl border bg-card px-4 py-3 shadow-card">
-					{unit ? (
-						slice ? <div className="prose prose-sm max-w-none dark:prose-invert"><ChatMarkdown>{slice}</ChatMarkdown></div> : <p className="text-[13px] text-muted-foreground">Building the slice…</p>
-					) : (
-						<div className="text-[13px] text-muted-foreground">
-							<p>Pick an entry point to see its slice: its storage footprint, the external calls and what each is followed by, its guards, arithmetic and assembly, and its code.</p>
-							{data?.clusters.length ? (
-								<div className="mt-4">
-									<p className="mb-1 font-medium text-foreground">Units that write the same state</p>
-									<ul className="space-y-1">
-										{data.clusters.map((c, i) => (
-											<li key={i} className="font-mono text-[11px]">
-												{c.shared.join(", ")} ← {c.units.join(", ")}
-											</li>
-										))}
-									</ul>
-								</div>
-							) : null}
-						</div>
-					)}
-				</div>
-			</div>
+			{error ? <p className="whitespace-pre-wrap rounded-xl border bg-card p-3 font-mono text-[11px] text-red-600">{error}</p> : null}
+			{!data && !error ? <p className="p-3 text-[13px] text-muted-foreground">{entry ? "Reading the AST…" : "No Solidity sources in this folder."}</p> : null}
+			{data ? <StorageMatrix data={data} unit={unit} slice={slice} onOpen={open} onClose={() => setUnit(null)} /> : null}
 		</>
 	);
 }
@@ -727,6 +550,7 @@ export function SwarmPanel({ folder, name, scan, bridge, session, file: openPath
 	const [proofs, setProofs] = useState<Record<string, Proof>>({});
 	const [openItem, setOpenItem] = useState<number | null>(null);
 	const [file, setFile] = useState<{ path: string; text: string } | null>(null);
+	const [planOpen, setPlanOpen] = useState(false);
 	/** A report with the PoC tests and proofs it cites inlined (newer reports already carry them). */
 	const withPoc = async (body: string) => {
 		const cited = [...new Set(body.match(/[\w./-]+\.(?:t\.sol|lean)/g) ?? [])].filter((p) => !body.includes(`Proof of concept: \`${p}\``)).slice(0, 3);
@@ -743,6 +567,17 @@ export function SwarmPanel({ folder, name, scan, bridge, session, file: openPath
 	// The page's mode (Code, Swarm, Audit) and the open file live in the URL, so they survive reloads.
 	const [params, setParams] = useSearchParams();
 	const mode = (params.get("mode") as Mode | null) ?? "swarm";
+	// The main contract's entry points, read from the AST, so the plan can name the ones each item covers.
+	const [entryUnits, setEntryUnits] = useState<AstUnit[]>([]);
+	const mainSource = (scan?.solidity ?? []).find((f) => f.startsWith("src/") && !f.endsWith(".t.sol") && !f.endsWith(".s.sol")) ?? null;
+	useEffect(() => {
+		setEntryUnits([]);
+		if (mode !== "swarm" || !mainSource) return;
+		void invoke<AstUnits>("ast_units", { folder, entry: mainSource }).then(
+			(d) => setEntryUnits(d.units.filter((u) => u.mutability !== "view" && u.mutability !== "pure" && u.function !== "constructor")),
+			() => setEntryUnits([]),
+		);
+	}, [mode, folder, mainSource, invoke]);
 	const setMode = (m: Mode) => {
 		const next = new URLSearchParams(params);
 		next.set("mode", m);
@@ -883,10 +718,13 @@ export function SwarmPanel({ folder, name, scan, bridge, session, file: openPath
 	const title = sessionTitle(viewing);
 	const working = [...events].reverse().find((e) => e.kind === "status" && e.role !== "swarm");
 	const done = plan.filter((i) => i.mark === "x").length;
+	// Entry points a plan item names, matched as whole words in its text.
+	const named = (text: string) => entryUnits.filter((u) => new RegExp(`\\b${u.function}\\b`).test(text));
+	const inPlan = new Set(plan.flatMap((i) => named(i.text).map((u) => u.function)));
 	const finished = !run ? events.find((e) => e.kind === "done") : undefined;
 	const shown = events.filter((e) => e.kind !== "status");
 
-	// The plan as a list with each item's proof, shown in Audit's Plan tab.
+	// The plan as a list with each item's proof, on the Swarm canvas.
 	const planList = (
 						<ul className="space-y-0.5 p-2 text-[13px]">
 							{plan.length === 0 ? <li className="p-2 text-muted-foreground">The planner writes .formal/plan.md on the first run.</li> : null}
@@ -897,7 +735,16 @@ export function SwarmPanel({ folder, name, scan, bridge, session, file: openPath
 									<li key={i.index} className={`rounded-md ${working && working.item === String(i.index) ? "bg-muted" : ""}`}>
 										<button type="button" disabled={!proof} onClick={() => setOpenItem(expanded ? null : i.index)} className="flex w-full gap-2 px-2 py-1 text-left enabled:hover:bg-muted/60 rounded-md">
 											<span className={`mt-0.5 grid size-4 shrink-0 place-items-center rounded border text-[10px] ${i.mark === "x" ? "border-emerald-500 bg-emerald-500 text-white" : i.mark === "!" ? "border-amber-500 text-amber-600" : ""}`}>{i.mark === "x" ? "✓" : i.mark === "!" ? "!" : ""}</span>
-											<span className={`flex-1 ${i.mark === "x" ? "text-muted-foreground" : ""}`}>{i.text}</span>
+											<span className="min-w-0 flex-1">
+												<span className={i.mark === "x" ? "text-muted-foreground" : ""}>{i.text}</span>
+												{named(i.text).length ? (
+													<span className="mt-1 flex flex-wrap gap-1">
+														{named(i.text).map((u) => (
+															<span key={u.name} className="rounded bg-muted px-1 font-mono text-[10px] text-muted-foreground" title={u.writes.length ? `writes ${u.writes.join(", ")}` : "writes nothing"}>{u.function}</span>
+														))}
+													</span>
+												) : null}
+											</span>
 											{proof ? <ChevronDown className={`mt-0.5 size-3.5 shrink-0 text-muted-foreground transition-transform ${expanded ? "rotate-180" : ""}`} /> : null}
 										</button>
 										{expanded && proof ? (
@@ -921,6 +768,29 @@ export function SwarmPanel({ folder, name, scan, bridge, session, file: openPath
 							})}
 						</ul>
 	);
+
+	// Every state-changing entry point; the ones no plan item names are the gaps.
+	const entryList = entryUnits.length ? (
+		<div className="border-t p-2">
+			<div className="flex items-center gap-2 px-2 pb-1.5 text-[11px] text-muted-foreground">
+				<span className="font-mono uppercase tracking-wider">Entry points</span>
+				<span>{inPlan.size}/{entryUnits.length} in the plan</span>
+			</div>
+			<div className="flex flex-wrap gap-1 px-1.5">
+				{entryUnits.map((u) => (
+					<button
+						key={u.name}
+						type="button"
+						onClick={() => setMode("audit")}
+						title={`${inPlan.has(u.function) ? "In the plan" : "Not in the plan"} · ${u.writes.length ? `writes ${u.writes.join(", ")}` : "writes nothing"}`}
+						className={`rounded-md border px-1.5 py-0.5 font-mono text-[10.5px] hover:bg-muted ${inPlan.has(u.function) ? "border-emerald-500/40 bg-emerald-500/10 text-emerald-700 dark:text-emerald-400" : "border-dashed text-muted-foreground"}`}
+					>
+						{u.function}
+					</button>
+				))}
+			</div>
+		</div>
+	) : null;
 
 	const pageTitle = (
 		<>
@@ -954,6 +824,16 @@ export function SwarmPanel({ folder, name, scan, bridge, session, file: openPath
 					</div>
 				)}
 				<ModeTabs mode={mode} onMode={setMode} />
+				{mode === "swarm" ? (
+					<section className={`pointer-events-auto absolute left-3 top-14 z-10 flex w-[min(20rem,calc(100%-1.5rem))] flex-col overflow-hidden rounded-2xl border bg-muted/80 p-1 shadow-pop backdrop-blur ${planOpen ? "max-h-[calc(100%-4.5rem)]" : ""}`}>
+						<button type="button" onClick={() => setPlanOpen(!planOpen)} aria-expanded={planOpen} className="flex h-8 shrink-0 items-center gap-2 px-2.5 text-left">
+							<span className="font-mono text-[11px] font-medium uppercase tracking-wider text-muted-foreground">Plan</span>
+							<span className="text-[11px] text-muted-foreground">{plan.length ? `${done}/${plan.length}` : ""}{entryUnits.length ? ` · ${inPlan.size}/${entryUnits.length} entry points` : ""}</span>
+							<ChevronDown className={`ml-auto size-3.5 text-muted-foreground transition-transform ${planOpen ? "rotate-180" : ""}`} />
+						</button>
+						{planOpen ? <div className="min-h-0 overflow-y-auto rounded-xl border bg-card">{planList}{entryList}</div> : null}
+					</section>
+				) : null}
 				{mode === "code" ? (
 					// The page is the editor: the file fills the whole page under the tabs.
 					<div className="absolute inset-x-0 bottom-0 top-14 z-10 flex min-h-0 flex-col">
@@ -983,7 +863,7 @@ export function SwarmPanel({ folder, name, scan, bridge, session, file: openPath
 				{mode === "bugs" ? <BugsView bugs={bugs} openBug={openBug} setOpenBug={setOpenBug} withPoc={withPoc} onOpenFile={view} /> : null}
 				{mode === "audit" ? (
 					<div className="pointer-events-auto absolute bottom-3 left-3 right-3 top-14 z-10 flex min-h-0 flex-col overflow-hidden rounded-2xl border bg-muted/60 p-1">
-						<AuditView folder={folder} scan={scan} invoke={invoke} preferred={openPath ?? null} plan={planList} planMeta={plan.length ? `${done}/${plan.length}` : ""} />
+						<AuditView folder={folder} scan={scan} invoke={invoke} preferred={openPath ?? null} />
 					</div>
 				) : null}
 			</div>
