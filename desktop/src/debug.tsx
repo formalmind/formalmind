@@ -1,3 +1,4 @@
+import { ScriptRunDialog } from "./script-run-dialog";
 import { recordRun } from "@/lib/run-results";
 import { reportError } from "@/lib/report-error";
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -607,39 +608,29 @@ export function DebugView({ folder, file, test: wanted, onPick, embedded }: { fo
 		};
 	}, [folder, file]);
 
-	// The chain id runs use (scripts read deployments/<chainId>/ by it), kept per folder; the ones the folder has
-	// deployments for are offered.
-	const chainKey = `fm:chain:${folder}`;
-	const [chain, setChainState] = useState(() => {
-		try {
-			return Number(localStorage.getItem(chainKey)) || 31337;
-		} catch {
-			return 31337;
-		}
-	});
-	const setChain = (id: number) => {
-		setChainState(id);
-		try {
-			localStorage.setItem(chainKey, String(id));
-		} catch {
-			/* not kept */
-		}
-	};
-	const [chains, setChains] = useState<number[]>([]);
-	// From a script's run prompt: the chain, and the Anvil fork to run on (a local URL).
-	const [urlParams] = useSearchParams();
+	// Where runs happen, from the URL: an Anvil fork (`fork`, a local URL, with its `chain`), a chain id without a
+	// fork, or forge's empty local chain (31337). The Chain menu lists the chains running now; "Set up a chain…"
+	// opens the same settings as a script's play button.
+	const [urlParams, setUrlParams] = useSearchParams();
 	const fork = urlParams.get("fork");
-	const urlChain = Number(urlParams.get("chain")) || null;
+	const chain = Number(urlParams.get("chain")) || 31337;
+	const [running_, setRunningChains] = useState<{ name: string; folder: string; chain_id: number; port: number; alive: boolean }[]>([]);
+	const [setup, setSetup] = useState(false);
+	const loadChains = useCallback(() => {
+		void invoke<{ name: string; folder: string; chain_id: number; port: number; alive: boolean }[]>("anvil_list").then((l) => setRunningChains(l.filter((f) => f.alive)), () => setRunningChains([]));
+	}, []);
 	useEffect(() => {
-		if (urlChain && urlChain !== chain) setChainState(urlChain);
-		// eslint-disable-next-line react-hooks/exhaustive-deps
-	}, [urlChain]);
-	useEffect(() => {
-		void invoke<{ files: string[] }>("folder_tree", { path: folder }).then(
-			(t) => setChains([...new Set(t.files.map((f) => f.match(/^deployments\/(\d+)\//)?.[1]).filter(Boolean).map(Number))].sort((a, b) => a - b)),
-			() => setChains([]),
-		);
-	}, [folder]);
+		loadChains();
+		const t = setInterval(loadChains, 5000);
+		return () => clearInterval(t);
+	}, [loadChains]);
+	const pickChain = (target: { chainId: number; fork: string | null }) => {
+		const next = new URLSearchParams(urlParams);
+		next.set("chain", String(target.chainId));
+		if (target.fork) next.set("fork", target.fork);
+		else next.delete("fork");
+		setUrlParams(next, { replace: true });
+	};
 
 	const start = useCallback(
 		async (t: TestFn) => {
@@ -674,7 +665,7 @@ export function DebugView({ folder, file, test: wanted, onPick, embedded }: { fo
 		const t = session?.tests.find((x) => run && `${x.contract}::${x.test}` === run.key);
 		if (t && !running) void start(t);
 		// eslint-disable-next-line react-hooks/exhaustive-deps
-	}, [chain]);
+	}, [chain, fork]);
 
 	// Scripts first (what production runs), then tests.
 	const tests = useMemo(() => {
@@ -767,28 +758,45 @@ export function DebugView({ folder, file, test: wanted, onPick, embedded }: { fo
 			</aside>}
 			<main className="flex min-h-0 min-w-0 flex-1 flex-col">
 				<div className="mb-2 flex shrink-0 items-center gap-2 text-[11px] text-muted-foreground">
-					{fork ? (
-						<span className="inline-flex items-center gap-1.5 rounded-md bg-emerald-500/10 px-2 py-0.5 font-mono text-emerald-800 dark:text-emerald-300" title={`State read from the Anvil fork at ${fork}`}>
-							<span className="size-1.5 rounded-full bg-emerald-500" />
-							fork {fork.replace(/^https?:\/\/(127\.0\.0\.1|localhost)/, "")} · chain {chain}
-						</span>
-					) : null}
-					<label className={`items-center gap-1.5 ${fork ? "hidden" : "inline-flex"}`} title="What block.chainid reads. Scripts read deployments/<chainId>/ by it; forge's local chain is 31337.">
+					<label className="inline-flex items-center gap-1.5" title="Where runs happen: a running Anvil fork (state read from it), or an empty local chain">
 						<span className="font-mono uppercase tracking-wider">Chain</span>
+						<span className={`size-1.5 rounded-full ${fork ? "bg-emerald-500" : "bg-muted-foreground/40"}`} />
 						<select
-							value={chain}
-							onChange={(e) => setChain(Number(e.target.value))}
+							value={fork ?? (chain === 31337 ? "local" : `id:${chain}`)}
+							onChange={(e) => {
+								const v = e.target.value;
+								if (v === "setup") return setSetup(true);
+								if (v === "local") return pickChain({ chainId: 31337, fork: null });
+								const f = running_.find((x) => `http://127.0.0.1:${x.port}` === v);
+								if (f) pickChain({ chainId: f.chain_id, fork: v });
+							}}
 							className="h-6 rounded-md border bg-background px-1.5 font-mono text-[11px] text-foreground"
 						>
-							{[...new Set([31337, ...chains, chain])].map((id) => (
-								<option key={id} value={id}>
-									{id}
-									{id === 31337 ? " · local" : chains.includes(id) ? " · deployments" : ""}
+							<option value="local">Local · 31337</option>
+							{chain !== 31337 && !fork ? <option value={`id:${chain}`}>Chain {chain} · no fork</option> : null}
+							{fork && !running_.some((f) => `http://127.0.0.1:${f.port}` === fork) ? <option value={fork}>Fork {fork.replace(/^https?:\/\/127\.0\.0\.1/, "")} · chain {chain}</option> : null}
+							{running_.map((f) => (
+								<option key={f.name} value={`http://127.0.0.1:${f.port}`}>
+									{f.name} · chain {f.chain_id} · :{f.port}
 								</option>
 							))}
+							<option value="setup">Set up a chain…</option>
 						</select>
 					</label>
 				</div>
+				{setup && file ? (
+					<ScriptRunDialog
+						folder={folder}
+						file={file}
+						fn={run?.key.split("::").pop() ?? wanted?.split("::").pop() ?? "run"}
+						onClose={() => setSetup(false)}
+						onRun={(t) => {
+							setSetup(false);
+							loadChains();
+							pickChain(t);
+						}}
+					/>
+				) : null}
 				{error ? <p className="mb-2 whitespace-pre-wrap rounded-xl border border-red-500/30 bg-red-50/80 p-3 font-mono text-[11px] text-red-700 dark:bg-red-950/40 dark:text-red-400">{error}</p> : null}
 				{cmp && session ? (
 					<>
