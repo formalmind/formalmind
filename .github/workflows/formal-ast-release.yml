@@ -1,0 +1,76 @@
+name: formal-ast release
+
+# Builds the formal-ast CLI and attaches it to a GitHub release, so other repositories' CI can regenerate
+# their Lean models (e.g. asyncswap/contracts formal/scripts/generate.sh) with a pinned version.
+# Push a tag `formal-ast-v<version>` matching crates/formal-ast/Cargo.toml.
+#
+# The release is never marked Latest: `releases/latest` is the Mac app's (the updater's latest.json and the
+# landing page's Download for Mac link resolve through it).
+
+permissions: {}
+
+on:
+  push:
+    tags: ["formal-ast-v*"]
+
+jobs:
+  build:
+    name: build (${{ matrix.target }})
+    runs-on: ${{ matrix.os }}
+    permissions:
+      contents: read
+    strategy:
+      matrix:
+        include:
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+          - os: macos-14
+            target: aarch64-apple-darwin
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+
+      - name: Tag matches the crate version
+        shell: bash
+        run: |
+          version=$(sed -n 's/^version = "\(.*\)"/\1/p' crates/formal-ast/Cargo.toml | head -1)
+          if [ "${GITHUB_REF_NAME}" != "formal-ast-v${version}" ]; then
+            echo "::error::tag ${GITHUB_REF_NAME} doesn't match crates/formal-ast version ${version}"; exit 1
+          fi
+
+      - name: Build
+        run: cargo build --release --locked --manifest-path crates/formal-ast/Cargo.toml
+
+      - name: Package
+        shell: bash
+        run: |
+          mkdir -p dist
+          tar -C crates/formal-ast/target/release -czf "dist/formal-ast-${{ matrix.target }}.tar.gz" formal-ast
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: formal-ast-${{ matrix.target }}
+          path: dist/*.tar.gz
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+
+      - name: Create the release (not Latest)
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          cd dist
+          sha256sum *.tar.gz > SHA256SUMS
+          gh release create "${GITHUB_REF_NAME}" --repo "${GITHUB_REPOSITORY}" --latest=false \
+            --title "formal-ast ${GITHUB_REF_NAME#formal-ast-v}" \
+            --notes "The formal-ast CLI (solc AST → graph, scope, Lean model), built from ${GITHUB_SHA}." \
+            *.tar.gz SHA256SUMS
