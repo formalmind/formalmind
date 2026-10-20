@@ -82,7 +82,7 @@ pub fn is_added(path: &str) -> Result<bool, String> {
 }
 
 /// The Solidity and Lean files in a folder that's been added (only those may be read).
-#[tauri::command]
+#[tauri::command(async)]
 pub fn folder_scan(path: String) -> Result<Scan, String> {
     if !read()?.folders.contains(&path) {
         return Err("Add the folder first".into());
@@ -132,7 +132,7 @@ pub struct Tree {
 const TREE_SKIP: [&str; 12] = [".git", "node_modules", "lib", "dependencies", "out", "cache", "target", ".lake", "dist", "broadcast", ".formal", ".next"];
 
 /// All files in a folder that's been added, for the sidebar's file tree.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn folder_tree(path: String) -> Result<Tree, String> {
     if !read()?.folders.contains(&path) {
         return Err("Add the folder first".into());
@@ -193,7 +193,7 @@ mod tests {
 }
 
 /// Appends an error the app showed to ~/Library/Logs/Formal Mind/errors.log, so it can be read back later.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn log_error(source: String, message: String) -> Result<(), String> {
     use std::io::Write;
     let dir = std::path::PathBuf::from(std::env::var("HOME").map_err(|e| e.to_string())?).join("Library/Logs/Formal Mind");

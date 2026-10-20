@@ -160,7 +160,7 @@ fn set_mark(root: &Path, index: usize, mark: char) {
     let _ = std::fs::write(&path, out.join("\n") + "\n");
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn swarm_plan(folder: String) -> Result<Vec<PlanItem>, String> {
     if !local::read()?.folders.contains(&folder) {
         return Err("Add the folder first".into());
@@ -176,7 +176,7 @@ pub struct Bug {
 }
 
 /// The bugs agents have reported in this folder, newest first.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn swarm_bugs(folder: String) -> Result<Vec<Bug>, String> {
     if !local::read()?.folders.contains(&folder) {
         return Err("Add the folder first".into());
@@ -301,7 +301,7 @@ fn save_transcript(root: &Path, job: u64, messages: &[Value]) {
 }
 
 /// The queue as the app sees it: jobs not done yet, oldest first, and the session's spend.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn swarm_queue(folder: String) -> Result<Value, String> {
     if !local::read()?.folders.contains(&folder) {
         return Err("Add the folder first".into());
@@ -560,7 +560,7 @@ fn record_proof(root: &Path, index: usize, text: &str, files: Vec<String>, summa
 }
 
 /// What proves each plan item, by item number.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn swarm_proofs(folder: String) -> Result<Value, String> {
     if !local::read()?.folders.contains(&folder) {
         return Err("Add the folder first".into());
@@ -569,7 +569,7 @@ pub fn swarm_proofs(folder: String) -> Result<Value, String> {
 }
 
 /// A text file in an added folder, for viewing a proof or a PoC.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn folder_read(folder: String, path: String) -> Result<String, String> {
     if !local::read()?.folders.contains(&folder) {
         return Err("Add the folder first".into());
@@ -579,7 +579,7 @@ pub fn folder_read(folder: String, path: String) -> Result<String, String> {
 }
 
 /// An image in the folder as a `data:` URL, for Markdown previews (up to 8 MB).
-#[tauri::command]
+#[tauri::command(async)]
 pub fn folder_image(folder: String, path: String) -> Result<String, String> {
     if !local::read()?.folders.contains(&folder) {
         return Err("Add the folder first".into());
@@ -898,7 +898,7 @@ fn runs_dir(folder: &str) -> PathBuf {
 }
 
 /// Past swarm sessions in this folder, newest first (from .formal/runs/*.jsonl).
-#[tauri::command]
+#[tauri::command(async)]
 pub fn swarm_sessions(folder: String) -> Result<Vec<Session>, String> {
     if !local::read()?.folders.contains(&folder) {
         return Err("Add the folder first".into());
@@ -923,7 +923,7 @@ pub fn swarm_sessions(folder: String) -> Result<Vec<Session>, String> {
 }
 
 /// One session's events, oldest first.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn swarm_history(folder: String, run: String) -> Result<Vec<Value>, String> {
     if !local::read()?.folders.contains(&folder) {
         return Err("Add the folder first".into());

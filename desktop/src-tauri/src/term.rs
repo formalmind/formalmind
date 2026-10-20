@@ -34,7 +34,7 @@ fn nvim(app: &AppHandle) -> (PathBuf, Option<PathBuf>) {
 }
 
 /// Starts Neovim on a file (relative to the folder) in a terminal of this size; returns the terminal's id.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn term_start(app: AppHandle, folder: String, path: Option<String>, line: Option<u32>, cols: u16, rows: u16) -> Result<u32, String> {
     if !crate::local::is_added(&folder)? {
         return Err("Add the folder first".into());

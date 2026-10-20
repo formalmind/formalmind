@@ -105,13 +105,13 @@ fn free_port() -> Result<u16, String> {
 }
 
 /// The forks Formal Mind knows (any folder), with whether each still answers.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn anvil_list() -> Vec<Fork> {
     load().into_iter().map(|f| Fork { alive: chain_at(f.port) == Some(f.chain_id), ..f }).collect()
 }
 
 /// Whether the folder has a value for a chain's RPC variable (never the value).
-#[tauri::command]
+#[tauri::command(async)]
 pub fn anvil_rpc_known(folder: String, rpc_env: String) -> Result<bool, String> {
     if !crate::local::is_added(&folder)? {
         return Err("Add the folder first".into());
@@ -120,7 +120,7 @@ pub fn anvil_rpc_known(folder: String, rpc_env: String) -> Result<bool, String> 
 }
 
 /// Starts (or restarts) the fork of a chain for a folder, from its saved state when there is one.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn anvil_start(folder: String, chain_id: u64, rpc_env: String) -> Result<Fork, String> {
     if !crate::local::is_added(&folder)? {
         return Err("Add the folder first".into());
@@ -167,7 +167,7 @@ pub fn anvil_start(folder: String, chain_id: u64, rpc_env: String) -> Result<For
 }
 
 /// Stops a fork; with `clean`, deletes its saved state too (the next start forks fresh).
-#[tauri::command]
+#[tauri::command(async)]
 pub fn anvil_stop(name: String, clean: bool) -> Result<(), String> {
     let mut forks = load();
     if let Some(f) = forks.iter().find(|f| f.name == name) {

@@ -742,7 +742,7 @@ export function DebugView({ folder, file, test: wanted, onPick, embedded }: { fo
 	}, [cmp, home]);
 
 	return (
-		<div className="flex h-full min-h-0 flex-1 gap-2 p-2">
+		<div className="flex h-full min-h-0 min-w-0 flex-1 gap-2 overflow-hidden p-2">
 			{/* In a folder's Debug mode the sidebar's file tree lists the scripts and tests instead. */}
 			{embedded ? null : <aside className="flex w-60 shrink-0 flex-col rounded-2xl border bg-muted/80 p-1">
 				<div className="flex h-7 shrink-0 items-center gap-2 px-2.5">
