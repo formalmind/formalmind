@@ -15,7 +15,7 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tauri::{AppHandle, Emitter, Manager, State};
 
-const MODEL: &str = "claude-opus-5-5";
+const DEFAULT_MODEL: &str = "claude-opus-5-5";
 const MAX_STEPS: usize = 40;
 const MAX_ATTEMPTS: usize = 3;
 
@@ -40,6 +40,8 @@ pub struct SwarmRequest {
     pub api_base: String,
     /// "formal" (formal.team credits, the default) or "anthropic" (your own key from the keychain, straight to Anthropic).
     pub provider: Option<String>,
+    /// claude-opus-5-5 (default), claude-sonnet-5-5 or claude-haiku-5-5.
+    pub model: Option<String>,
 }
 
 fn anthropic_entry() -> Result<keyring::Entry, String> {
@@ -85,10 +87,22 @@ fn now_ms() -> u128 {
     SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_millis()
 }
 
-/// Dollars for one call at Claude Opus 5.5's list price ($4 in, $20 out, $0.20 cache reads, writes 1.25x input).
-fn cost(usage: &Value) -> f64 {
+/// Dollars for one call at the model's list price (input, output, cache reads per million; writes 1.25x input).
+fn cost(model: &str, usage: &Value) -> f64 {
+    let (inp, out, read) = match model {
+        m if m.contains("haiku") => (0.1, 0.5, 0.01),
+        m if m.contains("sonnet") => (2.0, 10.0, 0.2),
+        _ => (4.0, 20.0, 0.2),
+    };
     let n = |k: &str| usage[k].as_f64().unwrap_or(0.0);
-    (n("input_tokens") * 4.0 + n("cache_creation_input_tokens") * 5.0 + n("cache_read_input_tokens") * 0.2 + n("output_tokens") * 20.0) / 1e6
+    (n("input_tokens") * inp + n("cache_creation_input_tokens") * inp * 1.25 + n("cache_read_input_tokens") * read + n("output_tokens") * out) / 1e6
+}
+
+fn model_of(req: &SwarmRequest) -> &str {
+    match req.model.as_deref() {
+        Some(m @ ("claude-opus-5-5" | "claude-sonnet-5-5" | "claude-haiku-5-5")) => m,
+        _ => DEFAULT_MODEL,
+    }
 }
 
 // ---- the plan: .formal/plan.md, a checklist ----
@@ -287,7 +301,7 @@ impl Turn<'_> {
                 return Ok(out);
             }
             let body = json!({
-                "model": MODEL, "max_tokens": 16000, "system": system(role, &self.req.folder, &goal),
+                "model": model_of(self.req), "max_tokens": 16000, "system": system(role, &self.req.folder, &goal),
                 "messages": messages, "tools": tools(role),
                 "output_config": { "effort": if role == "prover" { "high" } else { "medium" } },
             });
@@ -305,7 +319,7 @@ impl Turn<'_> {
             if !status.is_success() {
                 return Err(reply["error"]["message"].as_str().unwrap_or("The model call failed").to_string());
             }
-            *self.swarm.spent.lock().unwrap() += cost(&reply["usage"]);
+            *self.swarm.spent.lock().unwrap() += cost(model_of(self.req), &reply["usage"]);
             let content = reply["content"].clone();
             messages.push(json!({ "role": "assistant", "content": content }));
             let mut results = vec![];

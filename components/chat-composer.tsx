@@ -45,6 +45,8 @@ export interface ChatComposerProps {
 	repo?: { owner: string; name: string } | null;
 	/** Replaces the repo chip on the shelf. */
 	context?: React.ReactNode;
+	/** A model pill for other providers' models (the local swarm's Claude models), in place of `model`. */
+	modelPicker?: { value: string; options: { value: string; label: string }[]; onChange: (value: string) => void; disabled?: boolean };
 	placeholder?: string;
 	textareaRef?: React.Ref<HTMLTextAreaElement>;
 }
@@ -61,6 +63,7 @@ export function ChatComposer({
 	onThinkChange,
 	repo,
 	context,
+	modelPicker,
 	placeholder = "Ask about this repo…",
 	textareaRef,
 }: ChatComposerProps) {
@@ -165,6 +168,28 @@ export function ChatComposer({
 									</DropdownMenuRadioGroup>
 								</>
 							) : null}
+						</DropdownMenuContent>
+					</DropdownMenu>
+				) : null}
+				{modelPicker ? (
+					<DropdownMenu>
+						<DropdownMenuTrigger
+							disabled={modelPicker.disabled}
+							className={cn(CHIP, "bg-secondary text-secondary-foreground outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:opacity-60")}
+							aria-label="Model"
+						>
+							<Sparkles className="h-3.5 w-3.5" />
+							{modelPicker.options.find((o) => o.value === modelPicker.value)?.label ?? modelPicker.value}
+							<ChevronDown className="h-3 w-3 text-muted-foreground" />
+						</DropdownMenuTrigger>
+						<DropdownMenuContent align="start">
+							<DropdownMenuRadioGroup value={modelPicker.value} onValueChange={modelPicker.onChange}>
+								{modelPicker.options.map((o) => (
+									<DropdownMenuRadioItem key={o.value} value={o.value}>
+										{o.label}
+									</DropdownMenuRadioItem>
+								))}
+							</DropdownMenuRadioGroup>
 						</DropdownMenuContent>
 					</DropdownMenu>
 				) : null}

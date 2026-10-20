@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { Check, ChevronDown, Copy, FileCode2, Play, Square, Wrench } from "lucide-react";
+import { Check, ChevronDown, Copy, FileCode2, Play, Square } from "lucide-react";
 import { ChatComposer } from "@/components/chat-composer";
 import { ChatMarkdown } from "@/components/chat-markdown";
 import { SwarmCanvas } from "@/components/swarm/swarm-canvas";
@@ -44,6 +44,12 @@ function CopyButton({ text, label = "Copy" }: { text: string; label?: string }) 
 type Session = { run: string; outcome: string; spent: number; events: number };
 
 const BUDGETS = [2, 5, 10, 20];
+/** Claude models the local swarm can run on; the choice applies when the swarm starts. */
+const MODELS = [
+	{ value: "claude-opus-5-5", label: "Claude Opus 5.5" },
+	{ value: "claude-sonnet-5-5", label: "Claude Sonnet 5.5" },
+	{ value: "claude-haiku-5-5", label: "Claude Haiku 5.5" },
+];
 const colorOf = (role: string) => (ROLE_COLORS as Record<string, string>)[role] ?? "hsl(var(--muted-foreground))";
 const store = { get: (k: string) => { try { return localStorage.getItem(k); } catch { return null; } }, set: (k: string, v: string) => { try { localStorage.setItem(k, v); } catch { /* not kept */ } } };
 
@@ -90,7 +96,8 @@ export function SwarmPanel({ folder, name, scan, bridge }: { folder: string; nam
 	// One floating card open at a time, like an accordion; a bug report opens the bugs card.
 	const [panel, setPanel] = useState<string | null>("plan");
 	const [chatOpen, setChatOpen] = useState(true);
-	const [showTools, setShowTools] = useState(false);
+	const [model, setModel] = useState(() => store.get("fm:model") ?? MODELS[0].value);
+	
 	// Set in Settings (desktop/src/settings.tsx).
 	const [provider] = useState<Provider>(() => (store.get("fm:provider") === "anthropic" ? "anthropic" : "formal"));
 	const [hasKey, setHasKey] = useState(false);
@@ -151,13 +158,13 @@ export function SwarmPanel({ folder, name, scan, bridge }: { folder: string; nam
 	useEffect(() => {
 		// Braces matter: scrollTo returns a Promise in newer browsers, and an effect must return nothing or a cleanup.
 		chat.current?.scrollTo({ top: chat.current.scrollHeight });
-	}, [events, showTools]);
+	}, [events]);
 
 	const start = async () => {
 		setError(null);
 		setEvents([]);
 		try {
-			const id = await invoke<string>("swarm_start", { request: { folder, goal: goal.trim() || null, budget_usd: budget, api_base: apiBase(), provider } });
+			const id = await invoke<string>("swarm_start", { request: { folder, goal: goal.trim() || null, budget_usd: budget, api_base: apiBase(), provider, model } });
 			runRef.current = id;
 			setRun(id);
 			setViewing(id);
@@ -178,7 +185,7 @@ export function SwarmPanel({ folder, name, scan, bridge }: { folder: string; nam
 	const working = [...events].reverse().find((e) => e.kind === "status" && e.role !== "swarm");
 	const done = plan.filter((i) => i.mark === "x").length;
 	const finished = !run ? events.find((e) => e.kind === "done") : undefined;
-	const shown = events.filter((e) => e.kind !== "status" && (showTools || (e.kind !== "tool" && e.kind !== "result")));
+	const shown = events.filter((e) => e.kind !== "status" && e.kind !== "result");
 
 	return (
 		<div className="relative flex h-full min-h-0 flex-1">
@@ -275,7 +282,6 @@ export function SwarmPanel({ folder, name, scan, bridge }: { folder: string; nam
 			<aside className={`pointer-events-auto absolute right-3 top-[6.5rem] z-20 flex w-[min(24rem,calc(100%-1.5rem))] flex-col rounded-2xl border bg-muted/80 p-1.5 shadow-pop backdrop-blur ${chatOpen ? "bottom-3" : ""}`}>
 				<div className="flex h-8 shrink-0 items-center gap-2 pl-2 pr-0.5">
 					<button type="button" onClick={() => setChatOpen(!chatOpen)} aria-expanded={chatOpen} title={chatOpen ? "Collapse the chat" : "Open the chat"} className="flex items-center gap-1.5">
-						<Label>Swarm chat</Label>
 						<ChevronDown className={`size-3.5 text-muted-foreground transition-transform duration-200 ${chatOpen ? "rotate-180" : ""}`} />
 					</button>
 					{sessions.length ? (
@@ -290,9 +296,6 @@ export function SwarmPanel({ folder, name, scan, bridge }: { folder: string; nam
 					{run ? (
 						<div className="flex shrink-0 items-center gap-1 text-[11px] text-muted-foreground">
 							<span className="tabular-nums" title="Spent of the cap">${spent.toFixed(2)}/${budget}</span>
-							<button type="button" onClick={() => setShowTools(!showTools)} title={showTools ? "Hide tool calls" : "Show tool calls"} aria-pressed={showTools} className={`grid size-7 place-items-center rounded-md hover:bg-background ${showTools ? "bg-background text-foreground" : ""}`}>
-								<Wrench className="size-3.5" />
-							</button>
 							<button type="button" onClick={() => void invoke("swarm_stop", { run })} title="Stop the swarm" className="inline-flex h-7 items-center gap-1 rounded-md border bg-background px-2 text-foreground hover:bg-muted">
 								<Square className="size-3" />Stop
 							</button>
@@ -347,6 +350,15 @@ export function SwarmPanel({ folder, name, scan, bridge }: { folder: string; nam
 						onSubmit={() => void (run ? send() : start())}
 						onStop={() => {}}
 						isLoading={false}
+						modelPicker={{
+							value: model,
+							options: MODELS,
+							disabled: Boolean(run),
+							onChange: (m) => {
+								setModel(m);
+								store.set("fm:model", m);
+							},
+						}}
 						placeholder={run ? "Steer the swarm: a question, a new focus, an idea to check…" : "What should the swarm focus on? (optional) ↑ starts it"}
 						context={
 							<span className="inline-flex h-8 items-center gap-1.5 rounded-full bg-secondary px-3 text-sm font-medium text-secondary-foreground">
