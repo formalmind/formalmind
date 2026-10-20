@@ -27,9 +27,13 @@ import {
 
 const SIDEBAR_COOKIE_NAME = "sidebar_state"
 const SIDEBAR_COOKIE_MAX_AGE = 60 * 60 * 24 * 7
-const SIDEBAR_WIDTH = "16rem"
 const SIDEBAR_WIDTH_MOBILE = "18rem"
 const SIDEBAR_WIDTH_ICON = "3rem"
+// Dragging the rail sets the width, in pixels, kept between visits.
+const SIDEBAR_WIDTH_MIN = 192
+const SIDEBAR_WIDTH_MAX = 520
+const SIDEBAR_WIDTH_KEY = "fm:sidebar-width"
+const clampWidth = (px: number) => Math.min(SIDEBAR_WIDTH_MAX, Math.max(SIDEBAR_WIDTH_MIN, Math.round(px)))
 const SIDEBAR_KEYBOARD_SHORTCUT = "b"
 
 type SidebarContextProps = {
@@ -40,6 +44,10 @@ type SidebarContextProps = {
 	setOpenMobile: (open: boolean) => void
 	isMobile: boolean
 	toggleSidebar: () => void
+	width: number
+	setWidth: (width: number) => void
+	resizing: boolean
+	setResizing: (resizing: boolean) => void
 }
 
 const SidebarContext = React.createContext<SidebarContextProps | null>(null)
@@ -75,6 +83,24 @@ const SidebarProvider = React.forwardRef<
 	) => {
 		const isMobile = useIsMobile()
 		const [openMobile, setOpenMobile] = React.useState(false)
+		const [width, _setWidth] = React.useState(() => {
+			try {
+				const kept = Number(localStorage.getItem(SIDEBAR_WIDTH_KEY))
+				return kept ? clampWidth(kept) : 256
+			} catch {
+				return 256
+			}
+		})
+		const setWidth = React.useCallback((px: number) => {
+			const w = clampWidth(px)
+			_setWidth(w)
+			try {
+				localStorage.setItem(SIDEBAR_WIDTH_KEY, String(w))
+			} catch {
+				/* not kept */
+			}
+		}, [])
+		const [resizing, setResizing] = React.useState(false)
 
 		// This is the internal state of the sidebar.
 		// We use openProp and setOpenProp for control from outside the component.
@@ -131,8 +157,12 @@ const SidebarProvider = React.forwardRef<
 				openMobile,
 				setOpenMobile,
 				toggleSidebar,
+				width,
+				setWidth,
+				resizing,
+				setResizing,
 			}),
-			[state, open, setOpen, isMobile, openMobile, setOpenMobile, toggleSidebar]
+			[state, open, setOpen, isMobile, openMobile, setOpenMobile, toggleSidebar, width, setWidth, resizing]
 		)
 
 		return (
@@ -141,13 +171,14 @@ const SidebarProvider = React.forwardRef<
 					<div
 						style={
 							{
-								"--sidebar-width": SIDEBAR_WIDTH,
+								"--sidebar-width": `${width}px`,
 								"--sidebar-width-icon": SIDEBAR_WIDTH_ICON,
 								...style,
 							} as React.CSSProperties
 						}
 						className={cn(
 							"group/sidebar-wrapper flex min-h-svh w-full has-[[data-variant=inset]]:bg-sidebar",
+							resizing && "cursor-col-resize select-none [&_*]:!transition-none",
 							className
 						)}
 						ref={ref}
