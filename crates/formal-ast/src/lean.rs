@@ -115,6 +115,12 @@ fn bits_of(t: &str) -> Option<u32> {
     None
 }
 
+/// `bytesN` with N < 32 (left-aligned in a word).
+fn bytes_n(t: &str) -> Option<u32> {
+    let n: u32 = t.split_whitespace().next()?.strip_prefix("bytes")?.parse().ok()?;
+    (n < 32).then_some(n)
+}
+
 /// The width of a signed type (`int24` → 24).
 fn int_bits(t: &str) -> Option<u32> {
     let t = t.split_whitespace().next().unwrap_or("");
@@ -199,6 +205,8 @@ pub struct Gen<'a> {
     /// Assembly uses `tload`/`tstore`: State gets a transient word map.
     transient: bool,
     ext_calls: BTreeMap<String, ExtCall>,
+    /// Functions given a hand-written summary instead of a translation.
+    summaries: Vec<String>,
 }
 
 impl<'a> Gen<'a> {
@@ -291,6 +299,7 @@ impl<'a> Gen<'a> {
             calls,
             transient: false,
             ext_calls: BTreeMap::new(),
+            summaries: vec![],
         }
     }
 
@@ -555,6 +564,9 @@ impl<'a> Gen<'a> {
     }
 
     fn translate(&mut self, f: Id) -> R<String> {
+        if let Some(text) = self.summary(f) {
+            return Ok(text);
+        }
         let node = self.nodes.get(&f).copied().ok_or("no node")?;
         if node["body"].is_null() {
             return bail("no body");
@@ -676,6 +688,86 @@ impl<'a> Gen<'a> {
         Ok(out)
     }
 
+    /// The contract's ABI entry point: the selector picks a public function, its arguments are decoded, its results
+    /// encoded, as the compiled dispatcher does. Selectors the model doesn't translate go to `Ext.dispatch_other`.
+    fn dispatch(&mut self) -> String {
+        let mut cases = vec![];
+        for f in self.scope.surface.clone() {
+            let node = self.nodes[&f];
+            let Some(sel) = node["functionSelector"].as_str().map(|s| s.to_string()) else { continue };
+            if self.status.get(&f) != Some(&true) {
+                continue;
+            }
+            let name = self.lean_fn_name(f);
+            let types: Vec<String> = node["parameters"]["parameters"].as_array().into_iter().flatten().map(tstr).collect();
+            let rets: Vec<String> = node["returnParameters"]["parameters"].as_array().into_iter().flatten().map(tstr).collect();
+            let mut fx = Fx::new(self, f);
+            fx.indent = 1;
+            let case = (|| -> R<Vec<String>> {
+                let args = fx.abi_decode_tuple(&types, "args", "0")?;
+                let call = format!("{name} ext {}", args.iter().map(|a| paren(a)).collect::<Vec<_>>().join(" "));
+                if rets.is_empty() {
+                    fx.line(call);
+                    fx.line("return []".into());
+                } else {
+                    fx.line(format!("let r ← {call}"));
+                    let items: Vec<(String, String)> = rets.iter().enumerate().map(|(i, t)| (t.clone(), proj("r", i, rets.len()))).collect();
+                    let enc = fx.abi_encode(&items)?;
+                    fx.line(format!("return {enc}"));
+                }
+                Ok(std::mem::take(&mut fx.out))
+            })();
+            if let Ok(lines) = case {
+                cases.push((sel, lines));
+            }
+        }
+        // One small definition per selector keeps each `do` block simple; the dispatcher is a plain if/else chain.
+        let mut out = String::new();
+        for (sel, lines) in &cases {
+            let _ = writeln!(out, "def dispatch_{sel} {{σ : Type}} (ext : Ext σ) (args : (List Nat)) : M σ (List Nat) := do\n{}\n", lines.join("\n"));
+        }
+        let mut chain = "ext.dispatch_other data".to_string();
+        for (sel, _) in cases.iter().rev() {
+            chain = format!("if sel == 0x{sel} then dispatch_{sel} ext args\n  else {chain}");
+        }
+        let _ = writeln!(
+            out,
+            "/-- The ABI entry point: selector → decoded arguments → the function → encoded results. -/\ndef dispatch {{σ : Type}} (ext : Ext σ) (data : (List Nat)) : M σ (List Nat) :=\n  let sel := bytesWordAt data 0 / 2 ^ 224\n  let args := data.drop 4\n  {chain}\n"
+        );
+        out
+    }
+
+    /// Hand-written definitions for library functions whose code is plumbing the generator doesn't translate.
+    /// Each follows the code line by line; the report lists them as summaries.
+    fn summary(&mut self, f: Id) -> Option<String> {
+        let func = &self.g.functions[&f];
+        let contract = self.g.contracts.get(&func.contract)?.name.clone();
+        if !self.g.is_dependency(f) {
+            return None;
+        }
+        match (contract.as_str(), func.name.as_str(), func.signature.as_str()) {
+            // v4-core Hooks.callHook: a raw call to the hook with `data`; a failed call reverts (bubbled); the
+            // returned data must hold at least a word whose selector matches the one called.
+            ("Hooks", "callHook", _) => {
+                let name = self.lean_fn_name(f);
+                self.ext.insert("rawCall : Nat → Nat → List Nat → M σ (List Nat)".into(), "a low-level call (address, value, calldata) → returndata; reverts when the callee reverts".into());
+                self.summaries.push(self.g.qualified(f));
+                Some(
+                    [
+                        "/-- Hooks.callHook (summary of its code: the raw call, the returned data, the selector check) -/".to_string(),
+                        format!("def {name} {{σ : Type}} (ext : Ext σ) (self : Nat) (data : (List Nat)) : M σ (List Nat) := do"),
+                        "  let result ← ext.rawCall self 0 data".into(),
+                        "  if decide (result.length < 32) || bytesWordAt result 0 / 2 ^ 224 != bytesWordAt data 0 / 2 ^ 224 then".into(),
+                        "    throw ⟨\"InvalidHookResponse\"⟩".into(),
+                        "  return result\n".into(),
+                    ]
+                    .join("\n"),
+                )
+            }
+            _ => None,
+        }
+    }
+
     /// A standalone model: the prelude, then everything in `namespace`.
     pub fn generate(self, namespace: &str) -> Model {
         let p = self.parts();
@@ -693,6 +785,7 @@ impl<'a> Gen<'a> {
 
     /// The model for the scope's surface, in pieces.
     pub fn parts(mut self) -> Parts {
+        self.ext.insert("dispatch_other : List Nat → M σ (List Nat)".into(), "calls to selectors the model doesn't dispatch (and fallback/receive)".into());
         for f in self.scope.surface.clone() {
             self.function(f);
         }
@@ -770,6 +863,8 @@ impl<'a> Gen<'a> {
         for d in defs {
             let _ = writeln!(out, "{d}");
         }
+        let dispatch = self.dispatch();
+        out.push_str(&dispatch);
         let entries = self
             .scope
             .surface
@@ -1423,6 +1518,19 @@ impl<'g, 'a> Fx<'g, 'a> {
         Ok(())
     }
 
+    /// A Yul identifier naming an outside `bytes memory` value: its Lean name.
+    fn yul_bytes_ref(&self, e: &Value, y: &Yul) -> Option<String> {
+        if e["nodeType"] != "YulIdentifier" || y.var(&s(&e["name"])).is_some() {
+            return None;
+        }
+        let (decl, slot, offset) = *y.refs.get(&s(&e["src"]))?;
+        if slot || offset {
+            return None;
+        }
+        let ty = tstr(self.g.nodes.get(&decl)?);
+        (strip_location(&ty) == "bytes").then(|| self.locals.get(&decl).cloned()).flatten()
+    }
+
     /// `x.slot` of a value-type state variable at offset 0: its field and Solidity type.
     fn yul_state_slot(&mut self, e: &Value, y: &Yul) -> R<(String, String)> {
         if e["nodeType"] != "YulIdentifier" {
@@ -1476,6 +1584,19 @@ impl<'g, 'a> Fx<'g, 'a> {
                         self.g.transient = true;
                         let k = self.yul_expr(&args[0], y)?;
                         return Ok(format!("((ext.get (← get)).«transient» {})", paren(&k)));
+                    }
+                    "mload" if self.yul_bytes_ref(&args[0], y).is_some() => {
+                        // `mload(b)` of a `bytes` value is its length.
+                        let b = self.yul_bytes_ref(&args[0], y).unwrap();
+                        return Ok(format!("({b}).length"));
+                    }
+                    "mload" if yul_call_name(&args[0]) == Some("add") && args[0]["arguments"].as_array().is_some_and(|a| a.iter().any(|x| self.yul_bytes_ref(x, y).is_some())) => {
+                        // `mload(add(b, off))`: the word at byte `off - 32` of the data.
+                        let parts = args[0]["arguments"].as_array().cloned().unwrap_or_default();
+                        let (bi, oi) = if self.yul_bytes_ref(&parts[0], y).is_some() { (0, 1) } else { (1, 0) };
+                        let b = self.yul_bytes_ref(&parts[bi], y).unwrap();
+                        let off = self.yul_expr(&parts[oi], y)?;
+                        return Ok(format!("(bytesWordAt {b} ({} - 32))", paren(&off)));
                     }
                     "mload" => {
                         let off = yul_const(&args[0]).ok_or("mload at a computed offset")?;
@@ -1983,6 +2104,9 @@ impl<'g, 'a> Fx<'g, 'a> {
         if int_bits(&t).is_some() {
             return Ok(vec![format!("(toUnsigned 256 {})", paren(term))]);
         }
+        if bytes_n(&t).is_some() {
+            return Ok(vec![to_word(&t, term)]);
+        }
         if t.starts_with("uint") || t.starts_with("address") || t.starts_with("contract ") || t.starts_with("enum ") || t == "bytes32" {
             return Ok(vec![term.to_string()]);
         }
@@ -2137,6 +2261,8 @@ impl<'g, 'a> Fx<'g, 'a> {
             Some(format!("abiEnum {}", self.g.enum_size.get(name).ok_or_else(|| format!("enum {name}"))?))
         } else if tt == "bytes32" {
             None
+        } else if let Some(n) = bytes_n(&tt) {
+            Some(format!("abiBytesN {n}"))
         } else if tt.starts_with("uint") || tt.starts_with("address") || tt.starts_with("contract ") {
             bits_of(&tt).filter(|b| *b < 256).map(|b| format!("abiUint {b}"))
         } else {
@@ -2411,6 +2537,11 @@ impl<'g, 'a> Fx<'g, 'a> {
             let to = self.g.norm(&tstr(e));
             let from = self.g.norm(&tstr(&args[0]));
             let literal = from.starts_with("int_const") || from.starts_with("rational");
+            if strip_location(&from) == "bytes" {
+                if let Some(n) = bytes_n(&to).or((to == "bytes32").then_some(32)) {
+                    return Ok(format!("(bytesWord (({} ++ List.replicate {n} 0).take {n}))", paren(&a)));
+                }
+            }
             return Ok(match (int_bits(&to), int_bits(&from), bits_of(&to), bits_of(&from)) {
                 // intM → intN: narrowing wraps, widening keeps the value.
                 (Some(tb), Some(fb), _, _) if tb < fb => format!("(wrapI {tb} {})", paren(&a)),
@@ -2454,6 +2585,35 @@ impl<'g, 'a> Fx<'g, 'a> {
                 items.push((tstr(a), v));
             }
             return self.abi_encode(&items);
+        }
+        if abi && (callee["memberName"] == "encodeCall" || callee["memberName"] == "encodeWithSelector") {
+            // Calldata: the 4-byte selector, then the arguments' ABI encoding.
+            let sel = if callee["memberName"] == "encodeCall" {
+                let f = &args[0];
+                let r = f["referencedDeclaration"].as_i64().ok_or("encodeCall of an unknown function")?;
+                let d = self.g.nodes.get(&r).copied().ok_or("encodeCall target")?;
+                format!("0x{}", d["functionSelector"].as_str().ok_or("encodeCall of a function without a selector")?)
+            } else {
+                let v = self.expr(&args[0])?;
+                self.atom(v)
+            };
+            let rest: Vec<Value> = if callee["memberName"] == "encodeCall" {
+                match args.get(1) {
+                    Some(t) if t["nodeType"] == "TupleExpression" && t["isInlineArray"] != true => t["components"].as_array().cloned().unwrap_or_default(),
+                    Some(t) => vec![t.clone()],
+                    None => vec![],
+                }
+            } else {
+                args[1..].to_vec()
+            };
+            let mut items = vec![];
+            for a in &rest {
+                let v = self.expr(a)?;
+                let v = self.atom(v);
+                items.push((tstr(a), v));
+            }
+            let enc = self.abi_encode(&items)?;
+            return Ok(format!("((wordBytes ({sel} * 2 ^ 224)).take 4 ++ {enc})"));
         }
         if abi && callee["memberName"] == "decode" {
             let data = self.expr(&args[0])?;
@@ -2705,7 +2865,9 @@ fn yul_literal(e: &Value) -> R<String> {
 
 /// A Solidity value as the word Yul sees.
 fn to_word(ty: &str, v: &str) -> String {
-    if ty == "bool" {
+    if let Some(n) = bytes_n(ty) {
+        format!("({} * 2 ^ {})", paren(v), 256 - 8 * n)
+    } else if ty == "bool" {
         format!("(ybool {})", paren(v))
     } else if int_bits(ty).is_some() {
         format!("(toUnsigned 256 {})", paren(v))
@@ -2720,6 +2882,8 @@ fn word_to(ty: &str, v: &str) -> String {
         format!("({} != 0)", paren(v))
     } else if let Some(b) = int_bits(ty) {
         format!("(toSigned {b} {})", paren(v))
+    } else if let Some(n) = bytes_n(ty) {
+        format!("({} / 2 ^ {})", paren(v), 256 - 8 * n)
     } else if let Some(b) = bits_of(ty).filter(|b| *b < 256) {
         if ty.starts_with("bytes") {
             v.to_string()

@@ -126,6 +126,23 @@ pub fn link(members: &[Parts]) -> Linked {
             for (k, (fname, _, _)) in m.ext.iter().enumerate() {
                 let open = format!("O.{}", open_name(fi, fname));
                 let v = match &binding[i][k] {
+                    // A raw call runs the callee's ABI dispatcher when it's a member of the world.
+                    None if fname == "rawCall" => {
+                        let mut body = format!("{open} addr value data");
+                        for j in (0..n).rev().filter(|j| *j != i) {
+                            let fj = &fields[j];
+                            let run = if depth == "0" {
+                                "throw ⟨\"call depth\"⟩".to_string()
+                            } else {
+                                format!("callAsV A.{fi} A.{fj} value ({}.dispatch {} data)", names[j], proj("exts A O n", j, n))
+                            };
+                            body = format!("if addr = A.{fj} then {run} else {body}");
+                            if depth != "0" {
+                                bound.push((m.contract.clone(), "rawCall".into(), members[j].contract.clone()));
+                            }
+                        }
+                        format!("fun addr value data => {body}")
+                    }
                     None => open,
                     Some((targets, arity, view)) => {
                         let args: Vec<String> = (0..*arity).map(|a| format!("a{a}")).collect();

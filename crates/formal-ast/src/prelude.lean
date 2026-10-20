@@ -151,6 +151,12 @@ def abiBytesAt (bs : List Nat) (pos : Nat) : M σ (List Nat) := do
 /-- `bytes` as an ABI tail: its length, the data, zero padding to a whole word. -/
 def abiBytes (bs : List Nat) : List Nat := wordBytes bs.length ++ bs ++ List.replicate ((32 - bs.length % 32) % 32) 0
 
+/-- The word at byte `pos` of `bytes` (what `mload(add(b, 0x20 + pos))` reads), zero-padded past the end. -/
+def bytesWordAt (bs : List Nat) (pos : Nat) : Nat := bytesWord ((bs.drop pos ++ List.replicate 32 0).take 32)
+/-- `bytesN` decoded from a word: left-aligned, with the low bytes zero. -/
+def abiBytesN (n w : Nat) : M σ Nat :=
+  if w % 2 ^ (256 - 8 * n) = 0 then pure (w / 2 ^ (256 - 8 * n)) else throw ⟨"abi.decode"⟩
+
 /-- A decoded word checked against its type, as `abi.decode` does: anything that doesn't fit reverts. -/
 def abiUint (bits w : Nat) : M σ Nat := if w < 2 ^ bits then pure w else throw ⟨"abi.decode"⟩
 def abiInt (bits w : Nat) : M σ Int := if fits bits (toSigned 256 w) then pure (toSigned 256 w) else throw ⟨"abi.decode"⟩
@@ -174,6 +180,10 @@ def view {α : Type} (f : Env → σ → Except Revert α) : M σ α := do
 /-- A call into another contract of the world: `msg.sender` is the caller, `address(this)` the callee. -/
 def callAs {α : Type} (caller callee : Nat) (x : M σ α) : M σ α :=
   withReader (fun e => { e with sender := caller, self := callee, value := 0 }) x
+
+/-- A call that also sends `value`. -/
+def callAsV {α : Type} (caller callee value : Nat) (x : M σ α) : M σ α :=
+  withReader (fun e => { e with sender := caller, self := callee, value := value }) x
 
 /-- A view function of another contract, run against the world (its writes, if any, are dropped). -/
 def runView {α : Type} (x : M σ α) (env : Env) (w : σ) : Except Revert α :=
