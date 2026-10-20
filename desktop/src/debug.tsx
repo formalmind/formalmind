@@ -1,3 +1,4 @@
+import { recordRun } from "@/lib/run-results";
 import { reportError } from "@/lib/report-error";
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router";
@@ -600,14 +601,17 @@ export function DebugView({ folder, file, test: wanted, onPick, embedded }: { fo
 			try {
 				const r = await invoke<RunView>("debug_run", { id: session.id, contract: t.contract, test: t.test });
 				setRun({ ...r, key });
+				recordRun(folder, session.file, t.name, t.test, r.success);
 				setCmp(null);
 			} catch (e) {
 				setError(String(e));
+				// It couldn't run (setUp reverted, a cheatcode is missing…): that counts as failed.
+				recordRun(folder, session.file, t.name, t.test, false);
 			} finally {
 				setRunning(null);
 			}
 		},
-		[session],
+		[session, folder],
 	);
 	// A test named in the URL (`&test=Contract::test`) runs once its file has compiled, and again when it changes.
 	useEffect(() => {

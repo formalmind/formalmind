@@ -1,3 +1,4 @@
+import { fileResult, useRunResults } from "@/lib/run-results";
 import { useCallback, useEffect, useState } from "react";
 import { useLocation, useNavigate, useSearchParams } from "react-router";
 import { invoke } from "@tauri-apps/api/core";
@@ -74,6 +75,7 @@ function runnablesIn(text: string, prefix: "run" | "test"): Runnable[] {
 function FolderItem({ path, current, file }: { path: string; current: boolean; file: string | null }) {
 	const tree = useTree(path, current);
 	const navigate = useNavigate();
+	const results = useRunResults(path);
 	const [params] = useSearchParams();
 	return (
 		<TreeFolder name={name(path)} title={path} href={href(path)} current={current}>
@@ -103,6 +105,7 @@ function FolderItem({ path, current, file }: { path: string; current: boolean; f
 							navigate(`/local?${next.toString()}`);
 						},
 						current: params.get("mode") === "debug" && file && params.get("test") ? `${file}::${params.get("test")}` : null,
+						result: (f, r) => (r ? results[`${f}::${r.contract}::${r.fn}`] : fileResult(results, f)),
 					}}
 				/>
 			) : null}
