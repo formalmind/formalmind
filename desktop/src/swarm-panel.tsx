@@ -513,30 +513,40 @@ export function SwarmPanel({ folder, name, scan, bridge, session, file: openPath
 	const finished = !run ? events.find((e) => e.kind === "done") : undefined;
 	const shown = events.filter((e) => e.kind !== "status");
 
+	const pageTitle = (
+		<>
+			<span className="inline-flex h-8 min-w-0 items-center rounded-full border bg-background/90 px-3 text-sm shadow-sm backdrop-blur">{scan?.git ? <MarkGithubIcon className="mr-2 size-4 shrink-0" /> : null}<span className="truncate">{name}</span></span>
+			{onDebug ? (
+				<button type="button" onClick={() => onDebug(null)} title="Debug this folder's Foundry tests" className="inline-flex h-8 shrink-0 items-center gap-1.5 rounded-full border bg-background/90 px-3 text-[12px] text-muted-foreground shadow-sm backdrop-blur hover:text-foreground">
+					<Bug className="size-3.5" />Debug
+				</button>
+			) : null}
+		</>
+	);
+
 	return (
 		<div className="relative flex h-full min-h-0 flex-1">
 			{/* The canvas, as on the Swarm page, with the plan, files and bugs floating over it as one accordion. */}
 			<div className="absolute inset-0 flex flex-col overflow-hidden">
-				<SwarmCanvas
-					state={localBoard(folder, plan, events, Boolean(run), budget)}
-					fill
-					local
-					repo={folder}
-					actions={actions}
-					title={
-						<>
-							<span className="inline-flex h-8 min-w-0 items-center rounded-full border bg-background/90 px-3 text-sm shadow-sm backdrop-blur">{scan?.git ? <MarkGithubIcon className="mr-2 size-4 shrink-0" /> : null}<span className="truncate">{name}</span></span>
-							{onDebug ? (
-								<button type="button" onClick={() => onDebug(null)} title="Debug this folder's Foundry tests" className="inline-flex h-8 shrink-0 items-center gap-1.5 rounded-full border bg-background/90 px-3 text-[12px] text-muted-foreground shadow-sm backdrop-blur hover:text-foreground">
-									<Bug className="size-3.5" />Debug
-								</button>
-							) : null}
-						</>
-					}
-				/>
+				{/* Swarm mode shows the canvas; Code and Audit replace it. The name and the controls stay in every mode. */}
+				{mode === "swarm" ? (
+					<SwarmCanvas
+						state={localBoard(folder, plan, events, Boolean(run), budget)}
+						fill
+						local
+						repo={folder}
+						actions={actions}
+						title={pageTitle}
+					/>
+				) : (
+					<div className="relative h-full w-full bg-background">
+						<div className="absolute left-3 top-3 flex min-w-0 max-w-[calc(100%-14rem)] items-center gap-2">{pageTitle}</div>
+						<div className="absolute right-3 top-3 flex items-center gap-2">{actions}</div>
+					</div>
+				)}
 				<ModeTabs mode={mode} onMode={setMode} />
 				{mode === "code" ? (
-					<div className="pointer-events-auto absolute bottom-3 left-3 right-[25.75rem] top-14 z-10 flex min-h-0 flex-col overflow-hidden rounded-2xl border bg-muted/80 p-1 shadow-pop backdrop-blur">
+					<div className="pointer-events-auto absolute bottom-3 left-3 right-[25.75rem] top-14 z-10 flex min-h-0 flex-col overflow-hidden rounded-2xl border bg-muted/60 p-1">
 						{file ? (
 							<>
 								<div className="flex h-8 shrink-0 items-center gap-2 px-2.5">
@@ -561,7 +571,7 @@ export function SwarmPanel({ folder, name, scan, bridge, session, file: openPath
 					</div>
 				) : null}
 				{mode === "audit" ? (
-					<div className="pointer-events-auto absolute bottom-3 left-3 right-[25.75rem] top-14 z-10 flex min-h-0 flex-col overflow-hidden rounded-2xl border bg-muted/80 p-1 shadow-pop backdrop-blur">
+					<div className="pointer-events-auto absolute bottom-3 left-3 right-[25.75rem] top-14 z-10 flex min-h-0 flex-col overflow-hidden rounded-2xl border bg-muted/60 p-1">
 						<AuditView folder={folder} scan={scan} invoke={invoke} preferred={openPath ?? null} />
 					</div>
 				) : null}
