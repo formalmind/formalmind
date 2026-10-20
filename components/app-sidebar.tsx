@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { Link, useLocation, useNavigate } from "react-router";
-import { BookOpen, Folder, FolderOpen, HardDrive, ChevronRight, GanttChart, Network, Plus } from "lucide-react"
+import { BookOpen, Folder, FolderOpen, ChevronRight, GanttChart, Network, Plus } from "lucide-react"
 import {
 	Sidebar,
 	SidebarContent,
@@ -16,6 +16,7 @@ import {
 } from "@/components/ui/sidebar"
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible"
 import { NavUser } from "@/components/nav-user"
+import { LocalHeading, SessionFolder, type FolderSession } from "@/components/session-folder"
 import { SidebarResizer } from "@/components/sidebar-resizer"
 import { LogoMark } from "@/components/logo"
 import { BUILD } from "@/lib/build-info"
@@ -167,9 +168,16 @@ function Projects({ pathname }: { pathname: string }) {
 	)
 }
 
+const DEMO_SESSIONS: FolderSession[] = [
+	{ id: "local-19a2b3c4d5e", title: "Liquidations and the penalty cap", href: "/local-demo?run=local-19a2b3c4d5e", live: true },
+	{ id: "local-19a2b3c4d00", title: "Vault share math", href: "/local-demo?run=local-19a2b3c4d00" },
+	{ id: "local-19a2b3c4c00", title: "Session 1", href: "/local-demo?run=local-19a2b3c4c00" },
+]
+
 /** `extra` is for a host's own sections under the projects (the desktop app's local folders). */
 export function AppSidebar({ extra, ...props }: React.ComponentProps<typeof Sidebar> & { extra?: React.ReactNode }) {
-	const pathname = useLocation().pathname
+	const location = useLocation()
+	const pathname = location.pathname
 	// The landing page is a page of its own, even for someone signed in.
 	if (pathname === "/welcome") return null
 
@@ -212,9 +220,16 @@ export function AppSidebar({ extra, ...props }: React.ComponentProps<typeof Side
 				{/* On localhost, the desktop app's local-folder page with demo data, for design feedback. */}
 				{!extra && typeof window !== "undefined" && window.location.hostname === "localhost" ? (
 					<SidebarGroup>
-						<SidebarMenu>
-							<NavLink item={{ title: "lending-protocol (local demo)", url: "/local-demo", icon: HardDrive, anim: "" }} active={pathname === "/local-demo"} />
-						</SidebarMenu>
+						<LocalHeading />
+						<ul className="flex flex-col gap-0.5">
+							<SessionFolder
+								name="lending-protocol"
+								href="/local-demo"
+								current={pathname === "/local-demo"}
+								currentSession={pathname === "/local-demo" ? new URLSearchParams(location.search).get("run") : null}
+								sessions={DEMO_SESSIONS}
+							/>
+						</ul>
 					</SidebarGroup>
 				) : null}
 			</SidebarContent>

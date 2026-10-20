@@ -1,14 +1,15 @@
 import { useCallback, useEffect, useState } from "react";
-import { Link, useLocation, useSearchParams } from "react-router";
+import { useLocation, useSearchParams } from "react-router";
 import { invoke } from "@tauri-apps/api/core";
 import { open } from "@tauri-apps/plugin-dialog";
-import { HardDrive, Plus, X } from "lucide-react";
+import { Plus } from "lucide-react";
 import { listen } from "@tauri-apps/api/event";
 import { apiBase } from "./api";
+import { LocalHeading, SessionFolder } from "@/components/session-folder";
 import { SwarmPanel, type Bridge } from "./swarm-panel";
 
 const tauri: Bridge = { invoke, listen, apiBase };
-import { SidebarGroup, SidebarGroupAction, SidebarGroupLabel, SidebarMenu, SidebarMenuAction, SidebarMenuButton, SidebarMenuItem, SidebarMenuSub, SidebarMenuSubButton, SidebarMenuSubItem } from "@/components/ui/sidebar";
+import { SidebarGroup, SidebarMenu, SidebarMenuButton, SidebarMenuItem } from "@/components/ui/sidebar";
 
 type Config = { folders: string[] };
 export type Scan = { solidity: string[]; lean: string[]; truncated: boolean };
@@ -53,31 +54,23 @@ function useSessions(folder: string) {
 /** A folder in the sidebar with its swarm sessions underneath, like a project's chats on the web. */
 function FolderItem({ path, current, run, onRemove }: { path: string; current: boolean; run: string | null; onRemove: () => void }) {
 	const sessions = useSessions(path);
+	const [live, setLive] = useState<string | null>(null);
+	useEffect(() => {
+		const look = () => void invoke<string | null>("swarm_running").then(setLive, () => setLive(null));
+		look();
+		window.addEventListener("fm:sessions", look);
+		return () => window.removeEventListener("fm:sessions", look);
+	}, []);
 	return (
-		<SidebarMenuItem>
-			<SidebarMenuButton asChild isActive={current && !run} tooltip={path} className="font-normal">
-				<Link to={href(path)}>
-					<HardDrive />
-					<span>{name(path)}</span>
-				</Link>
-			</SidebarMenuButton>
-			<SidebarMenuAction showOnHover title="Remove from the list" onClick={onRemove}>
-				<X />
-			</SidebarMenuAction>
-			{sessions.length ? (
-				<SidebarMenuSub>
-					{sessions.slice(0, 8).map((x, i) => (
-						<SidebarMenuSubItem key={x.run}>
-							<SidebarMenuSubButton asChild isActive={current && run === x.run} size="sm">
-								<Link to={`${href(path)}&run=${x.run}`} title={x.outcome || undefined}>
-									<span className="truncate">{x.title || `Session ${sessions.length - i}`}</span>
-								</Link>
-							</SidebarMenuSubButton>
-						</SidebarMenuSubItem>
-					))}
-				</SidebarMenuSub>
-			) : null}
-		</SidebarMenuItem>
+		<SessionFolder
+			name={name(path)}
+			title={path}
+			href={href(path)}
+			current={current}
+			currentSession={run}
+			onRemove={onRemove}
+			sessions={sessions.slice(0, 12).map((x, i) => ({ id: x.run, title: x.title || `Session ${sessions.length - i}`, href: `${href(path)}&run=${x.run}`, live: x.run === live }))}
+		/>
 	);
 }
 
@@ -88,14 +81,13 @@ export function LocalFolders() {
 	const current = location.pathname === "/local" ? params.get("path") : null;
 	return (
 		<SidebarGroup>
-			<SidebarGroupLabel>On this computer</SidebarGroupLabel>
-			<SidebarGroupAction title="Add a folder" onClick={() => void add()}>
-				<Plus />
-			</SidebarGroupAction>
-			<SidebarMenu>
+			<LocalHeading onAdd={() => void add()} />
+			<ul className="flex flex-col gap-0.5">
 				{folders.map((path) => (
 					<FolderItem key={path} path={path} current={current === path} run={current === path ? params.get("run") : null} onRemove={() => void remove(path)} />
 				))}
+			</ul>
+			<SidebarMenu>
 				{folders.length === 0 ? (
 					<SidebarMenuItem>
 						<SidebarMenuButton onClick={() => void add()} className="font-normal text-muted-foreground">
