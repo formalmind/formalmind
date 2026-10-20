@@ -18,10 +18,10 @@ export async function GET() {
 		const runs = new Map<string, SwarmCost>();
 		for (const e of (await getCredits(session.user.sub)).entries) {
 			if (e.kind !== "spend") continue;
-			const [repo, run] = e.ref.split(":");
+			const [repo, run, role = "", ref = ""] = e.ref.split(":");
 			if (!repo || covered.has(repo.toLowerCase())) continue;
-			const key = `${repo}:${run}`;
-			const line = runs.get(key) ?? { repo, role: "run", ref: "", usd: 0, runId: Number(run) || null, createdAt: e.at };
+			const key = `${repo}:${run}:${role}:${ref}`;
+			const line = runs.get(key) ?? { repo, role: role || "run", ref: ref ? `#${ref}` : "", usd: 0, runId: Number(run) || null, createdAt: e.at };
 			line.usd += -e.cents / 100;
 			if (e.at > line.createdAt) line.createdAt = e.at;
 			runs.set(key, line);

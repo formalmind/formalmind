@@ -66,13 +66,14 @@ const sessionSecret = () => {
 };
 
 /** A three-hour key for the model proxy: which account pays, for which proofs repository and run. */
-export async function mintModelSession(sub: string, repo: string, run: string): Promise<string> {
-	return new SignJWT({ repo, run }).setProtectedHeader({ alg: "HS256" }).setSubject(sub).setIssuedAt().setExpirationTime(`${MODEL_SESSION_S}s`).setAudience("formal.team/model").sign(sessionSecret());
+/** `job` names the agent and the issue or PR it works on, so every charge says what it was for. */
+export async function mintModelSession(sub: string, repo: string, run: string, job: { role?: string; ref?: string } = {}): Promise<string> {
+	return new SignJWT({ repo, run, role: job.role ?? "", ref: job.ref ?? "" }).setProtectedHeader({ alg: "HS256" }).setSubject(sub).setIssuedAt().setExpirationTime(`${MODEL_SESSION_S}s`).setAudience("formal.team/model").sign(sessionSecret());
 }
 
-export async function verifyModelSession(key: string): Promise<{ sub: string; repo: string; run: string }> {
+export async function verifyModelSession(key: string): Promise<{ sub: string; repo: string; run: string; role: string; ref: string }> {
 	const { payload } = await jwtVerify(key, sessionSecret(), { audience: "formal.team/model" }).catch(() => {
 		throw new TokenError(401, "Invalid or expired formal.team model session.");
 	});
-	return { sub: String(payload.sub), repo: String(payload.repo), run: String(payload.run) };
+	return { sub: String(payload.sub), repo: String(payload.repo), run: String(payload.run), role: String(payload.role ?? ""), ref: String(payload.ref ?? "") };
 }

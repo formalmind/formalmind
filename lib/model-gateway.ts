@@ -43,7 +43,7 @@ const apiError = (status: number, type: string, message: string) => Response.jso
 /** Proxies one Anthropic API call; `path` is the part after /api/model (for example /v1/messages). */
 export async function proxy(request: Request, path: string): Promise<Response> {
 	const key = request.headers.get("x-api-key") ?? request.headers.get("authorization")?.replace(/^Bearer\s+/i, "") ?? "";
-	let caller: { sub: string; repo: string; run: string };
+	let caller: { sub: string; repo: string; run: string; role: string; ref: string };
 	try {
 		caller = await verifyModelSession(key);
 	} catch (error) {
@@ -81,7 +81,8 @@ export async function proxy(request: Request, path: string): Promise<Response> {
 	}
 	if (!metered || !upstream.body) return upstream;
 
-	const ref = `${caller.repo}:${caller.run}:${crypto.randomUUID().slice(0, 8)}`;
+	// <proofs repo>:<run>:<agent>:<issue or PR>:<call>, so Billing can say which agent spent it, on what.
+	const ref = `${caller.repo}:${caller.run}:${caller.role}:${caller.ref}:${crypto.randomUUID().slice(0, 8)}`;
 	const charge = (model: string, usage: Usage) =>
 		recordSpend(caller.sub, costCents(model, usage), ref, {
 			in: usage.input_tokens ?? 0,
