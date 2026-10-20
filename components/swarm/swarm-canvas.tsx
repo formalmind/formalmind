@@ -647,7 +647,17 @@ export function SwarmCanvas({ state, fill = false, contain = false, title, actio
 	const geo = useMemo(() => geometry(groups), [groups]);
 	const panelsEnd = Math.max(geo.height, geo.panelTop + Math.max(...panelHs) + PAD);
 	const BELOW_GAP = 24;
-	const boardH = below ? panelsEnd + BELOW_GAP + below.height + PAD : panelsEnd;
+	// The card under the notebooks can be resized from its bottom edge; its height is kept per title.
+	const belowKey = below ? `fm:canvas-below:${below.title}` : "";
+	const [belowH, setBelowH] = useState<number | null>(() => {
+		try {
+			return Number(localStorage.getItem(belowKey)) || null;
+		} catch {
+			return null;
+		}
+	});
+	const belowHeight = below ? Math.max(240, belowH ?? below.height) : 0;
+	const boardH = below ? panelsEnd + BELOW_GAP + belowHeight + PAD : panelsEnd;
 	// In fill mode people can pan and zoom: `view` sits on top of the fitted placement.
 	const [view, setRawView] = useState({ k: 1, x: 0, y: 0 });
 	// The canvas is unbounded: pan anywhere; the fit button in the zoom pill brings the board back.
@@ -1087,11 +1097,52 @@ export function SwarmCanvas({ state, fill = false, contain = false, title, actio
 						<section
 							data-canvas-ui
 							className="absolute flex flex-col overflow-hidden rounded-xl border bg-card shadow-card"
-							style={{ left: PAD, top: panelsEnd + BELOW_GAP, width: W - PAD * 2, height: below.height }}
+							style={{ left: PAD, top: panelsEnd + BELOW_GAP, width: W - PAD * 2, height: belowHeight }}
 						>
 							<div className="flex h-9 shrink-0 items-center border-b px-4 font-mono text-[12px] font-medium text-muted-foreground">{below.title}</div>
 							<div data-scroll className="flex min-h-0 flex-1 flex-col overflow-auto">
 								{below.node}
+							</div>
+							{/* Drag to resize (in board units, so it follows the zoom); double-click for the default size. */}
+							<div
+								role="separator"
+								aria-orientation="horizontal"
+								aria-label={`Resize ${below.title}`}
+								title="Drag to resize · double-click to reset"
+								onPointerDown={(e) => {
+									e.preventDefault();
+									e.stopPropagation();
+									const y0 = e.clientY;
+									const h0 = belowHeight;
+									const k = s || 1;
+									let last = h0;
+									const move = (ev: PointerEvent) => {
+										last = Math.max(240, Math.round(h0 + (ev.clientY - y0) / k));
+										setBelowH(last);
+									};
+									const up = () => {
+										window.removeEventListener("pointermove", move);
+										window.removeEventListener("pointerup", up);
+										try {
+											localStorage.setItem(belowKey, String(last));
+										} catch {
+											/* not kept */
+										}
+									};
+									window.addEventListener("pointermove", move);
+									window.addEventListener("pointerup", up);
+								}}
+								onDoubleClick={() => {
+									setBelowH(null);
+									try {
+										localStorage.removeItem(belowKey);
+									} catch {
+										/* not kept */
+									}
+								}}
+								className="group/resize absolute inset-x-0 bottom-0 flex h-3 cursor-row-resize items-end justify-center"
+							>
+								<span className="mb-1 h-1 w-10 rounded-full bg-border transition-colors group-hover/resize:bg-muted-foreground/60" />
 							</div>
 						</section>
 					) : null}
