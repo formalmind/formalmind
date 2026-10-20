@@ -115,6 +115,10 @@ const makeDemo = (data: DemoData | null): Bridge => ({
 			if (!url) throw "Not in the demo data.";
 			return url as T;
 		}
+		if (cmd === "ast_scripts") {
+			if (!data?.scripts) throw "No scripts in the demo data.";
+			return data.scripts as T;
+		}
 		if (cmd === "ast_formal") {
 			const formal = data?.formals?.[String(args?.entry ?? "")];
 			if (!formal) throw "No deployable contract in this file (libraries, interfaces and types have no model).";

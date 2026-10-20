@@ -82,6 +82,7 @@ pub fn run() {
             ast::ast_units,
             ast::ast_slice,
             ast::ast_formal,
+            ast::ast_scripts,
             executor::model_key_set,
             executor::model_key_status,
             executor::turn_start,

@@ -34,6 +34,8 @@ enum Command {
     Json,
     /// Audit mode's data as JSON: units, clusters and every unit's slice.
     Audit,
+    /// Production's entry points: what each script under script/ deploys and calls (the entry argument is ignored).
+    Scripts,
     /// The Audit page's coverage as JSON: each function's Lean model (or why it is opaque) and the theorems naming it.
     Formal,
     /// A world of linked models: the entry plus `--with file[:Contract]` members, interface calls bound to the
@@ -54,6 +56,10 @@ enum Command {
 
 fn main() -> Result<()> {
     let cli = Cli::parse();
+    if matches!(cli.command, Command::Scripts) {
+        println!("{}", formal_ast::script_entries(&cli.root)?);
+        return Ok(());
+    }
     let started = Instant::now();
     let (a, output) = analyze_full(&cli.root, &cli.entry, cli.contract.as_deref())?;
     let g = &a.graph;
@@ -85,6 +91,7 @@ fn main() -> Result<()> {
                 println!("  opaque {f}: {why}");
             }
         }
+        Command::Scripts => unreachable!(),
         Command::Formal => {
             println!("{}", formal_ast::formal_json(&a, &output, took.as_millis() as u64));
         }

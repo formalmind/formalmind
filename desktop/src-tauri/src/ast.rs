@@ -49,3 +49,13 @@ pub async fn ast_formal(folder: String, entry: String) -> Result<Value, String> 
     .await
     .map_err(|e| e.to_string())?
 }
+
+/// Production's entry points: what each Foundry script under script/ deploys and calls, and so which of the folder's
+/// contracts are in scope.
+#[tauri::command]
+pub async fn ast_scripts(folder: String) -> Result<Value, String> {
+    check(&folder)?;
+    tauri::async_runtime::spawn_blocking(move || formal_ast::script_entries(Path::new(&folder)).map_err(|e| format!("{e:#}")))
+        .await
+        .map_err(|e| e.to_string())?
+}

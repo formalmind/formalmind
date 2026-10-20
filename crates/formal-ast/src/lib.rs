@@ -273,3 +273,145 @@ pub fn formal_json(a: &Analysis, output: &serde_json::Value, ms: u64) -> serde_j
         "ms": ms + started.elapsed().as_millis() as u64,
     })
 }
+
+/// The protocol as production uses it: every Foundry script under `script/` (`*.s.sol`), what each deploys and which
+/// of the project's own functions it calls. Those are the entry points; the project's contracts nothing deploys or
+/// calls are out of scope. (Tests only show the code runs; scripts are what will run on chain.)
+pub fn script_entries(root: &Path) -> Result<serde_json::Value> {
+    use serde_json::json;
+    use std::collections::{BTreeMap, BTreeSet};
+    let project = solc::Project::load(root)?;
+    let mut scripts = vec![];
+    let mut stack = vec![root.join("script")];
+    while let Some(dir) = stack.pop() {
+        let Ok(read) = std::fs::read_dir(&dir) else { continue };
+        for e in read.flatten() {
+            let p = e.path();
+            if p.is_dir() {
+                stack.push(p);
+            } else if p.to_string_lossy().ends_with(".s.sol") {
+                scripts.push(p.strip_prefix(root).unwrap_or(&p).to_string_lossy().replace('\\', "/"));
+            }
+        }
+    }
+    scripts.sort();
+    // Project code: not a dependency, not a script or test.
+    let own = |path: &str| !path.starts_with("script/") && !path.starts_with("test/") && !path.contains("/test/") && !path.ends_with(".t.sol") && !path.ends_with(".s.sol");
+    // (contract, function) → the scripts that call it; contract → the scripts that deploy it.
+    let mut calls: BTreeMap<(String, String), (String, usize, BTreeSet<String>)> = BTreeMap::new();
+    let mut deploys: BTreeMap<String, BTreeSet<String>> = BTreeMap::new();
+    let mut seen_contracts: BTreeMap<String, (String, String)> = BTreeMap::new(); // name → (file, kind)
+    // Contracts in scope because a deployed or called one inherits them or deploys them itself: name → why.
+    let mut reached: BTreeMap<String, String> = BTreeMap::new();
+    let mut out = vec![];
+    for script in &scripts {
+        let started = std::time::Instant::now();
+        let result = (|| -> Result<serde_json::Value> {
+            let output = solc::compile(&project, script)?;
+            let mut g = graph::Graph::build(&output);
+            g.mark_dependencies(&project.libs);
+            let scope = scope::Scope::new(&g, script, None)?;
+            let mut src = slice::Sources::new(root, &g);
+            for c in g.contracts.values() {
+                let file = &g.files[&c.file].path;
+                if !g.dependency_files.contains(&c.file) && own(file) {
+                    seen_contracts.insert(c.name.clone(), (file.clone(), c.kind.clone()));
+                }
+            }
+            let mut mine_deploys = BTreeSet::new();
+            let mut mine_calls = vec![];
+            for f in &scope.reachable {
+                for c in &g.functions[f].calls {
+                    if c.kind != graph::CallKind::External {
+                        continue;
+                    }
+                    if let Some(rest) = c.name.strip_prefix("new ") {
+                        let name = rest.rsplit(' ').next().unwrap_or(rest).to_string();
+                        if g.contract_by_name(&name).is_some_and(|k| !g.dependency_files.contains(&k.file) && own(&g.files[&k.file].path)) {
+                            deploys.entry(name.clone()).or_default().insert(script.clone());
+                            mine_deploys.insert(name);
+                        }
+                        continue;
+                    }
+                    let Some(t) = c.target else { continue };
+                    let Some(func) = g.functions.get(&t) else { continue };
+                    let target = &g.contracts[&func.contract];
+                    if g.dependency_files.contains(&target.file) || !own(&g.files[&target.file].path) {
+                        continue;
+                    }
+                    // A call through one of the project's interfaces runs whichever project contract implements it.
+                    let mut owners: Vec<&graph::Contract> = vec![];
+                    if target.kind == "interface" {
+                        owners.extend(g.contracts.values().filter(|k| k.kind == "contract" && k.id != target.id && k.bases.contains(&target.id) && own(&g.files[&k.file].path) && !g.dependency_files.contains(&k.file)));
+                    }
+                    if owners.is_empty() {
+                        owners.push(target);
+                    }
+                    for o in owners {
+                        let line = src.line(c.src);
+                        let e = calls.entry((o.name.clone(), func.name.clone())).or_insert_with(|| (g.files[&o.file].path.clone(), 0, BTreeSet::new()));
+                        e.2.insert(script.clone());
+                        mine_calls.push(json!({ "contract": o.name, "function": func.name, "line": line }));
+                    }
+                }
+            }
+            // What those contracts bring with them: their bases, and what their own code deploys (transitively).
+            let mut todo: Vec<String> = mine_deploys.iter().cloned().chain(mine_calls.iter().filter_map(|c| c["contract"].as_str().map(String::from))).collect();
+            let mut done = BTreeSet::new();
+            while let Some(name) = todo.pop() {
+                if !done.insert(name.clone()) {
+                    continue;
+                }
+                let Some(k) = g.contract_by_name(&name) else { continue };
+                for b in &k.bases {
+                    let base = &g.contracts[b];
+                    if base.id != k.id && !g.dependency_files.contains(&base.file) && own(&g.files[&base.file].path) {
+                        reached.entry(base.name.clone()).or_insert_with(|| format!("a base of {name}"));
+                        todo.push(base.name.clone());
+                    }
+                    for f in &base.functions {
+                        for c in &g.functions[f].calls {
+                            if let Some(rest) = c.name.strip_prefix("new ") {
+                                let made = rest.rsplit(' ').next().unwrap_or(rest).to_string();
+                                if g.contract_by_name(&made).is_some_and(|m| !g.dependency_files.contains(&m.file) && own(&g.files[&m.file].path)) {
+                                    reached.entry(made.clone()).or_insert_with(|| format!("deployed by {name}"));
+                                    todo.push(made);
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            mine_calls.sort_by_key(|c| c["line"].as_u64());
+            mine_calls.dedup_by(|a, b| a["contract"] == b["contract"] && a["function"] == b["function"]);
+            Ok(json!({ "contract": g.contracts[&scope.entry].name, "deploys": mine_deploys, "calls": mine_calls }))
+        })();
+        let ms = started.elapsed().as_millis() as u64;
+        out.push(match result {
+            Ok(mut v) => {
+                v["file"] = json!(script);
+                v["ms"] = json!(ms);
+                v
+            }
+            Err(e) => json!({ "file": script, "error": format!("{e:#}"), "ms": ms }),
+        });
+    }
+    let entry_points: Vec<serde_json::Value> = calls.iter().map(|((c, f), (file, _, by))| json!({ "contract": c, "function": f, "file": file, "scripts": by })).collect();
+    let used: BTreeSet<&String> = deploys.keys().chain(calls.keys().map(|(c, _)| c)).collect();
+    let contracts: Vec<serde_json::Value> = seen_contracts
+        .iter()
+        .filter(|(_, (_, kind))| kind == "contract" || kind == "abstract")
+        .map(|(name, (file, kind))| {
+            let direct = used.contains(name);
+            json!({
+                "name": name,
+                "file": file,
+                "kind": kind,
+                "inScope": direct || reached.contains_key(name),
+                "deployedBy": deploys.get(name).cloned().unwrap_or_default(),
+                "via": if direct { None } else { reached.get(name).cloned() },
+            })
+        })
+        .collect();
+    Ok(json!({ "scripts": out, "entryPoints": entry_points, "contracts": contracts }))
+}

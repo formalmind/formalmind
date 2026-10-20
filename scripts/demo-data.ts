@@ -47,7 +47,15 @@ for (const f of files.filter((f) => f.startsWith("src/") && f.endsWith(".sol")))
 	}
 }
 
+// Production's entry points, from the Foundry scripts.
+let scripts: unknown = null;
+try {
+	scripts = JSON.parse(execFileSync(bin, ["--root", root, "x", "scripts"], { encoding: "utf8", maxBuffer: 64 << 20 }));
+} catch {
+	// No script/ folder.
+}
+
 const out = resolve(import.meta.dir, "../components/demo/data.json");
 mkdirSync(resolve(out, ".."), { recursive: true });
-writeFileSync(out, JSON.stringify({ name: basename(root), path: root, files, sources, images, audits, formals }));
+writeFileSync(out, JSON.stringify({ name: basename(root), path: root, files, sources, images, audits, formals, scripts }));
 console.log(`${out}: ${files.length} files, ${Object.keys(sources).length} sources, ${Object.keys(images).length} images, ${Object.keys(audits).length} audits, ${(statSync(out).size / 1024).toFixed(0)} KB`);

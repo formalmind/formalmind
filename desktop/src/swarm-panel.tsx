@@ -395,6 +395,11 @@ type FormalFn = {
 	theorems: number[];
 };
 type FormalTheorem = { name: string; file: string; line: number; sorry: boolean; text: string };
+type Scripts = {
+	scripts: { file: string; contract?: string; deploys?: string[]; calls?: { contract: string; function: string; line: number }[]; error?: string; ms: number }[];
+	entryPoints: { contract: string; function: string; file: string; scripts: string[] }[];
+	contracts: { name: string; file: string; kind: string; inScope: boolean; deployedBy: string[]; via: string | null }[];
+};
 type Formal = { contract: string; namespace: string; modelLines: number; translated: number; opaque: number; ext: number; functions: FormalFn[]; theorems: FormalTheorem[]; ms: number };
 
 /** Where a function stands: proved by a finished theorem, modeled in Lean, or left opaque (and why). */
@@ -418,17 +423,22 @@ const COVERAGE_FILTERS = [
  * Solidity beside its Lean, and the theorems in the folder that name it. Opaque functions say why they couldn't be
  * translated (the model then holds for every behaviour of them).
  */
-function CoverageView({ data, onOpenFile }: { data: Formal; onOpenFile: (path: string) => void }) {
+function CoverageView({ data, scripts, onOpenFile }: { data: Formal; scripts: Scripts | null; onOpenFile: (path: string) => void }) {
+	// The scripts that call a function, matched by its contract (or the contract it is inherited into) and name.
+	const contractOf = (f: FormalFn) => f.name.split(".").slice(0, -1).join(".");
+	const fnName = (f: FormalFn) => f.name.split(".").pop() ?? f.name;
+	const calledBy = (f: FormalFn) => (scripts?.entryPoints ?? []).filter((e) => e.function === fnName(f) && (e.contract === contractOf(f) || e.contract === data.contract)).flatMap((e) => e.scripts);
 	const [filter, setFilter] = useState<(typeof COVERAGE_FILTERS)[number]["id"]>("all");
 	const [deps, setDeps] = useState(false);
 	const shown = data.functions.filter((f) => (deps || !f.dependency) && (filter === "all" || (filter === "modeled" ? ["modeled", "sorry"].includes(fnStatus(f, data.theorems).key) : fnStatus(f, data.theorems).key === filter)));
 	const groups = [
-		{ title: "Entry points", fns: shown.filter((f) => f.entry) },
+		{ title: "Called by scripts", fns: shown.filter((f) => f.entry && calledBy(f).length) },
+		{ title: scripts ? "Other entry points" : "Entry points", fns: shown.filter((f) => f.entry && !calledBy(f).length) },
 		{ title: "Internal", fns: shown.filter((f) => !f.entry && !f.dependency) },
 		{ title: "Libraries", fns: shown.filter((f) => !f.entry && f.dependency) },
 	].filter((g) => g.fns.length);
 	const [picked, setPicked] = useState<string | null>(null);
-	const current = data.functions.find((f) => f.name === picked) ?? shown.find((f) => f.entry) ?? shown[0] ?? null;
+	const current = data.functions.find((f) => f.name === picked) ?? groups[0]?.fns[0] ?? null;
 	const own = data.functions.filter((f) => !f.dependency);
 	const proved = own.filter((f) => fnStatus(f, data.theorems).key === "proved").length;
 	const inLean = own.filter((f) => !f.why).length;
@@ -442,6 +452,25 @@ function CoverageView({ data, onOpenFile }: { data: Formal; onOpenFile: (path: s
 				<span className="text-muted-foreground"><span className="font-mono">{data.theorems.length}</span> theorems{data.theorems.some((t) => t.sorry) ? ` · ${data.theorems.filter((t) => t.sorry).length} with sorry` : ""}</span>
 				<span className="ml-auto text-[11px] text-muted-foreground">{data.namespace} model · {data.modelLines} lines</span>
 			</div>
+			{scripts ? (
+				<div className="flex shrink-0 flex-wrap items-center gap-1.5 rounded-xl border bg-card px-3 py-1.5 text-[11px]">
+					<span className="text-muted-foreground" title="The Foundry scripts under script/ are what runs in production: what they deploy and call is in scope.">
+						Scope from <span className="font-mono text-foreground">{scripts.scripts.length}</span> scripts
+						{scripts.scripts.some((x) => x.error) ? <span className="text-amber-700 dark:text-amber-400"> ({scripts.scripts.filter((x) => x.error).length} didn't compile)</span> : null}:
+					</span>
+					{scripts.contracts.map((c) => (
+						<button
+							key={c.name}
+							type="button"
+							onClick={() => onOpenFile(c.file)}
+							title={c.inScope ? (c.deployedBy.length ? `Deployed by ${c.deployedBy.join(", ")}` : (c.via ?? "Called by a script")) : "No script deploys or calls it"}
+							className={`rounded-md px-1.5 py-0.5 font-mono ${c.inScope ? "bg-emerald-500/10 text-emerald-800 dark:text-emerald-300" : "text-muted-foreground line-through decoration-muted-foreground/50"}`}
+						>
+							{c.name}
+						</button>
+					))}
+				</div>
+			) : null}
 			<div className="flex min-h-0 flex-1 gap-1">
 				<nav className="flex w-72 shrink-0 flex-col overflow-hidden rounded-xl border bg-card">
 					<div className="flex shrink-0 flex-wrap items-center gap-1 border-b p-1.5">
@@ -472,6 +501,7 @@ function CoverageView({ data, onOpenFile }: { data: Formal; onOpenFile: (path: s
 											<span className={`size-2 shrink-0 rounded-full ${st.dot}`} />
 											<span className="truncate">{f.name.split(".").slice(-1)[0]}</span>
 											{f.theorems.length ? <span className="ml-auto shrink-0 text-[10px]">{f.theorems.length}</span> : null}
+											{calledBy(f).length ? <span className="ml-auto shrink-0 rounded bg-muted px-1 font-sans text-[10px] text-muted-foreground" title={calledBy(f).join("\n")}>{calledBy(f).length} script{calledBy(f).length > 1 ? "s" : ""}</span> : null}
 										</button>
 									);
 								})}
@@ -489,6 +519,7 @@ function CoverageView({ data, onOpenFile }: { data: Formal; onOpenFile: (path: s
 								{status.label}
 							</span>
 							<span className="text-[11px] text-muted-foreground">{[current.visibility, current.mutability !== "nonpayable" ? current.mutability : ""].filter(Boolean).join(" · ")}</span>
+							{calledBy(current).length ? <span className="text-[11px] text-muted-foreground">called by {calledBy(current).map((x) => x.split("/").pop()).join(", ")}</span> : null}
 							{current.file ? (
 								<button type="button" onClick={() => onOpenFile(current.file!)} className="ml-auto inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 font-mono text-[11px] text-muted-foreground hover:bg-muted hover:text-foreground" title="Open in Code">
 									<FileCode2 className="size-3" />
@@ -503,7 +534,7 @@ function CoverageView({ data, onOpenFile }: { data: Formal; onOpenFile: (path: s
 									<FileView path="f.sol" text={current.solidity} start={current.line} />
 								</div>
 								<div className="min-w-0">
-									<p className="px-3 pt-2 font-mono text-[10px] uppercase tracking-wider text-muted-foreground">Lean{current.def ? ` · ${current.lean}` : ""}</p>
+									<p className="px-3 pt-2 font-mono text-[10px] tracking-wider text-muted-foreground">Lean4 SPEC{current.def ? ` · ${current.lean}` : ""}</p>
 									{current.def ? (
 										<FileView path="f.lean" text={current.def.trimEnd()} />
 									) : (
@@ -517,15 +548,15 @@ function CoverageView({ data, onOpenFile }: { data: Formal; onOpenFile: (path: s
 								</div>
 							</div>
 							<div className="border-t">
-								<p className="px-3 pt-2 font-mono text-[10px] uppercase tracking-wider text-muted-foreground">Theorems · {current.theorems.length}</p>
+								<p className="px-3 pt-2 font-mono text-[10px] tracking-wider text-muted-foreground">Lean4 PROOF · {current.theorems.length}</p>
 								{current.theorems.length === 0 ? (
-									<p className="px-3 pb-3 pt-1 text-[12px] text-muted-foreground">No theorem in this folder names {current.def ? <code className="font-mono">{current.lean}</code> : "it"} yet.</p>
+									<p className="px-3 pb-3 pt-1 text-[12px] text-muted-foreground">No proof in this folder names {current.def ? <code className="font-mono">{current.lean}</code> : "it"} yet.</p>
 								) : (
 									current.theorems.map((i) => {
 										const t = data.theorems[i];
 										return (
-											<div key={i} className="mx-2 mb-2 mt-1 overflow-hidden rounded-lg border">
-												<div className="flex items-center gap-2 border-b bg-muted/40 px-2.5 py-1 text-[11px]">
+											<div key={i} className={`mx-2 mb-2 mt-1 overflow-hidden rounded-lg border border-l-2 ${t.sorry ? "border-l-sky-500 bg-sky-500/[0.06]" : "border-emerald-500/30 border-l-emerald-500 bg-emerald-500/10"}`}>
+												<div className={`flex items-center gap-2 border-b px-2.5 py-1 text-[11px] ${t.sorry ? "border-sky-500/20" : "border-emerald-500/20"}`}>
 													<span className={`size-1.5 rounded-full ${t.sorry ? "bg-sky-500" : "bg-emerald-500"}`} />
 													<span className="font-mono font-medium">{t.name}</span>
 													{t.sorry ? <span className="text-sky-700 dark:text-sky-400">sorry</span> : null}
@@ -553,7 +584,12 @@ function AuditView({ folder, scan, invoke, preferred, onOpenFile }: { folder: st
 	const pick = preferred && sources.includes(preferred) ? preferred : (sources.find((f) => f.startsWith("src/")) ?? sources[0] ?? null);
 	const [entry, setEntry] = useState<string | null>(pick);
 	const [formal, setFormal] = useState<Formal | null>(null);
+	const [scripts, setScripts] = useState<Scripts | null>(null);
 	const [error, setError] = useState<string | null>(null);
+	useEffect(() => {
+		setScripts(null);
+		void invoke<Scripts>("ast_scripts", { folder }).then(setScripts, () => setScripts(null));
+	}, [folder, invoke]);
 	useEffect(() => {
 		if (!entry && pick) setEntry(pick);
 	}, [entry, pick]);
@@ -585,7 +621,7 @@ function AuditView({ folder, scan, invoke, preferred, onOpenFile }: { folder: st
 			</div>
 			{error ? <p className="whitespace-pre-wrap rounded-xl border bg-card p-3 font-mono text-[11px] text-red-600">{error}</p> : null}
 			{!ready && !error ? <p className="p-3 text-[13px] text-muted-foreground">{entry ? "Building the Lean model from the AST…" : "No Solidity sources in this folder."}</p> : null}
-			{formal ? <CoverageView key={entry} data={formal} onOpenFile={onOpenFile} /> : null}
+			{formal ? <CoverageView key={entry} data={formal} scripts={scripts} onOpenFile={onOpenFile} /> : null}
 		</>
 	);
 }
