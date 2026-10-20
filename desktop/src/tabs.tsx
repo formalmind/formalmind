@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { useLocation, useNavigate } from "react-router";
-import { Gauge, GanttChart, HardDrive, MessageSquare, Network, PanelLeft, Plus, Settings, X, type LucideIcon } from "lucide-react";
+import { Gauge, GanttChart, HardDrive, MessageSquare, Network, PanelLeft, Plus, RefreshCw, Settings, X, type LucideIcon } from "lucide-react";
 import { NotificationCenter } from "@/components/notification-center";
 import { useSidebar } from "@/components/ui/sidebar";
 
@@ -42,8 +42,6 @@ function load(): { tabs: Tab[]; active: string } {
 export function TabBar() {
 	const location = useLocation();
 	const navigate = useNavigate();
-	// Canvas pages carry refresh, settings and the bell themselves, top right.
-	const onLocal = location.pathname === "/local" || location.pathname === "/" || /^\/projects\/[^/]+\/[^/]+$/.test(location.pathname);
 	const { toggleSidebar } = useSidebar();
 	const [state, setState] = useState(load);
 	const here = location.pathname + location.search;
@@ -139,21 +137,11 @@ export function TabBar() {
 					<Plus className="size-4" />
 				</button>
 			</div>
-			{onLocal ? null : <button type="button" onClick={() => navigate("/settings")} title="Settings" className="grid size-7 shrink-0 place-items-center rounded-md text-muted-foreground hover:bg-sidebar-accent hover:text-foreground">
-				<Settings className="size-4" />
-			</button>}
-			{/* The bell lives here on every page but a local folder, whose canvas carries it (app updates land in it too). */}
-			{onLocal ? null : <NotificationCenter />}
-		</div>
-	);
-}
-
-/** Settings and the bell, pinned top-right on a local folder's canvas. */
-export function CanvasActions() {
-	const navigate = useNavigate();
-	return (
-		<div className="flex items-center gap-1 rounded-full border bg-background/90 px-1 shadow-sm backdrop-blur">
-			<button type="button" onClick={() => navigate("/settings")} title="Settings" className="grid size-7 place-items-center rounded-full text-muted-foreground hover:bg-muted hover:text-foreground">
+			{/* Refresh, settings and the bell stay here on every page; the canvases leave them to the tab bar. */}
+			<button type="button" onClick={() => window.dispatchEvent(new Event("fm:refresh"))} title="Refresh" className="grid size-7 shrink-0 place-items-center rounded-md text-muted-foreground hover:bg-sidebar-accent hover:text-foreground">
+				<RefreshCw className="size-4" />
+			</button>
+			<button type="button" onClick={() => navigate("/settings")} title="Settings" className="grid size-7 shrink-0 place-items-center rounded-md text-muted-foreground hover:bg-sidebar-accent hover:text-foreground">
 				<Settings className="size-4" />
 			</button>
 			<NotificationCenter />

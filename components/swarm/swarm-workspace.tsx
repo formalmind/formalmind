@@ -37,6 +37,7 @@ function onlyProject(state: SwarmState, repo: string): SwarmState {
 /** The swarm's board; with `only` (a project's repository), just that project's agents and work. */
 export function SwarmWorkspace({ repo, only }: { repo: string; only?: string }) {
 	const projects = useProjects();
+	const desktop = typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
 	const swarmRepos = (projects ?? []).filter((p) => p.proofsRepo && (!only || p.repo === only)).map((p) => p.repo);
 	// The chat open beside the canvas: an agent (a click on its name) or the whole swarm ("Ask the swarm").
 	const [talkTo, setTalkTo] = useState<SwarmRole | "swarm" | null>(null);
@@ -56,6 +57,11 @@ export function SwarmWorkspace({ repo, only }: { repo: string; only?: string }) 
 		return () => window.removeEventListener("keydown", close);
 	}, [talkTo]);
 
+	useEffect(() => {
+		const refresh = () => void load();
+		window.addEventListener("fm:refresh", refresh);
+		return () => window.removeEventListener("fm:refresh", refresh);
+	});
 	const load = async (quiet = false) => {
 		if (!quiet) setLoading(true);
 		try {
@@ -158,7 +164,8 @@ export function SwarmWorkspace({ repo, only }: { repo: string; only?: string }) 
 						</HoverCard>
 					</>
 				}
-				actions={
+				// The Mac app keeps refresh, settings and the bell in its tab bar.
+				actions={desktop ? null : (
 					<>
 						<button
 							type="button"
@@ -172,7 +179,7 @@ export function SwarmWorkspace({ repo, only }: { repo: string; only?: string }) 
 						<SettingsMenu repos={swarmRepos} className={`${pill} size-8 justify-center text-muted-foreground transition-colors hover:text-foreground`} />
 						<NotificationCenter />
 					</>
-				}
+				)}
 			/>
 			</SwarmContextMenu>
 			{/* One composer at a time: while the side panel holds a chat (the swarm's or an agent's), it has its own. */}
