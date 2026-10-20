@@ -12,6 +12,9 @@ import { FileTree, type Runnable } from "@/components/file-tree";
 import { SwarmPanel, type Bridge } from "./swarm-panel";
 import { DebugView } from "./debug";
 
+/** Debug mode (the Debug tab, and run buttons on scripts and tests in the tree). Off for now: the audit comes first. */
+const DEBUG_ENABLED = false;
+
 const tauri: Bridge = { invoke, listen, apiBase };
 import { SidebarGroup, SidebarMenu, SidebarMenuButton, SidebarMenuItem } from "@/components/ui/sidebar";
 
@@ -110,13 +113,13 @@ function FolderItem({ path, current, file }: { path: string; current: boolean; f
 						next.set("mode", "code");
 						navigate(`/local?${next.toString()}`);
 					}}
-					runnables={{
+					runnables={DEBUG_ENABLED ? {
 						has: (f) => /\.[ts]\.sol$/.test(f),
 						list: (f) => invoke<string>("folder_read", { folder: path, path: f }).then((text) => runnablesIn(text, f.endsWith(".s.sol") ? "run" : "test")),
 						onRun: (f, r) => (FORKS_ENABLED && f.endsWith(".s.sol") ? setAsking({ file: f, r }) : debugRun(f, r)),
 						current: params.get("mode") === "debug" && file && params.get("test") ? `${file}::${params.get("test")}` : null,
 						result: (f, r) => (r ? results[`${f}::${r.contract}::${r.fn}`] : fileResult(results, f)),
-					}}
+					} : undefined}
 				/>
 			) : null}
 			{asking ? (
@@ -175,5 +178,5 @@ export function LocalFolderPage() {
 		invoke<Scan>("folder_scan", { path }).then(setScan, (e) => setError(String(e)));
 	}, [path]);
 	if (error) return <p className="p-6 text-sm text-red-600">{error}</p>;
-	return path ? <SwarmPanel folder={path} name={name(path)} scan={scan} bridge={tauri} session={params.get("run")} file={params.get("file")} debug={(file, test, onPick) => <DebugView folder={path} file={file} test={test} onPick={onPick} embedded />} /> : null;
+	return path ? <SwarmPanel folder={path} name={name(path)} scan={scan} bridge={tauri} session={params.get("run")} file={params.get("file")} debug={DEBUG_ENABLED ? (file, test, onPick) => <DebugView folder={path} file={file} test={test} onPick={onPick} embedded /> : undefined} /> : null;
 }

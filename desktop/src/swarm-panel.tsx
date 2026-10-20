@@ -756,7 +756,9 @@ export function SwarmPanel({ folder, name, scan, bridge, session, file: openPath
 	};
 	// The page's mode (Code, Swarm, Audit) and the open file live in the URL, so they survive reloads.
 	const [params, setParams] = useSearchParams();
-	const mode = (params.get("mode") as Mode | null) ?? "swarm";
+	// Debug mode exists only where the page is given a debugger; an old link to it opens Code instead.
+	const asked = (params.get("mode") as Mode | null) ?? "swarm";
+	const mode: Mode = asked === "debug" && !debug ? "code" : asked;
 	// The main contract's entry points, read from the AST, so the plan can name the ones each item covers.
 	const [entryUnits, setEntryUnits] = useState<AstUnit[]>([]);
 	const mainSource = (scan?.solidity ?? []).find((f) => f.startsWith("src/") && !f.endsWith(".t.sol") && !f.endsWith(".s.sol")) ?? null;
