@@ -130,6 +130,33 @@ def ysignextend (b x : Nat) : Nat :=
     if v ≥ 2 ^ t then (v + W - 2 ^ (t + 1)) % W else v
   else x
 
+/-! ABI encoding of static values: each value is one 32-byte big-endian word; `bytes` are lists of byte values. -/
+
+def wordBytes (w : Nat) : List Nat := (List.range 32).map (fun i => (w >>> (8 * (31 - i))) % 256)
+def bytesWord (l : List Nat) : Nat := l.foldl (fun acc b => acc * 256 + b) 0
+def abiEncode (ws : List Nat) : List Nat := ws.flatMap wordBytes
+
+/-- The i-th word of ABI data; data too short reverts, as `abi.decode` does. -/
+def abiWord (bs : List Nat) (i : Nat) : M σ Nat :=
+  if (i + 1) * 32 ≤ bs.length then pure (bytesWord ((bs.drop (i * 32)).take 32)) else throw ⟨"abi.decode"⟩
+/-- `calldataload`: past the end reads zeros. -/
+def abiWordOr0 (bs : List Nat) (i : Nat) : Nat := bytesWord (((bs.drop (i * 32)).take 32) ++ List.replicate 32 0 |>.take 32)
+
+/-- Dynamic ABI: the word at byte position `pos`, and `bytes` stored at `pos` (length word, then the data). -/
+def abiWordAt (bs : List Nat) (pos : Nat) : M σ Nat :=
+  if pos + 32 ≤ bs.length then pure (bytesWord ((bs.drop pos).take 32)) else throw ⟨"abi.decode"⟩
+def abiBytesAt (bs : List Nat) (pos : Nat) : M σ (List Nat) := do
+  let len ← abiWordAt bs pos
+  if pos + 32 + len ≤ bs.length then pure ((bs.drop (pos + 32)).take len) else throw ⟨"abi.decode"⟩
+/-- `bytes` as an ABI tail: its length, the data, zero padding to a whole word. -/
+def abiBytes (bs : List Nat) : List Nat := wordBytes bs.length ++ bs ++ List.replicate ((32 - bs.length % 32) % 32) 0
+
+/-- A decoded word checked against its type, as `abi.decode` does: anything that doesn't fit reverts. -/
+def abiUint (bits w : Nat) : M σ Nat := if w < 2 ^ bits then pure w else throw ⟨"abi.decode"⟩
+def abiInt (bits w : Nat) : M σ Int := if fits bits (toSigned 256 w) then pure (toSigned 256 w) else throw ⟨"abi.decode"⟩
+def abiBool (w : Nat) : M σ Bool := if w ≤ 1 then pure (w == 1) else throw ⟨"abi.decode"⟩
+def abiEnum (n w : Nat) : M σ Nat := if w < n then pure w else throw ⟨"abi.decode"⟩
+
 /-- Loops run at most this many iterations, as gas bounds them; a longer run reverts ("loop bound"). -/
 def loopBound : Nat := 2 ^ 64
 

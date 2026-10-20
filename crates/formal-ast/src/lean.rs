@@ -182,6 +182,8 @@ pub struct Gen<'a> {
     struct_by_canon: HashMap<String, Id>,
     /// User-defined value types (`BalanceDelta`) → their underlying typeString (`int256`).
     udvt: HashMap<String, String>,
+    /// Enums by canonical name → how many members.
+    enum_size: HashMap<String, usize>,
     state_field: HashMap<Id, String>,
     fn_name: HashMap<Id, String>,
     /// Ok(definition) or Err(reason), per function id, in generation order.
@@ -205,6 +207,7 @@ impl<'a> Gen<'a> {
         let mut enum_index = HashMap::new();
         let mut struct_by_canon = HashMap::new();
         let mut udvt = HashMap::new();
+        let mut enum_size = HashMap::new();
         fn walk<'v>(n: &'v Value, f: &mut impl FnMut(&'v Value)) {
             match n {
                 Value::Object(m) => {
@@ -227,6 +230,7 @@ impl<'a> Gen<'a> {
                         for (i, m) in n["members"].as_array().into_iter().flatten().enumerate() {
                             enum_index.insert(id_of(m), i);
                         }
+                        enum_size.insert(s(&n["canonicalName"]), n["members"].as_array().map(|m| m.len()).unwrap_or(0));
                     }
                     "StructDefinition" => {
                         struct_by_canon.insert(s(&n["canonicalName"]), id_of(n));
@@ -275,6 +279,7 @@ impl<'a> Gen<'a> {
             enum_index,
             struct_by_canon,
             udvt,
+            enum_size,
             state_field,
             fn_name: HashMap::new(),
             done: vec![],
@@ -573,6 +578,7 @@ impl<'a> Gen<'a> {
                 continue;
             }
             fx.locals.insert(id_of(p), n.clone());
+            fx.params.push((n.clone(), tstr(p), s(&p["storageLocation"])));
             if assigned.contains(&id_of(p)) {
                 if p["storageLocation"] == "memory" && ty != "Nat" && ty != "Bool" {
                     return bail("writes to a memory parameter (shared with the caller)");
@@ -581,6 +587,7 @@ impl<'a> Gen<'a> {
             }
             params.push(format!("({n} : {ty})"));
         }
+        fx.rets = node["returnParameters"]["parameters"].as_array().cloned().unwrap_or_default();
         let mut ret_types = vec![];
         let mut named = vec![];
         for r in node["returnParameters"]["parameters"].as_array().into_iter().flatten() {
@@ -976,6 +983,10 @@ struct Fx<'g, 'a> {
     named: Vec<String>,
     /// The "finished normally" flag of each enclosing loop.
     loops: Vec<String>,
+    /// The function's parameters: (Lean name, typeString, data location).
+    params: Vec<(String, String, String)>,
+    /// The return parameters' declarations, for typing returned literals.
+    rets: Vec<Value>,
     /// Storage parameters: id → lens name.
     lens: HashMap<Id, String>,
     modifier: bool,
@@ -984,7 +995,7 @@ struct Fx<'g, 'a> {
 
 impl<'g, 'a> Fx<'g, 'a> {
     fn new(g: &'g mut Gen<'a>, _f: Id) -> Self {
-        Fx { g, out: vec![], indent: 0, tmp: 0, unchecked: 0, locals: HashMap::new(), alias: HashMap::new(), named: vec![], loops: vec![], lens: HashMap::new(), modifier: false, placeholder: false }
+        Fx { g, out: vec![], indent: 0, tmp: 0, unchecked: 0, locals: HashMap::new(), alias: HashMap::new(), named: vec![], loops: vec![], params: vec![], rets: vec![], lens: HashMap::new(), modifier: false, placeholder: false }
     }
 
     fn line(&mut self, l: String) {
@@ -1079,7 +1090,17 @@ impl<'g, 'a> Fx<'g, 'a> {
                     let t = tuple(&self.named.clone());
                     self.line(format!("return {t}"));
                 } else {
-                    let t = self.expr(&st["expression"])?;
+                    let e = &st["expression"];
+                    let rets = self.rets.clone();
+                    let t = if e["nodeType"] == "TupleExpression" && rets.len() > 1 {
+                        let mut items = vec![];
+                        for (i, c) in e["components"].as_array().cloned().unwrap_or_default().iter().enumerate() {
+                            items.push(self.expr_for(c, &rets, i)?);
+                        }
+                        tuple(&items)
+                    } else {
+                        self.expr_for(e, &rets, 0)?
+                    };
                     self.line(format!("return {t}"));
                 }
                 Ok(())
@@ -1487,6 +1508,17 @@ impl<'g, 'a> Fx<'g, 'a> {
                         }
                         self.g.ext.insert("keccak : List Nat → Nat".into(), "keccak256 over words (any function: no collision assumptions)".into());
                         return Ok(format!("(ext.keccak [{}])", words.join(", ")));
+                    }
+                    "calldataload" => {
+                        // A callback taking one `bytes calldata`, called with the standard ABI encoding (selector,
+                        // offset, length, data): word k of the data is at 0x44 + 32k.
+                        let c = yul_const(&args[0]).ok_or("calldataload at a computed offset")?;
+                        match self.params.as_slice() {
+                            [(name, ty, loc)] if ty == "bytes" && loc == "calldata" && c >= 0x44 && (c - 0x44) % 32 == 0 => {
+                                return Ok(format!("(abiWordOr0 {name} {})", (c - 0x44) / 32));
+                            }
+                            _ => return bail("calldataload outside a single-bytes callback"),
+                        }
                     }
                     "caller" => return Ok("(← read).sender".into()),
                     "address" => return Ok("(← read).self".into()),
@@ -1942,6 +1974,184 @@ impl<'g, 'a> Fx<'g, 'a> {
         self.arith(op, bits, a, b)
     }
 
+    /// The ABI words a static value encodes to (structs field by field).
+    fn abi_words(&mut self, t: &str, term: &str) -> R<Vec<String>> {
+        let t = strip_location(&self.g.norm(strip_location(t))).to_string();
+        if t == "bool" {
+            return Ok(vec![format!("(ybool {})", paren(term))]);
+        }
+        if int_bits(&t).is_some() {
+            return Ok(vec![format!("(toUnsigned 256 {})", paren(term))]);
+        }
+        if t.starts_with("uint") || t.starts_with("address") || t.starts_with("contract ") || t.starts_with("enum ") || t == "bytes32" {
+            return Ok(vec![term.to_string()]);
+        }
+        if let Some(name) = t.strip_prefix("struct ") {
+            let sid = *self.g.struct_by_canon.get(name).ok_or_else(|| format!("struct {name}"))?;
+            let members: Vec<(String, String)> = self.g.nodes[&sid]["members"].as_array().into_iter().flatten().map(|m| (s(&m["name"]), tstr(m))).collect();
+            let mut out = vec![];
+            for (n, mt) in members {
+                out.extend(self.abi_words(&mt, &format!("({term}).{}", ident(&n)))?);
+            }
+            return Ok(out);
+        }
+        bail(format!("ABI encoding of {t} (dynamic types aren't modelled yet)"))
+    }
+
+    /// Whether a type is dynamic in the ABI (encoded at an offset): bytes, string, or a struct holding one.
+    fn abi_dynamic(&self, t: &str) -> R<bool> {
+        let t = strip_location(&self.g.norm(strip_location(t))).to_string();
+        if t == "bytes" || t == "string" {
+            return Ok(true);
+        }
+        if t.ends_with("[]") {
+            return bail("ABI arrays aren't modelled yet");
+        }
+        if let Some(name) = t.strip_prefix("struct ") {
+            let sid = *self.g.struct_by_canon.get(name).ok_or_else(|| format!("struct {name}"))?;
+            for m in self.g.nodes[&sid]["members"].as_array().cloned().unwrap_or_default() {
+                if self.abi_dynamic(&tstr(&m))? {
+                    return Ok(true);
+                }
+            }
+        }
+        Ok(false)
+    }
+
+    fn struct_members(&self, t: &str) -> R<Vec<(String, String)>> {
+        let name = strip_location(t).strip_prefix("struct ").ok_or("not a struct")?;
+        let sid = *self.g.struct_by_canon.get(name).ok_or_else(|| format!("struct {name}"))?;
+        Ok(self.g.nodes[&sid]["members"].as_array().into_iter().flatten().map(|m| (s(&m["name"]), tstr(m))).collect())
+    }
+
+    /// `abi.encode(items…)`: static values in the head, dynamic ones as offsets into the tails that follow.
+    fn abi_encode(&mut self, items: &[(String, String)]) -> R<String> {
+        let mut head_words: Vec<Option<String>> = vec![]; // None = an offset to fill in
+        let mut tails = vec![];
+        for (t, v) in items {
+            if self.abi_dynamic(t)? {
+                let tail = self.abi_tail(t, v)?;
+                let tail = self.atom(tail);
+                tails.push(tail);
+                head_words.push(None);
+            } else {
+                for w in self.abi_words(t, v)? {
+                    head_words.push(Some(w));
+                }
+            }
+        }
+        let head_bytes = 32 * head_words.len();
+        let mut words = vec![];
+        let mut k = 0;
+        for w in head_words {
+            match w {
+                Some(w) => words.push(w),
+                None => {
+                    let before: Vec<String> = tails[..k].iter().map(|t| format!("{t}.length")).collect();
+                    words.push(if before.is_empty() { head_bytes.to_string() } else { format!("({head_bytes} + {})", before.join(" + ")) });
+                    k += 1;
+                }
+            }
+        }
+        let mut out = format!("abiEncode [{}]", words.join(", "));
+        for t in &tails {
+            out = format!("{out} ++ {t}");
+        }
+        Ok(format!("({out})"))
+    }
+
+    /// The tail of a dynamic value: bytes/string with their length, a struct as its own tuple encoding.
+    fn abi_tail(&mut self, t: &str, v: &str) -> R<String> {
+        let tt = strip_location(&self.g.norm(strip_location(t))).to_string();
+        match tt.as_str() {
+            "bytes" => Ok(format!("(abiBytes {v})")),
+            "string" => Ok(format!("(abiBytes ({v}.toUTF8.toList.map (·.toNat)))")),
+            _ => {
+                let members = self.struct_members(&tt)?;
+                let items: Vec<(String, String)> = members.into_iter().map(|(n, mt)| (mt, format!("({v}).{}", ident(&n)))).collect();
+                self.abi_encode(&items)
+            }
+        }
+    }
+
+    /// Decodes a tuple of values whose encoding starts at byte `base` of `data`.
+    fn abi_decode_tuple(&mut self, types: &[String], data: &str, base: &str) -> R<Vec<String>> {
+        let mut slot = 0usize;
+        let mut vals = vec![];
+        for t in types {
+            vals.push(self.abi_decode_at(t, data, base, &mut slot)?);
+        }
+        Ok(vals)
+    }
+
+    fn abi_decode_at(&mut self, t: &str, data: &str, base: &str, slot: &mut usize) -> R<String> {
+        let tt = strip_location(&self.g.norm(strip_location(t))).to_string();
+        let at = |slot: usize| if base == "0" { format!("{}", 32 * slot) } else { format!("({base} + {})", 32 * slot) };
+        if self.abi_dynamic(&tt)? {
+            // The head holds an offset (from `base`) to where the value is.
+            let o = self.fresh("__o");
+            self.line(format!("let {o} ← abiWordAt {data} {}", at(*slot)));
+            *slot += 1;
+            let pos = if base == "0" { o } else { format!("({base} + {o})") };
+            let pos = self.atom(pos);
+            return match tt.as_str() {
+                "bytes" => {
+                    let v = self.fresh("__d");
+                    self.line(format!("let {v} ← abiBytesAt {data} {pos}"));
+                    Ok(v)
+                }
+                "string" => bail("abi.decode of a string"),
+                _ => {
+                    let members = self.struct_members(&tt)?;
+                    let types: Vec<String> = members.iter().map(|(_, mt)| mt.clone()).collect();
+                    let vals = self.abi_decode_tuple(&types, data, &pos)?;
+                    let ty = self.g.ty_str(&tt)?;
+                    let fields: Vec<String> = members.iter().zip(&vals).map(|((n, _), v)| format!("{} := {v}", ident(n))).collect();
+                    let v = self.fresh("__d");
+                    self.line(format!("let {v} : {ty} := {{ {} }}", fields.join(", ")));
+                    Ok(v)
+                }
+            };
+        }
+        // Static: in place, word by word (structs inline).
+        if tt.starts_with("struct ") {
+            let members = self.struct_members(&tt)?;
+            let mut fields = vec![];
+            for (n, mt) in &members {
+                let v = self.abi_decode_at(mt, data, base, slot)?;
+                fields.push(format!("{} := {v}", ident(n)));
+            }
+            let ty = self.g.ty_str(&tt)?;
+            let v = self.fresh("__d");
+            self.line(format!("let {v} : {ty} := {{ {} }}", fields.join(", ")));
+            return Ok(v);
+        }
+        let w = self.fresh("__w");
+        self.line(format!("let {w} ← abiWordAt {data} {}", at(*slot)));
+        *slot += 1;
+        let check = if tt == "bool" {
+            Some("abiBool".to_string())
+        } else if let Some(b) = int_bits(&tt) {
+            Some(format!("abiInt {b}"))
+        } else if let Some(name) = tt.strip_prefix("enum ") {
+            Some(format!("abiEnum {}", self.g.enum_size.get(name).ok_or_else(|| format!("enum {name}"))?))
+        } else if tt == "bytes32" {
+            None
+        } else if tt.starts_with("uint") || tt.starts_with("address") || tt.starts_with("contract ") {
+            bits_of(&tt).filter(|b| *b < 256).map(|b| format!("abiUint {b}"))
+        } else {
+            return bail(format!("ABI decoding of {tt}"));
+        };
+        Ok(match check {
+            Some(c) => {
+                let v = self.fresh("__d");
+                self.line(format!("let {v} ← {c} {w}"));
+                v
+            }
+            None => w,
+        })
+    }
+
     /// Translates a sub-expression into its own lines, for branches that must not run eagerly.
     fn branch(&mut self, e: &Value) -> R<(Vec<String>, String)> {
         let saved = std::mem::take(&mut self.out);
@@ -2235,6 +2445,24 @@ impl<'g, 'a> Fx<'g, 'a> {
             return self.expr(&args[0]);
         }
         let builtin = callee["referencedDeclaration"].as_i64().is_some_and(|r| r < 0);
+        let abi = callee["nodeType"] == "MemberAccess" && callee["expression"]["name"] == "abi" && callee["expression"]["referencedDeclaration"].as_i64().is_some_and(|r| r < 0);
+        if abi && callee["memberName"] == "encode" {
+            let mut items = vec![];
+            for a in &args {
+                let v = self.expr(a)?;
+                let v = self.atom(v);
+                items.push((tstr(a), v));
+            }
+            return self.abi_encode(&items);
+        }
+        if abi && callee["memberName"] == "decode" {
+            let data = self.expr(&args[0])?;
+            let data = self.atom(data);
+            let t = tstr(e);
+            let types = if t.starts_with("tuple(") { split_tuple(&t) } else { vec![t] };
+            let vals = self.abi_decode_tuple(&types, &data, "0")?;
+            return Ok(tuple(&vals));
+        }
         if builtin && callee["nodeType"] == "Identifier" && callee["name"] == "keccak256" {
             let arg = &args[0];
             if let Some(bytes) = literal_bytes(arg) {
@@ -2501,6 +2729,38 @@ fn word_to(ty: &str, v: &str) -> String {
     } else {
         v.to_string()
     }
+}
+
+fn strip_location(t: &str) -> &str {
+    let t = t.trim();
+    for suffix in [" memory", " calldata", " storage ref", " storage pointer"] {
+        if let Some(rest) = t.strip_suffix(suffix) {
+            return rest;
+        }
+    }
+    t
+}
+
+/// The parts of `tuple(a,b,…)`, split at top-level commas.
+fn split_tuple(t: &str) -> Vec<String> {
+    let inner = t.trim().strip_prefix("tuple(").and_then(|x| x.strip_suffix(')')).unwrap_or(t);
+    let (mut parts, mut depth, mut cur) = (vec![], 0, String::new());
+    for c in inner.chars() {
+        match c {
+            '(' | '[' => depth += 1,
+            ')' | ']' => depth -= 1,
+            ',' if depth == 0 => {
+                parts.push(std::mem::take(&mut cur));
+                continue;
+            }
+            _ => {}
+        }
+        cur.push(c);
+    }
+    if !cur.is_empty() {
+        parts.push(cur);
+    }
+    parts
 }
 
 fn keccak_hex(bytes: &[u8]) -> String {

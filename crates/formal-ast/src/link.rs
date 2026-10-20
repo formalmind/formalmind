@@ -78,25 +78,31 @@ pub fn link(members: &[Parts]) -> Linked {
         let _ = writeln!(out, "  {f} : Nat");
     }
 
-    // Bindings: an interface call goes to the member that implements the interface and translates the function.
+    // Bindings, by selector as the EVM dispatches: a call through any interface goes to every member with a
+    // translated public function of that name and those parameter types, chosen by the target address.
     let mut bound = vec![];
-    let mut binding = vec![]; // per member: per ext field, Some((member j, lean fn, arity, view))
+    let mut binding = vec![]; // per member: per ext field, (targets [(member j, lean fn)], arity, view)
     for (i, m) in members.iter().enumerate() {
         let mut b = vec![];
         for (fname, _, _) in &m.ext {
-            let target = m.calls.iter().find(|c| &c.field == fname).and_then(|c| {
-                members.iter().enumerate().find_map(|(j, other)| {
-                    if j == i || !other.bases.contains(&c.iface) {
-                        return None;
-                    }
-                    let e = other.entries.iter().find(|e| e.name == c.function && e.params == c.params)?;
-                    Some((j, e.lean.clone()?, c.params.len(), c.view))
+            let call = m.calls.iter().find(|c| &c.field == fname);
+            let targets: Vec<(usize, String)> = call
+                .map(|c| {
+                    members
+                        .iter()
+                        .enumerate()
+                        .filter(|(j, _)| *j != i)
+                        .filter_map(|(j, other)| {
+                            let e = other.entries.iter().find(|e| e.name == c.function && e.params == c.params)?;
+                            Some((j, e.lean.clone()?))
+                        })
+                        .collect()
                 })
-            });
-            if let Some((j, _, _, _)) = &target {
+                .unwrap_or_default();
+            for (j, _) in &targets {
                 bound.push((m.contract.clone(), fname.clone(), members[*j].contract.clone()));
             }
-            b.push(target);
+            b.push(call.filter(|_| !targets.is_empty()).map(|c| (targets, c.params.len(), c.view)));
         }
         binding.push(b);
     }
@@ -121,17 +127,23 @@ pub fn link(members: &[Parts]) -> Linked {
                 let open = format!("O.{}", open_name(fi, fname));
                 let v = match &binding[i][k] {
                     None => open,
-                    Some((j, lean, arity, view)) => {
+                    Some((targets, arity, view)) => {
                         let args: Vec<String> = (0..*arity).map(|a| format!("a{a}")).collect();
                         let a = args.join(" ");
-                        let fj = &fields[*j];
-                        let callee = format!("{}.{lean} {} {a}", names[*j], proj("exts A O n", *j, n));
-                        match (*view, depth) {
-                            (false, "0") => format!("fun addr {a} => if addr = A.{fj} then throw ⟨\"call depth\"⟩ else {open} addr {a}"),
-                            (false, _) => format!("fun addr {a} => if addr = A.{fj} then callAs A.{fi} A.{fj} ({callee}) else {open} addr {a}"),
-                            (true, "0") => format!("fun env w addr {a} => if addr = A.{fj} then .error ⟨\"call depth\"⟩ else {open} env w addr {a}"),
-                            (true, _) => format!("fun env w addr {a} => if addr = A.{fj} then runView ({callee}) {{ env with sender := A.{fi}, self := A.{fj}, value := 0 }} w else {open} env w addr {a}"),
+                        // The fallback when the address is none of the bound members: the open behaviour.
+                        let mut body = if *view { format!("{open} env w addr {a}") } else { format!("{open} addr {a}") };
+                        for (j, lean) in targets.iter().rev() {
+                            let fj = &fields[*j];
+                            let callee = format!("{}.{lean} {} {a}", names[*j], proj("exts A O n", *j, n));
+                            let run = match (*view, depth) {
+                                (false, "0") => "throw ⟨\"call depth\"⟩".to_string(),
+                                (false, _) => format!("callAs A.{fi} A.{fj} ({callee})"),
+                                (true, "0") => ".error ⟨\"call depth\"⟩".to_string(),
+                                (true, _) => format!("runView ({callee}) {{ env with sender := A.{fi}, self := A.{fj}, value := 0 }} w"),
+                            };
+                            body = format!("if addr = A.{fj} then {run} else {body}");
                         }
+                        if *view { format!("fun env w addr {a} => {body}") } else { format!("fun addr {a} => {body}") }
                     }
                 };
                 let _ = write!(s, ",\n       {fname} := {v}");

@@ -164,9 +164,18 @@ First cross-contract theorem: when the PoolManager is locked, AsyncSwap's `take`
 proof goes through `onlyWhenUnlocked`, `Lock.isUnlocked`'s `tload` and `CustomRevert`'s assembly, and uses only
 Lean's standard axioms.
 
+**Router + AsyncSwap + PoolManager:**
+- Calls bind **by selector**, as the EVM dispatches, not only through declared interfaces.
+- The ABI codec covers static and dynamic values (`bytes`, structs holding them: head offsets plus tails). Decoding
+  checks every word against its type, the way solc's decoder does. `calldataload` in a single-`bytes` callback reads
+  the standard encoding.
+- With that, the cycle `Router → PoolManager.unlock → Router.unlockCallback → PoolManager.swap / AsyncSwap` binds:
+  21 bound calls. Lean checks the 5,404-line world in about 4s.
+- Proved, with only Lean's standard axioms:
+  - PoolManager's callback runs Router's generated `unlockCallback` with PoolManager as `msg.sender`;
+  - a Router entry into `unlock` while PoolManager is already unlocked reverts inside PoolManager.
+
 **Next for the world:**
-- **ABI codec:** an encoder/decoder for static structs, so `Router → PoolManager.unlock → Router.unlockCallback`
-  binds.
 - **Summaries:** hand-written specs for v4's hook-call plumbing (`Hooks.callHook`, `ParseBytes`) and its
   storage-pointer assembly (`TickBitmap.flipTick`, `Pool.updateTick`), each to be checked against the code, so
   PoolManager → AsyncSwap hook calls bind too.
