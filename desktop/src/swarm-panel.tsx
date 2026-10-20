@@ -661,9 +661,25 @@ export function SwarmPanel({ folder, name, scan, bridge, session, file: openPath
 		// eslint-disable-next-line react-hooks/exhaustive-deps
 	}, [folder]);
 	// The file picked in the sidebar's tree (or a proof link) is what the Code tab shows.
+	// Without one, it reopens the last file this folder showed.
 	useEffect(() => {
-		if (openPath) loadFile(openPath);
-		else setFile(null);
+		const key = `fm:file:${folder}`;
+		if (openPath) {
+			store.set(key, openPath);
+			loadFile(openPath);
+			return;
+		}
+		setFile(null);
+		const last = store.get(key);
+		if (!last) return;
+		setParams(
+			(prev) => {
+				const next = new URLSearchParams(prev);
+				next.set("file", last);
+				return next;
+			},
+			{ replace: true },
+		);
 		// eslint-disable-next-line react-hooks/exhaustive-deps
 	}, [openPath, folder]);
 	// Sessions are picked from the chat card's title (the sidebar holds the folder's files).
