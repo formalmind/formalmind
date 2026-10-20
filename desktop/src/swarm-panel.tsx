@@ -373,7 +373,107 @@ type AstUnits = {
 	reached?: { name: string; kind: string; visibility: string; dependency: boolean; arith: number; asm: number; calls: number }[];
 	scopeFiles?: { path: string; inScope: boolean; dependency: boolean; imports: number }[];
 };
-type AuditTab = "tree" | "plan" | "entries" | "functions" | "files";
+type AuditTab = "matrix" | "tree" | "plan" | "entries" | "functions" | "files";
+
+/**
+ * Which entry point touches which storage: rows are state variables (most-written first), columns are entry points
+ * (state-changing first). A variable written by many entry points is where invariants and bugs live. Clicking a cell
+ * or a column opens that entry point's slice beside the matrix.
+ */
+function StorageMatrix({ data, unit, slice, onOpen, onClose }: { data: AstUnits; unit: string | null; slice: string | null; onOpen: (name: string) => void; onClose: () => void }) {
+	const [hover, setHover] = useState<{ row: string | null; col: string | null }>({ row: null, col: null });
+	const [views, setViews] = useState(false);
+	// Rows: every mutable state variable of the contract and its bases, plus any the units touch.
+	const declared = (data.tree ?? []).flatMap((c) => c.stateVars.filter((v) => !v.constant && !v.immutable).map((v) => ({ ...v, contract: c.name })));
+	const touched = new Set(data.units.flatMap((u) => [...u.reads, ...u.writes]));
+	const rows = [...declared.filter((v) => touched.has(v.name)), ...declared.filter((v) => !touched.has(v.name))];
+	const writers = (name: string) => data.units.filter((u) => u.writes.includes(name)).length;
+	rows.sort((a, b) => writers(b.name) - writers(a.name));
+	const mutating = data.units.filter((u) => u.mutability !== "view" && u.mutability !== "pure");
+	const cols = views ? [...mutating, ...data.units.filter((u) => !mutating.includes(u))] : mutating;
+	const short = (n: string) => n.split(".").slice(1).join(".") || n;
+	return (
+		<div className={`grid min-h-0 flex-1 gap-1 ${unit ? "grid-cols-[minmax(0,1fr)_minmax(0,28rem)]" : "grid-cols-1"}`}>
+			<div className="min-h-0 overflow-auto rounded-xl border bg-card shadow-card">
+				<div className="sticky left-0 top-0 z-20 flex items-center gap-3 border-b bg-card/95 px-3 py-2 text-[11px] text-muted-foreground backdrop-blur">
+					<span className="inline-flex items-center gap-1"><span className="size-2.5 rounded-sm bg-red-500/80" /> writes</span>
+					<span className="inline-flex items-center gap-1"><span className="size-2.5 rounded-sm bg-sky-500/50" /> reads</span>
+					<span className="inline-flex items-center gap-1"><span className="size-2.5 rounded-sm bg-gradient-to-br from-sky-500/50 from-50% to-red-500/80 to-50%" /> both</span>
+					<label className="ml-auto inline-flex cursor-pointer items-center gap-1.5">
+						<input type="checkbox" checked={views} onChange={(e) => setViews(e.target.checked)} className="size-3" />
+						include view functions
+					</label>
+				</div>
+				<table className="border-separate border-spacing-0 text-[12px]">
+					<thead>
+						<tr>
+							<th className="sticky left-0 top-9 z-10 min-w-56 border-b bg-card px-3 py-2 text-left align-bottom font-normal text-muted-foreground">
+								<span className="font-mono">{rows.length}</span> state · <span className="font-mono">{cols.length}</span> entry points
+							</th>
+							{cols.map((u) => (
+								<th key={u.name} className={`sticky top-9 z-[5] h-36 w-8 border-b bg-card px-0 align-bottom font-normal ${hover.col === u.name || unit === u.name ? "bg-muted" : ""}`}>
+									<button
+										type="button"
+										onClick={() => onOpen(u.name)}
+										onMouseEnter={() => setHover({ row: null, col: u.name })}
+										onMouseLeave={() => setHover({ row: null, col: null })}
+										title={`${u.name} — open its slice`}
+										className={`mx-auto block max-h-36 truncate pb-2 font-mono text-[11px] [writing-mode:vertical-rl] rotate-180 hover:text-foreground ${unit === u.name ? "font-semibold text-foreground" : "text-muted-foreground"} ${u.mutability === "view" || u.mutability === "pure" ? "opacity-60" : ""}`}
+									>
+										{short(u.name)}
+									</button>
+								</th>
+							))}
+						</tr>
+					</thead>
+					<tbody>
+						{rows.map((v) => {
+							const n = writers(v.name);
+							return (
+								<tr key={`${v.contract}.${v.name}`}>
+									<th className={`sticky left-0 z-[5] border-b bg-card px-3 py-1.5 text-left font-normal ${hover.row === v.name ? "bg-muted" : ""}`}>
+										<span className="flex items-center gap-2">
+											<span className="truncate font-mono text-[12px] text-foreground">{v.name}</span>
+											{n ? <span className="shrink-0 rounded bg-red-500/10 px-1 font-mono text-[10px] text-red-700 dark:text-red-400" title={`written by ${n} entry points`}>{n}w</span> : null}
+											<span className="ml-auto max-w-40 truncate font-mono text-[10px] text-muted-foreground" title={v.type}>{v.type}</span>
+										</span>
+									</th>
+									{cols.map((u) => {
+										const r = u.reads.includes(v.name);
+										const w = u.writes.includes(v.name);
+										const lit = hover.row === v.name || hover.col === u.name || unit === u.name;
+										return (
+											<td
+												key={u.name}
+												onMouseEnter={() => setHover({ row: v.name, col: u.name })}
+												onMouseLeave={() => setHover({ row: null, col: null })}
+												onClick={() => (r || w ? onOpen(u.name) : undefined)}
+												title={`${short(u.name)} ${w && r ? "reads and writes" : w ? "writes" : r ? "reads" : "doesn't touch"} ${v.name}`}
+												className={`h-7 w-8 border-b p-0 text-center ${lit ? "bg-muted/70" : ""} ${r || w ? "cursor-pointer" : ""}`}
+											>
+												{w || r ? (
+													<span
+														className={`mx-auto block size-4 rounded-[4px] ${w && r ? "bg-gradient-to-br from-sky-500/50 from-50% to-red-500/80 to-50%" : w ? "bg-red-500/80" : "bg-sky-500/50"}`}
+													/>
+												) : null}
+											</td>
+										);
+									})}
+								</tr>
+							);
+						})}
+					</tbody>
+				</table>
+			</div>
+			{unit ? (
+				<div className="relative min-h-0 overflow-y-auto rounded-xl border bg-card px-4 py-3 shadow-card">
+					<button type="button" onClick={onClose} title="Close the slice" className="absolute right-2 top-2 grid size-6 place-items-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground">×</button>
+					{slice ? <div className="prose prose-sm max-w-none dark:prose-invert"><ChatMarkdown>{slice}</ChatMarkdown></div> : <p className="text-[13px] text-muted-foreground">Building the slice…</p>}
+				</div>
+			) : null}
+		</div>
+	);
+}
 
 /** A chip in the AST tree: a bordered, rounded value. */
 function Chip({ children, tone }: { children: React.ReactNode; tone?: "muted" | "amber" | "violet" }) {
@@ -457,7 +557,7 @@ function AuditView({ folder, scan, invoke, preferred, plan, planMeta }: { folder
 	const [error, setError] = useState<string | null>(null);
 	const [unit, setUnit] = useState<string | null>(null);
 	const [slice, setSlice] = useState<string | null>(null);
-	const [tab, setTab] = useState<AuditTab>("tree");
+	const [tab, setTab] = useState<AuditTab>("matrix");
 	useEffect(() => {
 		if (!entry && pick) setEntry(pick);
 	}, [entry, pick]);
@@ -494,6 +594,7 @@ function AuditView({ folder, scan, invoke, preferred, plan, planMeta }: { folder
 				{data ? (
 					<div role="tablist" aria-label="What to show" className="flex min-w-0 items-center gap-0.5 rounded-lg border bg-background/60 p-0.5">
 						{([
+							["matrix", "Storage × entry points"],
 							["tree", `${data.contract} syntax tree`],
 							["plan", `Plan${planMeta ? ` ${planMeta}` : ""}`],
 							["entries", `${data.units.length} entry points`],
@@ -508,6 +609,7 @@ function AuditView({ folder, scan, invoke, preferred, plan, planMeta }: { folder
 				) : null}
 				{data ? <span className="shrink-0 text-[11px] text-muted-foreground">{data.ms} ms</span> : null}
 			</div>
+			{data && tab === "matrix" ? <StorageMatrix data={data} unit={unit} slice={slice} onOpen={open} onClose={() => setUnit(null)} /> : null}
 			{data && tab === "tree" && data.tree ? <AstTree tree={data.tree} /> : null}
 			{data && tab === "plan" ? <div className="min-h-0 overflow-y-auto rounded-xl border bg-card shadow-card">{plan}</div> : null}
 			{data && tab === "functions" ? (
