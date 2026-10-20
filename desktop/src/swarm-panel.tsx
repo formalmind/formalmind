@@ -1,7 +1,8 @@
 import { MarkGithubIcon } from "@primer/octicons-react";
-import { Suspense, lazy, useEffect, useRef, useState } from "react";
+import { Suspense, lazy, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { NeovimView } from "./neovim";
+import { JsonTree } from "./json-tree";
 import { Bug, Check, ChevronDown, Code2, Copy, FileCode2, GanttChart, MessagesSquare, Network, Play, Plus, ScanSearch, Square, WandSparkles, Wrench } from "lucide-react";
 
 // The project roadmap (GitHub Projects-style), the same view the web app had on its own page.
@@ -192,6 +193,16 @@ function FileView({ path, text, big, start = 1, mark, cursor }: { path: string; 
 			))}
 		</pre>
 	);
+}
+
+/** Whether a file parses as JSON (tsconfig-style comments don't, and show as text). */
+function jsonValid(text: string) {
+	try {
+		JSON.parse(text);
+		return true;
+	} catch {
+		return false;
+	}
 }
 
 /** The 0-based line and UTF-16 character under a point in a FileView, when it is on a word. */
@@ -709,6 +720,9 @@ export function SwarmPanel({ folder, name, scan, bridge, session, file: openPath
 	const [planOpen, setPlanOpen] = useState(false);
 	// Markdown files open rendered; the toggle shows their source (the choice is kept).
 	const [mdSource, setMdSource] = useState(() => store.get("fm:md-view") === "source");
+	// JSON files open as a collapsible tree; Raw shows the file as it is.
+	const [jsonRaw, setJsonRaw] = useState(() => store.get("fm:json-view") === "raw");
+	const jsonOk = useMemo(() => Boolean(file && /\.json$/i.test(file.path) && jsonValid(file.text)), [file]);
 	// Images a Markdown file points at, read from the folder (relative to the file), by path.
 	const [images, setImages] = useState<Record<string, string>>({});
 	const imagePath = (src: string, from: string) => {
@@ -1187,6 +1201,28 @@ export function SwarmPanel({ folder, name, scan, bridge, session, file: openPath
 												})}
 											</span>
 										) : null}
+										{/\.json$/i.test(file.path) ? (
+											<span role="tablist" aria-label="JSON view" className="mr-1 inline-flex h-6 items-center rounded-md border bg-muted/60 p-0.5">
+												{(["Tree", "Raw"] as const).map((v) => {
+													const on = (v === "Raw") === jsonRaw;
+													return (
+														<button
+															key={v}
+															type="button"
+															role="tab"
+															aria-selected={on}
+															onClick={() => {
+																setJsonRaw(v === "Raw");
+																store.set("fm:json-view", v === "Raw" ? "raw" : "tree");
+															}}
+															className={`h-5 rounded px-2 text-[11px] ${on ? "bg-background font-medium text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"}`}
+														>
+															{v}
+														</button>
+													);
+												})}
+											</span>
+										) : null}
 										<CopyButton text={file.text} label="Copy the file" />
 									</span>
 								</div>
@@ -1214,6 +1250,8 @@ export function SwarmPanel({ folder, name, scan, bridge, session, file: openPath
 									{vim && slot ? (
 										// The Mac app runs real Neovim (bundled); the web keeps the light cursor below.
 										<NeovimView bridge={bridge} folder={folder} path={file.path} line={markLine} onFile={(p, l) => view(p, l)} />
+									) : jsonOk && !jsonRaw ? (
+										<JsonTree text={file.text} />
 									) : /\.(md|markdown)$/i.test(file.path) && !mdSource ? (
 										<ChatMarkdown className="mx-auto max-w-3xl px-6 py-6 text-[14px]" image={(src) => { const p = imagePath(src, file.path); return p === null ? src : images[p]; }}>{file.text}</ChatMarkdown>
 									) : (
