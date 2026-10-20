@@ -334,9 +334,9 @@ const MODES: { id: Mode; label: string; icon: typeof Code2 }[] = [
 	{ id: "code", label: "Code", icon: Code2 },
 	{ id: "chat", label: "Chat", icon: MessagesSquare },
 	{ id: "swarm", label: "Swarm", icon: Network },
-	{ id: "roadmap", label: "Roadmap", icon: GanttChart },
 	{ id: "audit", label: "Audit", icon: ScanSearch },
 	{ id: "bugs", label: "Bugs", icon: Bug },
+	{ id: "roadmap", label: "Roadmap", icon: GanttChart },
 ];
 
 /** The page's modes as a macOS-style segmented control, centred at the top. */
@@ -555,6 +555,8 @@ export function SwarmPanel({ folder, name, scan, bridge, session, file: openPath
 	const [openItem, setOpenItem] = useState<number | null>(null);
 	const [file, setFile] = useState<{ path: string; text: string } | null>(null);
 	const [planOpen, setPlanOpen] = useState(false);
+	// Markdown files open rendered; the toggle shows their source (the choice is kept).
+	const [mdSource, setMdSource] = useState(() => store.get("fm:md-view") === "source");
 	/** A report with the PoC tests and proofs it cites inlined (newer reports already carry them). */
 	const withPoc = async (body: string) => {
 		const cited = [...new Set(body.match(/[\w./-]+\.(?:t\.sol|lean)/g) ?? [])].filter((p) => !body.includes(`Proof of concept: \`${p}\``)).slice(0, 3);
@@ -868,11 +870,37 @@ export function SwarmPanel({ folder, name, scan, bridge, session, file: openPath
 												<Bug className="size-3" />Debug
 											</button>
 										) : null}
+										{/\.(md|markdown)$/i.test(file.path) ? (
+											<span role="tablist" aria-label="Markdown view" className="mr-1 inline-flex h-6 items-center rounded-md border bg-muted/60 p-0.5">
+												{(["Preview", "Source"] as const).map((v) => {
+													const on = (v === "Source") === mdSource;
+													return (
+														<button
+															key={v}
+															type="button"
+															role="tab"
+															aria-selected={on}
+															onClick={() => {
+																setMdSource(v === "Source");
+																store.set("fm:md-view", v === "Source" ? "source" : "preview");
+															}}
+															className={`h-5 rounded px-2 text-[11px] ${on ? "bg-background font-medium text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"}`}
+														>
+															{v}
+														</button>
+													);
+												})}
+											</span>
+										) : null}
 										<CopyButton text={file.text} label="Copy the file" />
 									</span>
 								</div>
 								<div className="min-h-0 flex-1 overflow-auto">
-									<FileView path={file.path} text={file.text} big />
+									{/\.(md|markdown)$/i.test(file.path) && !mdSource ? (
+										<ChatMarkdown className="mx-auto max-w-3xl px-6 py-6 text-[14px]">{file.text}</ChatMarkdown>
+									) : (
+										<FileView path={file.path} text={file.text} big />
+									)}
 								</div>
 							</>
 						) : (
