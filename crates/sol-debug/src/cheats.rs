@@ -51,6 +51,10 @@ pub struct Cheats {
     pub code: HashMap<String, Vec<u8>>,
     /// Unsupported cheatcodes that were called (for the summary).
     pub missing: Vec<String>,
+    /// What `console.log` printed, in order (setUp's and the run's).
+    pub console: Vec<String>,
+    /// console.log signatures by selector (forge-std's: up to four of string/uint256/address/bool, and singles).
+    console_sigs: HashMap<[u8; 4], String>,
     /// Programs `vm.ffi` / `vm.tryFfi` may run (by name: `hnc`), and the folder they run in. Empty: ffi refuses.
     pub ffi_allow: Vec<String>,
     pub ffi_dir: std::path::PathBuf,
@@ -198,6 +202,30 @@ impl Cheats {
         Cheats { signatures, ..Default::default() }
     }
 
+    /// A console.log call as the line it prints (values joined by spaces, as forge shows them).
+    fn console_line(&mut self, input: &Bytes) -> String {
+        if self.console_sigs.is_empty() {
+            self.console_sigs = console_signatures();
+        }
+        let Some(sel) = input.get(..4).and_then(|s| <[u8; 4]>::try_from(s).ok()) else { return String::new() };
+        let Some(sig) = self.console_sigs.get(&sel) else { return format!("(console.log 0x{})", revm::primitives::hex::encode(sel)) };
+        let params = &sig[sig.find('(').unwrap()..];
+        let Ok(DynSolValue::Tuple(args)) = DynSolType::parse(&params.replace("uint)", "uint256)").replace("uint,", "uint256,").replace("int)", "int256)").replace("int,", "int256,")).and_then(|t| t.abi_decode_params(&input[4..])) else {
+            return format!("(console.log {sig}: can't decode)");
+        };
+        args.iter()
+            .map(|v| match v {
+                DynSolValue::String(s) => s.clone(),
+                DynSolValue::Uint(u, _) => u.to_string(),
+                DynSolValue::Int(i, _) => i.to_string(),
+                DynSolValue::Address(a) => a.to_checksum(None),
+                DynSolValue::Bool(b) => b.to_string(),
+                other => format!("0x{}", revm::primitives::hex::encode(other.abi_encode_packed())),
+            })
+            .collect::<Vec<_>>()
+            .join(" ")
+    }
+
     /// The cheatcode signature for a selector (`prank(address)`).
     pub fn signature(&self, selector: &[u8]) -> Option<&'static str> {
         self.signatures.get(selector.get(..4)?).copied()
@@ -214,6 +242,8 @@ impl Cheats {
             && self.expect_revert.as_ref().is_some_and(|e| e.depth == depth && e.caller == inputs.caller);
         self.armed.push(aimed);
         if inputs.target_address == CONSOLE {
+            let line = self.console_line(input);
+            self.console.push(line);
             return Some(outcome(inputs, InstructionResult::Return, Bytes::new()));
         }
         if inputs.target_address != HEVM {
@@ -703,4 +733,30 @@ fn json_at<'a>(v: &'a serde_json::Value, key: &str) -> Option<&'a serde_json::Va
         }
     }
     Some(at)
+}
+
+/// forge-std's console.log signatures (and hardhat's older `uint`/`int` spellings), by selector.
+fn console_signatures() -> HashMap<[u8; 4], String> {
+    let mut sigs = vec!["log()".to_string()];
+    for t in ["string", "uint256", "int256", "address", "bool", "bytes32", "bytes", "uint", "int"] {
+        sigs.push(format!("log({t})"));
+    }
+    for (name, t) in [("logString", "string"), ("logUint", "uint256"), ("logInt", "int256"), ("logAddress", "address"), ("logBool", "bool"), ("logBytes", "bytes"), ("logBytes32", "bytes32")] {
+        sigs.push(format!("{name}({t})"));
+    }
+    for uint in ["uint256", "uint"] {
+        let base = ["string", uint, "address", "bool"];
+        for a in base {
+            for b in base {
+                sigs.push(format!("log({a},{b})"));
+                for c in base {
+                    sigs.push(format!("log({a},{b},{c})"));
+                    for d in base {
+                        sigs.push(format!("log({a},{b},{c},{d})"));
+                    }
+                }
+            }
+        }
+    }
+    sigs.into_iter().map(|s| (keccak256(s.as_bytes())[..4].try_into().unwrap(), s)).collect()
 }

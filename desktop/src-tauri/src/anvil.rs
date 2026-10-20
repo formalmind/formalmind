@@ -121,7 +121,9 @@ pub fn anvil_rpc_known(folder: String, rpc_env: String) -> Result<bool, String> 
 
 /// Starts (or restarts) the fork of a chain for a folder, from its saved state when there is one.
 #[tauri::command(async)]
-pub fn anvil_start(folder: String, chain_id: u64, rpc_env: String) -> Result<Fork, String> {
+pub fn anvil_start(app: tauri::AppHandle, folder: String, chain_id: u64, rpc_env: String) -> Result<Fork, String> {
+    let log_folder = folder.clone();
+    let log = move |line: String| crate::debug::log(&Some(app.clone()), &log_folder, line);
     if !crate::local::is_added(&folder)? {
         return Err("Add the folder first".into());
     }
@@ -136,6 +138,7 @@ pub fn anvil_start(folder: String, chain_id: u64, rpc_env: String) -> Result<For
         }
     }
     let port = free_port()?;
+    log(format!("$ anvil --fork-url ${rpc_env} --chain-id {chain_id} --port {port} --state ~/.formalmind/anvil/{name}.json"));
     let state = dir()?.join(format!("{name}.json"));
     let child = Command::new(anvil())
         .args(["--fork-url", &url, "--port", &port.to_string(), "--chain-id", &chain_id.to_string(), "--silent", "--state-interval", "30"])
@@ -156,6 +159,7 @@ pub fn anvil_start(folder: String, chain_id: u64, rpc_env: String) -> Result<For
         }
         std::thread::sleep(std::time::Duration::from_millis(500));
     }
+    log(if alive { format!("anvil ready on :{port}") } else { "anvil didn't answer".into() });
     if !alive {
         kill_anvil(fork.pid);
         return Err(format!("anvil didn't answer on port {port} (check {})", fork.rpc_env));

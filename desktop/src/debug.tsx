@@ -4,6 +4,7 @@ import { reportError } from "@/lib/report-error";
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router";
 import { invoke } from "@tauri-apps/api/core";
+import { listen } from "@tauri-apps/api/event";
 import { Bug, ChevronDown, ChevronRight, Columns2, FileCode2, FlaskConical, FolderPlus, Link2, Loader2, Play, Unlink2, X } from "lucide-react";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { useHighlightedCode } from "@/hooks/use-highlighted-code";
@@ -822,7 +823,56 @@ export function DebugView({ folder, file, test: wanted, onPick, embedded }: { fo
 						</div>
 					</div>
 				)}
+				<OutputPanel folder={folder} busy={opening || Boolean(running)} />
 			</main>
 		</div>
+	);
+}
+
+/**
+ * Debug's output, like a terminal under the panes: what's running now (solc, anvil, the fork, setUp and the run)
+ * and what the run printed with console.log, so a long compile or fork start never looks frozen.
+ */
+function OutputPanel({ folder, busy }: { folder: string; busy: boolean }) {
+	const [lines, setLines] = useState<{ at: number; text: string }[]>([]);
+	const [open, setOpen] = useState(true);
+	const box = useRef<HTMLDivElement | null>(null);
+	useEffect(() => {
+		const off = listen<{ folder: string; line: string }>("debug:log", ({ payload }) => {
+			if (payload.folder !== folder) return;
+			setLines((l) => [...l.slice(-400), { at: Date.now(), text: payload.line }]);
+		});
+		return () => void off.then((f) => f());
+	}, [folder]);
+	useEffect(() => {
+		box.current?.scrollTo({ top: box.current.scrollHeight });
+	}, [lines, open]);
+	const tone = (t: string) =>
+		t.startsWith("$") ? "text-sky-400" : t.startsWith("console.log") ? "text-zinc-100" : /^(pass|anvil ready|compiled|fork:)/.test(t) ? "text-emerald-400" : /fail|revert|didn't/.test(t) ? "text-red-400" : "text-zinc-400";
+	return (
+		<section className="mt-2 flex shrink-0 flex-col overflow-hidden rounded-xl border bg-zinc-950 font-mono text-[11px] leading-5 text-zinc-300">
+			<button type="button" onClick={() => setOpen(!open)} className="flex h-7 shrink-0 items-center gap-2 px-3 text-left text-zinc-400 hover:text-zinc-200">
+				<ChevronRight className={`size-3 transition-transform ${open ? "rotate-90" : ""}`} />
+				<span className="uppercase tracking-wider">Output</span>
+				{busy ? <Loader2 className="size-3 animate-spin text-sky-400" /> : null}
+				<span className="truncate text-zinc-500">{lines.at(-1)?.text ?? "Runs show what they do here."}</span>
+				{lines.length ? (
+					<span role="button" tabIndex={-1} onClick={(e) => { e.stopPropagation(); setLines([]); }} className="ml-auto shrink-0 rounded px-1.5 text-zinc-500 hover:bg-zinc-800 hover:text-zinc-200">
+						clear
+					</span>
+				) : null}
+			</button>
+			{open ? (
+				<div ref={box} className="max-h-40 min-h-16 overflow-auto border-t border-zinc-800 px-3 py-1.5">
+					{lines.length === 0 ? <p className="text-zinc-500">Nothing yet. Run a script or a test from the file tree.</p> : null}
+					{lines.map((l, i) => (
+						<p key={i} className="flex gap-3 whitespace-pre-wrap break-all">
+							<span className="shrink-0 select-none text-zinc-600">{new Date(l.at).toLocaleTimeString([], { hour12: false })}</span>
+							<span className={tone(l.text)}>{l.text}</span>
+						</p>
+					))}
+				</div>
+			) : null}
+		</section>
 	);
 }

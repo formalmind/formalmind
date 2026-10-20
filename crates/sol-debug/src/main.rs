@@ -169,6 +169,13 @@ fn main() -> Result<()> {
         let verdict = if run.test.success { "PASS".to_string() } else { format!("FAIL: {}", run.test.revert_reason().unwrap_or_default()) };
         println!("\n{verdict}  {}::{test}  ({} steps, {} gas, {:.1?})", a.contract, run.test.trace.steps.len(), run.test.gas_used, t.elapsed());
         print_writes(&s, &run.test);
+        let console = s.take_console();
+        if !console.is_empty() {
+            println!("console:");
+            for line in console {
+                println!("  {line}");
+            }
+        }
         if !s.evm.inspector.cheats.missing.is_empty() {
             println!("unsupported cheatcodes called: {:?}", s.evm.inspector.cheats.missing);
         }

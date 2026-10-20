@@ -308,6 +308,11 @@ impl Session {
         Ok(info)
     }
 
+    /// What console.log printed since the last call (setUp's and the run's).
+    pub fn take_console(&mut self) -> Vec<String> {
+        std::mem::take(&mut self.evm.inspector.cheats.console)
+    }
+
     /// RPC failures while running on a fork (empty on a local chain).
     pub fn fork_errors(&self) -> Vec<String> {
         self.evm.ctx.db().db.take_errors()
