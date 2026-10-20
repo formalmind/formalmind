@@ -87,6 +87,7 @@ pub fn run() {
             ast::ast_scripts,
             lsp::lsp_definition,
             lsp::lsp_hover,
+            local::log_error,
             term::term_start,
             term::term_write,
             term::term_resize,

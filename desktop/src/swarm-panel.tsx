@@ -2,6 +2,7 @@ import { MarkGithubIcon } from "@primer/octicons-react";
 import { Suspense, lazy, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { NvimTerminal } from "./nvim-terminal";
+import { reportError } from "@/lib/report-error";
 import { JsonTree } from "./json-tree";
 import { Bug, Check, ChevronDown, Code2, Copy, FileCode2, GanttChart, MessagesSquare, Network, Play, Plus, ScanSearch, Square, WandSparkles, Wrench } from "lucide-react";
 
@@ -652,6 +653,9 @@ function AuditView({ folder, scan, invoke, preferred, onOpenFile }: { folder: st
 	const [scripts, setScripts] = useState<Scripts | null>(null);
 	const [error, setError] = useState<string | null>(null);
 	useEffect(() => {
+		if (error) reportError(`Audit · ${entry ?? ""}`, error);
+	}, [error, entry]);
+	useEffect(() => {
 		setScripts(null);
 		void invoke<Scripts>("ast_scripts", { folder }).then(setScripts, () => setScripts(null));
 	}, [folder, invoke]);
@@ -722,6 +726,10 @@ export function SwarmPanel({ folder, name, scan, bridge, session, file: openPath
 	// Markdown files open rendered; the toggle shows their source (the choice is kept).
 	const [mdSource, setMdSource] = useState(() => store.get("fm:md-view") === "source");
 	// JSON files open as a collapsible tree; Raw shows the file as it is.
+	// Every error the page shows also goes to the bell (copyable) and the app's error log.
+	useEffect(() => {
+		if (error) reportError(name, error);
+	}, [error, name]);
 	const [jsonRaw, setJsonRaw] = useState(() => store.get("fm:json-view") === "raw");
 	const jsonOk = useMemo(() => Boolean(file && /\.json$/i.test(file.path) && jsonValid(file.text)), [file]);
 	// Images a Markdown file points at, read from the folder (relative to the file), by path.

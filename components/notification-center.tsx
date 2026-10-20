@@ -7,7 +7,7 @@
  */
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { ArrowUpRight, Bell, X } from "lucide-react";
+import { ArrowUpRight, Bell, Check, Copy, X } from "lucide-react";
 import {
   dismissNotification,
   markNotificationRead,
@@ -123,19 +123,24 @@ export function NotificationCenter() {
                   <p className="truncate text-sm font-medium text-foreground">{n.title}</p>
                   {n.read && <span className="shrink-0 text-[10px] text-muted-foreground">Read</span>}
                 </div>
-                <div className="min-w-0 break-words text-xs font-medium text-muted-foreground">
+                <div className={`min-w-0 select-text break-words text-xs font-medium text-muted-foreground ${n.variant === "error" ? "max-h-40 overflow-y-auto whitespace-pre-wrap" : ""}`}>
                   <span>{relativeTime(n.createdAt, now)}</span>
                   {n.description != null && <> {n.description}</>}
                 </div>
-                {n.action && (
-                  <button
-                    type="button"
-                    className="btn-dark mt-2 h-7 px-3 text-xs"
-                    onClick={() => window.dispatchEvent(new Event(n.action!.event))}
-                  >
-                    {n.action.label}
-                  </button>
-                )}
+                {n.action || n.variant === "error" ? (
+                  <div className="mt-2 flex items-center gap-1.5">
+                    {n.action && (
+                      <button
+                        type="button"
+                        className="btn-dark h-7 px-3 text-xs"
+                        onClick={() => window.dispatchEvent(new Event(n.action!.event))}
+                      >
+                        {n.action.label}
+                      </button>
+                    )}
+                    {n.variant === "error" || n.copy ? <CopyNotice text={n.copy ?? [n.title, n.description].filter(Boolean).join(": ")} /> : null}
+                  </div>
+                ) : null}
               </div>
                 ))}
                 {(headerShowReadHistory ? readHistory : unread).length === 0 && (
@@ -200,5 +205,25 @@ export function NotificationCenter() {
         </div>
       )}
     </div>
+  );
+}
+
+/** Copies a notice (an error and its details) to paste elsewhere. */
+function CopyNotice({ text }: { text: string }) {
+  const [done, setDone] = useState(false);
+  return (
+    <button
+      type="button"
+      className="inline-flex h-7 items-center gap-1.5 rounded-full border bg-muted px-3 text-xs text-muted-foreground transition-colors hover:text-foreground"
+      onClick={() => {
+        void navigator.clipboard?.writeText(text).then(() => {
+          setDone(true);
+          setTimeout(() => setDone(false), 1500);
+        });
+      }}
+    >
+      {done ? <Check aria-hidden="true" className="size-3.5" /> : <Copy aria-hidden="true" className="size-3.5" />}
+      {done ? "Copied" : "Copy"}
+    </button>
   );
 }

@@ -191,3 +191,14 @@ mod tests {
         fs::remove_dir_all(tmp).unwrap();
     }
 }
+
+/// Appends an error the app showed to ~/Library/Logs/Formal Mind/errors.log, so it can be read back later.
+#[tauri::command]
+pub fn log_error(source: String, message: String) -> Result<(), String> {
+    use std::io::Write;
+    let dir = std::path::PathBuf::from(std::env::var("HOME").map_err(|e| e.to_string())?).join("Library/Logs/Formal Mind");
+    std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+    let secs = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0);
+    let mut f = std::fs::OpenOptions::new().create(true).append(true).open(dir.join("errors.log")).map_err(|e| e.to_string())?;
+    writeln!(f, "[{secs}] v{} {source}: {}", env!("CARGO_PKG_VERSION"), message.replace('\n', "\n    ")).map_err(|e| e.to_string())
+}

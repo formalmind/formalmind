@@ -3,6 +3,7 @@ import { Terminal } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
 import "@xterm/xterm/css/xterm.css";
 import type { Bridge } from "./swarm-panel";
+import { reportError } from "@/lib/report-error";
 
 /**
  * Vim mode in the Mac app: the bundled Neovim in a real terminal (a pseudo-terminal in src-tauri/src/term.rs, drawn
@@ -46,7 +47,10 @@ export function NvimTerminal({ bridge, folder, path, line }: { bridge: Bridge; f
 					if (disposed) void bridge.invoke("term_kill", { id: n });
 					else id = n;
 				},
-				(e) => term.write(`\r\n\x1b[31m${String(e)}\x1b[0m\r\n`),
+				(e) => {
+					term.write(`\r\n\x1b[31m${String(e)}\x1b[0m\r\n`);
+					reportError("Neovim", e);
+				},
 			);
 		};
 		const offData = bridge.listen<{ id: number; data: string }>("term:data", ({ payload }) => {

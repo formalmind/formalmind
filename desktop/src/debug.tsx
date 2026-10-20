@@ -1,3 +1,4 @@
+import { reportError } from "@/lib/report-error";
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router";
 import { invoke } from "@tauri-apps/api/core";
@@ -558,6 +559,9 @@ export function DebugView({ folder, file, test: wanted, onPick }: { folder: stri
 	const [focusB, setFocusB] = useState(false);
 	const [linked, setLinked] = useState(true);
 	const typing = useRef(false);
+	useEffect(() => {
+		if (error) reportError(`Debug · ${file ?? name(folder)}`, error);
+	}, [error, file, folder]);
 
 	useEffect(() => {
 		setScan(null);
