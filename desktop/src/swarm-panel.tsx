@@ -418,9 +418,6 @@ export function SwarmPanel({ folder, name, scan, bridge, session }: { folder: st
 					/>
 					{run ? null : (
 						<div className="flex flex-wrap items-center gap-1.5 px-1 text-xs">
-							<a href="#/settings" className="text-muted-foreground hover:text-foreground hover:underline" title="Change in Settings">
-								Claude via {provider === "anthropic" ? (hasKey ? "your Anthropic key" : "your Anthropic key (not set)") : "formal.team credits"}
-							</a>
 							<button type="button" onClick={() => void start()} disabled={provider === "anthropic" && !hasKey} className="btn-dark ml-auto h-7 gap-1.5 px-3 disabled:opacity-50"><Play className="size-3" />{plan.some((i) => i.mark === " ") ? "Resume" : "Start"}</button>
 						</div>
 					)}
