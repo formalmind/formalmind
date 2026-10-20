@@ -368,7 +368,7 @@ same library.
 ### Desktop: debug mode (built)
 
 The Tauri app runs the same crate: `desktop/src-tauri` depends on `crates/sol-debug`, and `src-tauri/src/debug.rs`
-puts it behind seven commands. revm's EVM isn't `Send`, so each debug session is a thread of its own that owns the
+puts it behind nine commands. revm's EVM isn't `Send`, so each debug session is a thread of its own that owns the
 `Session`, the `Run` and the `Navigator`; commands hand it jobs over a channel, keyed by a session id. The webview
 never gets the trace, only one step's view at a time.
 
@@ -380,7 +380,11 @@ never gets the trace, only one step's view at a time.
 | `debug_break(id, line, file?, name?) → view` | Toggles a line breakpoint (by source id, by file name, or in the current file) |
 | `debug_watch(id, text, on) → view` | Adds or removes a storage watch: `continue` stops on a write whose name contains it |
 | `debug_file(id, file) → { name, text }` | One source file, whole, fetched once per file and highlighted in the webview |
+| `debug_compare(id, other, contract, test, slot_map?) → compared` | "Compare with…": the same test of the same file in another added folder, both runs, the diff report, both opened on the first divergence |
+| `debug_sync(id, b) → view` | Keeps a comparison in step: moves the other side to the external call this side is in |
 | `debug_close(id)` | Ends the session's thread |
+
+`debug_nav`, `debug_break`, `debug_watch` and `debug_file` take `b: true` to act on the compared folder's run.
 
 A step's view (`StepView`) is a few kilobytes: the place (source id, line, scope, node type and the node's `src` on
 its line as UTF-16 columns), the open frames, 61 instructions around the pc, the stack top first, memory rebuilt
@@ -388,8 +392,8 @@ from the frame's writes (the words the last step wrote marked), the latest 100 s
 the breakpoints, the watches and a status line. The engine packages are built with `opt-level = 3` in the dev
 profile too, so `tauri dev` runs a 33k-step test in about as long as the CLI.
 
-The page is `desktop/src/debug.tsx`, at `/debug?path=<folder>&file=<test file>&test=<Contract::test>`. A folder's
-**Files** card has **Debug tests**, and a bug button on every `*.t.sol`. The page has the folder's test files as a
+The page is `desktop/src/debug.tsx`, at `/debug?path=<folder>&file=<test file>&test=<Contract::test>`. **Debug**
+sits beside the folder's name and on every `*.t.sol` in the sidebar's file tree. The page has the folder's test files as a
 tree on the left; clicking one compiles it and lists its tests, and clicking a test runs it. The panes are the TUI's,
 in the app's card style: source (highlighted with the app's Shiki highlighter, the current node's range lit, a
 gutter that toggles breakpoints), calls (click a frame to go to its first step), opcodes (the current node's
@@ -402,6 +406,30 @@ Checked on `~/developer/asyncswap/contracts`, `test/AsyncSwap.t.sol` → `test_s
 (`self.nodes[leafId].price = price;`, in the `AsyncSwap ⇒ AsyncMatching` DELEGATECALL), and the storage pane reads
 `write priceBooks[0x3e76cc…a14c].asks.nodes[1].price: 0 → 950000000000000000`. `cargo test -- --ignored
 async_swap` in `src-tauri/` checks the same named write without the UI.
+
+**Compare with… (Solidity against its port).** A run's header has **Compare with…**: pick another added folder,
+or add one (the Huff port `~/developer/asyncswap/v2-raff`, a fork, a fixed branch checked out elsewhere). The
+session compiles the same file there, runs the same test, and calls `diff::compare`, which checks the external
+calls, events and storage writes an outside observer sees (`crates/sol-debug/src/diff.rs`). The page
+shows the report as a strip: one chip per kind (`✓ calls 18/18`, `✗ storage Counter 1/4`), the ported contracts
+whose storage wasn't compared, and the first divergence on both sides (click a side to go there). An optional slot
+map (a path in the other folder: solc `storageLayout` JSON per contract name) names the port's slots, and
+**Compare again** reruns with it. The two runs sit one above the other with all their panes, both on the first
+divergence. As in the TUI's split view, Tab switches the side the keys move (clicking a side does too) and `=` puts
+both back at the divergence.
+
+**In step** (on by default) keeps the other side at the same place in the call tree. A step's place is how many
+observed external calls have started and which of them it runs in (a library DELEGATECALL counts as its caller's
+call). After a move, the other side moves only when its place differs, to the first step with the same place. So
+both enter `PoolManager.unlock` together, both come back to the Router after it returns, and stepping inside one
+call leaves the other where it is. Opcodes can't be paired across implementations; calls can.
+
+Checked in the page on the same Async Swap test against v2-raff: no divergence (calls 18/18, events 6/6, token0
+3/3, PoolManager 1/1, AsyncSwap's own storage not compared without a slot map, 24 / 16 writes), as the CLI's `--diff`
+reports. Stepping side a into `router.swap` and then `PoolManager.unlock` takes side b into `Router.huff` and its
+`unlock`, and `f` brings both back. On sol-debug's diff fixture (`bumps += 1` against `+= 2`) both sides open on step
+265, `Counter.sol:12`, with `bumps[0x5b73…0519]: 0 → 1` against `0 → 2` in the storage panes;
+`compare_fixture_diverges_in_the_same_call` in `src-tauri/src/debug.rs` checks that case.
 
 Still to come on the canvas: the contract graph that formal-ast already draws, with the current function lit, an
 edge animating for each call frame, storage cells changing as the trace advances, and a timeline scrubber over the
