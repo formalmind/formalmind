@@ -3,6 +3,7 @@
 //! with settings in ~/.formalmind (local.rs), the local executor that runs agent turns here (executor.rs), and debug
 //! mode over the sol-debug engine (debug.rs).
 
+mod ast;
 mod debug;
 mod executor;
 mod swarm;
@@ -78,6 +79,8 @@ pub fn run() {
             local::folder_remove,
             local::folder_scan,
             local::folder_tree,
+            ast::ast_units,
+            ast::ast_slice,
             executor::model_key_set,
             executor::model_key_status,
             executor::turn_start,

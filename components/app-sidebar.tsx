@@ -290,6 +290,7 @@ export function AppSidebar({ extra, ...props }: React.ComponentProps<typeof Side
 									onOpen={(f) => {
 										const next = new URLSearchParams(location.search)
 										next.set("file", f)
+										next.set("mode", "code")
 										navigate(`/local-demo?${next.toString()}`)
 									}}
 								/>

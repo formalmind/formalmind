@@ -76,6 +76,11 @@ pub struct Scan {
 const SKIP: [&str; 9] = [".git", "node_modules", "lib", "dependencies", "out", "cache", "target", ".lake", "dist"];
 const LIMIT: usize = 5000;
 
+/// Whether a folder has been added (only those may be read).
+pub fn is_added(path: &str) -> Result<bool, String> {
+    Ok(read()?.folders.iter().any(|f| f == path))
+}
+
 /// The Solidity and Lean files in a folder that's been added (only those may be read).
 #[tauri::command]
 pub fn folder_scan(path: String) -> Result<Scan, String> {

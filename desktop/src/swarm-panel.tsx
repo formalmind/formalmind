@@ -1,6 +1,6 @@
 import { MarkGithubIcon } from "@primer/octicons-react";
 import { useEffect, useRef, useState } from "react";
-import { Bug, Check, ChevronDown, Copy, FileCode2, Maximize2, Minimize2, Play, Plus, Square, WandSparkles, Wrench } from "lucide-react";
+import { Bug, Check, ChevronDown, Code2, Copy, FileCode2, Network, Play, Plus, ScanSearch, Square, WandSparkles, Wrench } from "lucide-react";
 import { useSearchParams } from "react-router";
 import { ChatComposer } from "@/components/chat-composer";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuRadioGroup, DropdownMenuRadioItem, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
@@ -185,10 +185,10 @@ function Floating({ id, open, onOpen, title, meta, tone, action, children }: { i
  * and steer the swarm, the plan, and what each agent says as it works).
  */
 /** A whole file, highlighted by its extension, with a line-number gutter. */
-function FileView({ path, text }: { path: string; text: string }) {
+function FileView({ path, text, big }: { path: string; text: string; big?: boolean }) {
 	const lines = useHighlightedCode(text, EXT[path.split(".").pop() ?? ""] ?? "text");
 	return (
-		<pre className="overflow-x-auto py-2 font-mono text-[11px] leading-5">
+		<pre className={`overflow-x-auto py-2 font-mono ${big ? "text-[12.5px] leading-6" : "text-[11px] leading-5"}`}>
 			{lines.map((line, i) => (
 				<span key={i} className="block whitespace-pre pr-3">
 					<span className="mr-3 inline-block w-9 select-none text-right text-muted-foreground/60">{i + 1}</span>
@@ -196,6 +196,138 @@ function FileView({ path, text }: { path: string; text: string }) {
 				</span>
 			))}
 		</pre>
+	);
+}
+
+type Mode = "code" | "swarm" | "audit";
+
+const MODES: { id: Mode; label: string; icon: typeof Code2 }[] = [
+	{ id: "code", label: "Code", icon: Code2 },
+	{ id: "swarm", label: "Swarm", icon: Network },
+	{ id: "audit", label: "Audit", icon: ScanSearch },
+];
+
+/** The page's modes as a macOS-style segmented control, centred at the top. */
+function ModeTabs({ mode, onMode }: { mode: Mode; onMode: (m: Mode) => void }) {
+	return (
+		<div role="tablist" aria-label="Mode" className="pointer-events-auto absolute left-1/2 top-3 z-20 inline-flex h-8 -translate-x-1/2 items-center gap-0.5 rounded-lg border bg-muted/90 p-0.5 shadow-sm backdrop-blur">
+			{MODES.map(({ id, label, icon: Icon }) => (
+				<button
+					key={id}
+					type="button"
+					role="tab"
+					aria-selected={mode === id}
+					onClick={() => onMode(id)}
+					className={`inline-flex h-7 items-center gap-1.5 rounded-md px-3 text-[12px] font-medium outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring ${mode === id ? "bg-background text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"}`}
+				>
+					<Icon className="size-3.5" />
+					{label}
+				</button>
+			))}
+		</div>
+	);
+}
+
+type AstUnit = { name: string; function: string; mutability: string; reads: string[]; writes: string[]; external: number; guards: number; arith: number; unchecked: number; asm: number; closure: number };
+type AstUnits = { contract: string; files: number; inScope: number; reachable: number; unusedImports: string[]; ms: number; units: AstUnit[]; clusters: { units: string[]; shared: string[] }[] };
+
+/** Audit mode: the contract as the AST reads it — entry points, their storage footprint and risks, and each one's
+ *  slice (what an agent gets). */
+function AuditView({ folder, scan, invoke, preferred }: { folder: string; scan: Scan | null; invoke: Bridge["invoke"]; preferred: string | null }) {
+	const sources = (scan?.solidity ?? []).filter((f) => !f.endsWith(".t.sol") && !f.endsWith(".s.sol"));
+	const pick = preferred && sources.includes(preferred) ? preferred : (sources.find((f) => f.startsWith("src/")) ?? sources[0] ?? null);
+	const [entry, setEntry] = useState<string | null>(pick);
+	const [data, setData] = useState<AstUnits | null>(null);
+	const [error, setError] = useState<string | null>(null);
+	const [unit, setUnit] = useState<string | null>(null);
+	const [slice, setSlice] = useState<string | null>(null);
+	useEffect(() => {
+		if (!entry && pick) setEntry(pick);
+	}, [entry, pick]);
+	useEffect(() => {
+		if (!entry) return;
+		setData(null);
+		setError(null);
+		setUnit(null);
+		setSlice(null);
+		void invoke<AstUnits>("ast_units", { folder, entry }).then(setData, (e) => setError(String(e)));
+	}, [folder, entry, invoke]);
+	const open = (name: string) => {
+		setUnit(name);
+		setSlice(null);
+		void invoke<string>("ast_slice", { folder, entry, function: name }).then(setSlice, (e) => setSlice(`Couldn't build the slice: ${e}`));
+	};
+	return (
+		<>
+			<div className="flex h-8 shrink-0 items-center gap-2 px-2.5 text-[12px]">
+				<span className="font-mono text-[11px] font-medium uppercase tracking-wider text-muted-foreground">AST</span>
+				<DropdownMenu>
+					<DropdownMenuTrigger className="inline-flex h-6 min-w-0 items-center gap-1 rounded-md border bg-background px-2 font-mono text-[11px] outline-none hover:bg-muted" title="The contract to read">
+						<span className="truncate">{entry ?? "No Solidity sources"}</span>
+						<ChevronDown className="size-3 shrink-0" />
+					</DropdownMenuTrigger>
+					<DropdownMenuContent align="start" className="max-h-80 overflow-y-auto">
+						<DropdownMenuRadioGroup value={entry ?? ""} onValueChange={setEntry}>
+							{sources.map((f) => (
+								<DropdownMenuRadioItem key={f} value={f} className="font-mono text-[11px]">{f}</DropdownMenuRadioItem>
+							))}
+						</DropdownMenuRadioGroup>
+					</DropdownMenuContent>
+				</DropdownMenu>
+				{data ? (
+					<span className="min-w-0 truncate text-muted-foreground">
+						{data.contract} · {data.units.length} entry points · {data.reachable} functions reached · {data.inScope} of {data.files} files in scope · {data.ms} ms
+					</span>
+				) : null}
+			</div>
+			<div className="grid min-h-0 flex-1 grid-cols-[minmax(0,22rem)_minmax(0,1fr)] gap-1">
+				<div className="min-h-0 overflow-y-auto rounded-xl border bg-card p-1 shadow-card">
+					{error ? <p className="whitespace-pre-wrap p-3 font-mono text-[11px] text-red-600">{error}</p> : null}
+					{!data && !error ? <p className="p-3 text-[13px] text-muted-foreground">{entry ? "Reading the AST…" : "No Solidity sources in this folder."}</p> : null}
+					{data?.unusedImports.length ? <p className="px-2 py-1.5 text-[11px] text-amber-700 dark:text-amber-400">Unused imports: {data.unusedImports.join(", ")}</p> : null}
+					<ul>
+						{data?.units.map((u) => (
+							<li key={u.name}>
+								<button type="button" onClick={() => open(u.name)} className={`w-full rounded-lg px-2 py-1.5 text-left hover:bg-muted ${unit === u.name ? "bg-muted" : ""}`}>
+									<span className="flex items-center gap-2">
+										<span className="truncate font-mono text-[12px]">{u.name}</span>
+										<span className="ml-auto shrink-0 text-[10px] text-muted-foreground">{u.mutability}</span>
+									</span>
+									<span className="mt-0.5 flex flex-wrap gap-x-2 text-[10.5px] text-muted-foreground">
+										{u.writes.length ? <span className="text-foreground/80">writes {u.writes.join(", ")}</span> : <span>writes nothing</span>}
+										{u.external ? <span className="text-amber-700 dark:text-amber-400">{u.external} external</span> : null}
+										{u.guards ? <span>{u.guards} guards</span> : null}
+										{u.arith ? <span>{u.arith} arith{u.unchecked ? ` (${u.unchecked} unchecked)` : ""}</span> : null}
+										{u.asm ? <span className="text-violet-700 dark:text-violet-400">{u.asm} asm</span> : null}
+									</span>
+								</button>
+							</li>
+						))}
+					</ul>
+				</div>
+				<div className="min-h-0 overflow-y-auto rounded-xl border bg-card px-4 py-3 shadow-card">
+					{unit ? (
+						slice ? <div className="prose prose-sm max-w-none dark:prose-invert"><ChatMarkdown>{slice}</ChatMarkdown></div> : <p className="text-[13px] text-muted-foreground">Building the slice…</p>
+					) : (
+						<div className="text-[13px] text-muted-foreground">
+							<p>Pick an entry point to see its slice: its storage footprint, the external calls and what each is followed by, its guards, arithmetic and assembly, and its code.</p>
+							{data?.clusters.length ? (
+								<div className="mt-4">
+									<p className="mb-1 font-medium text-foreground">Units that write the same state</p>
+									<ul className="space-y-1">
+										{data.clusters.map((c, i) => (
+											<li key={i} className="font-mono text-[11px]">
+												{c.shared.join(", ")} ← {c.units.join(", ")}
+											</li>
+										))}
+									</ul>
+								</div>
+							) : null}
+						</div>
+					)}
+				</div>
+			</div>
+		</>
 	);
 }
 
@@ -227,8 +359,6 @@ export function SwarmPanel({ folder, name, scan, bridge, session, file: openPath
 	const [proofs, setProofs] = useState<Record<string, Proof>>({});
 	const [openItem, setOpenItem] = useState<number | null>(null);
 	const [file, setFile] = useState<{ path: string; text: string } | null>(null);
-	// The file card can widen to read code comfortably; it stops short of the chat card.
-	const [wideFile, setWideFile] = useState(false);
 	/** A report with the PoC tests and proofs it cites inlined (newer reports already carry them). */
 	const withPoc = async (body: string) => {
 		const cited = [...new Set(body.match(/[\w./-]+\.(?:t\.sol|lean)/g) ?? [])].filter((p) => !body.includes(`Proof of concept: \`${p}\``)).slice(0, 3);
@@ -242,14 +372,26 @@ export function SwarmPanel({ folder, name, scan, bridge, session, file: openPath
 		);
 		return body + parts.join("");
 	};
-	const view = (path: string) => {
+	// The page's mode (Code, Swarm, Audit) and the open file live in the URL, so they survive reloads.
+	const [params, setParams] = useSearchParams();
+	const mode = (params.get("mode") as Mode | null) ?? "swarm";
+	const setMode = (m: Mode) => {
+		const next = new URLSearchParams(params);
+		next.set("mode", m);
+		setParams(next);
+	};
+	const loadFile = (path: string) => {
 		void invoke<string>("folder_read", { folder, path }).then(
-			(text) => {
-				setFile({ path, text });
-				setPanel("file");
-			},
+			(text) => setFile({ path, text }),
 			(e) => setError(String(e)),
 		);
+	};
+	/** Opens a file in the Code tab. */
+	const view = (path: string) => {
+		const next = new URLSearchParams(params);
+		next.set("file", path);
+		next.set("mode", "code");
+		setParams(next);
 	};
 	const [viewing, setViewing] = useState<string | null>(null);
 	const runRef = useRef<string | null>(null);
@@ -310,13 +452,13 @@ export function SwarmPanel({ folder, name, scan, bridge, session, file: openPath
 		if (session && session !== viewing && !run) load(session);
 		// eslint-disable-next-line react-hooks/exhaustive-deps
 	}, [session]);
-	// A file picked in the sidebar's tree opens in the file card.
+	// The file picked in the sidebar's tree (or a proof link) is what the Code tab shows.
 	useEffect(() => {
-		if (openPath) view(openPath);
+		if (openPath) loadFile(openPath);
+		else setFile(null);
 		// eslint-disable-next-line react-hooks/exhaustive-deps
 	}, [openPath, folder]);
 	// Sessions are picked from the chat card's title (the sidebar holds the folder's files).
-	const [params, setParams] = useSearchParams();
 	const pickSession = (run: string) => {
 		const next = new URLSearchParams(params);
 		next.set("run", run);
@@ -392,7 +534,38 @@ export function SwarmPanel({ folder, name, scan, bridge, session, file: openPath
 						</>
 					}
 				/>
-				<div className={`pointer-events-none absolute left-3 top-14 z-10 flex max-h-[calc(100%-4.5rem)] flex-col gap-2 transition-[width] duration-200 ${wideFile && panel === "file" ? "bottom-3 w-[min(48rem,calc(100%-26.5rem))]" : "w-[min(18rem,calc(100%-1.5rem))]"}`}>
+				<ModeTabs mode={mode} onMode={setMode} />
+				{mode === "code" ? (
+					<div className="pointer-events-auto absolute bottom-3 left-3 right-[25.75rem] top-14 z-10 flex min-h-0 flex-col overflow-hidden rounded-2xl border bg-muted/80 p-1 shadow-pop backdrop-blur">
+						{file ? (
+							<>
+								<div className="flex h-8 shrink-0 items-center gap-2 px-2.5">
+									<span className="font-mono text-[11px] font-medium uppercase tracking-wider text-muted-foreground">{file.path.split("/").pop()}</span>
+									<span className="min-w-0 truncate text-[11px] text-muted-foreground">{file.path}</span>
+									<span className="ml-auto flex items-center gap-1">
+										{onDebug && file.path.endsWith(".t.sol") ? (
+											<button type="button" onClick={() => onDebug(file.path)} title={`Debug a test in ${file.path}`} className="inline-flex h-6 items-center gap-1 rounded-md border bg-background px-2 text-[11px] text-foreground hover:bg-muted">
+												<Bug className="size-3" />Debug
+											</button>
+										) : null}
+										<CopyButton text={file.text} label="Copy the file" />
+									</span>
+								</div>
+								<div className="min-h-0 flex-1 overflow-auto rounded-xl border bg-card shadow-card">
+									<FileView path={file.path} text={file.text} big />
+								</div>
+							</>
+						) : (
+							<p className="m-auto text-sm text-muted-foreground">Pick a file in the sidebar.</p>
+						)}
+					</div>
+				) : null}
+				{mode === "audit" ? (
+					<div className="pointer-events-auto absolute bottom-3 left-3 right-[25.75rem] top-14 z-10 flex min-h-0 flex-col overflow-hidden rounded-2xl border bg-muted/80 p-1 shadow-pop backdrop-blur">
+						<AuditView folder={folder} scan={scan} invoke={invoke} preferred={openPath ?? null} />
+					</div>
+				) : null}
+				<div className={`pointer-events-none absolute left-3 top-14 z-10 flex max-h-[calc(100%-4.5rem)] w-[min(18rem,calc(100%-1.5rem))] flex-col gap-2 ${mode === "swarm" ? "" : "hidden"}`}>
 					<Floating id="plan" open={panel} onOpen={setPanel} title="Plan" meta={plan.length ? `${done}/${plan.length}` : ""}>
 						<ul className="space-y-0.5 p-2 text-[13px]">
 							{plan.length === 0 ? <li className="p-2 text-muted-foreground">The planner writes .formal/plan.md on the first run.</li> : null}
@@ -441,33 +614,6 @@ export function SwarmPanel({ folder, name, scan, bridge, session, file: openPath
 									</li>
 								))}
 							</ul>
-						</Floating>
-					) : null}
-					{file ? (
-						<Floating id="file" open={panel} onOpen={setPanel} title={file.path.split("/").pop() ?? "File"} meta={file.path} action={
-							<span className="flex items-center gap-1">
-								{onDebug && file.path.endsWith(".t.sol") ? (
-									<button type="button" onClick={(e) => { e.stopPropagation(); onDebug(file.path); }} title={`Debug a test in ${file.path}`} className="inline-flex h-6 items-center gap-1 rounded-md border bg-background px-2 text-[11px] text-foreground hover:bg-muted">
-										<Bug className="size-3" />Debug
-									</button>
-								) : null}
-								<CopyButton text={file.text} label="Copy the file" />
-								<button
-									type="button"
-									onClick={(e) => {
-										e.stopPropagation();
-										setWideFile(!wideFile);
-										setPanel("file");
-									}}
-									title={wideFile ? "Make the file card narrow again" : "Expand the file card"}
-									aria-label={wideFile ? "Collapse the file card" : "Expand the file card"}
-									className="grid size-6 shrink-0 place-items-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground"
-								>
-									{wideFile ? <Minimize2 className="size-3.5" /> : <Maximize2 className="size-3.5" />}
-								</button>
-							</span>
-						}>
-							<FileView path={file.path} text={file.text} />
 						</Floating>
 					) : null}
 				</div>

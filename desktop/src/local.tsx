@@ -68,6 +68,7 @@ function FolderItem({ path, current, file }: { path: string; current: boolean; f
 					onOpen={(f) => {
 						const next = new URLSearchParams(params);
 						next.set("file", f);
+						next.set("mode", "code");
 						navigate(`/local?${next.toString()}`);
 					}}
 				/>

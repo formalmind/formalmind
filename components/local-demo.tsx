@@ -102,6 +102,8 @@ const demo: Bridge = {
 			folder_read: SOURCES[String(args?.path ?? "")] ?? "// (demo: no contents)\n",
 			swarm_running: RUN,
 			anthropic_key_status: false,
+			ast_units: AST_UNITS,
+			ast_slice: AST_SLICE,
 		};
 		if (cmd === "swarm_suggest") return new Promise((done) => setTimeout(() => done("Good catch on the penalty cap. Write the PoC for that bug, then move on to the oracle item." as T), 700));
 		if (cmd === "swarm_say") {
@@ -112,6 +114,39 @@ const demo: Bridge = {
 		return answers[cmd] as T;
 	},
 };
+
+const AST_UNITS = {
+	contract: "Vault",
+	files: 9,
+	inScope: 6,
+	reachable: 24,
+	unusedImports: [],
+	ms: 210,
+	units: [
+		{ name: "Vault.deposit", function: "deposit", mutability: "nonpayable", reads: ["totalAssets", "totalShares", "rate"], writes: ["totalAssets", "totalShares", "balanceOf"], external: 1, guards: 3, arith: 6, unchecked: 0, asm: 0, closure: 5 },
+		{ name: "Vault.withdraw", function: "withdraw", mutability: "nonpayable", reads: ["totalAssets", "totalShares", "rate", "balanceOf"], writes: ["totalAssets", "totalShares", "balanceOf"], external: 1, guards: 4, arith: 7, unchecked: 1, asm: 0, closure: 6 },
+		{ name: "Lending.liquidate", function: "liquidate", mutability: "nonpayable", reads: ["loans", "debtShares", "rate"], writes: ["loans", "debtShares", "reserves"], external: 3, guards: 5, arith: 12, unchecked: 0, asm: 0, closure: 9 },
+		{ name: "Vault.convertToShares", function: "convertToShares", mutability: "view", reads: ["totalAssets", "totalShares"], writes: [], external: 0, guards: 1, arith: 2, unchecked: 0, asm: 0, closure: 2 },
+	],
+	clusters: [{ units: ["deposit", "withdraw", "liquidate"], shared: ["totalAssets", "totalShares"] }],
+};
+
+const AST_SLICE = `# Vault.deposit
+external nonpayable · src/Vault.sol:42
+
+## Footprint
+- reads: totalAssets, totalShares, rate
+- writes: totalAssets, totalShares, balanceOf
+
+## External calls
+- Vault.sol:51 \`asset.transferFrom(msg.sender, address(this), assets)\` — external; then writes **totalAssets, totalShares, balanceOf**
+
+## Guards
+- Vault.sol:43 if-revert: \`assets == 0\`
+
+## Arithmetic
+- Vault.sol:47 \`assets.mulDiv(totalShares, totalAssets)\` — mulDiv uint256, rounds floor
+`;
 
 export function LocalDemoPage() {
 	const [params] = useSearchParams();
