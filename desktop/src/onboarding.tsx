@@ -189,30 +189,52 @@ function FolderStep({ onNext }: { onNext: () => void }) {
 	);
 }
 
-/** Step 3: the model key local turns run with, kept in the keychain. */
+/** Step 3: how agents reach Claude — formal.team credits (no key), or your own Anthropic key kept in the keychain. */
 function KeyStep({ onNext }: { onNext: () => void }) {
+	const [own, setOwn] = useState(false);
 	const [key, setKey] = useState("");
+	const choose = (provider: "formal" | "anthropic") => {
+		try {
+			localStorage.setItem("fm:provider", provider);
+		} catch {
+			/* the swarm panel asks again */
+		}
+	};
 	return (
 		<Frame step={2}>
 			<Cards />
-			<Headline muted="Bring your own key." strong="Proofs run on your machine." />
-			<form
-				className="fm-rise w-full space-y-4 [animation-delay:160ms]"
-				onSubmit={(e) => {
-					e.preventDefault();
-					void invoke("model_key_set", { key }).then(onNext);
-				}}
-			>
-				<input
-					type="password"
-					value={key}
-					onChange={(e) => setKey(e.target.value)}
-					placeholder="OpenAI API key"
-					className="w-full rounded-xl border border-white/15 bg-white/5 px-4 py-3 text-sm text-white placeholder:text-white/35 focus:border-white/40 focus:outline-none"
-				/>
-				<button type="submit" disabled={!key.trim()} className={primary}>Save to keychain</button>
-				<button type="button" onClick={onNext} className={quiet}>Skip for now</button>
-			</form>
+			<Headline muted="Agents run on Claude." strong="Pick how to pay for it." />
+			<div className="fm-rise w-full space-y-4 [animation-delay:160ms]">
+				{own ? (
+					<form
+						className="space-y-4"
+						onSubmit={(e) => {
+							e.preventDefault();
+							choose("anthropic");
+							void invoke("anthropic_key_set", { key }).then(onNext);
+						}}
+					>
+						<input
+							type="password"
+							autoFocus
+							value={key}
+							onChange={(e) => setKey(e.target.value)}
+							placeholder="Anthropic API key (sk-ant-…)"
+							className="w-full rounded-xl border border-white/15 bg-white/5 px-4 py-3 text-sm text-white placeholder:text-white/35 focus:border-white/40 focus:outline-none"
+						/>
+						<button type="submit" disabled={!key.trim()} className={primary}>Save to keychain</button>
+						<button type="button" onClick={() => setOwn(false)} className={quiet}>Use formal.team credits instead</button>
+					</form>
+				) : (
+					<>
+						<button type="button" onClick={() => { choose("formal"); onNext(); }} className={primary}>Use my formal.team credits</button>
+						<p className="text-sm text-white/50">
+							No key needed: calls go through formal.team and show up in Billing.{" "}
+							<button type="button" onClick={() => setOwn(true)} className={quiet}>Use my own Anthropic key</button>
+						</p>
+					</>
+				)}
+			</div>
 		</Frame>
 	);
 }

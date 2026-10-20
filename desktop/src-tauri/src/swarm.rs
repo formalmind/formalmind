@@ -1,7 +1,8 @@
 //! A swarm that runs on this machine, on one local folder, until the plan is proven, an agent finds a bug, the budget
 //! runs out, or you stop it. Planner → prover → reviewer, one item at a time, with the state in the folder's
-//! `.formal/` (plan.md, bugs/, runs/). Files, `lake` and `forge` stay here; only the model calls leave, through
-//! formal.team's metered Claude proxy, charged to your credits as `local/<folder>` with the agent and item.
+//! `.formal/` (plan.md, bugs/, runs/). Files, `lake` and `forge` stay here; only the model calls leave: through
+//! formal.team's metered Claude proxy (charged to your credits as `local/<folder>` with the agent and item), or straight
+//! to Anthropic with your own key.
 
 use crate::executor::{call_tool, clip, inside};
 use crate::local;
@@ -34,6 +35,30 @@ pub struct SwarmRequest {
     pub budget_usd: f64,
     /// formal.team (or a local Worker) and the desktop session token, from the app.
     pub api_base: String,
+    /// "formal" (formal.team credits, the default) or "anthropic" (your own key from the keychain, straight to Anthropic).
+    pub provider: Option<String>,
+}
+
+fn anthropic_entry() -> Result<keyring::Entry, String> {
+    keyring::Entry::new("team.formal.desktop", "anthropic").map_err(|e| e.to_string())
+}
+
+/// Saves your Anthropic API key in the keychain (empty clears it).
+#[tauri::command]
+pub fn anthropic_key_set(key: String) -> Result<(), String> {
+    let entry = anthropic_entry()?;
+    if key.trim().is_empty() {
+        return match entry.delete_credential() {
+            Ok(()) | Err(keyring::Error::NoEntry) => Ok(()),
+            Err(e) => Err(e.to_string()),
+        };
+    }
+    entry.set_password(key.trim()).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub fn anthropic_key_status() -> bool {
+    anthropic_entry().and_then(|e| e.get_password().map_err(|e| e.to_string())).is_ok()
 }
 
 #[derive(Serialize, Clone)]
@@ -223,6 +248,10 @@ impl Turn<'_> {
     }
 
     async fn session(&self, role: &str, item: &str) -> Result<(String, String), String> {
+        if self.req.provider.as_deref() == Some("anthropic") {
+            let key = anthropic_entry()?.get_password().map_err(|_| "Add your Anthropic key first".to_string())?;
+            return Ok((key, "https://api.anthropic.com".into()));
+        }
         let folder = Path::new(&self.req.folder).file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default();
         let res = self
             .client
@@ -433,7 +462,11 @@ pub fn swarm_start(app: AppHandle, swarms: State<'_, Swarms>, request: SwarmRequ
     if !local::read()?.folders.contains(&request.folder) {
         return Err("Add the folder first".into());
     }
-    token()?;
+    if request.provider.as_deref() == Some("anthropic") {
+        anthropic_entry()?.get_password().map_err(|_| "Add your Anthropic key first".to_string())?;
+    } else {
+        token()?;
+    }
     if swarms.0.lock().unwrap().values().len() > 0 {
         return Err("A swarm is already running; stop it first".into());
     }

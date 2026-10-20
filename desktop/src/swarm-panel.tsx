@@ -23,6 +23,24 @@ export function SwarmPanel({ folder }: { folder: string }) {
 	const [say, setSay] = useState("");
 	const [error, setError] = useState<string | null>(null);
 	const [open, setOpen] = useState<string | null>(null);
+	const [provider, setProvider] = useState<"formal" | "anthropic">(() => {
+		try {
+			return localStorage.getItem("fm:provider") === "anthropic" ? "anthropic" : "formal";
+		} catch {
+			return "formal";
+		}
+	});
+	const [hasKey, setHasKey] = useState(false);
+	const [key, setKey] = useState("");
+	useEffect(() => void invoke<boolean>("anthropic_key_status").then(setHasKey), []);
+	const pick = (p: "formal" | "anthropic") => {
+		setProvider(p);
+		try {
+			localStorage.setItem("fm:provider", p);
+		} catch {
+			/* kept for this view only */
+		}
+	};
 	const runRef = useRef<string | null>(null);
 	const log = useRef<HTMLDivElement>(null);
 
@@ -52,7 +70,7 @@ export function SwarmPanel({ folder }: { folder: string }) {
 		setError(null);
 		setEvents([]);
 		try {
-			const id = await invoke<string>("swarm_start", { request: { folder, goal: goal.trim() || null, budget_usd: budget, api_base: apiBase() } });
+			const id = await invoke<string>("swarm_start", { request: { folder, goal: goal.trim() || null, budget_usd: budget, api_base: apiBase(), provider } });
 			runRef.current = id;
 			setRun(id);
 		} catch (e) {
@@ -106,16 +124,49 @@ export function SwarmPanel({ folder }: { folder: string }) {
 								className="w-full rounded-xl border bg-transparent px-3 py-2 text-sm outline-none focus:border-foreground/30"
 							/>
 							<div className="flex flex-wrap items-center gap-2">
+								<span className="text-xs text-muted-foreground">Claude via</span>
+								{/* One control: the provider dropdown, which becomes the key field when your own key is picked and missing. */}
+								{provider === "anthropic" && !hasKey ? (
+									<form
+										className="inline-flex h-8 items-center overflow-hidden rounded-lg border bg-background text-xs"
+										onSubmit={(e) => {
+											e.preventDefault();
+											if (!key.trim()) return;
+											void invoke("anthropic_key_set", { key }).then(() => {
+												setKey("");
+												setHasKey(true);
+											});
+										}}
+									>
+										<input type="password" autoFocus value={key} onChange={(e) => setKey(e.target.value)} placeholder="Paste your Anthropic key (sk-ant-…)" className="h-full w-60 bg-transparent px-2.5 outline-none" />
+										<button type="submit" disabled={!key.trim()} className="h-full border-l px-2.5 font-medium disabled:opacity-40">Save</button>
+										<button type="button" onClick={() => pick("formal")} title="Back to formal.team credits" className="h-full border-l px-2 text-muted-foreground hover:text-foreground">×</button>
+									</form>
+								) : (
+									<select
+										value={provider}
+										onChange={(e) => pick(e.target.value as "formal" | "anthropic")}
+										className="h-8 rounded-lg border bg-background px-2 text-xs outline-none"
+									>
+										<option value="formal">formal.team credits</option>
+										<option value="anthropic">My Anthropic key{hasKey ? " (saved)" : ""}</option>
+									</select>
+								)}
+								{provider === "anthropic" && hasKey ? (
+									<button type="button" onClick={() => void invoke("anthropic_key_set", { key: "" }).then(() => setHasKey(false))} className="text-xs text-muted-foreground hover:underline">Forget key</button>
+								) : null}
+							</div>
+							<div className="flex flex-wrap items-center gap-2">
 								<span className="text-xs text-muted-foreground">Stop at</span>
 								<div className="inline-flex rounded-lg bg-muted p-0.5 text-xs">
 									{BUDGETS.map((b) => (
 										<button key={b} type="button" onClick={() => setBudget(b)} className={`rounded-md px-2.5 py-1 ${b === budget ? "shadow-card bg-background font-medium" : "text-muted-foreground"}`}>${b}</button>
 									))}
 								</div>
-								<button type="button" onClick={() => void start()} className="btn-dark ml-auto h-9 gap-1.5 px-4 text-sm"><Play className="size-3.5" />{plan.length ? "Resume the swarm" : "Start the swarm"}</button>
+								<button type="button" onClick={() => void start()} disabled={provider === "anthropic" && !hasKey} className="btn-dark ml-auto disabled:opacity-50 h-9 gap-1.5 px-4 text-sm"><Play className="size-3.5" />{plan.length ? "Resume the swarm" : "Start the swarm"}</button>
 							</div>
 							<p className="text-xs text-muted-foreground">
-								Planner, prover and reviewer work through the plan one item at a time until it's proven or someone finds a bug. Files, Lean and Foundry run here; only model calls go out, charged to your credits.
+								Planner, prover and reviewer work through the plan one item at a time until it's proven or someone finds a bug. Files, Lean and Foundry run here; only model calls go out: through formal.team (shown in Billing) or straight to Anthropic with your key.
 							</p>
 						</>
 					)}

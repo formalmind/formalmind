@@ -62,6 +62,11 @@ jq -n \
   '{version: $version, notes: $notes, pub_date: $pub_date,
     platforms: {"darwin-aarch64": {signature: $signature, url: $url}}}' > "$OUT/latest.json"
 
+# A release must point at a commit GitHub has. Run from the pre-push hook, this one isn't there yet: push it first
+# (SKIP_RELEASE stops the hook from running again); the hook's own push then has nothing left to send.
+if ! git branch -r --contains HEAD 2>/dev/null | grep -q "origin/main"; then
+  SKIP_RELEASE=1 git push -q origin HEAD:main
+fi
 gh release create "$TAG" -R "$REPO" --title "Formal Mind $VERSION" --notes "Formal Mind $VERSION" \
   --target "$(git rev-parse HEAD)" \
   "$OUT/Formal-Mind-mac.dmg" "$OUT/Formal-Mind-mac.app.tar.gz" "$OUT/latest.json"
