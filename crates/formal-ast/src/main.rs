@@ -8,7 +8,7 @@ use std::time::Instant;
 
 /// Reads a Solidity protocol through solc's AST (never forge): its graph, scope, units of work and slices.
 #[derive(Parser)]
-#[command(name = "formal-ast")]
+#[command(name = "formalmind")]
 struct Cli {
     /// The project folder (with foundry.toml / remappings.txt).
     #[arg(long, default_value = ".")]

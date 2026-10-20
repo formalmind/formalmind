@@ -1,8 +1,8 @@
-name: formal-ast release
+name: formalmind CLI release
 
-# Builds the formal-ast CLI and attaches it to a GitHub release, so other repositories' CI can regenerate
+# Builds the `formalmind` CLI (crates/formal-ast) and attaches it to a GitHub release, so other repositories' CI can regenerate
 # their Lean models (e.g. asyncswap/contracts formal/scripts/generate.sh) with a pinned version.
-# Push a tag `formal-ast-v<version>` matching crates/formal-ast/Cargo.toml.
+# Push a tag `formalmind-cli-v<version>` matching crates/formal-ast/Cargo.toml.
 #
 # The release is never marked Latest: `releases/latest` is the Mac app's (the updater's latest.json and the
 # landing page's Download for Mac link resolve through it).
@@ -11,7 +11,7 @@ permissions: {}
 
 on:
   push:
-    tags: ["formal-ast-v*"]
+    tags: ["formalmind-cli-v*"]
 
 jobs:
   build:
@@ -35,7 +35,7 @@ jobs:
         shell: bash
         run: |
           version=$(sed -n 's/^version = "\(.*\)"/\1/p' crates/formal-ast/Cargo.toml | head -1)
-          if [ "${GITHUB_REF_NAME}" != "formal-ast-v${version}" ]; then
+          if [ "${GITHUB_REF_NAME}" != "formalmind-cli-v${version}" ]; then
             echo "::error::tag ${GITHUB_REF_NAME} doesn't match crates/formal-ast version ${version}"; exit 1
           fi
 
@@ -46,11 +46,11 @@ jobs:
         shell: bash
         run: |
           mkdir -p dist
-          tar -C crates/formal-ast/target/release -czf "dist/formal-ast-${{ matrix.target }}.tar.gz" formal-ast
+          tar -C crates/formal-ast/target/release -czf "dist/formalmind-${{ matrix.target }}.tar.gz" formalmind
 
       - uses: actions/upload-artifact@v4
         with:
-          name: formal-ast-${{ matrix.target }}
+          name: formalmind-${{ matrix.target }}
           path: dist/*.tar.gz
 
   release:
@@ -71,6 +71,6 @@ jobs:
           cd dist
           sha256sum *.tar.gz > SHA256SUMS
           gh release create "${GITHUB_REF_NAME}" --repo "${GITHUB_REPOSITORY}" --latest=false \
-            --title "formal-ast ${GITHUB_REF_NAME#formal-ast-v}" \
-            --notes "The formal-ast CLI (solc AST → graph, scope, Lean model), built from ${GITHUB_SHA}." \
+            --title "formalmind CLI ${GITHUB_REF_NAME#formalmind-cli-v}" \
+            --notes "The formalmind CLI (crates/formal-ast: solc AST → graph, scope, Lean model), built from ${GITHUB_SHA}." \
             *.tar.gz SHA256SUMS
