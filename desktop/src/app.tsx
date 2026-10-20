@@ -14,6 +14,7 @@ import { SWARM_REPO } from "@/lib/swarm-repo";
 import type { SessionData } from "@/lib/session";
 import { apiBase, clearToken, exchangeCode, loadToken } from "./api";
 
+import { DebugPage } from "./debug";
 import { LocalFolderPage, LocalFolders } from "./local";
 import { onboarded, SetupSteps, SignInStep } from "./onboarding";
 import { SettingsPage } from "./settings";
@@ -54,6 +55,7 @@ function Shell({ user }: { user: User }) {
 								<Route path="/usage" element={<UsagePage />} />
 								<Route path="/projects/:owner/:name" element={<ProjectHomePage />} />
 								<Route path="/local" element={<LocalFolderPage />} />
+								<Route path="/debug" element={<DebugPage />} />
 								<Route path="/settings" element={<SettingsPage />} />
 								{/* Other pages come over from the web app as the desktop app grows. */}
 								<Route path="*" element={<Navigate to="/" replace />} />

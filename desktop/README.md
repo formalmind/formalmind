@@ -11,7 +11,7 @@ the `@/` alias, nothing copied), plus what only a native app can do. Runs on mac
 
 **On this computer** in the sidebar adds folders from disk (native picker). The list lives in
 `~/.formalmind/config.json`, the app's home for local settings. A folder's page lists its Solidity and Lean files
-(skipping `.git`, `node_modules`, `lib`, `out`, `cache`, `target`, `.lake`, `dist`). Only folders you added can be
+(skipping `.git`, `node_modules`, `lib`, `dependencies`, `out`, `cache`, `target`, `.lake`, `dist`). Only folders you added can be
 read. Nothing is uploaded. `src-tauri/src/local.rs` has it, with a test (`cargo test` in `src-tauri/`).
 
 ## Develop

@@ -45,7 +45,8 @@ after a 2 s compile. To get there the session:
   `remappings.txt` is scoped to it (`dependencies/v4-core/:solmate/=…`). This lives in formal-ast's `Project`, so
   the audit engine benefits too.
 
-The terminal UI (`tui.rs`, section 8) and the step-in/over/out logic (`nav.rs`, section 6) are built.
+The terminal UI (`tui.rs`, section 8), the step-in/over/out logic (`nav.rs`, section 6) and the desktop app's debug
+mode (section 8) are built.
 
 ## 1. Pipeline
 
@@ -359,13 +360,47 @@ vim keys:
 The engine (`Session`, `Trace`, `CodeMap`, `Layout`) has no UI code, so the TUI is a separate binary target on the
 same library.
 
-### Desktop: debug mode on the canvas
+### Desktop: debug mode (built)
 
-The Tauri app runs the same crate through a command (`debug_open(seq) → session id`, `debug_step(id, cmd) → view`).
-The canvas gets a debug mode: the contract graph that formal-ast already draws, with the current function lit, an edge
-animating for each call frame, storage cells changing as the trace advances, and a timeline scrubber over the steps
-(reverse stepping is free, since it's an index). A finding or a failing fuzz run on the canvas has an "Open in
-debugger" action.
+The Tauri app runs the same crate: `desktop/src-tauri` depends on `crates/sol-debug`, and `src-tauri/src/debug.rs`
+puts it behind seven commands. revm's EVM isn't `Send`, so each debug session is a thread of its own that owns the
+`Session`, the `Run` and the `Navigator`; commands hand it jobs over a channel, keyed by a session id. The webview
+never gets the trace, only one step's view at a time.
+
+| Command | Does |
+|---|---|
+| `debug_open(folder, file) → { id, tests }` | Compiles one file of an added local folder (solc standard-json, as the CLI) and lists its `test…()` functions |
+| `debug_run(id, contract, test) → run` | `setUp()` untraced, the test recorded; the calls tree once, and the view of the first statement in the test's body. A second run compiles again for a clean chain; breakpoints and watches carry over |
+| `debug_nav(id, to, back, arg) → view` | `op`, `into`, `over`, `out`, `continue`, `search` (each forward or back), `first`, `last`, `step N`, `pc N` |
+| `debug_break(id, line, file?, name?) → view` | Toggles a line breakpoint (by source id, by file name, or in the current file) |
+| `debug_watch(id, text, on) → view` | Adds or removes a storage watch: `continue` stops on a write whose name contains it |
+| `debug_file(id, file) → { name, text }` | One source file, whole, fetched once per file and highlighted in the webview |
+| `debug_close(id)` | Ends the session's thread |
+
+A step's view (`StepView`) is a few kilobytes: the place (source id, line, scope, node type and the node's `src` on
+its line as UTF-16 columns), the open frames, 61 instructions around the pc, the stack top first, memory rebuilt
+from the frame's writes (the words the last step wrote marked), the latest 100 storage accesses named by the layout,
+the breakpoints, the watches and a status line. The engine packages are built with `opt-level = 3` in the dev
+profile too, so `tauri dev` runs a 33k-step test in about as long as the CLI.
+
+The page is `desktop/src/debug.tsx`, at `/debug?path=<folder>&file=<test file>&test=<Contract::test>`. A folder's
+**Files** card has **Debug tests**, and a bug button on every `*.t.sol`. The page has the folder's test files as a
+tree on the left; clicking one compiles it and lists its tests, and clicking a test runs it. The panes are the TUI's,
+in the app's card style: source (highlighted with the app's Shiki highlighter, the current node's range lit, a
+gutter that toggles breakpoints), calls (click a frame to go to its first step), opcodes (the current node's
+instructions tinted), stack, memory and storage (click an access to go to its step). The keys are the TUI's: `j/k`,
+`n/N` (and `h/l`), `s/S`, `f/F`, `c/C`, `g/G`, `/text` then `;` `,`, `:b 58`, `:b File.sol:58`, `:w name`,
+`:unw name`, `:step N`, `:pc N`. The folder page's file viewer highlights Solidity and Lean the same way.
+
+Checked on `~/developer/asyncswap/contracts`, `test/AsyncSwap.t.sol` → `test_swap_createsOrderWithPrice` (passes,
+32,902 steps): `/router.swap`, `s` into the Router, `:w asks.nodes`, `c` stops at `RadixPriceTree.sol:35`
+(`self.nodes[leafId].price = price;`, in the `AsyncSwap ⇒ AsyncMatching` DELEGATECALL), and the storage pane reads
+`write priceBooks[0x3e76cc…a14c].asks.nodes[1].price: 0 → 950000000000000000`. `cargo test -- --ignored
+async_swap` in `src-tauri/` checks the same named write without the UI.
+
+Still to come on the canvas: the contract graph that formal-ast already draws, with the current function lit, an
+edge animating for each call frame, storage cells changing as the trace advances, and a timeline scrubber over the
+steps. A finding or a failing fuzz run on the canvas gets an "Open in debugger" action.
 
 ## 9. Reuse
 
@@ -382,8 +417,6 @@ debugger" action.
 
 1. `generatedSources` to place the compiler helper steps.
 2. Replaying call sequences from JSON (the agent hook), with an invariant checked after each call.
-3. Tests picked from the file tree: in Formal Mind, the user selects a local repository, sees its files, and starts
-   analysis or debugging from there. `Session::compile(root, file)` already takes a project folder and one file.
-   The desktop app passes the selected folder and the clicked test file, then lists the `test_…` functions to run.
+3. ~~Tests picked from the file tree~~: built (section 8). Next, the same tree starting analysis as well as debugging.
 4. Recompiling from on-chain metadata, to debug deployed contracts.
-5. The Tauri debug mode on the canvas, on the same `Session` + `Navigator`.
+5. The canvas side of debug mode (section 8), on the same `Session` + `Navigator`.

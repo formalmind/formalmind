@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
-import { useLocation, useSearchParams } from "react-router";
+import { useLocation, useNavigate, useSearchParams } from "react-router";
 import { invoke } from "@tauri-apps/api/core";
 import { open } from "@tauri-apps/plugin-dialog";
 import { Plus } from "lucide-react";
@@ -104,6 +104,7 @@ export function LocalFolders() {
 /** A local folder: what's in it to prove. The files stay on this machine. */
 export function LocalFolderPage() {
 	const [params] = useSearchParams();
+	const navigate = useNavigate();
 	const path = params.get("path") ?? "";
 	const [scan, setScan] = useState<Scan | null>(null);
 	const [error, setError] = useState<string | null>(null);
@@ -113,5 +114,5 @@ export function LocalFolderPage() {
 		invoke<Scan>("folder_scan", { path }).then(setScan, (e) => setError(String(e)));
 	}, [path]);
 	if (error) return <p className="p-6 text-sm text-red-600">{error}</p>;
-	return path ? <SwarmPanel folder={path} name={name(path)} scan={scan} bridge={tauri} session={params.get("run")} /> : null;
+	return path ? <SwarmPanel folder={path} name={name(path)} scan={scan} bridge={tauri} session={params.get("run")} onDebug={(file) => navigate(`/debug?path=${encodeURIComponent(path)}${file ? `&file=${encodeURIComponent(file)}` : ""}`)} /> : null;
 }

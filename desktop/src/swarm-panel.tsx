@@ -1,6 +1,6 @@
 import { MarkGithubIcon } from "@primer/octicons-react";
 import { useEffect, useRef, useState } from "react";
-import { Check, ChevronDown, Copy, FileCode2, Play, Square, WandSparkles, Wrench } from "lucide-react";
+import { Bug, Check, ChevronDown, Copy, FileCode2, Play, Square, WandSparkles, Wrench } from "lucide-react";
 import { ChatComposer } from "@/components/chat-composer";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuLabel, DropdownMenuRadioGroup, DropdownMenuRadioItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { ChatMarkdown } from "@/components/chat-markdown";
@@ -183,7 +183,25 @@ function Floating({ id, open, onOpen, title, meta, tone, action, children }: { i
  * A local folder's swarm: the canvas on the left (the board, the contract files, bugs) and the chat on the right (start
  * and steer the swarm, the plan, and what each agent says as it works).
  */
-export function SwarmPanel({ folder, name, scan, bridge, session, actions }: { folder: string; name: string; scan: Scan | null; bridge: Bridge; session?: string | null; actions?: React.ReactNode }) {
+/** A whole file, highlighted by its extension, with a line-number gutter. */
+function FileView({ path, text }: { path: string; text: string }) {
+	const lines = useHighlightedCode(text, EXT[path.split(".").pop() ?? ""] ?? "text");
+	return (
+		<pre className="overflow-x-auto py-2 font-mono text-[11px] leading-5">
+			{lines.map((line, i) => (
+				<span key={i} className="block whitespace-pre pr-3">
+					<span className="mr-3 inline-block w-9 select-none text-right text-muted-foreground/60">{i + 1}</span>
+					{line}
+				</span>
+			))}
+		</pre>
+	);
+}
+
+/**
+ * `onDebug` (the desktop app) opens debug mode on a test file; without it the files have no debug action.
+ */
+export function SwarmPanel({ folder, name, scan, bridge, session, actions, onDebug }: { folder: string; name: string; scan: Scan | null; bridge: Bridge; session?: string | null; actions?: React.ReactNode; onDebug?: (file: string | null) => void }) {
 	const { invoke, listen, apiBase } = bridge;
 	const [run, setRun] = useState<string | null>(null);
 	const [events, setEvents] = useState<Ev[]>([]);
@@ -385,15 +403,26 @@ export function SwarmPanel({ folder, name, scan, bridge, session, actions }: { f
 							})}
 						</ul>
 					</Floating>
-					<Floating id="files" open={panel} onOpen={setPanel} title="Files" meta={scan ? `${scan.solidity.length} sol · ${scan.lean.length} lean` : ""}>
+					<Floating id="files" open={panel} onOpen={setPanel} title="Files" meta={scan ? `${scan.solidity.length} sol · ${scan.lean.length} lean` : ""} action={onDebug ? (
+						<button type="button" onClick={(e) => { e.stopPropagation(); onDebug(null); }} title="Debug this folder's Foundry tests" className="inline-flex h-6 items-center gap-1 rounded-md border bg-background px-2 text-[11px] text-foreground hover:bg-muted">
+							<Bug className="size-3" />Debug tests
+						</button>
+					) : undefined}>
 						<ul className="p-2 font-mono text-[11px]">
 							{scan === null ? <li className="p-2 text-muted-foreground">Reading the folder…</li> : null}
 							{[...(scan?.solidity ?? []), ...(scan?.lean ?? [])].map((f) => (
 								<li key={f}>
-									<button type="button" onClick={() => view(f)} className="flex w-full items-center gap-1.5 truncate rounded px-1.5 py-1 text-left hover:bg-muted" title={`Open ${f}`}>
-										<FileCode2 className={`size-3 shrink-0 ${f.endsWith(".lean") ? "text-violet-500" : "text-sky-500"}`} />
-										<span className="truncate">{f}</span>
-									</button>
+									<div className="group flex items-center rounded hover:bg-muted">
+										<button type="button" onClick={() => view(f)} className="flex min-w-0 flex-1 items-center gap-1.5 truncate px-1.5 py-1 text-left" title={`Open ${f}`}>
+											<FileCode2 className={`size-3 shrink-0 ${f.endsWith(".lean") ? "text-violet-500" : "text-sky-500"}`} />
+											<span className="truncate">{f}</span>
+										</button>
+										{onDebug && f.endsWith(".t.sol") ? (
+											<button type="button" onClick={() => onDebug(f)} title={`Debug a test in ${f}`} className="mr-1 grid size-5 shrink-0 place-items-center rounded text-muted-foreground opacity-60 hover:bg-background hover:text-foreground group-hover:opacity-100">
+												<Bug className="size-3" />
+											</button>
+										) : null}
+									</div>
 								</li>
 							))}
 						</ul>
@@ -416,7 +445,7 @@ export function SwarmPanel({ folder, name, scan, bridge, session, actions }: { f
 					) : null}
 					{file ? (
 						<Floating id="file" open={panel} onOpen={setPanel} title={file.path.split("/").pop() ?? "File"} meta={file.path} action={<CopyButton text={file.text} label="Copy the file" />}>
-							<pre className="whitespace-pre overflow-x-auto p-3 font-mono text-[11px] leading-5">{file.text}</pre>
+							<FileView path={file.path} text={file.text} />
 						</Floating>
 					) : null}
 				</div>
