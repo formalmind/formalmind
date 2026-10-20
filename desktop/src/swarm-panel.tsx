@@ -351,7 +351,7 @@ export function SwarmPanel({ folder, name, scan, bridge, session }: { folder: st
 						) : e.kind === "tool" || e.kind === "result" ? (
 							<p key={i} className="truncate pl-4 font-mono text-[11px] text-muted-foreground">{e.kind === "tool" ? `› ${e.text}` : e.text.split("\n")[0]}</p>
 						) : (
-							<div key={i} className="max-w-[92%]">
+							<div key={i}>
 								<p className="mb-1 flex items-center gap-1.5 text-xs font-medium capitalize" style={{ color: e.kind === "bug" ? "#dc2626" : colorOf(e.role) }}>
 									<span className="size-1.5 rounded-full" style={{ background: e.kind === "bug" ? "#dc2626" : colorOf(e.role) }} />
 									{e.kind === "bug" ? "bug reported" : e.role}
@@ -372,7 +372,12 @@ export function SwarmPanel({ folder, name, scan, bridge, session }: { folder: st
 										<span className="mt-1 block text-xs text-red-700/70 dark:text-red-400/70">Open the report →</span>
 									</button>
 								) : (
-									<div className={`whitespace-pre-wrap rounded-2xl rounded-tl-md px-3 py-2 ${e.kind === "plan" || e.kind === "done" ? "bg-muted/60 text-muted-foreground" : "bg-muted"}`}>{e.text}</div>
+									e.kind === "plan" || e.kind === "done" ? (
+										<p className="text-[13px] text-muted-foreground">{e.text}</p>
+									) : (
+										// Flat on the page, as Markdown, like the web chats.
+										<ChatMarkdown>{e.text}</ChatMarkdown>
+									)
 								)}
 							</div>
 						),
