@@ -1,6 +1,6 @@
 import { MarkGithubIcon } from "@primer/octicons-react";
 import { useEffect, useRef, useState } from "react";
-import { Bug, Check, ChevronDown, Code2, Copy, FileCode2, MessagesSquare, Network, Play, Plus, ScanSearch, Square, WandSparkles, Wrench } from "lucide-react";
+import { Bug, Check, ChevronDown, Code2, Copy, FileCode2, GanttChart, MessagesSquare, Network, Play, Plus, ScanSearch, Square, WandSparkles, Wrench } from "lucide-react";
 import { useSearchParams } from "react-router";
 import { ChatComposer } from "@/components/chat-composer";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuRadioGroup, DropdownMenuRadioItem, DropdownMenuSeparator, DropdownMenuSub, DropdownMenuSubContent, DropdownMenuSubTrigger, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
@@ -325,14 +325,23 @@ function BugsView({ bugs, openBug, setOpenBug, withPoc, onOpenFile }: { bugs: Bu
 	);
 }
 
-type Mode = "code" | "chat" | "swarm" | "audit" | "bugs";
+type Mode = "code" | "chat" | "swarm" | "roadmap" | "audit" | "bugs";
 
 const MODES: { id: Mode; label: string; icon: typeof Code2 }[] = [
 	{ id: "code", label: "Code", icon: Code2 },
 	{ id: "chat", label: "Chat", icon: MessagesSquare },
 	{ id: "swarm", label: "Swarm", icon: Network },
+	{ id: "roadmap", label: "Roadmap", icon: GanttChart },
 	{ id: "audit", label: "Audit", icon: ScanSearch },
 	{ id: "bugs", label: "Bugs", icon: Bug },
+];
+
+/** The plan as a board: an item is being proved while an agent works on it, proved once checked off, stuck when marked `!`. */
+const ROADMAP: { title: string; dot: string; has: (i: { mark: string }, active: boolean) => boolean }[] = [
+	{ title: "To do", dot: "bg-muted-foreground/40", has: (i, active) => i.mark !== "x" && i.mark !== "!" && !active },
+	{ title: "Proving", dot: "bg-sky-500", has: (i, active) => i.mark !== "x" && i.mark !== "!" && active },
+	{ title: "Proved", dot: "bg-emerald-500", has: (i) => i.mark === "x" },
+	{ title: "Stuck", dot: "bg-amber-500", has: (i) => i.mark === "!" },
 ];
 
 /** The page's modes as a macOS-style segmented control, centred at the top. */
@@ -572,7 +581,7 @@ export function SwarmPanel({ folder, name, scan, bridge, session, file: openPath
 	const mainSource = (scan?.solidity ?? []).find((f) => f.startsWith("src/") && !f.endsWith(".t.sol") && !f.endsWith(".s.sol")) ?? null;
 	useEffect(() => {
 		setEntryUnits([]);
-		if (mode !== "swarm" || !mainSource) return;
+		if ((mode !== "swarm" && mode !== "roadmap") || !mainSource) return;
 		void invoke<AstUnits>("ast_units", { folder, entry: mainSource }).then(
 			(d) => setEntryUnits(d.units.filter((u) => u.mutability !== "view" && u.mutability !== "pure" && u.function !== "constructor")),
 			() => setEntryUnits([]),
@@ -874,6 +883,50 @@ export function SwarmPanel({ folder, name, scan, bridge, session, file: openPath
 						) : (
 							<p className="m-auto text-sm text-muted-foreground">Pick a file in the sidebar.</p>
 						)}
+					</div>
+				) : null}
+				{mode === "roadmap" ? (
+					<div className="pointer-events-auto absolute bottom-3 left-3 right-3 top-14 z-10 grid min-h-0 grid-cols-4 gap-2 overflow-x-auto">
+						{ROADMAP.map((col) => {
+							const items = plan.filter((i) => col.has(i, working?.item === String(i.index)));
+							return (
+								<section key={col.title} className="flex min-h-0 min-w-52 flex-col rounded-2xl border bg-muted/60 p-1">
+									<header className="flex h-8 shrink-0 items-center gap-2 px-2.5">
+										<span className={`size-2 rounded-full ${col.dot}`} />
+										<span className="font-mono text-[11px] font-medium uppercase tracking-wider text-muted-foreground">{col.title}</span>
+										<span className="text-[11px] text-muted-foreground">{items.length}</span>
+									</header>
+									<div className="min-h-0 flex-1 space-y-1 overflow-y-auto">
+										{items.map((i) => {
+											const proof = proofs[String(i.index)];
+											return (
+												<article key={i.index} className="rounded-xl border bg-card p-2.5 text-[13px] leading-5">
+													<p>{i.text}</p>
+													{named(i.text).length ? (
+														<div className="mt-1.5 flex flex-wrap gap-1">
+															{named(i.text).map((u) => (
+																<span key={u.name} className="rounded bg-muted px-1 font-mono text-[10px] text-muted-foreground">{u.function}</span>
+															))}
+														</div>
+													) : null}
+													{proof?.files.length ? (
+														<div className="mt-2 space-y-0.5 border-t pt-1.5">
+															{proof.files.map((f) => (
+																<button key={f} type="button" onClick={() => view(f)} className="flex w-full items-center gap-1.5 truncate rounded px-1 py-0.5 text-left font-mono text-[11px] text-muted-foreground hover:bg-muted hover:text-foreground" title={`Open ${f}`}>
+																	<FileCode2 className={`size-3 shrink-0 ${f.endsWith(".lean") ? "text-violet-500" : "text-sky-500"}`} />
+																	<span className="truncate">{f}</span>
+																</button>
+															))}
+														</div>
+													) : null}
+												</article>
+											);
+										})}
+										{items.length === 0 ? <p className="px-2.5 py-1 text-[12px] text-muted-foreground">Nothing here.</p> : null}
+									</div>
+								</section>
+							);
+						})}
 					</div>
 				) : null}
 				{mode === "bugs" ? <BugsView bugs={bugs} openBug={openBug} setOpenBug={setOpenBug} withPoc={withPoc} onOpenFile={view} /> : null}

@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { Link, useLocation, useNavigate } from "react-router";
-import { BookOpen, Folder, FolderOpen, ChevronRight, GanttChart, MessagesSquare, Plus } from "lucide-react"
+import { BookOpen, Folder, FolderOpen, ChevronRight, MessagesSquare, Plus } from "lucide-react"
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
 import { SwarmMenu } from "@/components/projects/swarm-control"
 import {
@@ -268,10 +268,8 @@ export function AppSidebar({ extra, ...props }: React.ComponentProps<typeof Side
 			<SidebarContent>
 				<SidebarGroup>
 					<SidebarMenu>
-						{/* One swarm, one budget, working across every project: the home page. */}
-						<NavLink item={{ title: "Roadmap", url: "/roadmap", icon: GanttChart, anim: "roadmap" }} active={pathname === "/roadmap" || pathname.endsWith("/roadmap")} />
-						{/* Your projects below the app's pages: a gap, a quiet heading, and + to add one (like a section header). */}
-						<li className="mt-4 flex h-7 items-center justify-between pl-2 pr-1 text-xs font-medium text-sidebar-foreground/60 group-data-[collapsible=icon]:justify-center group-data-[collapsible=icon]:p-0">
+						{/* Your projects: a quiet heading, and + to add one (like a section header). The roadmap is a tab of each. */}
+						<li className="flex h-7 items-center justify-between pl-2 pr-1 text-xs font-medium text-sidebar-foreground/60 group-data-[collapsible=icon]:justify-center group-data-[collapsible=icon]:p-0">
 							<span className="group-data-[collapsible=icon]:hidden">Projects</span>
 							<Link
 								to="/onboarding?new=1"
