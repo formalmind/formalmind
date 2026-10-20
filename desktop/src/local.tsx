@@ -8,6 +8,7 @@ import { apiBase } from "./api";
 import { LocalHeading, TreeFolder } from "@/components/session-folder";
 import { FileTree } from "@/components/file-tree";
 import { SwarmPanel, type Bridge } from "./swarm-panel";
+import { DebugView } from "./debug";
 
 const tauri: Bridge = { invoke, listen, apiBase };
 import { SidebarGroup, SidebarMenu, SidebarMenuButton, SidebarMenuItem } from "@/components/ui/sidebar";
@@ -108,7 +109,6 @@ export function LocalFolders() {
 /** A local folder: what's in it to prove. The files stay on this machine. */
 export function LocalFolderPage() {
 	const [params] = useSearchParams();
-	const navigate = useNavigate();
 	const path = params.get("path") ?? "";
 	const [scan, setScan] = useState<Scan | null>(null);
 	const [error, setError] = useState<string | null>(null);
@@ -118,5 +118,5 @@ export function LocalFolderPage() {
 		invoke<Scan>("folder_scan", { path }).then(setScan, (e) => setError(String(e)));
 	}, [path]);
 	if (error) return <p className="p-6 text-sm text-red-600">{error}</p>;
-	return path ? <SwarmPanel folder={path} name={name(path)} scan={scan} bridge={tauri} session={params.get("run")} file={params.get("file")} onDebug={(file) => navigate(`/debug?path=${encodeURIComponent(path)}${file ? `&file=${encodeURIComponent(file)}` : ""}`)} /> : null;
+	return path ? <SwarmPanel folder={path} name={name(path)} scan={scan} bridge={tauri} session={params.get("run")} file={params.get("file")} debug={(file, onPick) => <DebugView folder={path} file={file} onPick={onPick} />} /> : null;
 }

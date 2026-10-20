@@ -9,7 +9,7 @@ mod executor;
 mod swarm;
 mod local;
 mod lsp;
-mod nvim;
+mod term;
 
 use keyring::Entry;
 use tauri::Manager;
@@ -87,12 +87,10 @@ pub fn run() {
             ast::ast_scripts,
             lsp::lsp_definition,
             lsp::lsp_hover,
-            nvim::nvim_attach,
-            nvim::nvim_detach,
-            nvim::nvim_open,
-            nvim::nvim_input,
-            nvim::nvim_mouse,
-            nvim::nvim_resize,
+            term::term_start,
+            term::term_write,
+            term::term_resize,
+            term::term_kill,
             executor::model_key_set,
             executor::model_key_status,
             executor::turn_start,

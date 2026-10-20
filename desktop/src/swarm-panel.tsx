@@ -1,12 +1,12 @@
 import { MarkGithubIcon } from "@primer/octicons-react";
 import { Suspense, lazy, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { NeovimView } from "./neovim";
+import { NvimTerminal } from "./nvim-terminal";
 import { JsonTree } from "./json-tree";
 import { Bug, Check, ChevronDown, Code2, Copy, FileCode2, GanttChart, MessagesSquare, Network, Play, Plus, ScanSearch, Square, WandSparkles, Wrench } from "lucide-react";
 
 // The project roadmap (GitHub Projects-style), the same view the web app had on its own page.
-import { motion as vimMotion, search as vimSearch, useVimMode, type Cursor } from "@/components/vim-mode";
+import { motion as vimMotion, search as vimSearch, setVimMode, useVimMode, type Cursor } from "@/components/vim-mode";
 const ProjectView = lazy(() => import("@/components/project/project-view").then((m) => ({ default: m.ProjectView })));
 import { useSearchParams } from "react-router";
 import { ChatComposer } from "@/components/chat-composer";
@@ -377,7 +377,7 @@ function BugsView({ bugs, openBug, setOpenBug, withPoc, onOpenFile }: { bugs: Bu
 	);
 }
 
-type Mode = "code" | "chat" | "swarm" | "roadmap" | "audit" | "bugs";
+type Mode = "code" | "chat" | "swarm" | "roadmap" | "audit" | "bugs" | "debug";
 
 const MODES: { id: Mode; label: string; icon: typeof Code2 }[] = [
 	{ id: "code", label: "Code", icon: Code2 },
@@ -402,7 +402,7 @@ function NavGroup({ name, git, onDebug, mode, onMode, inBar, compact }: { name: 
 				<span className={`truncate ${compact ? "max-w-28" : "max-w-48"}`}>{name}</span>
 			</span>
 			{onDebug ? (
-				<button type="button" onClick={onDebug} title="Debug this folder's Foundry tests" className={`${seg} ${h} text-muted-foreground hover:text-foreground`}>
+				<button type="button" role="tab" aria-selected={mode === "debug"} onClick={onDebug} title="Debug this folder's Foundry tests" className={`${seg} ${h} ${mode === "debug" ? "bg-background text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"}`}>
 					<Bug className="size-3.5" />
 					{compact ? null : "Debug"}
 				</button>
@@ -692,9 +692,10 @@ function AuditView({ folder, scan, invoke, preferred, onOpenFile }: { folder: st
 }
 
 /**
- * `onDebug` (the desktop app) opens debug mode on a test file; without it the files have no debug action.
+ * `debug` (the desktop app) renders Debug mode — the folder's Foundry tests in the debugger — for a test file;
+ * without it there is no Debug mode.
  */
-export function SwarmPanel({ folder, name, scan, bridge, session, file: openPath, actions, onDebug }: { folder: string; name: string; scan: Scan | null; bridge: Bridge; session?: string | null; file?: string | null; actions?: React.ReactNode; onDebug?: (file: string | null) => void }) {
+export function SwarmPanel({ folder, name, scan, bridge, session, file: openPath, actions, debug }: { folder: string; name: string; scan: Scan | null; bridge: Bridge; session?: string | null; file?: string | null; actions?: React.ReactNode; debug?: (file: string | null, onPick: (file: string) => void) => React.ReactNode }) {
 	const { invoke, listen, apiBase } = bridge;
 	const [run, setRun] = useState<string | null>(null);
 	const [events, setEvents] = useState<Ev[]>([]);
@@ -795,6 +796,14 @@ export function SwarmPanel({ folder, name, scan, bridge, session, file: openPath
 		setParams(next);
 	};
 	const markLine = Number(params.get("line")) || null;
+	/** Debug mode on a test file (the debugger compiles it and lists its tests). */
+	const debugFile = (path: string) => {
+		const next = new URLSearchParams(params);
+		next.set("file", path);
+		next.set("mode", "debug");
+		next.delete("line");
+		setParams(next);
+	};
 	// Code navigation (solidity-language-server in the app): ⌘/Ctrl-click goes to the definition; resting on a
 	// symbol shows its hover.
 	const [hover, setHover] = useState<{ x: number; y: number; text: string } | null>(null);
@@ -1133,7 +1142,7 @@ export function SwarmPanel({ folder, name, scan, bridge, session, file: openPath
 		return () => ro.disconnect();
 	}, []);
 	const compact = width < (slot ? 1100 : 820);
-	const nav = <NavGroup name={name} git={Boolean(scan?.git)} onDebug={onDebug ? () => onDebug(null) : undefined} mode={mode} onMode={setMode} inBar={Boolean(slot)} compact={compact} />;
+	const nav = <NavGroup name={name} git={Boolean(scan?.git)} onDebug={debug ? () => setMode("debug") : undefined} mode={mode} onMode={setMode} inBar={Boolean(slot)} compact={compact} />;
 
 	return (
 		// In the Mac app the controls live in the title bar, so the page starts at the top.
@@ -1174,8 +1183,8 @@ export function SwarmPanel({ folder, name, scan, bridge, session, file: openPath
 									<FileCode2 className="size-3.5 shrink-0 text-muted-foreground" />
 									<Breadcrumbs root={name} path={file.path} files={tree} onOpen={view} />
 									<span className="ml-auto flex items-center gap-1">
-										{onDebug && file.path.endsWith(".t.sol") ? (
-											<button type="button" onClick={() => onDebug(file.path)} title={`Debug a test in ${file.path}`} className="inline-flex h-6 items-center gap-1 rounded-md px-2 text-[11px] text-muted-foreground hover:bg-muted hover:text-foreground">
+										{debug && file.path.endsWith(".t.sol") ? (
+											<button type="button" onClick={() => debugFile(file.path)} title={`Debug a test in ${file.path}`} className="inline-flex h-6 items-center gap-1 rounded-md px-2 text-[11px] text-muted-foreground hover:bg-muted hover:text-foreground">
 												<Bug className="size-3" />Debug
 											</button>
 										) : null}
@@ -1223,6 +1232,15 @@ export function SwarmPanel({ folder, name, scan, bridge, session, file: openPath
 												})}
 											</span>
 										) : null}
+										<button
+											type="button"
+											onClick={() => setVimMode(!vim)}
+											aria-pressed={vim}
+											title={vim ? (slot ? "Vim mode is on: Neovim runs here. Turn it off" : "Vim keys are on. Turn them off") : slot ? "Open in Neovim (Vim mode)" : "Vim keys"}
+											className={`inline-flex h-6 items-center rounded-md px-1.5 font-mono text-[11px] font-medium ${vim ? "bg-emerald-500/15 text-emerald-700 dark:text-emerald-400" : "text-muted-foreground hover:bg-muted hover:text-foreground"}`}
+										>
+											vim
+										</button>
 										<CopyButton text={file.text} label="Copy the file" />
 									</span>
 								</div>
@@ -1249,7 +1267,7 @@ export function SwarmPanel({ folder, name, scan, bridge, session, file: openPath
 								>
 									{vim && slot ? (
 										// The Mac app runs real Neovim (bundled); the web keeps the light cursor below.
-										<NeovimView bridge={bridge} folder={folder} path={file.path} line={markLine} onFile={(p, l) => view(p, l)} />
+										<NvimTerminal bridge={bridge} folder={folder} path={file.path} line={markLine} />
 									) : jsonOk && !jsonRaw ? (
 										<JsonTree text={file.text} />
 									) : /\.(md|markdown)$/i.test(file.path) && !mdSource ? (
@@ -1302,6 +1320,11 @@ export function SwarmPanel({ folder, name, scan, bridge, session, file: openPath
 						) : (
 							<p className="m-auto text-sm text-muted-foreground">Pick a file in the sidebar.</p>
 						)}
+					</div>
+				) : null}
+				{mode === "debug" && debug ? (
+					<div className="pointer-events-auto absolute inset-x-0 bottom-0 top-[var(--fm-top)] z-10 flex min-h-0 bg-background">
+						{debug(openPath?.endsWith(".t.sol") ? openPath : null, debugFile)}
 					</div>
 				) : null}
 				{mode === "roadmap" ? (

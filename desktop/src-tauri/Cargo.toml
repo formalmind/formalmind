@@ -22,13 +22,13 @@ tauri-plugin-single-instance = { version = "2", features = ["deep-link"] }
 keyring = { version = "3", features = ["apple-native", "windows-native", "linux-native"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-rmpv = "1"
 sol-debug = { path = "../../crates/sol-debug" }
 formal-ast = { path = "../../crates/formal-ast" }
 revm = { version = "43", default-features = false, features = ["std"] }
 regex = "1"
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
 tokio = { version = "1", features = ["process", "time"] }
+portable-pty = "0.9"
 
 [dev-dependencies]
 tokio = { version = "1", features = ["macros", "rt"] }

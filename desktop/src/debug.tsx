@@ -535,12 +535,16 @@ function Report({ cmp, linked, slotMap, onLink, onHome, onGo, onSlotMap, onClose
 }
 
 /** /debug?path=<folder>&file=<test file>&test=<Contract::test>: pick a test file, pick a test, debug it. */
+/** The debugger on its own page (/debug?path=…&file=…&test=…). */
 export function DebugPage() {
 	const [params] = useSearchParams();
 	const navigate = useNavigate();
 	const folder = params.get("path") ?? "";
-	const file = params.get("file");
-	const wanted = params.get("test");
+	return <DebugView folder={folder} file={params.get("file")} test={params.get("test")} onPick={(f) => navigate(`/debug?path=${encodeURIComponent(folder)}&file=${encodeURIComponent(f)}`, { replace: true })} />;
+}
+
+/** A folder's Foundry tests: pick a file, run a test, step through it (also Debug mode of a folder's page). */
+export function DebugView({ folder, file, test: wanted, onPick }: { folder: string; file: string | null; test?: string | null; onPick: (file: string) => void }) {
 	const [scan, setScan] = useState<Scan | null>(null);
 	const [session, setSession] = useState<{ id: number; file: string; tests: TestFn[] } | null>(null);
 	const [opening, setOpening] = useState(false);
@@ -608,7 +612,7 @@ export function DebugPage() {
 	}, [session]);
 
 	const tests = useMemo(() => (scan?.solidity ?? []).filter(isTest), [scan]);
-	const pick = (f: string) => navigate(`/debug?path=${encodeURIComponent(folder)}&file=${encodeURIComponent(f)}`, { replace: true });
+	const pick = onPick;
 	const onView = useCallback((v: StepView) => setRun((r) => (r ? { ...r, view: v } : r)), []);
 
 	const compare = useCallback(
