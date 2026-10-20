@@ -25,12 +25,23 @@ for (const f of files) {
 	sources[f] = readFileSync(join(root, f), "utf8");
 }
 
-// formal-ast's audit for every contract under src/.
+// Its images, for Markdown previews (up to 4 MB each).
+const MIME: Record<string, string> = { png: "image/png", jpg: "image/jpeg", jpeg: "image/jpeg", gif: "image/gif", webp: "image/webp", svg: "image/svg+xml" };
+const images: Record<string, string> = {};
+for (const f of files) {
+	const mime = MIME[f.split(".").pop()?.toLowerCase() ?? ""];
+	if (!mime || statSync(join(root, f)).size > 4_000_000) continue;
+	images[f] = `data:${mime};base64,${readFileSync(join(root, f)).toString("base64")}`;
+}
+
+// formal-ast's audit and Lean coverage for every contract under src/.
 const bin = resolve(import.meta.dir, "../crates/formal-ast/target/release/formal-ast");
 const audits: Record<string, unknown> = {};
+const formals: Record<string, unknown> = {};
 for (const f of files.filter((f) => f.startsWith("src/") && f.endsWith(".sol"))) {
 	try {
 		audits[f] = JSON.parse(execFileSync(bin, ["--root", root, f, "audit"], { encoding: "utf8", maxBuffer: 64 << 20 }));
+		formals[f] = JSON.parse(execFileSync(bin, ["--root", root, f, "formal"], { encoding: "utf8", maxBuffer: 64 << 20 }));
 	} catch {
 		// Files without a deployable contract (libraries, interfaces, types) have no audit.
 	}
@@ -38,5 +49,5 @@ for (const f of files.filter((f) => f.startsWith("src/") && f.endsWith(".sol")))
 
 const out = resolve(import.meta.dir, "../components/demo/data.json");
 mkdirSync(resolve(out, ".."), { recursive: true });
-writeFileSync(out, JSON.stringify({ name: basename(root), path: root, files, sources, audits }));
-console.log(`${out}: ${files.length} files, ${Object.keys(sources).length} sources, ${Object.keys(audits).length} audits, ${(statSync(out).size / 1024).toFixed(0)} KB`);
+writeFileSync(out, JSON.stringify({ name: basename(root), path: root, files, sources, images, audits, formals }));
+console.log(`${out}: ${files.length} files, ${Object.keys(sources).length} sources, ${Object.keys(images).length} images, ${Object.keys(audits).length} audits, ${(statSync(out).size / 1024).toFixed(0)} KB`);

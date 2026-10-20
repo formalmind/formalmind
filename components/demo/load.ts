@@ -3,7 +3,7 @@
  * committed: without it the demo uses its sample folder.
  */
 export type DemoAudit = Record<string, unknown> & { slices?: Record<string, string> };
-export type DemoData = { name: string; path: string; files: string[]; sources: Record<string, string>; audits: Record<string, DemoAudit> };
+export type DemoData = { name: string; path: string; files: string[]; sources: Record<string, string>; images?: Record<string, string>; audits: Record<string, DemoAudit>; formals?: Record<string, unknown> };
 
 const found = import.meta.glob<DemoData>("./data.json", { import: "default" });
 let loading: Promise<DemoData | null> | null = null;

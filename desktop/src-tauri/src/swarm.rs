@@ -578,6 +578,43 @@ pub fn folder_read(folder: String, path: String) -> Result<String, String> {
     std::fs::read_to_string(p).map_err(|e| e.to_string())
 }
 
+/// An image in the folder as a `data:` URL, for Markdown previews (up to 8 MB).
+#[tauri::command]
+pub fn folder_image(folder: String, path: String) -> Result<String, String> {
+    if !local::read()?.folders.contains(&folder) {
+        return Err("Add the folder first".into());
+    }
+    let p = inside(Path::new(&folder), &path)?;
+    let ext = p.extension().and_then(|e| e.to_str()).unwrap_or("").to_ascii_lowercase();
+    let mime = match ext.as_str() {
+        "png" => "image/png",
+        "jpg" | "jpeg" => "image/jpeg",
+        "gif" => "image/gif",
+        "webp" => "image/webp",
+        "svg" => "image/svg+xml",
+        "avif" => "image/avif",
+        "ico" => "image/x-icon",
+        _ => return Err("Not an image".into()),
+    };
+    let bytes = std::fs::read(&p).map_err(|e| e.to_string())?;
+    if bytes.len() > 8 << 20 {
+        return Err("Image too large".into());
+    }
+    Ok(format!("data:{mime};base64,{}", base64(&bytes)))
+}
+
+fn base64(bytes: &[u8]) -> String {
+    const T: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    let mut out = String::with_capacity(bytes.len().div_ceil(3) * 4);
+    for c in bytes.chunks(3) {
+        let n = (c[0] as u32) << 16 | (*c.get(1).unwrap_or(&0) as u32) << 8 | *c.get(2).unwrap_or(&0) as u32;
+        for i in 0..4 {
+            out.push(if i <= c.len() { T[(n >> (18 - 6 * i)) as usize & 63] as char } else { '=' });
+        }
+    }
+    out
+}
+
 fn write_bug(root: &Path, input: &Value) -> String {
     let dir = root.join(".formal").join("bugs");
     let _ = std::fs::create_dir_all(&dir);

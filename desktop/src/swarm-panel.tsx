@@ -557,6 +557,30 @@ export function SwarmPanel({ folder, name, scan, bridge, session, file: openPath
 	const [planOpen, setPlanOpen] = useState(false);
 	// Markdown files open rendered; the toggle shows their source (the choice is kept).
 	const [mdSource, setMdSource] = useState(() => store.get("fm:md-view") === "source");
+	// Images a Markdown file points at, read from the folder (relative to the file), by path.
+	const [images, setImages] = useState<Record<string, string>>({});
+	const imagePath = (src: string, from: string) => {
+		if (/^([a-z][a-z0-9+.-]*:|\/\/|#)/i.test(src)) return null;
+		const parts = (src.startsWith("/") ? [] : from.split("/").slice(0, -1));
+		for (const seg of src.replace(/^\//, "").split(/[?#]/)[0].split("/")) {
+			if (seg === "..") parts.pop();
+			else if (seg && seg !== ".") parts.push(decodeURIComponent(seg));
+		}
+		return parts.join("/");
+	};
+	useEffect(() => {
+		if (!file || !/\.(md|markdown)$/i.test(file.path)) return;
+		const srcs = [...file.text.matchAll(/!\[[^\]]*\]\(\s*<?([^)\s>]+)/g), ...file.text.matchAll(/<img[^>]*\ssrc=["']([^"']+)["']/gi)].map((m) => m[1]);
+		for (const src of new Set(srcs)) {
+			const path = imagePath(src, file.path);
+			if (!path || images[path]) continue;
+			void invoke<string>("folder_image", { folder, path }).then(
+				(url) => setImages((m) => ({ ...m, [path]: url })),
+				() => undefined,
+			);
+		}
+		// eslint-disable-next-line react-hooks/exhaustive-deps
+	}, [file, folder]);
 	/** A report with the PoC tests and proofs it cites inlined (newer reports already carry them). */
 	const withPoc = async (body: string) => {
 		const cited = [...new Set(body.match(/[\w./-]+\.(?:t\.sol|lean)/g) ?? [])].filter((p) => !body.includes(`Proof of concept: \`${p}\``)).slice(0, 3);
@@ -897,7 +921,7 @@ export function SwarmPanel({ folder, name, scan, bridge, session, file: openPath
 								</div>
 								<div className="min-h-0 flex-1 overflow-auto">
 									{/\.(md|markdown)$/i.test(file.path) && !mdSource ? (
-										<ChatMarkdown className="mx-auto max-w-3xl px-6 py-6 text-[14px]">{file.text}</ChatMarkdown>
+										<ChatMarkdown className="mx-auto max-w-3xl px-6 py-6 text-[14px]" image={(src) => { const p = imagePath(src, file.path); return p === null ? src : images[p]; }}>{file.text}</ChatMarkdown>
 									) : (
 										<FileView path={file.path} text={file.text} big />
 									)}

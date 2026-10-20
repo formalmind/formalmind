@@ -24,9 +24,10 @@ const PROSE =
 
 /**
  * A model's reply as markdown, the same everywhere: GitHub-flavoured (tables, task lists), math, highlighted code,
- * Mermaid diagrams and a safe subset of HTML; links open in a new tab.
+ * Mermaid diagrams and a safe subset of HTML; links open in a new tab. `image` maps an image's `src` (a file's
+ * Markdown points at paths beside it) to what to load; while it has no answer the image waits.
  */
-export function ChatMarkdown({ children, className = "" }: { children: string; className?: string }) {
+export function ChatMarkdown({ children, className = "", image }: { children: string; className?: string; image?: (src: string) => string | null | undefined }) {
 	return (
 		<div className={`${PROSE} ${className}`}>
 			<ReactMarkdown
@@ -36,6 +37,11 @@ export function ChatMarkdown({ children, className = "" }: { children: string; c
 					a: ({ node, ...props }) => {
 						void node;
 						return <a {...props} target="_blank" rel="noreferrer" />;
+					},
+					img: ({ node, src, ...props }) => {
+						void node;
+						const url = typeof src === "string" && image ? image(src) : src;
+						return url ? <img {...props} src={url} /> : <span className="inline-block h-24 w-full rounded-md bg-muted" aria-label={props.alt} />;
 					},
 					pre({ children: content, ...props }) {
 						const child = Children.toArray(content).find(isValidElement);

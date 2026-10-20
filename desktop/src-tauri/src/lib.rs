@@ -98,6 +98,7 @@ pub fn run() {
             swarm::swarm_history,
             swarm::swarm_proofs,
             swarm::folder_read,
+            swarm::folder_image,
             swarm::swarm_set_budget,
             swarm::swarm_queue,
             debug::debug_open,

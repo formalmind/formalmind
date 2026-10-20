@@ -110,6 +110,16 @@ const makeDemo = (data: DemoData | null): Bridge => ({
 			ast_units: AST_UNITS,
 			ast_slice: AST_SLICE,
 		};
+		if (cmd === "folder_image") {
+			const url = data?.images?.[String(args?.path ?? "")];
+			if (!url) throw "Not in the demo data.";
+			return url as T;
+		}
+		if (cmd === "ast_formal") {
+			const formal = data?.formals?.[String(args?.entry ?? "")];
+			if (!formal) throw "No deployable contract in this file (libraries, interfaces and types have no model).";
+			return formal as T;
+		}
 		if (data && (cmd === "ast_units" || cmd === "ast_slice")) {
 			const audit = data.audits[String(args?.entry ?? "")];
 			if (!audit) throw "No deployable contract in this file (libraries, interfaces and types have no audit).";
