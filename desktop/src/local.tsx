@@ -8,7 +8,7 @@ import { apiBase } from "./api";
 import { SwarmPanel, type Bridge } from "./swarm-panel";
 
 const tauri: Bridge = { invoke, listen, apiBase };
-import { SidebarGroup, SidebarGroupAction, SidebarGroupLabel, SidebarMenu, SidebarMenuAction, SidebarMenuButton, SidebarMenuItem } from "@/components/ui/sidebar";
+import { SidebarGroup, SidebarGroupAction, SidebarGroupLabel, SidebarMenu, SidebarMenuAction, SidebarMenuButton, SidebarMenuItem, SidebarMenuSub, SidebarMenuSubButton, SidebarMenuSubItem } from "@/components/ui/sidebar";
 
 type Config = { folders: string[] };
 export type Scan = { solidity: string[]; lean: string[]; truncated: boolean };
@@ -36,6 +36,51 @@ function useFolders() {
 }
 
 /** The sidebar section: local folders, with + to add one. */
+type SessionRow = { run: string; title: string; outcome: string };
+
+/** A folder's swarm sessions, newest first, refreshed when a session starts or ends. */
+function useSessions(folder: string) {
+	const [rows, setRows] = useState<SessionRow[]>([]);
+	useEffect(() => {
+		const look = () => void invoke<SessionRow[]>("swarm_sessions", { folder }).then(setRows, () => setRows([]));
+		look();
+		window.addEventListener("fm:sessions", look);
+		return () => window.removeEventListener("fm:sessions", look);
+	}, [folder]);
+	return rows;
+}
+
+/** A folder in the sidebar with its swarm sessions underneath, like a project's chats on the web. */
+function FolderItem({ path, current, run, onRemove }: { path: string; current: boolean; run: string | null; onRemove: () => void }) {
+	const sessions = useSessions(path);
+	return (
+		<SidebarMenuItem>
+			<SidebarMenuButton asChild isActive={current && !run} tooltip={path} className="font-normal">
+				<Link to={href(path)}>
+					<HardDrive />
+					<span>{name(path)}</span>
+				</Link>
+			</SidebarMenuButton>
+			<SidebarMenuAction showOnHover title="Remove from the list" onClick={onRemove}>
+				<X />
+			</SidebarMenuAction>
+			{sessions.length ? (
+				<SidebarMenuSub>
+					{sessions.slice(0, 8).map((x, i) => (
+						<SidebarMenuSubItem key={x.run}>
+							<SidebarMenuSubButton asChild isActive={current && run === x.run} size="sm">
+								<Link to={`${href(path)}&run=${x.run}`} title={x.outcome || undefined}>
+									<span className="truncate">{x.title || `Session ${sessions.length - i}`}</span>
+								</Link>
+							</SidebarMenuSubButton>
+						</SidebarMenuSubItem>
+					))}
+				</SidebarMenuSub>
+			) : null}
+		</SidebarMenuItem>
+	);
+}
+
 export function LocalFolders() {
 	const { folders, add, remove } = useFolders();
 	const location = useLocation();
@@ -49,17 +94,7 @@ export function LocalFolders() {
 			</SidebarGroupAction>
 			<SidebarMenu>
 				{folders.map((path) => (
-					<SidebarMenuItem key={path}>
-						<SidebarMenuButton asChild isActive={current === path} tooltip={path} className="font-normal">
-							<Link to={href(path)}>
-								<HardDrive />
-								<span>{name(path)}</span>
-							</Link>
-						</SidebarMenuButton>
-						<SidebarMenuAction showOnHover title="Remove from the list" onClick={() => void remove(path)}>
-							<X />
-						</SidebarMenuAction>
-					</SidebarMenuItem>
+					<FolderItem key={path} path={path} current={current === path} run={current === path ? params.get("run") : null} onRemove={() => void remove(path)} />
 				))}
 				{folders.length === 0 ? (
 					<SidebarMenuItem>
@@ -86,5 +121,5 @@ export function LocalFolderPage() {
 		invoke<Scan>("folder_scan", { path }).then(setScan, (e) => setError(String(e)));
 	}, [path]);
 	if (error) return <p className="p-6 text-sm text-red-600">{error}</p>;
-	return path ? <SwarmPanel folder={path} name={name(path)} scan={scan} bridge={tauri} /> : null;
+	return path ? <SwarmPanel folder={path} name={name(path)} scan={scan} bridge={tauri} session={params.get("run")} /> : null;
 }

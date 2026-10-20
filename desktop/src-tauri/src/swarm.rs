@@ -25,6 +25,8 @@ pub struct Swarm {
     /// Where the run's log lives and what it has spent, so quitting can record the pause.
     folder: String,
     spent: Mutex<f64>,
+    /// The spending cap, raised from the chat's header while the swarm runs.
+    budget: Mutex<f64>,
 }
 
 #[derive(Default)]
@@ -69,7 +71,7 @@ pub fn anthropic_key_status() -> bool {
 #[derive(Serialize, Clone)]
 struct SwarmEvent {
     run: String,
-    /// "status" | "say" | "tool" | "result" | "you" | "bug" | "plan" | "done"
+    /// "start" | "status" | "say" | "tool" | "result" | "you" | "bug" | "plan" | "done"
     kind: &'static str,
     role: String,
     item: String,
@@ -460,7 +462,8 @@ async fn run_swarm(turn: &Turn<'_>) -> String {
             return "stopped".into();
         }
         let spent = *turn.swarm.spent.lock().unwrap();
-        if spent >= turn.req.budget_usd {
+        let budget = *turn.swarm.budget.lock().unwrap();
+        if spent >= budget {
             return format!("budget reached (${spent:.2})");
         }
         let said: Vec<String> = std::mem::take(&mut *turn.swarm.inbox.lock().unwrap());
@@ -555,12 +558,14 @@ pub fn swarm_start(app: AppHandle, swarms: State<'_, Swarms>, request: SwarmRequ
         return Err("A swarm is already running; stop it first".into());
     }
     let run = format!("local-{:x}", now_ms());
-    let swarm = Arc::new(Swarm { stop: AtomicBool::new(false), inbox: Mutex::new(vec![]), folder: request.folder.clone(), spent: Mutex::new(0.0) });
+    let swarm = Arc::new(Swarm { stop: AtomicBool::new(false), inbox: Mutex::new(vec![]), folder: request.folder.clone(), spent: Mutex::new(0.0), budget: Mutex::new(request.budget_usd) });
     swarms.0.lock().unwrap().insert(run.clone(), swarm.clone());
     let id = run.clone();
     tauri::async_runtime::spawn(async move {
         let client = reqwest::Client::builder().timeout(Duration::from_secs(600)).build().unwrap_or_default();
         let turn = Turn { app: &app, run: &id, req: &request, swarm: &swarm, client };
+        // The session's title: the focus it was given.
+        turn.emit("start", "swarm", "", request.goal.clone().unwrap_or_default());
         turn.emit("status", "swarm", "", "starting".into());
         let outcome = run_swarm(&turn).await;
         turn.emit("done", "swarm", "", outcome);
@@ -588,6 +593,8 @@ pub fn swarm_say(swarms: State<'_, Swarms>, run: String, text: String) -> Result
 #[derive(Serialize)]
 pub struct Session {
     pub run: String,
+    /// The focus the session was started with, or "" when none was given.
+    pub title: String,
     /// The last line's text when the run finished ("done …", "bug found …"), else "".
     pub outcome: String,
     pub spent: f64,
@@ -612,8 +619,9 @@ pub fn swarm_sessions(folder: String) -> Result<Vec<Session>, String> {
                     let run = name.strip_suffix(".jsonl")?.to_string();
                     let text = std::fs::read_to_string(e.path()).ok()?;
                     let last: Value = text.lines().last().and_then(|l| serde_json::from_str(l).ok()).unwrap_or(json!({}));
+                    let title = text.lines().filter_map(|l| serde_json::from_str::<Value>(l).ok()).find(|e| e["kind"] == "start").and_then(|e| e["text"].as_str().map(String::from)).unwrap_or_default();
                     let outcome = if last["kind"] == "done" { last["text"].as_str().unwrap_or("").to_string() } else { String::new() };
-                    Some(Session { run, outcome, spent: last["spent"].as_f64().unwrap_or(0.0), events: text.lines().count() })
+                    Some(Session { run, title, outcome, spent: last["spent"].as_f64().unwrap_or(0.0), events: text.lines().count() })
                 })
                 .collect()
         })
@@ -646,6 +654,15 @@ pub fn pause_all(app: &AppHandle) {
             let _ = std::fs::OpenOptions::new().append(true).open(runs_dir(&s.folder).join(format!("{run}.jsonl"))).and_then(|mut f| writeln!(f, "{line}"));
         }
     }
+}
+
+/// Raises (or lowers) a running swarm's spending cap.
+#[tauri::command]
+pub fn swarm_set_budget(swarms: State<'_, Swarms>, run: String, usd: f64) -> Result<(), String> {
+    let map = swarms.0.lock().unwrap();
+    let s = map.get(&run).ok_or("The swarm isn't running")?;
+    *s.budget.lock().unwrap() = usd.max(0.0);
+    Ok(())
 }
 
 /// The running swarm, if any (so the page can reattach after a reload).

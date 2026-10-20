@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { Check, ChevronDown, Copy, FileCode2, Play, Square } from "lucide-react";
 import { ChatComposer } from "@/components/chat-composer";
+import { DropdownMenu, DropdownMenuContent, DropdownMenuLabel, DropdownMenuRadioGroup, DropdownMenuRadioItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { ChatMarkdown } from "@/components/chat-markdown";
 import { SwarmCanvas } from "@/components/swarm/swarm-canvas";
 import { ROLE_COLORS } from "@/lib/swarm-roles";
@@ -41,9 +42,9 @@ function CopyButton({ text, get, label = "Copy" }: { text?: string; get?: () => 
 	);
 }
 
-type Session = { run: string; outcome: string; spent: number; events: number };
+type Session = { run: string; title: string; outcome: string; spent: number; events: number };
 
-const BUDGETS = [2, 5, 10, 20];
+const BUDGETS = [2, 5, 10, 20, 50, 100];
 /** Claude models the local swarm can run on; the choice applies when the swarm starts. */
 const MODELS = [
 	{ value: "claude-opus-5-5", label: "Claude Opus 5.5" },
@@ -79,7 +80,7 @@ function Floating({ id, open, onOpen, title, meta, tone, action, children }: { i
  * A local folder's swarm: the canvas on the left (the board, the contract files, bugs) and the chat on the right (start
  * and steer the swarm, the plan, and what each agent says as it works).
  */
-export function SwarmPanel({ folder, name, scan, bridge }: { folder: string; name: string; scan: Scan | null; bridge: Bridge }) {
+export function SwarmPanel({ folder, name, scan, bridge, session }: { folder: string; name: string; scan: Scan | null; bridge: Bridge; session?: string | null }) {
 	const { invoke, listen, apiBase } = bridge;
 	const [run, setRun] = useState<string | null>(null);
 	const [events, setEvents] = useState<Ev[]>([]);
@@ -133,7 +134,15 @@ export function SwarmPanel({ folder, name, scan, bridge }: { folder: string; nam
 		setViewing(id);
 		void invoke<Ev[]>("swarm_history", { folder, run: id }).then((evs) => setEvents(evs.slice(-600)), () => setEvents([]));
 	};
-	const listSessions = () => invoke<Session[]>("swarm_sessions", { folder }).then((list) => (setSessions(list), list), () => []);
+	const listSessions = () =>
+		invoke<Session[]>("swarm_sessions", { folder }).then(
+			(list) => {
+				setSessions(list);
+				window.dispatchEvent(new Event("fm:sessions"));
+				return list;
+			},
+			() => [] as Session[],
+		);
 
 	const refresh = () => {
 		void invoke<Item[]>("swarm_plan", { folder }).then(setPlan, () => {});
@@ -149,7 +158,7 @@ export function SwarmPanel({ folder, name, scan, bridge }: { folder: string; nam
 			setRun(r);
 			const list = await listSessions();
 			// Reopen where you left off: the running session, else the latest one.
-			const id = r ?? list[0]?.run;
+			const id = r ?? session ?? list[0]?.run;
 			if (id) load(id);
 		});
 		const off = listen<Ev>("swarm", ({ payload }) => {
@@ -165,6 +174,11 @@ export function SwarmPanel({ folder, name, scan, bridge }: { folder: string; nam
 		return () => void off.then((f) => f());
 		// eslint-disable-next-line react-hooks/exhaustive-deps
 	}, [folder]);
+	// A session picked in the sidebar.
+	useEffect(() => {
+		if (session && session !== viewing && !run) load(session);
+		// eslint-disable-next-line react-hooks/exhaustive-deps
+	}, [session]);
 	useEffect(() => {
 		// Braces matter: scrollTo returns a Promise in newer browsers, and an effect must return nothing or a cleanup.
 		chat.current?.scrollTo({ top: chat.current.scrollHeight });
@@ -192,6 +206,12 @@ export function SwarmPanel({ folder, name, scan, bridge }: { folder: string; nam
 	};
 
 	const spent = events.at(-1)?.spent ?? 0;
+	const sessionTitle = (id: string | null) => {
+		const i = sessions.findIndex((x) => x.run === id);
+		if (i < 0) return run ? goal.trim() || "New session" : "New session";
+		return sessions[i].title || `Session ${sessions.length - i}`;
+	};
+	const title = sessionTitle(viewing);
 	const working = [...events].reverse().find((e) => e.kind === "status" && e.role !== "swarm");
 	const done = plan.filter((i) => i.mark === "x").length;
 	const finished = !run ? events.find((e) => e.kind === "done") : undefined;
@@ -294,22 +314,31 @@ export function SwarmPanel({ folder, name, scan, bridge }: { folder: string; nam
 					<button type="button" onClick={() => setChatOpen(!chatOpen)} aria-expanded={chatOpen} title={chatOpen ? "Collapse the chat" : "Open the chat"} className="flex items-center gap-1.5">
 						<ChevronDown className={`size-3.5 text-muted-foreground transition-transform duration-200 ${chatOpen ? "rotate-180" : ""}`} />
 					</button>
-					{sessions.length ? (
-						<select value={viewing ?? ""} onChange={(e) => load(e.target.value)} disabled={Boolean(run)} title="Session" className="h-7 min-w-0 flex-1 rounded-lg border bg-background px-1.5 text-xs outline-none">
-							{sessions.map((x) => (
-								<option key={x.run} value={x.run}>
-									{new Date(parseInt(x.run.replace("local-", ""), 16)).toLocaleString(undefined, { dateStyle: "short", timeStyle: "short" })} · ${x.spent.toFixed(2)}{x.run === run ? "" : x.outcome ? ` · ${x.outcome.slice(0, 28)}` : " · stopped"}
-								</option>
-							))}
-						</select>
-					) : <span className="flex-1" />}
+					<span className="min-w-0 flex-1 truncate text-[13px] font-medium" title={title}>{title}</span>
+					<DropdownMenu>
+						<DropdownMenuTrigger className="inline-flex h-7 shrink-0 items-center gap-1 rounded-md border bg-background px-2 text-[11px] tabular-nums text-muted-foreground outline-none hover:text-foreground" title="Spending cap">
+							{run || viewing ? `$${spent.toFixed(2)} / $${budget}` : `Budget $${budget}`}
+							<ChevronDown className="size-3" />
+						</DropdownMenuTrigger>
+						<DropdownMenuContent align="end">
+							<DropdownMenuLabel className="text-xs font-normal text-muted-foreground">Stop the swarm at</DropdownMenuLabel>
+							<DropdownMenuRadioGroup
+								value={String(budget)}
+								onValueChange={(v) => {
+									setBudget(Number(v));
+									if (run) void invoke("swarm_set_budget", { run, usd: Number(v) });
+								}}
+							>
+								{BUDGETS.map((b) => (
+									<DropdownMenuRadioItem key={b} value={String(b)} disabled={Boolean(run) && b <= spent}>${b}</DropdownMenuRadioItem>
+								))}
+							</DropdownMenuRadioGroup>
+						</DropdownMenuContent>
+					</DropdownMenu>
 					{run ? (
-						<div className="flex shrink-0 items-center gap-1 text-[11px] text-muted-foreground">
-							<span className="tabular-nums" title="Spent of the cap">${spent.toFixed(2)}/${budget}</span>
-							<button type="button" onClick={() => void invoke("swarm_stop", { run })} title="Stop the swarm" className="inline-flex h-7 items-center gap-1 rounded-md border bg-background px-2 text-foreground hover:bg-muted">
-								<Square className="size-3" />Stop
-							</button>
-						</div>
+						<button type="button" onClick={() => void invoke("swarm_stop", { run })} title="Stop the swarm" className="inline-flex h-7 shrink-0 items-center gap-1 rounded-md border bg-background px-2 text-[11px] text-foreground hover:bg-muted">
+							<Square className="size-3" />Stop
+						</button>
 					) : null}
 				</div>
 				{chatOpen ? (
@@ -381,9 +410,6 @@ export function SwarmPanel({ folder, name, scan, bridge }: { folder: string; nam
 							<a href="#/settings" className="text-muted-foreground hover:text-foreground hover:underline" title="Change in Settings">
 								Claude via {provider === "anthropic" ? (hasKey ? "your Anthropic key" : "your Anthropic key (not set)") : "formal.team credits"}
 							</a>
-							<select value={budget} onChange={(e) => setBudget(Number(e.target.value))} className="h-7 rounded-lg border bg-background px-1.5 outline-none" title="Stop at">
-								{BUDGETS.map((b) => <option key={b} value={b}>stop at ${b}</option>)}
-							</select>
 							<button type="button" onClick={() => void start()} disabled={provider === "anthropic" && !hasKey} className="btn-dark ml-auto h-7 gap-1.5 px-3 disabled:opacity-50"><Play className="size-3" />{plan.some((i) => i.mark === " ") ? "Resume" : "Start"}</button>
 						</div>
 					)}

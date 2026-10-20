@@ -92,7 +92,7 @@ const demo: Bridge = {
 		const answers: Record<string, unknown> = {
 			swarm_plan: PLAN,
 			swarm_bugs: BUGS,
-			swarm_sessions: [{ run: RUN, outcome: "", spent: 1.84, events: EVENTS.length }],
+			swarm_sessions: [{ run: RUN, title: "Liquidations and the penalty cap", outcome: "", spent: 1.84, events: EVENTS.length }],
 			swarm_history: EVENTS,
 			swarm_proofs: PROOFS,
 			folder_read: SOURCES[String(args?.path ?? "")] ?? "// (demo: no contents)\n",
