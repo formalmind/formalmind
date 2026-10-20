@@ -423,8 +423,29 @@ fn write_bug(root: &Path, input: &Value) -> String {
         input["scenario"].as_str().unwrap_or(""),
         input["evidence"].as_str().unwrap_or("(none given)")
     );
+    let body = body + &inline_cited(root, &format!("{} {}", input["evidence"].as_str().unwrap_or(""), input["scenario"].as_str().unwrap_or("")));
     let _ = inside(root, &rel).map(|p| std::fs::write(p, body));
     rel
+}
+
+/// The PoC tests and Lean files a report cites, inlined as code blocks so the report stands on its own.
+fn inline_cited(root: &Path, text: &str) -> String {
+    let re = regex::Regex::new(r"[\w./-]+\.(?:t\.sol|sol|lean)").expect("valid regex");
+    let mut seen: Vec<String> = vec![];
+    let mut out = String::new();
+    for m in re.find_iter(text) {
+        let path = m.as_str().trim_start_matches("./").to_string();
+        // Only tests and proofs: the contracts themselves are already in the repo.
+        let is_poc = path.ends_with(".t.sol") || path.ends_with(".lean") || path.contains("/formal/");
+        if !is_poc || seen.contains(&path) || seen.len() >= 3 {
+            continue;
+        }
+        let Ok(code) = inside(root, &path).and_then(|p| std::fs::read_to_string(p).map_err(|e| e.to_string())) else { continue };
+        let lang = if path.ends_with(".lean") { "lean" } else { "solidity" };
+        out.push_str(&format!("\n## Proof of concept: `{path}`\n\n```{lang}\n{}\n```\n", code.trim_end()));
+        seen.push(path);
+    }
+    out
 }
 
 /// The loop: answer the maintainer first, plan if there's no plan, then prove and review one item at a time.

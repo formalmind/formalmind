@@ -20,8 +20,8 @@ type Bug = { file: string; title: string; body: string };
 type Provider = "formal" | "anthropic";
 type Proof = { item: string; files: string[]; summary: string; at: string };
 
-/** Copies text, showing a tick for a moment. */
-function CopyButton({ text, label = "Copy" }: { text: string; label?: string }) {
+/** Copies text (or what `get` resolves to), showing a tick for a moment. */
+function CopyButton({ text, get, label = "Copy" }: { text?: string; get?: () => Promise<string>; label?: string }) {
 	const [done, setDone] = useState(false);
 	return (
 		<button
@@ -29,7 +29,7 @@ function CopyButton({ text, label = "Copy" }: { text: string; label?: string }) 
 			title={label}
 			onClick={(e) => {
 				e.stopPropagation();
-				void navigator.clipboard.writeText(text).then(() => {
+				void (get ? get() : Promise.resolve(text ?? "")).then((t) => navigator.clipboard.writeText(t)).then(() => {
 					setDone(true);
 					setTimeout(() => setDone(false), 1200);
 				});
@@ -74,9 +74,6 @@ function Floating({ id, open, onOpen, title, meta, tone, action, children }: { i
 	);
 }
 
-const Label = ({ children }: { children: React.ReactNode }) => (
-	<span className="font-mono text-[11px] font-medium uppercase tracking-wider text-muted-foreground">{children}</span>
-);
 
 /**
  * A local folder's swarm: the canvas on the left (the board, the contract files, bugs) and the chat on the right (start
@@ -105,6 +102,19 @@ export function SwarmPanel({ folder, name, scan, bridge }: { folder: string; nam
 	const [proofs, setProofs] = useState<Record<string, Proof>>({});
 	const [openItem, setOpenItem] = useState<number | null>(null);
 	const [file, setFile] = useState<{ path: string; text: string } | null>(null);
+	/** A report with the PoC tests and proofs it cites inlined (newer reports already carry them). */
+	const withPoc = async (body: string) => {
+		const cited = [...new Set(body.match(/[\w./-]+\.(?:t\.sol|lean)/g) ?? [])].filter((p) => !body.includes(`Proof of concept: \`${p}\``)).slice(0, 3);
+		const parts = await Promise.all(
+			cited.map((p) =>
+				invoke<string>("folder_read", { folder, path: p }).then(
+					(code) => `\n## Proof of concept: \`${p}\`\n\n\`\`\`${p.endsWith(".lean") ? "lean" : "solidity"}\n${code.trimEnd()}\n\`\`\`\n`,
+					() => "",
+				),
+			),
+		);
+		return body + parts.join("");
+	};
 	const view = (path: string) => {
 		void invoke<string>("folder_read", { folder, path }).then(
 			(text) => {
@@ -259,7 +269,7 @@ export function SwarmPanel({ folder, name, scan, bridge }: { folder: string; nam
 									<li key={b.file}>
 										<button type="button" onClick={() => setOpenBug(openBug === b.file ? null : b.file)} className="flex w-full items-center gap-2 px-3 py-2 text-left text-[13px]">
 											<span className="flex-1 font-medium">{b.title}</span>
-											<CopyButton text={b.body} label="Copy the report as Markdown" />
+											<CopyButton get={() => withPoc(b.body)} label="Copy the report as Markdown, PoC included" />
 											<ChevronDown className={`size-3.5 text-muted-foreground transition-transform ${openBug === b.file ? "rotate-180" : ""}`} />
 										</button>
 										{openBug === b.file ? <div className="prose prose-sm max-w-none border-t px-3 py-2 text-[13px] dark:prose-invert"><ChatMarkdown>{b.body.replace(/^# .*\n/, "")}</ChatMarkdown></div> : null}

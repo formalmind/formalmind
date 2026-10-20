@@ -25,6 +25,20 @@ const PROOFS = {
 	"2": { item: PLAN[1].text, files: ["formal/Formal/Vault.lean"], summary: "Withdraw proved the same way; the ceil rounding on shares holds.", at: "" },
 };
 const SOURCES: Record<string, string> = {
+	"test/formal/PoC_Liquidate.t.sol": `// SPDX-License-Identifier: MIT
+pragma solidity ^0.8.20;
+
+import {Test} from "forge-std/Test.sol";
+import {Lending} from "../../src/Lending.sol";
+
+contract PoC_Liquidate is Test {
+    function test_penaltyExceedsCap() public {
+        // (demo) set up a 100k position, move the pool in the swap callback, liquidate
+        uint256 paid = 111_800e18;
+        uint256 debt = 100_000e18;
+        assertGt(paid, debt * 110 / 100, "liquidator paid more than the 10% cap");
+    }
+}`,
 	"formal/Formal/Vault.lean": `namespace Vault
 
 /-- shares minted for a deposit: floor(assets * supply / total), or assets when empty -/
