@@ -379,7 +379,16 @@ export function SwarmPanel({ folder, name, scan, bridge, session, file: openPath
 					local
 					repo={folder}
 					actions={actions}
-					title={<span className="inline-flex h-8 min-w-0 items-center rounded-full border bg-background/90 px-3 text-sm shadow-sm backdrop-blur">{scan?.git ? <MarkGithubIcon className="mr-2 size-4 shrink-0" /> : null}<span className="truncate">{name}</span></span>}
+					title={
+						<>
+							<span className="inline-flex h-8 min-w-0 items-center rounded-full border bg-background/90 px-3 text-sm shadow-sm backdrop-blur">{scan?.git ? <MarkGithubIcon className="mr-2 size-4 shrink-0" /> : null}<span className="truncate">{name}</span></span>
+							{onDebug ? (
+								<button type="button" onClick={() => onDebug(null)} title="Debug this folder's Foundry tests" className="inline-flex h-8 shrink-0 items-center gap-1.5 rounded-full border bg-background/90 px-3 text-[12px] text-muted-foreground shadow-sm backdrop-blur hover:text-foreground">
+									<Bug className="size-3.5" />Debug
+								</button>
+							) : null}
+						</>
+					}
 				/>
 				<div className="pointer-events-none absolute left-3 top-14 z-10 flex max-h-[calc(100%-4.5rem)] w-[min(18rem,calc(100%-1.5rem))] flex-col gap-2">
 					<Floating id="plan" open={panel} onOpen={setPanel} title="Plan" meta={plan.length ? `${done}/${plan.length}` : ""}>
@@ -416,30 +425,6 @@ export function SwarmPanel({ folder, name, scan, bridge, session, file: openPath
 							})}
 						</ul>
 					</Floating>
-					<Floating id="files" open={panel} onOpen={setPanel} title="Files" meta={scan ? `${scan.solidity.length} sol · ${scan.lean.length} lean` : ""} action={onDebug ? (
-						<button type="button" onClick={(e) => { e.stopPropagation(); onDebug(null); }} title="Debug this folder's Foundry tests" className="inline-flex h-6 items-center gap-1 rounded-md border bg-background px-2 text-[11px] text-foreground hover:bg-muted">
-							<Bug className="size-3" />Debug tests
-						</button>
-					) : undefined}>
-						<ul className="p-2 font-mono text-[11px]">
-							{scan === null ? <li className="p-2 text-muted-foreground">Reading the folder…</li> : null}
-							{[...(scan?.solidity ?? []), ...(scan?.lean ?? [])].map((f) => (
-								<li key={f}>
-									<div className="group flex items-center rounded hover:bg-muted">
-										<button type="button" onClick={() => view(f)} className="flex min-w-0 flex-1 items-center gap-1.5 truncate px-1.5 py-1 text-left" title={`Open ${f}`}>
-											<FileCode2 className={`size-3 shrink-0 ${f.endsWith(".lean") ? "text-violet-500" : "text-sky-500"}`} />
-											<span className="truncate">{f}</span>
-										</button>
-										{onDebug && f.endsWith(".t.sol") ? (
-											<button type="button" onClick={() => onDebug(f)} title={`Debug a test in ${f}`} className="mr-1 grid size-5 shrink-0 place-items-center rounded text-muted-foreground opacity-60 hover:bg-background hover:text-foreground group-hover:opacity-100">
-												<Bug className="size-3" />
-											</button>
-										) : null}
-									</div>
-								</li>
-							))}
-						</ul>
-					</Floating>
 					{bugs.length ? (
 						<Floating id="bugs" open={panel} onOpen={setPanel} title="Bugs" meta={String(bugs.length)} tone="red">
 							<ul className="divide-y">
@@ -457,7 +442,16 @@ export function SwarmPanel({ folder, name, scan, bridge, session, file: openPath
 						</Floating>
 					) : null}
 					{file ? (
-						<Floating id="file" open={panel} onOpen={setPanel} title={file.path.split("/").pop() ?? "File"} meta={file.path} action={<CopyButton text={file.text} label="Copy the file" />}>
+						<Floating id="file" open={panel} onOpen={setPanel} title={file.path.split("/").pop() ?? "File"} meta={file.path} action={
+							<span className="flex items-center gap-1">
+								{onDebug && file.path.endsWith(".t.sol") ? (
+									<button type="button" onClick={(e) => { e.stopPropagation(); onDebug(file.path); }} title={`Debug a test in ${file.path}`} className="inline-flex h-6 items-center gap-1 rounded-md border bg-background px-2 text-[11px] text-foreground hover:bg-muted">
+										<Bug className="size-3" />Debug
+									</button>
+								) : null}
+								<CopyButton text={file.text} label="Copy the file" />
+							</span>
+						}>
 							<FileView path={file.path} text={file.text} />
 						</Floating>
 					) : null}
