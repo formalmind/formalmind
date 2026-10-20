@@ -190,6 +190,8 @@ pub struct Gen<'a> {
     udvt: HashMap<String, String>,
     /// Enums by canonical name → how many members.
     enum_size: HashMap<String, usize>,
+    /// Struct storage layouts (from solc's storageLayout): canonical name → (field, slot, byte offset, bytes, type label).
+    struct_layout: HashMap<String, Vec<(String, u64, u64, u64, String)>>,
     state_field: HashMap<Id, String>,
     fn_name: HashMap<Id, String>,
     /// Ok(definition) or Err(reason), per function id, in generation order.
@@ -216,6 +218,30 @@ impl<'a> Gen<'a> {
         let mut struct_by_canon = HashMap::new();
         let mut udvt = HashMap::new();
         let mut enum_size = HashMap::new();
+        let mut struct_layout = HashMap::new();
+        for contracts in output["contracts"].as_object().into_iter().flat_map(|m| m.values()) {
+            for c in contracts.as_object().into_iter().flat_map(|m| m.values()) {
+                let types = &c["storageLayout"]["types"];
+                for t in types.as_object().into_iter().flat_map(|m| m.values()) {
+                    let Some(members) = t["members"].as_array() else { continue };
+                    let label = s(&t["label"]).trim_start_matches("struct ").to_string();
+                    let fields = members
+                        .iter()
+                        .map(|m| {
+                            let ty = &types[m["type"].as_str().unwrap_or("")];
+                            (
+                                s(&m["label"]),
+                                s(&m["slot"]).parse().unwrap_or(0),
+                                m["offset"].as_u64().unwrap_or(0),
+                                s(&ty["numberOfBytes"]).parse().unwrap_or(32),
+                                s(&ty["label"]),
+                            )
+                        })
+                        .collect::<Vec<_>>();
+                    struct_layout.insert(label, fields);
+                }
+            }
+        }
         fn walk<'v>(n: &'v Value, f: &mut impl FnMut(&'v Value)) {
             match n {
                 Value::Object(m) => {
@@ -288,6 +314,7 @@ impl<'a> Gen<'a> {
             struct_by_canon,
             udvt,
             enum_size,
+            struct_layout,
             state_field,
             fn_name: HashMap::new(),
             done: vec![],
@@ -1359,7 +1386,7 @@ impl<'g, 'a> Fx<'g, 'a> {
         for r in n["externalReferences"].as_array().into_iter().flatten() {
             refs.insert(s(&r["src"]), (r["declaration"].as_i64().unwrap_or(0), r["isSlot"] == true, r["isOffset"] == true));
         }
-        let mut y = Yul { refs, vars: vec![HashMap::new()], mem: HashMap::new() };
+        let mut y = Yul { refs, vars: vec![HashMap::new()], mem: HashMap::new(), slots: HashMap::new() };
         self.line("-- assembly".into());
         self.yul_block(&n["AST"], &mut y)
     }
@@ -1406,6 +1433,11 @@ impl<'g, 'a> Fx<'g, 'a> {
                     return bail("Yul multi-variable declaration");
                 }
                 let v = if st["value"].is_null() { "0".to_string() } else { self.yul_expr(&st["value"], y)? };
+                if y.slots.contains_key(&v) {
+                    // A storage location, not a number: the name just refers to it.
+                    y.vars.last_mut().unwrap().insert(vars[0].clone(), v);
+                    return Ok(());
+                }
                 let name = format!("{}_{}", yul_var(&vars[0]).trim_matches(|c| c == '«' || c == '»'), self.fresh(""));
                 let name = ident(&name);
                 y.vars.last_mut().unwrap().insert(vars[0].clone(), name.clone());
@@ -1425,6 +1457,12 @@ impl<'g, 'a> Fx<'g, 'a> {
                 let name = yul_call_name(st).unwrap_or("");
                 let args: Vec<Value> = e["arguments"].as_array().cloned().unwrap_or_default();
                 match name {
+                    "sstore" if self.yul_slot(&args[0], y)?.is_some() => {
+                        let r = self.yul_slot(&args[0], y)?.unwrap();
+                        let v = self.yul_expr(&args[1], y)?;
+                        let v = self.atom(v);
+                        self.slot_write(&r, &v)
+                    }
                     "sstore" => {
                         let (field, ty) = self.yul_state_slot(&args[0], y)?;
                         let v = self.yul_expr(&args[1], y)?;
@@ -1444,6 +1482,10 @@ impl<'g, 'a> Fx<'g, 'a> {
                     "mstore" => {
                         let off = yul_const(&args[0]).ok_or("mstore at a computed offset")?;
                         let v = self.yul_expr(&args[1], y)?;
+                        if y.slots.contains_key(&v) {
+                            y.mem.insert(off, v);
+                            return Ok(());
+                        }
                         let m = self.fresh("m");
                         self.line(format!("let {m} := {v}"));
                         y.mem.insert(off, m);
@@ -1518,6 +1560,86 @@ impl<'g, 'a> Fx<'g, 'a> {
         Ok(())
     }
 
+    /// The storage location a Yul slot expression names: a placeholder, a variable holding one, or `add(p, k)`.
+    fn yul_slot(&mut self, e: &Value, y: &mut Yul) -> R<Option<SlotRef>> {
+        match e["nodeType"].as_str().unwrap_or("") {
+            "YulIdentifier" => {
+                let name = s(&e["name"]);
+                if let Some(v) = y.var(&name) {
+                    return Ok(y.slots.get(&v).cloned());
+                }
+                let (_, slot, _) = y.refs.get(&s(&e["src"])).copied().unwrap_or((0, false, false));
+                if !slot {
+                    return Ok(None);
+                }
+                let t = self.yul_expr(e, y)?;
+                Ok(y.slots.get(&t).cloned())
+            }
+            "YulFunctionCall" if yul_call_name(e) == Some("add") => {
+                let args = e["arguments"].as_array().cloned().unwrap_or_default();
+                for (a, b) in [(0, 1), (1, 0)] {
+                    if let (Some(r), Some(k)) = (self.yul_slot(&args[a], y)?, yul_const(&args[b])) {
+                        return Ok(Some(SlotRef { extra: r.extra + k, ..r }));
+                    }
+                }
+                Ok(None)
+            }
+            _ => Ok(None),
+        }
+    }
+
+    /// The fields of a struct stored in slot `k` of it: (field, byte offset, bytes, type).
+    fn packed(&self, r: &SlotRef) -> R<Vec<(String, u64, u64, String)>> {
+        let name = r.ty.trim_start_matches("struct ");
+        let layout = self.g.struct_layout.get(name).ok_or_else(|| format!("no storage layout for {name}"))?;
+        let fields: Vec<_> = layout.iter().filter(|f| f.1 == r.extra).map(|f| (f.0.clone(), f.2, f.3, f.4.clone())).collect();
+        if fields.is_empty() || fields.iter().any(|f| f.3.starts_with("mapping") || f.3.starts_with("struct") || f.3.contains('[')) {
+            return bail("sload/sstore of a struct slot that isn't plain values");
+        }
+        Ok(fields)
+    }
+
+    /// `sstore` to a named location: a value slot is that value; a struct slot unpacks into the fields it holds.
+    fn slot_write(&mut self, r: &SlotRef, v: &str) -> R<()> {
+        if r.ty.starts_with("struct ") {
+            for (f, off, nb, ty) in self.packed(r)? {
+                let part = format!("(({v} >>> {}) % 2 ^ {})", 8 * off, 8 * nb);
+                let val = word_to(&self.g.norm(&ty), &part);
+                let val = self.atom(val);
+                let mut p = r.path.clone();
+                p.steps.push(Step::Field(ident(&f)));
+                self.write(&p, |_| val.clone())?;
+            }
+            return Ok(());
+        }
+        if r.extra != 0 || r.ty.starts_with("mapping") || r.ty.contains('[') {
+            return bail("sstore into an aggregate slot");
+        }
+        let val = word_to(&self.g.norm(&r.ty), v);
+        let val = self.atom(val);
+        self.write(&r.path, |_| val.clone())
+    }
+
+    /// `sload` from a named location: a value, or a struct slot packed from its fields.
+    fn slot_read(&mut self, r: &SlotRef) -> R<String> {
+        if r.ty.starts_with("struct ") {
+            let mut parts = vec![];
+            for (f, off, nb, ty) in self.packed(r)? {
+                let mut p = r.path.clone();
+                p.steps.push(Step::Field(ident(&f)));
+                let cur = self.read(&p)?;
+                let w = to_word(&self.g.norm(&ty), &cur);
+                parts.push(format!("(({w} % 2 ^ {}) * 2 ^ {})", 8 * nb, 8 * off));
+            }
+            return Ok(format!("({})", parts.join(" + ")));
+        }
+        if r.extra != 0 || r.ty.starts_with("mapping") || r.ty.contains('[') {
+            return bail("sload of an aggregate slot");
+        }
+        let cur = self.read(&r.path)?;
+        Ok(to_word(&self.g.norm(&r.ty), &cur))
+    }
+
     /// A Yul identifier naming an outside `bytes memory` value: its Lean name.
     fn yul_bytes_ref(&self, e: &Value, y: &Yul) -> Option<String> {
         if e["nodeType"] != "YulIdentifier" || y.var(&s(&e["name"])).is_some() {
@@ -1555,9 +1677,25 @@ impl<'g, 'a> Fx<'g, 'a> {
                 }
                 let (decl, slot, offset) = *y.refs.get(&s(&e["src"])).ok_or_else(|| format!("Yul name {name}"))?;
                 if slot {
-                    let var = self.g.g.state_vars.get(&decl).ok_or("`.slot` of a storage pointer")?;
-                    let slot = var.slot.clone().ok_or("no storage slot")?;
-                    return Ok(slot);
+                    let ty = self.g.nodes.get(&decl).map(|d| tstr(d)).unwrap_or_default();
+                    let plain_state = self.g.g.state_vars.get(&decl).is_some_and(|v| !v.type_string.starts_with("mapping") && !v.type_string.starts_with("struct") && !v.type_string.contains('['));
+                    if plain_state {
+                        let var = &self.g.g.state_vars[&decl];
+                        return var.slot.clone().ok_or_else(|| "no storage slot".into());
+                    }
+                    // A storage pointer, storage parameter, or aggregate state variable: a named location.
+                    let path = if let Some(p) = self.alias.get(&decl) {
+                        p.clone()
+                    } else if let Some(l) = self.lens.get(&decl) {
+                        Path { base: Base::Lens(l.clone()), steps: vec![] }
+                    } else if let Some(f) = self.g.state_field.get(&decl) {
+                        Path { base: Base::State(f.clone()), steps: vec![] }
+                    } else {
+                        return bail("`.slot` of an unknown location");
+                    };
+                    let ph = self.fresh("__slot");
+                    y.slots.insert(ph.clone(), SlotRef { path, ty: strip_location(&ty).to_string(), extra: 0 });
+                    return Ok(ph);
                 }
                 if offset {
                     let var = self.g.g.state_vars.get(&decl).ok_or("`.offset` of a storage pointer")?;
@@ -1576,6 +1714,10 @@ impl<'g, 'a> Fx<'g, 'a> {
                 let name = s(&e["functionName"]["name"]);
                 let args: Vec<Value> = e["arguments"].as_array().cloned().unwrap_or_default();
                 match name.as_str() {
+                    "sload" if self.yul_slot(&args[0], y)?.is_some() => {
+                        let r = self.yul_slot(&args[0], y)?.unwrap();
+                        return self.slot_read(&r);
+                    }
                     "sload" => {
                         let (field, ty) = self.yul_state_slot(&args[0], y)?;
                         return Ok(to_word(&ty, &format!("(ext.get (← get)).{field}")));
@@ -1617,6 +1759,23 @@ impl<'g, 'a> Fx<'g, 'a> {
                         let words: Vec<String> = members.iter().map(|(n, t)| to_word(&self.g.norm(t), &format!("({local}).{}", ident(n)))).collect();
                         self.g.ext.insert("keccak : List Nat → Nat".into(), "keccak256 over words (any function: no collision assumptions)".into());
                         return Ok(format!("(ext.keccak [{}])", words.join(", ")));
+                    }
+                    "keccak256" if yul_const(&args[0]) == Some(0) && yul_const(&args[1]) == Some(64) && y.mem.get(&32).is_some_and(|v| y.slots.contains_key(v)) => {
+                        // keccak256(key . mapping.slot): the slot of mapping[key].
+                        let base = y.slots[&y.mem[&32]].clone();
+                        let key_word = y.mem.get(&0).cloned().ok_or("mapping slot without a key")?;
+                        if base.extra != 0 || !base.ty.starts_with("mapping(") {
+                            return bail("keccak256 over a non-mapping slot");
+                        }
+                        let (key_ty, value_ty) = mapping_types(&base.ty).ok_or("mapping type")?;
+                        let key = word_to(&self.g.norm(&key_ty), &key_word);
+                        let key = if int_bits(&self.g.norm(&key_ty)).is_some() { format!("(toSigned 256 {})", paren(&key_word)) } else { key };
+                        let k = self.atom(key);
+                        let mut path = base.path.clone();
+                        path.steps.push(Step::Map(k));
+                        let ph = self.fresh("__slot");
+                        y.slots.insert(ph.clone(), SlotRef { path, ty: value_ty, extra: 0 });
+                        return Ok(ph);
                     }
                     "keccak256" => {
                         let (off, len) = (yul_const(&args[0]).ok_or("keccak256 of computed memory")?, yul_const(&args[1]).ok_or("keccak256 of a computed length")?);
@@ -2806,6 +2965,16 @@ struct Yul {
     /// Yul variables in scope: Yul name → its Lean name (unique, since Lean won't shadow a `let mut`).
     vars: Vec<HashMap<String, String>>,
     mem: HashMap<u64, String>,
+    /// Storage locations named in Yul (`self.slot`, `keccak256(key, self.slot)`, `add(p, k)`): placeholder → where.
+    slots: HashMap<String, SlotRef>,
+}
+
+/// A storage location reached in assembly: a path, the Solidity type stored there, and a slot offset into it.
+#[derive(Clone, Debug)]
+struct SlotRef {
+    path: Path,
+    ty: String,
+    extra: u64,
 }
 
 impl Yul {
@@ -2893,6 +3062,14 @@ fn word_to(ty: &str, v: &str) -> String {
     } else {
         v.to_string()
     }
+}
+
+/// `mapping(K => V)` → (K, V).
+fn mapping_types(t: &str) -> Option<(String, String)> {
+    let inner = t.strip_prefix("mapping(")?.strip_suffix(')')?;
+    let (k, v) = inner.split_once(" => ")?;
+    let k = k.split_whitespace().next()?.to_string();
+    Some((k, v.trim().to_string()))
 }
 
 fn strip_location(t: &str) -> &str {

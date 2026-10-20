@@ -175,10 +175,25 @@ Lean's standard axioms.
   - PoolManager's callback runs Router's generated `unlockCallback` with PoolManager as `msg.sender`;
   - a Router entry into `unlock` while PoolManager is already unlocked reverts inside PoolManager.
 
-**Next for the world:**
-- **Summaries:** hand-written specs for v4's hook-call plumbing (`Hooks.callHook`, `ParseBytes`) and its
-  storage-pointer assembly (`TickBitmap.flipTick`, `Pool.updateTick`), each to be checked against the code, so
-  PoolManager → AsyncSwap hook calls bind too.
+**Hooks bind too:**
+- **Raw calls.** A low-level call is `Ext.rawCall` (address, value, calldata → returndata). Each model has a
+  generated `dispatch`, its ABI entry point: selector → decoded arguments → the function → encoded results, one small
+  definition per selector. The linker binds `rawCall` to the callee's `dispatch`, so any raw call with calldata
+  binds, not just v4 hooks.
+- **The one summary.** `Hooks.callHook` gets a hand-written summary that follows its code (the raw call, the
+  returned data, the selector check). Everything else on the hook path is generated, including `ParseBytes` (`mload`
+  over `bytes`) and `abi.encodeCall`.
+- **Storage-pointer assembly** comes from solc's storage layout:
+  - `keccak256(key . self.slot)` is the slot of `self[key]`, reached through the lens when `self` is a storage
+    parameter;
+  - `sstore` to a packed struct slot writes the fields it holds, and `sload` packs them back.
+
+  `TickBitmap.flipTick` and `Pool.updateTick` translate as written.
+- **Coverage now:** PoolManager 145/152, AsyncSwap 126/143, Router 32/46. The world is 6,742 lines, and Lean checks
+  it in about 7s.
+- **Proved:** a PoolManager hook call to AsyncSwap's address runs AsyncSwap's dispatcher with PoolManager as
+  `msg.sender`, and the `beforeSwap` selector dispatches to AsyncSwap's generated `beforeSwap`. Only Lean's standard
+  axioms are used.
 
 ## 6. What else the same graph provides
 
