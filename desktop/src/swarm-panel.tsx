@@ -251,6 +251,80 @@ function Breadcrumbs({ root, path, files, onOpen }: { root: string; path: string
 	);
 }
 
+/** What a report's front matter says: `**Severity:** high`, `**Location:** src/X.sol:12`, a cited PoC. */
+function bugFacts(body: string) {
+	const severity = /\*\*Severity:\*\*\s*([\w-]+)/i.exec(body)?.[1]?.toLowerCase() ?? null;
+	const location = /\*\*Location:\*\*\s*`?([\w./-]+\.\w+)(?::(\d+))?`?/i.exec(body);
+	const poc = /([\w./-]+\.t\.sol)/.exec(body)?.[1] ?? null;
+	const rest = body
+		.replace(/^# .*\n/, "")
+		.replace(/\*\*Severity:\*\*[^\n]*\n?/i, "")
+		.replace(/\*\*Location:\*\*[^\n]*\n?/i, "")
+		.trim();
+	return { severity, file: location?.[1] ?? null, line: location?.[2] ?? null, poc, rest };
+}
+
+const SEVERITY: Record<string, string> = {
+	critical: "border-red-600/40 bg-red-600/10 text-red-700 dark:text-red-400",
+	high: "border-red-500/40 bg-red-500/10 text-red-700 dark:text-red-400",
+	medium: "border-amber-500/40 bg-amber-500/10 text-amber-700 dark:text-amber-400",
+	low: "border-sky-500/40 bg-sky-500/10 text-sky-700 dark:text-sky-400",
+};
+
+/** Bug reports: a list on the left, the selected report on the right with its facts as chips. */
+function BugsView({ bugs, openBug, setOpenBug, withPoc, onOpenFile }: { bugs: Bug[]; openBug: string | null; setOpenBug: (f: string | null) => void; withPoc: (body: string) => Promise<string>; onOpenFile: (path: string) => void }) {
+	const selected = bugs.find((b) => b.file === openBug) ?? bugs[0];
+	if (!selected) {
+		return <p className="absolute inset-x-0 top-1/3 text-center text-sm text-muted-foreground">No bugs reported yet. The swarm files them here, each with a proof of concept.</p>;
+	}
+	const facts = bugFacts(selected.body);
+	return (
+		<div className="absolute inset-x-0 bottom-0 top-14 z-10 grid grid-cols-[minmax(0,20rem)_minmax(0,1fr)] gap-3 px-3 pb-3">
+			<ul className="min-h-0 space-y-1 overflow-y-auto">
+				{bugs.map((b) => {
+					const f = bugFacts(b.body);
+					const on = b.file === selected.file;
+					return (
+						<li key={b.file}>
+							<button type="button" onClick={() => setOpenBug(b.file)} className={`w-full rounded-xl border px-3 py-2.5 text-left transition-colors ${on ? "bg-muted" : "border-transparent hover:bg-muted/60"}`}>
+								<span className="flex items-center gap-2">
+									{f.severity ? <span className={`rounded-md border px-1.5 py-px text-[10px] font-medium uppercase tracking-wide ${SEVERITY[f.severity] ?? "border-border text-muted-foreground"}`}>{f.severity}</span> : null}
+									{f.file ? <span className="truncate font-mono text-[11px] text-muted-foreground">{f.file.split("/").pop()}{f.line ? `:${f.line}` : ""}</span> : null}
+								</span>
+								<span className="mt-1 block text-[13px] font-medium leading-snug">{b.title}</span>
+							</button>
+						</li>
+					);
+				})}
+			</ul>
+			<article className="min-h-0 overflow-y-auto rounded-2xl border bg-card px-6 py-5 shadow-card">
+				<div className="flex items-start gap-3">
+					<h2 className="flex-1 text-[17px] font-semibold leading-snug">{selected.title}</h2>
+					<CopyButton get={() => withPoc(selected.body)} label="Copy the report as Markdown, PoC included" />
+				</div>
+				<div className="mt-3 flex flex-wrap items-center gap-2 text-[12px]">
+					{facts.severity ? <span className={`inline-flex h-7 items-center rounded-lg border px-2.5 font-medium capitalize ${SEVERITY[facts.severity] ?? ""}`}>{facts.severity}</span> : null}
+					{facts.file ? (
+						<button type="button" onClick={() => onOpenFile(facts.file!)} title="Open in Code" className="inline-flex h-7 items-center gap-1.5 rounded-lg border bg-background px-2.5 font-mono hover:bg-muted">
+							<FileCode2 className="size-3.5 text-muted-foreground" />
+							{facts.file}{facts.line ? `:${facts.line}` : ""}
+						</button>
+					) : null}
+					{facts.poc ? (
+						<button type="button" onClick={() => onOpenFile(facts.poc!)} title="Open the proof of concept in Code" className="inline-flex h-7 items-center gap-1.5 rounded-lg border bg-background px-2.5 font-mono hover:bg-muted">
+							<Bug className="size-3.5 text-muted-foreground" />
+							PoC · {facts.poc.split("/").pop()}
+						</button>
+					) : null}
+				</div>
+				<div className="prose prose-sm mt-4 max-w-none dark:prose-invert">
+					<ChatMarkdown>{facts.rest}</ChatMarkdown>
+				</div>
+			</article>
+		</div>
+	);
+}
+
 type Mode = "code" | "chat" | "swarm" | "audit" | "bugs";
 
 const MODES: { id: Mode; label: string; icon: typeof Code2 }[] = [
@@ -804,26 +878,7 @@ export function SwarmPanel({ folder, name, scan, bridge, session, file: openPath
 						)}
 					</div>
 				) : null}
-				{mode === "bugs" ? (
-					<div className="absolute inset-x-0 bottom-0 top-14 z-10 overflow-y-auto">
-						<div className="mx-auto w-full max-w-3xl px-4 pb-6">
-							{bugs.length === 0 ? <p className="py-10 text-center text-sm text-muted-foreground">No bugs reported yet. The swarm files them here, each with a proof of concept.</p> : null}
-							<ul className="space-y-2">
-								{bugs.map((b) => (
-									<li key={b.file} className="rounded-2xl border border-red-500/25 bg-red-50/60 dark:bg-red-950/30">
-										<button type="button" onClick={() => setOpenBug(openBug === b.file ? null : b.file)} className="flex w-full items-center gap-2 px-4 py-3 text-left text-[14px]">
-											<span className="size-1.5 shrink-0 rounded-full bg-red-500" />
-											<span className="flex-1 font-medium">{b.title}</span>
-											<CopyButton get={() => withPoc(b.body)} label="Copy the report as Markdown, PoC included" />
-											<ChevronDown className={`size-3.5 text-muted-foreground transition-transform ${openBug === b.file ? "rotate-180" : ""}`} />
-										</button>
-										{openBug === b.file ? <div className="prose prose-sm max-w-none border-t border-red-500/20 bg-background px-4 py-3 text-[13px] dark:prose-invert"><ChatMarkdown>{b.body.replace(/^# .*\n/, "")}</ChatMarkdown></div> : null}
-									</li>
-								))}
-							</ul>
-						</div>
-					</div>
-				) : null}
+				{mode === "bugs" ? <BugsView bugs={bugs} openBug={openBug} setOpenBug={setOpenBug} withPoc={withPoc} onOpenFile={view} /> : null}
 				{mode === "audit" ? (
 					<div className="pointer-events-auto absolute bottom-3 left-3 right-3 top-14 z-10 flex min-h-0 flex-col overflow-hidden rounded-2xl border bg-muted/60 p-1">
 						<AuditView folder={folder} scan={scan} invoke={invoke} preferred={openPath ?? null} plan={planList} planMeta={plan.length ? `${done}/${plan.length}` : ""} />
