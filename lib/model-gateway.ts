@@ -7,18 +7,34 @@
 import { getCredits, recordSpend } from "@/lib/billing";
 import { getProofsOwner, TokenError, verifyModelSession } from "@/lib/swarm-tokens";
 
-/** Dollars per million tokens, input and output. Cache writes cost 1.25x input, cache reads 0.1x. */
-const PRICES: [RegExp, number, number][] = [
-	[/opus/, 5, 25],
-	[/sonnet/, 3, 15],
-	[/haiku/, 1, 5],
+/**
+ * Anthropic's list prices, dollars per million tokens: input, output, cache read. Cache writes cost 1.25x input for
+ * the 5-minute cache and 2x for the 1-hour one. Most specific first; an unknown model is charged at the Opus 5.5 row.
+ */
+const PRICES: [RegExp, number, number, number][] = [
+	[/opus-5-5/, 4, 20, 0.2],
+	[/fable|mythos/, 10, 50, 0.25],
+	[/opus/, 5, 25, 0.5],
+	[/sonnet-5/, 2, 10, 0.2],
+	[/sonnet/, 3, 15, 0.3],
+	[/haiku-5-5/, 0.1, 0.5, 0.01],
+	[/haiku/, 1, 5, 0.1],
 ];
 
-type Usage = { input_tokens?: number; output_tokens?: number; cache_creation_input_tokens?: number; cache_read_input_tokens?: number };
+type Usage = {
+	input_tokens?: number;
+	output_tokens?: number;
+	cache_creation_input_tokens?: number;
+	cache_read_input_tokens?: number;
+	cache_creation?: { ephemeral_5m_input_tokens?: number; ephemeral_1h_input_tokens?: number };
+};
 
 export function costCents(model: string, u: Usage): number {
-	const [, inp, out] = PRICES.find(([re]) => re.test(model)) ?? PRICES[0];
-	const usd = ((u.input_tokens ?? 0) * inp + (u.cache_creation_input_tokens ?? 0) * inp * 1.25 + (u.cache_read_input_tokens ?? 0) * inp * 0.1 + (u.output_tokens ?? 0) * out) / 1e6;
+	const [, inp, out, read] = PRICES.find(([re]) => re.test(model)) ?? PRICES[0];
+	const writes1h = u.cache_creation?.ephemeral_1h_input_tokens ?? 0;
+	const writes5m = u.cache_creation?.ephemeral_5m_input_tokens ?? Math.max(0, (u.cache_creation_input_tokens ?? 0) - writes1h);
+	const usd =
+		((u.input_tokens ?? 0) * inp + writes5m * inp * 1.25 + writes1h * inp * 2 + (u.cache_read_input_tokens ?? 0) * read + (u.output_tokens ?? 0) * out) / 1e6;
 	return usd * 100;
 }
 

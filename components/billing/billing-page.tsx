@@ -6,7 +6,34 @@ import type { CreditEntry } from "@/lib/billing";
 
 type Balance = { configured: boolean; cents: number; entries: CreditEntry[]; error?: string };
 
-const usd = (cents: number) => `$${(cents / 100).toFixed(2)}`;
+const usd = (cents: number) => `${cents < 0 ? "−" : ""}$${(Math.abs(cents) / 100).toFixed(2)}`;
+
+/** A line of history: a deposit, or one swarm run's model calls added up (they are charged call by call). */
+type Line = { key: string; at: string; cents: number; label: string; detail?: string; href?: string };
+
+function historyLines(entries: CreditEntry[]): Line[] {
+	const runs = new Map<string, Line>();
+	const lines: Line[] = [];
+	for (const e of entries) {
+		if (e.kind === "deposit") {
+			lines.push({ key: e.ref, at: e.at, cents: e.cents, label: e.ref.startsWith("adjust:") ? "Credit adjustment" : "Credits added" });
+			continue;
+		}
+		// A spend's ref is <proofs repo>:<Actions run id>:<call>.
+		const [repo, run] = e.ref.split(":");
+		const key = `${repo}:${run}`;
+		const line = runs.get(key);
+		if (line) {
+			line.cents += e.cents;
+			if (e.at > line.at) line.at = e.at;
+		} else {
+			const entry: Line = { key, at: e.at, cents: e.cents, label: "Swarm run", detail: repo, href: run ? `https://github.com/${repo}/actions/runs/${run}` : undefined };
+			runs.set(key, entry);
+			lines.push(entry);
+		}
+	}
+	return lines.sort((a, b) => b.at.localeCompare(a.at));
+}
 
 /** Prepaid credits: the balance, buying more through Stripe Checkout, and every deposit so far. */
 export function BillingPage() {
@@ -86,16 +113,30 @@ export function BillingPage() {
 				</section>
 
 				<section className="rounded-xl border">
-					<h2 className="border-b px-5 py-3 text-sm font-medium">Payment history</h2>
+					<h2 className="border-b px-5 py-3 text-sm font-medium">History</h2>
 					{!balance?.entries.length ? (
 						<p className="px-5 py-4 text-sm text-muted-foreground">{balance ? "No payments yet." : "Loading…"}</p>
 					) : (
 						<ul className="divide-y text-sm">
-							{[...balance.entries].reverse().map((e) => (
-								<li key={e.ref} className="flex items-center gap-4 px-5 py-2.5">
-									<span className="w-32 shrink-0 text-xs text-muted-foreground tabular-nums">{e.at.slice(0, 16).replace("T", " ")}</span>
-									<span className="flex-1">Deposit</span>
-									<span className="tabular-nums">{usd(e.cents)}</span>
+							{historyLines(balance.entries).map((l) => (
+								<li key={l.key} className="flex items-center gap-4 px-5 py-2.5">
+									<span className="w-32 shrink-0 text-xs text-muted-foreground tabular-nums">{new Date(l.at).toLocaleString(undefined, { dateStyle: "short", timeStyle: "short" })}</span>
+									<span className="min-w-0 flex-1 truncate">
+										{l.label}
+										{l.detail ? (
+											<>
+												{" "}
+												{l.href ? (
+													<a href={l.href} target="_blank" rel="noreferrer" className="text-muted-foreground hover:text-foreground hover:underline">
+														{l.detail}
+													</a>
+												) : (
+													<span className="text-muted-foreground">{l.detail}</span>
+												)}
+											</>
+										) : null}
+									</span>
+									<span className={`font-mono tabular-nums ${l.cents > 0 ? "text-emerald-600 dark:text-emerald-400" : ""}`}>{l.cents > 0 ? "+" : ""}{usd(l.cents)}</span>
 								</li>
 							))}
 						</ul>
