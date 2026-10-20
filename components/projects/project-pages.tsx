@@ -18,6 +18,7 @@ import {
 	projectPath,
 	repoOf,
 	saveProjectChat,
+	setChatWorking,
 	useProjects,
 	type Project,
 } from "@/components/projects/use-projects";
@@ -112,6 +113,14 @@ function ProjectChat({ repo, chatId }: { repo: string; chatId: string }) {
 	useEffect(() => {
 		if (!isLoading && messages.length > 0) saveProjectChat(repo, chatId, messages);
 	}, [isLoading, messages, repo, chatId]);
+	// While the agent answers, the chat shows a dot in the sidebar; a new chat is listed as soon as it starts working.
+	const latest = useRef(messages);
+	latest.current = messages;
+	useEffect(() => {
+		setChatWorking(repo, chatId, isLoading);
+		if (isLoading && latest.current.length > 0) saveProjectChat(repo, chatId, latest.current);
+	}, [isLoading, repo, chatId]);
+	useEffect(() => () => setChatWorking(repo, chatId, false), [repo, chatId]);
 
 	return (
 		<div className="flex min-h-0 flex-1 flex-col">

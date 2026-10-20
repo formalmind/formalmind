@@ -12,6 +12,8 @@ export async function GET() {
 	if (!project) return Response.json({ error: "The PROJECT Durable Object binding is missing; see wrangler.jsonc." }, { status: 500 });
 	try {
 		const ledger = (await project.costs()) as { costs: SwarmCost[]; syncedAt: number | null };
+		// One "#" in front of an item number, however many the source wrote ("25", "#25" and "##25" all read "#25").
+		for (const c of ledger.costs) c.ref = refLabel(c.ref);
 		const session = await auth.getSession();
 		if (!session?.user) return Response.json(ledger);
 		const covered = new Set(ledger.costs.map((c) => c.repo.toLowerCase()));
@@ -21,7 +23,7 @@ export async function GET() {
 			const [repo, run, role = "", ref = ""] = e.ref.split(":");
 			if (!repo || covered.has(repo.toLowerCase())) continue;
 			const key = `${repo}:${run}:${role}:${ref}`;
-			const line = runs.get(key) ?? { repo, role: role || "run", ref: ref ? `#${ref}` : "", usd: 0, runId: Number(run) || null, createdAt: e.at };
+			const line = runs.get(key) ?? { repo, role: role || "run", ref: refLabel(ref), usd: 0, runId: Number(run) || null, createdAt: e.at };
 			line.usd += -e.cents / 100;
 			if (e.at > line.createdAt) line.createdAt = e.at;
 			runs.set(key, line);
@@ -31,4 +33,9 @@ export async function GET() {
 	} catch (err) {
 		return Response.json({ error: err instanceof Error ? err.message : "Could not read usage." }, { status: 502 });
 	}
+}
+
+function refLabel(ref: string | null | undefined): string {
+	const bare = (ref ?? "").trim().replace(/^#+/, "");
+	return bare ? `#${bare}` : "";
 }

@@ -9,6 +9,9 @@ import type { DeepPartial } from "ai";
 
 export type PartialPlan = DeepPartial<RepoPlan>;
 
+/* Same card as the swarm board (BoardCard in swarm-canvas.tsx): 12px header, 13px body. */
+const CARD = "rounded-lg border bg-background p-2.5 shadow-sm animate-in fade-in-0 slide-in-from-bottom-1";
+
 const SIZE_STYLES: Record<string, string> = {
 	S: "bg-emerald-500/15 text-emerald-700 dark:text-emerald-300",
 	M: "bg-amber-500/15 text-amber-700 dark:text-amber-300",
@@ -86,29 +89,29 @@ export function PlanBoard({ repo, plan, status }: { repo: string; plan: PartialP
 			<div className="mt-4 grid gap-4 md:grid-cols-3">
 				<Column title="Contracts read" count={contracts.length}>
 					{contracts.map((c, i) => (
-						<li key={i} ref={ref(`contract-${i}`)} className="rounded-lg border bg-background p-3 shadow-sm animate-in fade-in-0 slide-in-from-bottom-1">
-							<p className="flex items-center gap-1.5 font-mono text-sm text-muted-foreground"><FileCode2 className="size-3.5 shrink-0" /><span className="truncate">{c?.path}</span></p>
-							{c?.role ? <p className="mt-1 text-sm leading-snug">{c.role}</p> : null}
+						<li key={i} ref={ref(`contract-${i}`)} className={CARD}>
+							<p className="flex items-center gap-1.5 font-mono text-[12px] text-muted-foreground"><FileCode2 className="size-3 shrink-0" /><span className="truncate">{c?.path}</span></p>
+							{c?.role ? <p className="mt-1 text-[13px] leading-snug text-foreground">{c.role}</p> : null}
 						</li>
 					))}
 				</Column>
 				<Column title="Invariants" count={invariants.length}>
 					{invariants.map((inv, i) => (
-						<li key={i} ref={ref(`inv-${i}`)} className="rounded-lg border bg-background p-3 shadow-sm animate-in fade-in-0 slide-in-from-bottom-1">
-							<p className="text-sm leading-snug">{inv?.statement}</p>
-							{inv?.why ? <p className="mt-1 text-sm leading-snug text-muted-foreground">{inv.why}</p> : null}
+						<li key={i} ref={ref(`inv-${i}`)} className={CARD}>
+							<p className="text-[13px] leading-snug text-foreground">{inv?.statement}</p>
+							{inv?.why ? <p className="mt-1 text-[12px] leading-snug text-muted-foreground">{inv.why}</p> : null}
 						</li>
 					))}
 				</Column>
 				<Column title="fm:todo" count={issues.length} mono>
 					{issues.map((issue, i) => (
-						<li key={i} ref={ref(`issue-${i}`)} className="rounded-lg border bg-background p-3 shadow-sm animate-in fade-in-0 slide-in-from-bottom-1">
-							<p className="flex items-center gap-1.5 text-sm text-muted-foreground">
+						<li key={i} ref={ref(`issue-${i}`)} className={CARD}>
+							<p className="flex items-center gap-1.5 text-[12px] text-muted-foreground">
 								<span className="font-mono">#{i + 1}</span>
-								{issue?.size ? <span className={`rounded px-1.5 py-px font-mono text-sm ${SIZE_STYLES[issue.size]}`}>{issue.size}</span> : null}
+								{issue?.size ? <span className={`rounded px-1.5 py-px font-mono text-[10px] ${SIZE_STYLES[issue.size]}`}>{issue.size}</span> : null}
 							</p>
-							<p className="mt-1 text-sm font-medium leading-snug">{issue?.title}</p>
-							{issue?.scope ? <p className="mt-1 text-sm leading-snug text-muted-foreground">{issue.scope}</p> : null}
+							<p className="mt-1 text-[13px] leading-snug text-foreground">{issue?.title}</p>
+							{issue?.scope ? <p className="mt-1 text-[12px] leading-snug text-muted-foreground">{issue.scope}</p> : null}
 						</li>
 					))}
 				</Column>

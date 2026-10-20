@@ -444,7 +444,7 @@ function loadItem(repo: string, number: number) {
 
 /** "#75" with a GitHub-style preview of that issue or PR on hover. */
 function RefCard({ repo, ref_ }: { repo: string; ref_: string }) {
-	const number = Number(ref_.replace(/^#/, ""));
+	const number = Number(ref_.replace(/^#+/, ""));
 	const [item, setItem] = useState<SwarmItem | null | undefined>(undefined);
 	const url = `https://github.com/${repo}/issues/${number}`;
 	if (!Number.isInteger(number) || number < 1) return <span className="text-muted-foreground">{ref_}</span>;

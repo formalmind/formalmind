@@ -100,3 +100,30 @@ export function saveProjectChat(repo: string, id: string, messages: Message[]) {
 }
 
 export const newChatId = () => crypto.randomUUID().slice(0, 8);
+
+/* Chats whose agent is answering right now, as "repo:id". Memory only: a reload ends every reply anyway. */
+const working = new Set<string>();
+let workingSnapshot: ReadonlySet<string> = new Set();
+const workingListeners = new Set<() => void>();
+
+/** Marks a chat as working (its reply is streaming) or idle; the sidebar shows a dot on working chats. */
+export function setChatWorking(repo: string, id: string, on: boolean) {
+	const key = `${repo}:${id}`;
+	if (working.has(key) === on) return;
+	if (on) working.add(key);
+	else working.delete(key);
+	workingSnapshot = new Set(working);
+	workingListeners.forEach((fn) => fn());
+}
+
+/** The "repo:id" keys of chats whose agent is working. */
+export function useWorkingChats(): ReadonlySet<string> {
+	return useSyncExternalStore(
+		(fn) => {
+			workingListeners.add(fn);
+			return () => workingListeners.delete(fn);
+		},
+		() => workingSnapshot,
+		() => workingSnapshot,
+	);
+}
