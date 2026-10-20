@@ -1,6 +1,6 @@
 import { MarkGithubIcon } from "@primer/octicons-react";
 import { useEffect, useRef, useState } from "react";
-import { Bug, Check, ChevronDown, Code2, Copy, FileCode2, Network, Play, Plus, ScanSearch, Square, WandSparkles, Wrench } from "lucide-react";
+import { Bug, Check, ChevronDown, Code2, Copy, FileCode2, MessagesSquare, Network, Play, Plus, ScanSearch, Square, WandSparkles, Wrench } from "lucide-react";
 import { useSearchParams } from "react-router";
 import { ChatComposer } from "@/components/chat-composer";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuRadioGroup, DropdownMenuRadioItem, DropdownMenuSeparator, DropdownMenuSub, DropdownMenuSubContent, DropdownMenuSubTrigger, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
@@ -271,10 +271,11 @@ function Breadcrumbs({ root, path, files, onOpen }: { root: string; path: string
 	);
 }
 
-type Mode = "code" | "swarm" | "audit";
+type Mode = "code" | "chat" | "swarm" | "audit";
 
 const MODES: { id: Mode; label: string; icon: typeof Code2 }[] = [
 	{ id: "code", label: "Code", icon: Code2 },
+	{ id: "chat", label: "Chat", icon: MessagesSquare },
 	{ id: "swarm", label: "Swarm", icon: Network },
 	{ id: "audit", label: "Audit", icon: ScanSearch },
 ];
@@ -421,7 +422,6 @@ export function SwarmPanel({ folder, name, scan, bridge, session, file: openPath
 	const [openBug, setOpenBug] = useState<string | null>(null);
 	// One floating card open at a time, like an accordion; a bug report opens the bugs card.
 	const [panel, setPanel] = useState<string | null>("plan");
-	const [chatOpen, setChatOpen] = useState(true);
 	const [model, setModel] = useState(() => store.get("fm:model") ?? MODELS[0].value);
 	
 	// Set in Settings (desktop/src/settings.tsx).
@@ -624,7 +624,7 @@ export function SwarmPanel({ folder, name, scan, bridge, session, file: openPath
 				)}
 				<ModeTabs mode={mode} onMode={setMode} />
 				{mode === "code" ? (
-					// The page is the editor: the file fills the whole page under the tabs; the chat floats over its right side.
+					// The page is the editor: the file fills the whole page under the tabs.
 					<div className="absolute inset-x-0 bottom-0 top-14 z-10 flex min-h-0 flex-col">
 						{file ? (
 							<>
@@ -650,7 +650,7 @@ export function SwarmPanel({ folder, name, scan, bridge, session, file: openPath
 					</div>
 				) : null}
 				{mode === "audit" ? (
-					<div className="pointer-events-auto absolute bottom-3 left-3 right-[25.75rem] top-14 z-10 flex min-h-0 flex-col overflow-hidden rounded-2xl border bg-muted/60 p-1">
+					<div className="pointer-events-auto absolute bottom-3 left-3 right-3 top-14 z-10 flex min-h-0 flex-col overflow-hidden rounded-2xl border bg-muted/60 p-1">
 						<AuditView folder={folder} scan={scan} invoke={invoke} preferred={openPath ?? null} />
 					</div>
 				) : null}
@@ -711,11 +711,9 @@ export function SwarmPanel({ folder, name, scan, bridge, session, file: openPath
 			{/* The chat: start and steer the swarm, the plan, and the agents' messages. */}
 			{/* The chat floats over the canvas on the right: a gray title bar with the run's controls, the white chat inside.
 			    The strip above it stays free for the Live pill and the bell. */}
-			<aside className={`pointer-events-auto absolute right-3 top-[6.5rem] z-20 flex w-[min(24rem,calc(100%-1.5rem))] flex-col rounded-2xl border bg-muted/80 p-1.5 shadow-pop backdrop-blur ${chatOpen ? "bottom-3" : ""}`}>
+			{mode === "chat" ? (
+			<aside className="absolute inset-x-0 bottom-0 top-14 z-20 mx-auto flex w-full max-w-3xl flex-col px-4 pb-3">
 				<div className="flex h-8 shrink-0 items-center gap-2 pl-2 pr-0.5">
-					<button type="button" onClick={() => setChatOpen(!chatOpen)} aria-expanded={chatOpen} title={chatOpen ? "Collapse the chat" : "Open the chat"} className="flex items-center gap-1.5">
-						<ChevronDown className={`size-3.5 text-muted-foreground transition-transform duration-200 ${chatOpen ? "rotate-180" : ""}`} />
-					</button>
 					<DropdownMenu>
 						<DropdownMenuTrigger className="flex min-w-0 flex-1 items-center gap-1 rounded-md text-left text-[13px] font-medium outline-none hover:text-foreground" title={`${title} — switch sessions`}>
 							<span className="truncate">{title}</span>
@@ -764,8 +762,7 @@ export function SwarmPanel({ folder, name, scan, bridge, session, file: openPath
 						</button>
 					) : null}
 				</div>
-				{chatOpen ? (
-				<div className="shadow-card mt-1 flex min-h-0 flex-1 flex-col overflow-hidden rounded-xl border bg-card">
+				<div className="mt-1 flex min-h-0 flex-1 flex-col overflow-hidden">
 				<div ref={chat} className="min-h-0 flex-1 space-y-3 overflow-y-auto p-4 text-sm">
 					{shown.length === 0 && !run ? <p className="text-muted-foreground">Start the swarm and its agents talk here. Message them anytime to steer.</p> : null}
 					{blocks(shown).map((block, i) =>
@@ -827,8 +824,9 @@ export function SwarmPanel({ folder, name, scan, bridge, session, file: openPath
 					)}
 				</div>
 				</div>
-				) : null}
+				
 			</aside>
+			) : null}
 		</div>
 	);
 }
