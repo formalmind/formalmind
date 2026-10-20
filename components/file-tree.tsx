@@ -194,29 +194,28 @@ export function FileTree({ paths, selected, onOpen, storageKey, truncated, runna
 								</>
 							) : (
 								<>
-									{runs ? (
-										// The play button: one function runs it, several open (and close) the list to pick from.
-										<span
-											role="button"
-											tabIndex={-1}
-											aria-label={`Debug ${node.name}`}
-											title={fnOpen ? "Hide its functions" : node.path.endsWith(".s.sol") ? "Debug this script" : "Debug a test in this file"}
-											onClick={(e) => {
-												e.stopPropagation();
-												if (fnOpen) toggleFns(node.path);
-												else play(node.path);
-											}}
-											className="-m-1 grid shrink-0 place-items-center rounded p-1 text-emerald-600 hover:bg-emerald-500/15"
-										>
-											{listed === "loading" ? <Loader2 className="size-3 animate-spin" /> : <Play className={`size-3 transition-transform ${playClass(runnables?.result?.(node.path))} ${fnOpen ? "rotate-90" : ""}`} />}
-										</span>
-									) : (
-										<span className="w-3 shrink-0" />
-									)}
+									<span className="w-3 shrink-0" />
 									{CODE.test(node.name) ? <FileCode2 className="size-3.5 shrink-0 text-muted-foreground" /> : <File className="size-3.5 shrink-0 text-muted-foreground" />}
 								</>
 							)}
 							<span className="truncate">{node.name}</span>
+							{/* The play button: one function runs it, several open (and close) the list to pick from. */}
+							{runs ? (
+								<span
+									role="button"
+									tabIndex={-1}
+									aria-label={`Debug ${node.name}`}
+									title={fnOpen ? "Hide its functions" : node.path.endsWith(".s.sol") ? "Debug this script" : "Debug a test in this file"}
+									onClick={(e) => {
+										e.stopPropagation();
+										if (fnOpen) toggleFns(node.path);
+										else play(node.path);
+									}}
+									className="-my-1 -mr-1 ml-auto grid shrink-0 place-items-center rounded p-1 text-emerald-600 hover:bg-emerald-500/15"
+								>
+									{listed === "loading" ? <Loader2 className="size-3 animate-spin" /> : <Play className={`size-3 transition-transform ${playClass(runnables?.result?.(node.path))} ${fnOpen ? "rotate-90" : ""}`} />}
+								</span>
+							) : null}
 						</button>
 						{fnOpen ? (
 							<ul className="flex flex-col">
