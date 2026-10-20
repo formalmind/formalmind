@@ -6,6 +6,7 @@
 
 pub mod graph;
 pub mod lean;
+pub mod link;
 pub mod scope;
 pub mod slice;
 pub mod solc;

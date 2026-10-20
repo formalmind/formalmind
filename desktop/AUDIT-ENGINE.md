@@ -136,6 +136,41 @@ structs, `State` in slot order, `Ext`, constants, then every reachable function,
     overflow). And `_deposit`'s order — limit checks, `dailyLendNetInflow`, `safeTransferFrom` before `_mint` — comes
     from the code instead of being described from reading it.
 
+### Bindings: interfaces replaced by implementations
+
+`formal-ast --root <repo> <entry.sol> link <out.lean> --with <impl.sol>[:Contract] …` links models into one world:
+
+- **Generic over the world.** Every model is generic over a world `σ`: its `Ext` is a lens (`get`/`set`) onto its
+  own `State`, and structs are shared, so AsyncSwap's `PoolKey` and PoolManager's `PoolKey` are the same type.
+- **Binding.** A call through an interface (`IPoolManager(x).swap`) is bound when another member lists that
+  interface among its bases and translates a function with the same name and parameter types. The world's `exts n`
+  runs the implementation's model when `x` is its address, with `msg.sender` and `address(this)` switched.
+  Otherwise the call stays open.
+- **Call depth.** Calls nest through `exts n`, and depth 0 reverts, so mutual calls (callbacks) are well-founded the
+  way the EVM's call depth makes them.
+- **Rollback.** `try` rollback covers the whole world.
+
+**AsyncSwap + PoolManager** (`asyncswap/contracts`, v4-core under `dependencies/`, per-dependency remappings):
+
+| | Translated | Opaque |
+|---|---|---|
+| AsyncSwap | 121 / 143 | 22 |
+| PoolManager | 131 / 152 (incl. `initialize`, `swap`, `modifyLiquidity`, `donate`, `Pool.swap`, TickMath, SqrtPriceMath) | 21 |
+
+The world is 4,535 lines, and Lean checks it in about 4s. All six of AsyncSwap's PoolManager calls (`swap`, `take`,
+`mint`, `burn`, `donate`, `updateDynamicLPFee`) run PoolManager's generated code.
+
+First cross-contract theorem: when the PoolManager is locked, AsyncSwap's `take` reverts inside PoolManager. The
+proof goes through `onlyWhenUnlocked`, `Lock.isUnlocked`'s `tload` and `CustomRevert`'s assembly, and uses only
+Lean's standard axioms.
+
+**Next for the world:**
+- **ABI codec:** an encoder/decoder for static structs, so `Router → PoolManager.unlock → Router.unlockCallback`
+  binds.
+- **Summaries:** hand-written specs for v4's hook-call plumbing (`Hooks.callHook`, `ParseBytes`) and its
+  storage-pointer assembly (`TickBitmap.flipTick`, `Pool.updateTick`), each to be checked against the code, so
+  PoolManager → AsyncSwap hook calls bind too.
+
 ## 6. What else the same graph provides
 
 All of these come from the graph and need no model time:

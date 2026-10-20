@@ -32,6 +32,13 @@ enum Command {
     Slice { function: String },
     /// The whole graph, scope, units and clusters as JSON (writes .formal/ast/graph.json under the root).
     Json,
+    /// A world of linked models: the entry plus `--with file[:Contract]` members, interface calls bound to the
+    /// members that implement them.
+    Link {
+        out: PathBuf,
+        #[arg(long = "with")]
+        with: Vec<String>,
+    },
     /// The Lean 4 model: writes it to `out` (relative to the root) and prints what was left opaque.
     Lean {
         out: PathBuf,
@@ -72,6 +79,34 @@ fn main() -> Result<()> {
             println!("{} — {} lines, {} functions translated, {} opaque", path.display(), model.text.lines().count(), model.report.translated.len(), model.report.opaque.len());
             for (f, why) in &model.report.opaque {
                 println!("  opaque {f}: {why}");
+            }
+        }
+        Command::Link { out, with } => {
+            let mut parts = vec![lean::Gen::new(&output, g, &a.scope).parts()];
+            let mut keep = vec![];
+            for w in &with {
+                let (file, contract) = match w.split_once(':') {
+                    Some((f, c)) => (f.to_string(), Some(c.to_string())),
+                    None => (w.clone(), None),
+                };
+                keep.push(analyze_full(&cli.root, &file, contract.as_deref())?);
+            }
+            for (b, out) in &keep {
+                parts.push(lean::Gen::new(out, &b.graph, &b.scope).parts());
+            }
+            let linked = formal_ast::link::link(&parts);
+            let path = a.project.root.join(&out);
+            if let Some(dir) = path.parent() {
+                std::fs::create_dir_all(dir)?;
+            }
+            std::fs::write(&path, &linked.text)?;
+            println!("{} — {} lines", path.display(), linked.text.lines().count());
+            for p in &parts {
+                println!("  {}: {} translated, {} opaque", p.contract, p.report.translated.len(), p.report.opaque.len());
+            }
+            println!("bound calls ({}):", linked.bound.len());
+            for (from, field, to) in &linked.bound {
+                println!("  {from}.{field} → {to}");
             }
         }
         Command::Json => {

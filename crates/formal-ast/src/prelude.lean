@@ -144,6 +144,16 @@ def view {α : Type} (f : Env → σ → Except Revert α) : M σ α := do
   | .ok v => pure v
   | .error r => throw r
 
+/-- A call into another contract of the world: `msg.sender` is the caller, `address(this)` the callee. -/
+def callAs {α : Type} (caller callee : Nat) (x : M σ α) : M σ α :=
+  withReader (fun e => { e with sender := caller, self := callee, value := 0 }) x
+
+/-- A view function of another contract, run against the world (its writes, if any, are dropped). -/
+def runView {α : Type} (x : M σ α) (env : Env) (w : σ) : Except Revert α :=
+  match (x.run env).run w with
+  | .ok (v, _) => .ok v
+  | .error e => .error e
+
 def upd {κ β : Type} [DecidableEq κ] (f : κ → β) (k : κ) (v : β) : κ → β := fun x => if x = k then v else f x
 
 def idx {α : Type} [Inhabited α] (l : List α) (i : Nat) : M σ α :=
