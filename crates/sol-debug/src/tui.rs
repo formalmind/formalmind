@@ -61,9 +61,8 @@ pub struct App<'a> {
     hx: [u16; 6],
     /// Per pane, from the last draw: how far `vy` can go (min, max), and where the pane is (for the mouse).
     bounds: Cell<[(isize, isize); 6]>,
-    /// Per pane, from the last draw: the furthest it can scroll right, and (first line, lines, rows) for its scrollbar.
+    /// Per pane, from the last draw: the furthest it can scroll right.
     hmax: Cell<[u16; 6]>,
-    vview: Cell<[(usize, usize, usize); 6]>,
     rects: RefCell<Vec<(Pane, Rect)>>,
 }
 
@@ -95,7 +94,6 @@ impl<'a> App<'a> {
             hx: [0; 6],
             bounds: Cell::new([(0, 0); 6]),
             hmax: Cell::new([0; 6]),
-            vview: Cell::new([(0, 0, 0); 6]),
             rects: RefCell::new(vec![]),
         }
     }
@@ -121,11 +119,7 @@ impl<'a> App<'a> {
         let mut b = self.bounds.get();
         b[pane as usize] = (-auto, max_top - auto);
         self.bounds.set(b);
-        let top = (auto + self.vy[pane as usize]).clamp(0, max_top) as usize;
-        let mut v = self.vview.get();
-        v[pane as usize] = (top, total, height);
-        self.vview.set(v);
-        top
+        (auto + self.vy[pane as usize]).clamp(0, max_top) as usize
     }
 
     /// A pane's frame: the accent border and a marker when it has focus, and its horizontal scroll in the title.
@@ -143,8 +137,6 @@ impl<'a> App<'a> {
 
     /// Draws a pane's lines (already windowed vertically) with its horizontal scroll, and remembers where it is.
     fn render_pane(&self, f: &mut Frame, area: Rect, pane: Pane, title: impl Into<String>, lines: Vec<Line<'static>>) {
-        use ratatui::layout::Margin;
-        use ratatui::widgets::{Scrollbar, ScrollbarOrientation, ScrollbarState};
         self.rects.borrow_mut().push((pane, area));
         let i = pane as usize;
         // How far right this pane can go: its widest line past the inside width.
@@ -155,20 +147,6 @@ impl<'a> App<'a> {
         self.hmax.set(hmax);
         let hx = self.hx[i].min(hmax[i]);
         f.render_widget(Paragraph::new(lines).block(self.pane_block(pane, title)).scroll((0, hx)), area);
-        // Scrollbars on the frame wherever there is more to see.
-        let thumb = Style::new().fg(if self.focus == pane { self.theme.accent } else { self.theme.dim });
-        let track = Style::new().fg(self.theme.border);
-        if hmax[i] > 0 {
-            let bar = Scrollbar::new(ScrollbarOrientation::HorizontalBottom).thumb_style(thumb).track_style(track).begin_symbol(None).end_symbol(None).thumb_symbol("▬");
-            let mut state = ScrollbarState::new(hmax[i] as usize).position(hx as usize).viewport_content_length(inner);
-            f.render_stateful_widget(bar, area.inner(Margin { vertical: 0, horizontal: 1 }), &mut state);
-        }
-        let (top, total, rows) = self.vview.get()[i];
-        if total > rows && rows > 0 {
-            let bar = Scrollbar::new(ScrollbarOrientation::VerticalRight).thumb_style(thumb).track_style(track).begin_symbol(None).end_symbol(None);
-            let mut state = ScrollbarState::new(total - rows).position(top).viewport_content_length(rows);
-            f.render_stateful_widget(bar, area.inner(Margin { vertical: 1, horizontal: 0 }), &mut state);
-        }
     }
 
     pub fn with_theme(mut self, theme: Theme) -> Self {
