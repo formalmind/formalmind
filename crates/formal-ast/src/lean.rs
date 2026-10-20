@@ -1,6 +1,7 @@
 //! The Lean 4 model, generated from solc's AST.
 //!
-//! Every reachable function becomes a `do` block in `M State α` (see prelude.lean). Statements map almost one to one:
+//! Every reachable function becomes a `do` block in `M σ α` over a world `σ` holding this contract's `State` (see
+//! prelude.lean; `Ext.get`/`Ext.set` are the lens). Statements map almost one to one:
 //! locals are `let mut`, storage writes are `modify`, `require`/`revert` throw, checked arithmetic reverts where
 //! Solidity panics. What can't be translated soundly (loops, assembly, storage parameters, mutated memory-struct
 //! parameters, bytes and strings, low-level calls…) becomes a named field of `Ext`, so every theorem holds for every
@@ -336,6 +337,30 @@ impl<'a> Gen<'a> {
         if let Some(rest) = t.strip_suffix(" memory").or_else(|| t.strip_suffix(" storage ref")).or_else(|| t.strip_suffix(" storage pointer")).or_else(|| t.strip_suffix(" calldata")) {
             return self.ty_str(rest);
         }
+        if let Some(inner) = t.strip_prefix("tuple(").and_then(|t| t.strip_suffix(')')) {
+            // Split at top-level commas.
+            let (mut parts, mut depth, mut cur) = (vec![], 0, String::new());
+            for c in inner.chars() {
+                match c {
+                    '(' | '[' => depth += 1,
+                    ')' | ']' => depth -= 1,
+                    ',' if depth == 0 => {
+                        parts.push(std::mem::take(&mut cur));
+                        continue;
+                    }
+                    _ => {}
+                }
+                cur.push(c);
+            }
+            if !cur.is_empty() {
+                parts.push(cur);
+            }
+            let mut tys = vec![];
+            for p in parts {
+                tys.push(self.ty_str(&p)?);
+            }
+            return Ok(product(&tys));
+        }
         if let Some(inner) = t.strip_suffix("[]") {
             return Ok(format!("(List {})", self.ty_str(inner)?));
         }
@@ -444,6 +469,7 @@ impl<'a> Gen<'a> {
                 let c = e["components"].as_array().ok_or("tuple")?;
                 if c.len() == 1 { self.const_expr(&c[0]) } else { bail("constant tuple") }
             }
+            "UnaryOperation" if e["operator"] == "-" => Ok(format!("(-{})", self.const_expr(&e["subExpression"])?)),
             "FunctionCall" if e["kind"] == "typeConversion" => {
                 let a = self.const_expr(&e["arguments"][0])?;
                 Ok(a)
@@ -505,7 +531,7 @@ impl<'a> Gen<'a> {
                 // A storage reference: the callee reads and writes the caller's location through a lens.
                 let base = n.trim_matches(|c| c == '«' || c == '»').to_string();
                 fx.lens.insert(id_of(p), base.clone());
-                params.push(format!("({base}_get : M State {ty}) ({base}_set : {ty} → M State Unit)"));
+                params.push(format!("({base}_get : M σ {ty}) ({base}_set : {ty} → M σ Unit)"));
                 continue;
             }
             fx.locals.insert(id_of(p), n.clone());
@@ -541,6 +567,9 @@ impl<'a> Gen<'a> {
             fx.line(format!("let mut {n} : {ty} := default"));
         }
         fx.modifier = modifier;
+        if modifier {
+            fx.line("let mut __r : α := default".into());
+        }
         fx.block(&node["body"])?;
         if modifier {
             if !fx.placeholder {
@@ -562,7 +591,7 @@ impl<'a> Gen<'a> {
         let func = &self.g.functions[&f];
         let _ = writeln!(out, "/-- {} ({}) -/", self.g.qualified(f), func.kind);
         if modifier {
-            let _ = writeln!(out, "def {name} {{α : Type}} (ext : Ext) {} (k : M State α) : M State α := do\n{body}", params.join(" "));
+            let _ = writeln!(out, "def {name} {{σ α : Type}} [Inhabited α] (ext : Ext σ) {} (k : M σ α) : M σ α := do\n{body}", params.join(" "));
             return Ok(out);
         }
         let ret = product(&ret_types);
@@ -595,9 +624,9 @@ impl<'a> Gen<'a> {
             tail.push(')');
         }
         if head.is_empty() {
-            let _ = writeln!(out, "def {name} (ext : Ext) {} : M State {ret} := do\n{body}", params.join(" "));
+            let _ = writeln!(out, "def {name} {{σ : Type}} (ext : Ext σ) {} : M σ {ret} := do\n{body}", params.join(" "));
         } else {
-            let _ = writeln!(out, "def {name} (ext : Ext) {} : M State {ret} :=\n  {head}do\n{body}{tail}", params.join(" "));
+            let _ = writeln!(out, "def {name} {{σ : Type}} (ext : Ext σ) {} : M σ {ret} :=\n  {head}do\n{body}{tail}", params.join(" "));
         }
         Ok(out)
     }
@@ -666,10 +695,7 @@ impl<'a> Gen<'a> {
         }
         let _ = writeln!(out, "deriving Inhabited\n");
 
-        let _ = writeln!(out, "/-- Everything the model leaves open: immutables, external calls and functions it couldn't translate. -/\nstructure Ext where");
-        if self.ext.is_empty() {
-            let _ = writeln!(out, "  unit : Unit := ()");
-        }
+        let _ = writeln!(out, "/-- Everything the model leaves open: immutables, external calls and functions it couldn't translate. -/\nstructure Ext (σ : Type) where\n  /-- This contract's storage within the world `σ`. -/\n  get : σ → State\n  set : σ → State → σ");
         for (field, why) in &self.ext {
             let _ = writeln!(out, "  /-- {why} -/\n  {field}");
             report.ext.push(field.clone());
@@ -716,14 +742,14 @@ impl<'a> Gen<'a> {
         for p in node["parameters"]["parameters"].as_array().into_iter().flatten() {
             let ty = self.clone_ty(&p["typeName"]).unwrap_or_else(|| "Nat".into());
             if p["storageLocation"] == "storage" {
-                parts.push(format!("M State {ty}"));
-                parts.push(format!("({ty} → M State Unit)"));
+                parts.push(format!("M σ {ty}"));
+                parts.push(format!("({ty} → M σ Unit)"));
             } else {
                 parts.push(ty);
             }
         }
         let rets: Vec<String> = node["returnParameters"]["parameters"].as_array().into_iter().flatten().map(|r| self.clone_ty(&r["typeName"]).unwrap_or_else(|| "Nat".into())).collect();
-        parts.push(format!("M State {}", product(&rets)));
+        parts.push(format!("M σ {}", product(&rets)));
         parts.join(" → ")
     }
 }
@@ -752,6 +778,13 @@ fn type_max(e: &Value) -> Option<String> {
     }
     let t = tstr(inner);
     let t = t.trim_start_matches("type(").trim_end_matches(')');
+    if let Some(b) = int_bits(t) {
+        return match s(&e["memberName"]).as_str() {
+            "max" => Some(format!("((2 ^ {} : Nat) - 1 : Int)", b - 1)),
+            "min" => Some(format!("(-((2 ^ {} : Nat) : Int))", b - 1)),
+            _ => None,
+        };
+    }
     let bits = bits_of(t)?;
     match s(&e["memberName"]).as_str() {
         "max" => Some(format!("(2 ^ {bits} - 1)")),
@@ -1001,11 +1034,12 @@ impl<'g, 'a> Fx<'g, 'a> {
             }
             "TryStatement" => self.try_stmt(st),
             "PlaceholderStatement" => {
-                if self.indent != 1 || self.placeholder {
-                    return bail("`_` not once at the top of the modifier");
+                if self.placeholder {
+                    return bail("`_` more than once in a modifier");
                 }
+                // When the modifier skips `_`, the function returns its defaults.
                 self.placeholder = true;
-                self.line("let __r ← k".into());
+                self.line("__r ← k".into());
                 Ok(())
             }
             other => bail(format!("{other} statement")),
@@ -1129,7 +1163,7 @@ impl<'g, 'a> Fx<'g, 'a> {
         for r in n["externalReferences"].as_array().into_iter().flatten() {
             refs.insert(s(&r["src"]), (r["declaration"].as_i64().unwrap_or(0), r["isSlot"] == true, r["isOffset"] == true));
         }
-        let mut y = Yul { refs, vars: vec![HashSet::new()], mem: HashMap::new() };
+        let mut y = Yul { refs, vars: vec![HashMap::new()], mem: HashMap::new() };
         self.line("-- assembly".into());
         self.yul_block(&n["AST"], &mut y)
     }
@@ -1143,7 +1177,7 @@ impl<'g, 'a> Fx<'g, 'a> {
                 return Ok(());
             }
         }
-        y.vars.push(HashSet::new());
+        y.vars.push(HashMap::new());
         let before = self.out.len();
         for st in &stmts {
             self.yul_stmt(st, y)?;
@@ -1176,8 +1210,9 @@ impl<'g, 'a> Fx<'g, 'a> {
                     return bail("Yul multi-variable declaration");
                 }
                 let v = if st["value"].is_null() { "0".to_string() } else { self.yul_expr(&st["value"], y)? };
-                let name = yul_var(&vars[0]);
-                y.vars.last_mut().unwrap().insert(vars[0].clone());
+                let name = format!("{}_{}", yul_var(&vars[0]).trim_matches(|c| c == '«' || c == '»'), self.fresh(""));
+                let name = ident(&name);
+                y.vars.last_mut().unwrap().insert(vars[0].clone(), name.clone());
                 self.line(format!("let mut {name} : Nat := {v}"));
                 Ok(())
             }
@@ -1198,7 +1233,7 @@ impl<'g, 'a> Fx<'g, 'a> {
                         let (field, ty) = self.yul_state_slot(&args[0], y)?;
                         let v = self.yul_expr(&args[1], y)?;
                         let v = self.atom(word_to(&ty, &v));
-                        self.line(format!("modify fun s => {{ s with {field} := {v} }}"));
+                        self.line(format!("modify fun w => ext.set w (let s := ext.get w; {{ s with {field} := {v} }})"));
                         Ok(())
                     }
                     "tstore" => {
@@ -1207,7 +1242,7 @@ impl<'g, 'a> Fx<'g, 'a> {
                         let k = self.atom(k);
                         let v = self.yul_expr(&args[1], y)?;
                         let v = self.atom(v);
-                        self.line(format!("modify fun s => {{ s with «transient» := upd s.«transient» {k} {v} }}"));
+                        self.line(format!("modify fun w => ext.set w (let s := ext.get w; {{ s with «transient» := upd s.«transient» {k} {v} }})"));
                         Ok(())
                     }
                     "mstore" => {
@@ -1272,8 +1307,8 @@ impl<'g, 'a> Fx<'g, 'a> {
     /// Assigns a Yul value to a Yul variable or an outside Solidity variable (converted to its type).
     fn yul_assign(&mut self, target: &Value, v: String, y: &mut Yul) -> R<()> {
         let name = s(&target["name"]);
-        if y.vars.iter().any(|scope| scope.contains(&name)) {
-            self.line(format!("{} := {v}", yul_var(&name)));
+        if let Some(lean) = y.var(&name) {
+            self.line(format!("{lean} := {v}"));
             return Ok(());
         }
         let (decl, slot, offset) = *y.refs.get(&s(&target["src"])).ok_or_else(|| format!("assignment to {name} in assembly"))?;
@@ -1306,8 +1341,8 @@ impl<'g, 'a> Fx<'g, 'a> {
             "YulLiteral" => yul_literal(e),
             "YulIdentifier" => {
                 let name = s(&e["name"]);
-                if y.vars.iter().any(|scope| scope.contains(&name)) {
-                    return Ok(yul_var(&name));
+                if let Some(lean) = y.var(&name) {
+                    return Ok(lean);
                 }
                 let (decl, slot, offset) = *y.refs.get(&s(&e["src"])).ok_or_else(|| format!("Yul name {name}"))?;
                 if slot {
@@ -1334,16 +1369,32 @@ impl<'g, 'a> Fx<'g, 'a> {
                 match name.as_str() {
                     "sload" => {
                         let (field, ty) = self.yul_state_slot(&args[0], y)?;
-                        return Ok(to_word(&ty, &format!("(← get).{field}")));
+                        return Ok(to_word(&ty, &format!("(ext.get (← get)).{field}")));
                     }
                     "tload" => {
                         self.g.transient = true;
                         let k = self.yul_expr(&args[0], y)?;
-                        return Ok(format!("((← get).«transient» {})", paren(&k)));
+                        return Ok(format!("((ext.get (← get)).«transient» {})", paren(&k)));
                     }
                     "mload" => {
                         let off = yul_const(&args[0]).ok_or("mload at a computed offset")?;
                         return y.mem.get(&off).cloned().ok_or_else(|| "mload of memory the model didn't see written".into());
+                    }
+                    "keccak256" if args[0]["nodeType"] == "YulIdentifier" && y.var(&s(&args[0]["name"])).is_none() => {
+                        // keccak256(structInMemory, size): the struct's fields, one word each.
+                        let (decl, _, _) = *y.refs.get(&s(&args[0]["src"])).ok_or("keccak256 of an unknown pointer")?;
+                        let local = self.locals.get(&decl).cloned().ok_or("keccak256 of a non-local")?;
+                        let t = tstr(self.g.nodes.get(&decl).copied().ok_or("decl")?);
+                        let canon = t.trim_start_matches("struct ").trim_end_matches(" memory").to_string();
+                        let sid = *self.g.struct_by_canon.get(&canon).ok_or("keccak256 of a non-struct pointer")?;
+                        let members: Vec<(String, String)> = self.g.nodes[&sid]["members"].as_array().into_iter().flatten().map(|m| (s(&m["name"]), tstr(m))).collect();
+                        let len = yul_const(&args[1]).ok_or("keccak256 of a computed length")?;
+                        if len != 32 * members.len() as u64 {
+                            return bail("keccak256 over part of a struct");
+                        }
+                        let words: Vec<String> = members.iter().map(|(n, t)| to_word(&self.g.norm(t), &format!("({local}).{}", ident(n)))).collect();
+                        self.g.ext.insert("keccak : List Nat → Nat".into(), "keccak256 over words (any function: no collision assumptions)".into());
+                        return Ok(format!("(ext.keccak [{}])", words.join(", ")));
                     }
                     "keccak256" => {
                         let (off, len) = (yul_const(&args[0]).ok_or("keccak256 of computed memory")?, yul_const(&args[1]).ok_or("keccak256 of a computed length")?);
@@ -1581,13 +1632,79 @@ impl<'g, 'a> Fx<'g, 'a> {
                 let c = e["components"].as_array().ok_or("tuple")?;
                 if c.len() == 1 { self.lpath(&c[0]) } else { bail("tuple path") }
             }
+            "FunctionCall" => self.storage_return(e),
             other => bail(format!("can't write through {other}")),
         }
     }
 
+    /// `_getPool(id)` where the callee only returns a storage path (`return _pools[id];`): that path, with the
+    /// arguments in place of the parameters.
+    fn storage_return(&mut self, e: &Value) -> R<Path> {
+        let callee = &e["expression"];
+        let target = callee["referencedDeclaration"].as_i64().ok_or("storage pointer from a call")?;
+        let target = self.g.scope.resolve(self.g.g, target);
+        let f = self.g.nodes.get(&target).copied().ok_or("storage pointer from a call")?;
+        let stmts = f["body"]["statements"].as_array().cloned().unwrap_or_default();
+        let rets = f["returnParameters"]["parameters"].as_array().cloned().unwrap_or_default();
+        // The callee may compute locals first (`bytes32 key = …;`); those run here, then its returned path is ours.
+        // The path is `return <path>;` or `<named return> = <path>;`.
+        let ret_id = rets.first().map(id_of);
+        let returned = stmts.last().and_then(|l| match l["nodeType"].as_str() {
+            Some("Return") => Some(l["expression"].clone()),
+            Some("ExpressionStatement") if l["expression"]["nodeType"] == "Assignment" && l["expression"]["operator"] == "=" && l["expression"]["leftHandSide"]["referencedDeclaration"].as_i64() == ret_id => Some(l["expression"]["rightHandSide"].clone()),
+            _ => None,
+        });
+        let ok = rets.len() == 1
+            && rets[0]["storageLocation"] == "storage"
+            && returned.is_some()
+            && stmts[..stmts.len() - 1].iter().all(|st| st["nodeType"] == "VariableDeclarationStatement");
+        if !ok {
+            return bail("storage pointer from a call that does more than return a path");
+        }
+        let params = f["parameters"]["parameters"].as_array().cloned().unwrap_or_default();
+        let mut args: Vec<Value> = vec![];
+        if callee["nodeType"] == "MemberAccess" && !tstr(&callee["expression"]).starts_with("type(") {
+            args.push(callee["expression"].clone());
+        }
+        args.extend(e["arguments"].as_array().cloned().unwrap_or_default());
+        let mut saved = vec![];
+        for (p, a) in params.iter().zip(&args) {
+            let pid = id_of(p);
+            if p["storageLocation"] == "storage" {
+                let path = self.lpath(a)?;
+                saved.push((pid, self.locals.get(&pid).cloned(), self.alias.insert(pid, path)));
+            } else {
+                let v = self.expr(a)?;
+                let v = self.atom(v);
+                saved.push((pid, self.locals.insert(pid, v), None));
+            }
+        }
+        let mut path = Ok(Path { base: Base::Local(String::new()), steps: vec![] });
+        for st in &stmts[..stmts.len() - 1] {
+            if let Err(e) = self.declare(st) {
+                path = Err(e);
+                break;
+            }
+        }
+        if path.is_ok() {
+            path = self.lpath(returned.as_ref().unwrap());
+        }
+        for (pid, local, alias) in saved {
+            match local {
+                Some(l) => self.locals.insert(pid, l),
+                None => self.locals.remove(&pid),
+            };
+            match alias {
+                Some(a) => self.alias.insert(pid, a),
+                None => self.alias.remove(&pid),
+            };
+        }
+        path
+    }
+
     fn read(&mut self, p: &Path) -> R<String> {
         let mut cur = match &p.base {
-            Base::State(f) => format!("(← get).{f}"),
+            Base::State(f) => format!("(ext.get (← get)).{f}"),
             Base::Local(n) => n.clone(),
             Base::Lens(l) => {
                 let t = self.fresh("__t");
@@ -1621,7 +1738,7 @@ impl<'g, 'a> Fx<'g, 'a> {
         match &p.base {
             Base::State(f) => {
                 let v = set(format!("s.{f}"), &p.steps, &leaf);
-                self.line(format!("modify fun s => {{ s with {f} := {v} }}"));
+                self.line(format!("modify fun w => ext.set w (let s := ext.get w; {{ s with {f} := {v} }})"));
             }
             Base::Local(n) => {
                 let v = set(n.clone(), &p.steps, &leaf);
@@ -1658,8 +1775,8 @@ impl<'g, 'a> Fx<'g, 'a> {
         };
         Ok(match &p.base {
             Base::State(f) => (
-                format!("(do return {})", pure_read(format!("(← get).{f}"))),
-                format!("(fun x => modify fun s => {{ s with {f} := {} }})", set(format!("s.{f}"), &p.steps, &|_: &str| "x".to_string())),
+                format!("(do return {})", pure_read(format!("(ext.get (← get)).{f}"))),
+                format!("(fun x => modify fun w => ext.set w (let s := ext.get w; {{ s with {f} := {} }}))", set(format!("s.{f}"), &p.steps, &|_: &str| "x".to_string())),
             ),
             Base::Lens(l) => (
                 format!("(do return {})", pure_read(format!("(← {l}_get)"))),
@@ -2186,12 +2303,12 @@ impl<'g, 'a> Fx<'g, 'a> {
                 let t = self.fresh("__t");
                 if view {
                     let field = format!("view_{iface}_{tname}");
-                    let ty = format!("Env → State → Nat → {}Except Revert {}", ptys.iter().map(|p| format!("{p} → ")).collect::<String>(), product(&rtys));
+                    let ty = format!("Env → σ → Nat → {}Except Revert {}", ptys.iter().map(|p| format!("{p} → ")).collect::<String>(), product(&rtys));
                     self.g.ext.insert(format!("{field} : {ty}"), format!("view call {iface}.{tname}: reads, can't write our storage"));
                     self.line(format!("let {t} ← view (fun env s => ext.{field} env s {addr} {})", a.join(" ")));
                 } else {
                     let field = format!("call_{iface}_{tname}");
-                    let ty = format!("Nat → {}M State {}", ptys.iter().map(|p| format!("{p} → ")).collect::<String>(), product(&rtys));
+                    let ty = format!("Nat → {}M σ {}", ptys.iter().map(|p| format!("{p} → ")).collect::<String>(), product(&rtys));
                     self.g.ext.insert(format!("{field} : {ty}"), format!("external call {iface}.{tname}: may re-enter and change our storage"));
                     self.line(format!("let {t} ← ext.{field} {addr} {}", a.join(" ")));
                 }
@@ -2216,8 +2333,15 @@ fn set(cur: String, steps: &[Step], leaf: &dyn Fn(&str) -> String) -> String {
 /// constant offsets (each word bound to a name when stored).
 struct Yul {
     refs: HashMap<String, (Id, bool, bool)>,
-    vars: Vec<HashSet<String>>,
+    /// Yul variables in scope: Yul name → its Lean name (unique, since Lean won't shadow a `let mut`).
+    vars: Vec<HashMap<String, String>>,
     mem: HashMap<u64, String>,
+}
+
+impl Yul {
+    fn var(&self, name: &str) -> Option<String> {
+        self.vars.iter().rev().find_map(|scope| scope.get(name).cloned())
+    }
 }
 
 fn yul_var(name: &str) -> String {

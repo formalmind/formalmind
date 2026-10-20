@@ -47,16 +47,30 @@ impl Project {
                 }
             }
         }
+        if project.libs.is_empty() {
+            project.libs.push("lib".into());
+        }
+        // Each dependency resolves its own imports with its own remappings (solc context remappings, as forge does).
+        for lib in project.libs.clone() {
+            let Ok(entries) = std::fs::read_dir(root.join(&lib)) else { continue };
+            for dep in entries.flatten() {
+                let Ok(text) = std::fs::read_to_string(dep.path().join("remappings.txt")) else { continue };
+                let dir = format!("{}/{}", lib.trim_end_matches('/'), dep.file_name().to_string_lossy());
+                for line in text.lines().map(str::trim).filter(|l| !l.is_empty() && !l.starts_with('#') && !l.contains(':')) {
+                    if let Some((prefix, target)) = line.split_once('=') {
+                        project.remappings.push(format!("{dir}/:{prefix}={dir}/{target}"));
+                    }
+                }
+            }
+        }
         // As forge does: a prefix ending in `/` maps to a target ending in `/`.
         for r in &mut project.remappings {
             if let Some((prefix, target)) = r.split_once('=') {
+                let prefix = prefix.rsplit(':').next().unwrap_or(prefix);
                 if prefix.ends_with('/') && !target.ends_with('/') {
                     *r = format!("{prefix}={target}/");
                 }
             }
-        }
-        if project.libs.is_empty() {
-            project.libs.push("lib".into());
         }
         Ok(project)
     }
