@@ -256,20 +256,31 @@ pub fn close(state: &Debuggers, id: u32) {
 
 /// Runs one test (setUp untraced, then the test recorded) and opens on its first statement.
 #[tauri::command]
-pub async fn debug_run(state: tauri::State<'_, Debuggers>, id: u32, contract: String, test: String, chain_id: Option<u64>) -> Result<RunView, String> {
-    run_test(&state, id, contract, test, chain_id).await
+pub async fn debug_run(state: tauri::State<'_, Debuggers>, id: u32, contract: String, test: String, chain_id: Option<u64>, fork_url: Option<String>) -> Result<RunView, String> {
+    run_test(&state, id, contract, test, chain_id, fork_url).await
 }
 
 /// `chain_id`: what `block.chainid` reads (scripts read deployments/<chainId>/ by it); 31337 when unset.
-pub async fn run_test(state: &Debuggers, id: u32, contract: String, test: String, chain_id: Option<u64>) -> Result<RunView, String> {
+/// `fork_url`: run on a fork (a local Anvil fork's URL), which brings its own chain id.
+pub async fn run_test(state: &Debuggers, id: u32, contract: String, test: String, chain_id: Option<u64>, fork_url: Option<String>) -> Result<RunView, String> {
     ask(state, id, move |d| {
         let mut s = match d.fresh.take() {
             Some(s) => s,
             None => Session::compile(&d.root, &d.file).map_err(err)?,
         };
-        s.set_chain_id(chain_id.unwrap_or(31337));
+        match &fork_url {
+            Some(url) => {
+                s.set_fork(url).map_err(err)?;
+            }
+            None => s.set_chain_id(chain_id.unwrap_or(31337)),
+        }
         let l = load(s, &contract, &test, d.loaded.take())?;
-        let out = run_view(&l, &contract, &test);
+        let mut out = run_view(&l, &contract, &test);
+        // On a fork, reads that failed came back as zero: say so rather than let them pass as state.
+        let rpc = l.s.fork_errors();
+        if !rpc.is_empty() {
+            out.verdict = format!("{} · {} fork reads failed (first: {})", out.verdict, rpc.len(), rpc[0]);
+        }
         d.loaded = Some(l);
         d.other = None;
         Ok(out)

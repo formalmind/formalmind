@@ -626,6 +626,14 @@ export function DebugView({ folder, file, test: wanted, onPick, embedded }: { fo
 		}
 	};
 	const [chains, setChains] = useState<number[]>([]);
+	// From a script's run prompt: the chain, and the Anvil fork to run on (a local URL).
+	const [urlParams] = useSearchParams();
+	const fork = urlParams.get("fork");
+	const urlChain = Number(urlParams.get("chain")) || null;
+	useEffect(() => {
+		if (urlChain && urlChain !== chain) setChainState(urlChain);
+		// eslint-disable-next-line react-hooks/exhaustive-deps
+	}, [urlChain]);
 	useEffect(() => {
 		void invoke<{ files: string[] }>("folder_tree", { path: folder }).then(
 			(t) => setChains([...new Set(t.files.map((f) => f.match(/^deployments\/(\d+)\//)?.[1]).filter(Boolean).map(Number))].sort((a, b) => a - b)),
@@ -640,7 +648,7 @@ export function DebugView({ folder, file, test: wanted, onPick, embedded }: { fo
 			setRunning(key);
 			setError(null);
 			try {
-				const r = await invoke<RunView>("debug_run", { id: session.id, contract: t.contract, test: t.test, chainId: chain });
+				const r = await invoke<RunView>("debug_run", { id: session.id, contract: t.contract, test: t.test, chainId: chain, forkUrl: fork });
 				setRun({ ...r, key });
 				recordRun(folder, session.file, t.name, t.test, r.success);
 				setCmp(null);
@@ -652,7 +660,7 @@ export function DebugView({ folder, file, test: wanted, onPick, embedded }: { fo
 				setRunning(null);
 			}
 		},
-		[session, folder, chain],
+		[session, folder, chain, fork],
 	);
 	// A test named in the URL (`&test=Contract::test`) runs once its file has compiled, and again when it changes.
 	useEffect(() => {
@@ -759,7 +767,13 @@ export function DebugView({ folder, file, test: wanted, onPick, embedded }: { fo
 			</aside>}
 			<main className="flex min-h-0 min-w-0 flex-1 flex-col">
 				<div className="mb-2 flex shrink-0 items-center gap-2 text-[11px] text-muted-foreground">
-					<label className="inline-flex items-center gap-1.5" title="What block.chainid reads. Scripts read deployments/<chainId>/ by it; forge's local chain is 31337.">
+					{fork ? (
+						<span className="inline-flex items-center gap-1.5 rounded-md bg-emerald-500/10 px-2 py-0.5 font-mono text-emerald-800 dark:text-emerald-300" title={`State read from the Anvil fork at ${fork}`}>
+							<span className="size-1.5 rounded-full bg-emerald-500" />
+							fork {fork.replace(/^https?:\/\/(127\.0\.0\.1|localhost)/, "")} · chain {chain}
+						</span>
+					) : null}
+					<label className={`items-center gap-1.5 ${fork ? "hidden" : "inline-flex"}`} title="What block.chainid reads. Scripts read deployments/<chainId>/ by it; forge's local chain is 31337.">
 						<span className="font-mono uppercase tracking-wider">Chain</span>
 						<select
 							value={chain}

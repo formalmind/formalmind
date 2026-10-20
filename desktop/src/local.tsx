@@ -1,3 +1,4 @@
+import { ScriptRunDialog, type ScriptTarget } from "./script-run-dialog";
 import { fileResult, useRunResults } from "@/lib/run-results";
 import { useCallback, useEffect, useState } from "react";
 import { useLocation, useNavigate, useSearchParams } from "react-router";
@@ -76,6 +77,23 @@ function FolderItem({ path, current, file }: { path: string; current: boolean; f
 	const tree = useTree(path, current);
 	const navigate = useNavigate();
 	const results = useRunResults(path);
+	// A script asks where to run first (chain, Anvil fork); tests run straight away.
+	const [asking, setAsking] = useState<{ file: string; r: Runnable } | null>(null);
+	const debugRun = (f: string, r: Runnable, target?: ScriptTarget) => {
+		const next = new URLSearchParams(params);
+		next.set("path", path);
+		next.set("file", f);
+		next.set("test", `${r.contract}::${r.fn}`);
+		next.set("mode", "debug");
+		next.delete("line");
+		next.delete("fork");
+		next.delete("chain");
+		if (target) {
+			next.set("chain", String(target.chainId));
+			if (target.fork) next.set("fork", target.fork);
+		}
+		navigate(`/local?${next.toString()}`);
+	};
 	const [params] = useSearchParams();
 	return (
 		<TreeFolder name={name(path)} title={path} href={href(path)} current={current}>
@@ -95,17 +113,22 @@ function FolderItem({ path, current, file }: { path: string; current: boolean; f
 					runnables={{
 						has: (f) => /\.[ts]\.sol$/.test(f),
 						list: (f) => invoke<string>("folder_read", { folder: path, path: f }).then((text) => runnablesIn(text, f.endsWith(".s.sol") ? "run" : "test")),
-						onRun: (f, r) => {
-							const next = new URLSearchParams(params);
-							next.set("path", path);
-							next.set("file", f);
-							next.set("test", `${r.contract}::${r.fn}`);
-							next.set("mode", "debug");
-							next.delete("line");
-							navigate(`/local?${next.toString()}`);
-						},
+						onRun: (f, r) => (f.endsWith(".s.sol") ? setAsking({ file: f, r }) : debugRun(f, r)),
 						current: params.get("mode") === "debug" && file && params.get("test") ? `${file}::${params.get("test")}` : null,
 						result: (f, r) => (r ? results[`${f}::${r.contract}::${r.fn}`] : fileResult(results, f)),
+					}}
+				/>
+			) : null}
+			{asking ? (
+				<ScriptRunDialog
+					folder={path}
+					file={asking.file}
+					fn={asking.r.fn}
+					onClose={() => setAsking(null)}
+					onRun={(t) => {
+						const a = asking;
+						setAsking(null);
+						debugRun(a.file, a.r, t);
 					}}
 				/>
 			) : null}

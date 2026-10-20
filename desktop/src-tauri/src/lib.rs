@@ -3,6 +3,7 @@
 //! with settings in ~/.formalmind (local.rs), the local executor that runs agent turns here (executor.rs), and debug
 //! mode over the sol-debug engine (debug.rs).
 
+mod anvil;
 mod ast;
 mod debug;
 mod executor;
@@ -88,6 +89,10 @@ pub fn run() {
             lsp::lsp_definition,
             lsp::lsp_hover,
             local::log_error,
+            anvil::anvil_list,
+            anvil::anvil_rpc_known,
+            anvil::anvil_start,
+            anvil::anvil_stop,
             term::term_start,
             term::term_write,
             term::term_resize,
