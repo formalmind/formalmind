@@ -546,22 +546,23 @@ export function SwarmPanel({ folder, name, scan, bridge, session, file: openPath
 				)}
 				<ModeTabs mode={mode} onMode={setMode} />
 				{mode === "code" ? (
-					<div className="pointer-events-auto absolute bottom-3 left-3 right-[25.75rem] top-14 z-10 flex min-h-0 flex-col overflow-hidden rounded-2xl border bg-muted/60 p-1">
+					// The page is the editor: the file fills the space under the tabs, up to the chat.
+					<div className="absolute bottom-0 left-0 right-[25.75rem] top-14 z-10 flex min-h-0 flex-col">
 						{file ? (
 							<>
-								<div className="flex h-8 shrink-0 items-center gap-2 px-2.5">
-									<span className="font-mono text-[11px] font-medium uppercase tracking-wider text-muted-foreground">{file.path.split("/").pop()}</span>
-									<span className="min-w-0 truncate text-[11px] text-muted-foreground">{file.path}</span>
+								<div className="flex h-8 shrink-0 items-center gap-2 border-b px-4">
+									<FileCode2 className="size-3.5 shrink-0 text-muted-foreground" />
+									<span className="min-w-0 truncate font-mono text-[12px] text-muted-foreground" title={file.path}>{file.path}</span>
 									<span className="ml-auto flex items-center gap-1">
 										{onDebug && file.path.endsWith(".t.sol") ? (
-											<button type="button" onClick={() => onDebug(file.path)} title={`Debug a test in ${file.path}`} className="inline-flex h-6 items-center gap-1 rounded-md border bg-background px-2 text-[11px] text-foreground hover:bg-muted">
+											<button type="button" onClick={() => onDebug(file.path)} title={`Debug a test in ${file.path}`} className="inline-flex h-6 items-center gap-1 rounded-md px-2 text-[11px] text-muted-foreground hover:bg-muted hover:text-foreground">
 												<Bug className="size-3" />Debug
 											</button>
 										) : null}
 										<CopyButton text={file.text} label="Copy the file" />
 									</span>
 								</div>
-								<div className="min-h-0 flex-1 overflow-auto rounded-xl border bg-card shadow-card">
+								<div className="min-h-0 flex-1 overflow-auto">
 									<FileView path={file.path} text={file.text} big />
 								</div>
 							</>
