@@ -453,7 +453,8 @@ impl<'a> App<'a> {
             Some(r) => format!(" stack · result {} ", short_word(r)),
             None => " stack ".into(),
         };
-        f.render_widget(Paragraph::new(lines).block(self.block(title)), area);
+        // Long words wrap rather than clip, so selecting one copies all of it.
+        f.render_widget(Paragraph::new(lines).wrap(ratatui::widgets::Wrap { trim: false }).block(self.block(title)), area);
     }
 
     fn draw_memory(&self, f: &mut Frame, area: Rect) {

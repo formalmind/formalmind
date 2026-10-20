@@ -633,17 +633,13 @@ pub fn show_value(v: &DynSolValue) -> String {
     }
 }
 
-/// A stack word, short: small numbers in decimal, the rest in hex (long ones elided in the middle).
+/// A stack word, never cut (so what's shown is what's copied): small numbers in decimal, the rest in hex without
+/// leading zeros.
 pub fn short_word(v: U256) -> String {
     if v < U256::from(1_000_000u64) {
         return v.to_string();
     }
-    let h = format!("{v:x}");
-    if h.len() <= 16 {
-        format!("0x{h}")
-    } else {
-        format!("0x{}…{}", &h[..6], &h[h.len() - 4..])
-    }
+    format!("{v:#x}")
 }
 
 /// The accounts every chain starts with: the sender's balance, `vm`'s byte of code, the CREATE2 deployer.
