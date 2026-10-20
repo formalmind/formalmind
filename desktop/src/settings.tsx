@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { apiBase, DEFAULT_API, setApiBase } from "./api";
+import { setVimMode, useVimMode } from "@/components/vim-mode";
 
 type Provider = "formal" | "anthropic";
 const read = (k: string) => {
@@ -25,6 +26,7 @@ export function SettingsPage() {
 	const [key, setKey] = useState("");
 	const [base, setBase] = useState(apiBase());
 	const [saved, setSaved] = useState<string | null>(null);
+	const vim = useVimMode();
 	useEffect(() => void invoke<boolean>("anthropic_key_status").then(setHasKey), []);
 
 	const pick = (p: Provider) => {
@@ -79,6 +81,15 @@ export function SettingsPage() {
 						</form>
 					)}
 				</div>
+			</Section>
+			<Section title="Editor">
+				<label className="flex items-center justify-between gap-4">
+					<span>
+						<span className="font-medium">Vim mode</span>
+						<span className="block text-xs text-muted-foreground">The Code tab runs Neovim (bundled with the app), with your own config from ~/.config/nvim if you have one.</span>
+					</span>
+					<input type="checkbox" checked={vim} onChange={(e) => setVimMode(e.target.checked)} className="size-4" />
+				</label>
 			</Section>
 			<Section title="Server">
 				<label className="flex items-center justify-between gap-4">

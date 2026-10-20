@@ -141,6 +141,8 @@ export function TabBar() {
 					<Plus className="size-4" />
 				</button>
 			</div>
+			{/* A page's own controls (a folder's name, Debug and modes) render here. */}
+			<div id="fm-titlebar-slot" className="flex min-w-0 shrink items-center" />
 			{/* Refresh, settings and the bell stay here on every page; the canvases leave them to the tab bar. */}
 			<button type="button" onClick={() => window.dispatchEvent(new Event("fm:refresh"))} title="Refresh" className="grid size-7 shrink-0 place-items-center rounded-md text-muted-foreground hover:bg-sidebar-accent hover:text-foreground">
 				<RefreshCw className="size-4" />

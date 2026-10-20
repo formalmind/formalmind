@@ -1,5 +1,7 @@
 import { MarkGithubIcon } from "@primer/octicons-react";
 import { Suspense, lazy, useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
+import { NeovimView } from "./neovim";
 import { Bug, Check, ChevronDown, Code2, Copy, FileCode2, GanttChart, MessagesSquare, Network, Play, Plus, ScanSearch, Square, WandSparkles, Wrench } from "lucide-react";
 
 // The project roadmap (GitHub Projects-style), the same view the web app had on its own page.
@@ -318,7 +320,7 @@ function BugsView({ bugs, openBug, setOpenBug, withPoc, onOpenFile }: { bugs: Bu
 	}
 	const facts = bugFacts(selected.body);
 	return (
-		<div className="absolute inset-x-0 bottom-0 top-14 z-10 grid grid-cols-[minmax(0,20rem)_minmax(0,1fr)] gap-3 px-3 pb-3">
+		<div className="absolute inset-x-0 bottom-0 top-[var(--fm-top)] z-10 grid grid-cols-[minmax(0,20rem)_minmax(0,1fr)] gap-3 px-3 pb-3">
 			<ul className="min-h-0 space-y-1 overflow-y-auto">
 				{bugs.map((b) => {
 					const f = bugFacts(b.body);
@@ -375,25 +377,41 @@ const MODES: { id: Mode; label: string; icon: typeof Code2 }[] = [
 	{ id: "roadmap", label: "Roadmap", icon: GanttChart },
 ];
 
-/** The page's modes as a macOS-style segmented control, centred at the top. */
-function ModeTabs({ mode, onMode }: { mode: Mode; onMode: (m: Mode) => void }) {
+/**
+ * The folder's name, Debug and the page's modes as one macOS-style segmented control. The Mac app shows it in its
+ * title bar; the web app centres it at the top of the page.
+ */
+function NavGroup({ name, git, onDebug, mode, onMode, inBar, compact }: { name: string; git: boolean; onDebug?: () => void; mode: Mode; onMode: (m: Mode) => void; inBar?: boolean; compact?: boolean }) {
+	const seg = "inline-flex shrink-0 items-center gap-1.5 rounded-md px-2.5 text-[12px] font-medium outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring";
+	const h = inBar ? "h-6" : "h-7";
 	return (
-		<div role="tablist" aria-label="Mode" className="pointer-events-auto absolute left-1/2 top-3 z-20 inline-flex h-8 -translate-x-1/2 items-center gap-0.5 rounded-lg border bg-muted/90 p-0.5 shadow-sm backdrop-blur">
+		<div role="tablist" aria-label="Mode" className={`pointer-events-auto inline-flex min-w-0 items-center gap-0.5 rounded-lg border bg-muted/90 p-0.5 shadow-sm backdrop-blur ${inBar ? "h-7" : "absolute left-1/2 top-3 z-20 h-8 max-w-[calc(100%-1.5rem)] -translate-x-1/2"}`}>
+			<span className={`${seg} ${h} min-w-0 text-foreground`} title={name}>
+				{git ? <MarkGithubIcon className="size-3.5 shrink-0" /> : null}
+				<span className={`truncate ${compact ? "max-w-28" : "max-w-48"}`}>{name}</span>
+			</span>
+			{onDebug ? (
+				<button type="button" onClick={onDebug} title="Debug this folder's Foundry tests" className={`${seg} ${h} text-muted-foreground hover:text-foreground`}>
+					<Bug className="size-3.5" />
+					{compact ? null : "Debug"}
+				</button>
+			) : null}
+			<span className="mx-0.5 h-4 w-px shrink-0 bg-border" />
 			{MODES.map(({ id, label, icon: Icon }) => (
-				<button
-					key={id}
-					type="button"
-					role="tab"
-					aria-selected={mode === id}
-					onClick={() => onMode(id)}
-					className={`inline-flex h-7 items-center gap-1.5 rounded-md px-3 text-[12px] font-medium outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring ${mode === id ? "bg-background text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"}`}
-				>
+				<button key={id} type="button" role="tab" aria-selected={mode === id} aria-label={label} title={compact ? label : undefined} onClick={() => onMode(id)} className={`${seg} ${h} ${mode === id ? "bg-background text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"}`}>
 					<Icon className="size-3.5" />
-					{label}
+					{compact ? null : label}
 				</button>
 			))}
 		</div>
 	);
+}
+
+/** The Mac app's title bar slot (desktop/src/tabs.tsx), when there is one. */
+function useTitlebarSlot() {
+	const [slot, setSlot] = useState<HTMLElement | null>(null);
+	useEffect(() => setSlot(document.getElementById("fm-titlebar-slot")), []);
+	return slot;
 }
 
 type AstUnit = { name: string; function: string; mutability: string; reads: string[]; writes: string[]; external: number; guards: number; arith: number; unchecked: number; asm: number; closure: number };
@@ -790,7 +808,7 @@ export function SwarmPanel({ folder, name, scan, bridge, session, file: openPath
 		void invoke<string | null>("lsp_hover", { folder, path, ...pos }).then((text) => setHover(text && r ? { x: r.left, y: r.top, text } : null), () => setHover(null));
 	};
 	const vimKey = (e: React.KeyboardEvent) => {
-		if (!vim || !file || e.metaKey || e.altKey) return;
+		if (!vim || slot || !file || e.metaKey || e.altKey) return;
 		const lines = file.text.split("\n");
 		if (vimSearchText !== null) return;
 		const key = e.ctrlKey ? `ctrl+${e.key}` : e.key;
@@ -1089,19 +1107,23 @@ export function SwarmPanel({ folder, name, scan, bridge, session, file: openPath
 		</div>
 	) : null;
 
-	const pageTitle = (
-		<>
-			<span className="inline-flex h-8 min-w-0 items-center rounded-full border bg-background/90 px-3 text-sm shadow-sm backdrop-blur">{scan?.git ? <MarkGithubIcon className="mr-2 size-4 shrink-0" /> : null}<span className="truncate">{name}</span></span>
-			{onDebug ? (
-				<button type="button" onClick={() => onDebug(null)} title="Debug this folder's Foundry tests" className="inline-flex h-8 shrink-0 items-center gap-1.5 rounded-full border bg-background/90 px-3 text-[12px] text-muted-foreground shadow-sm backdrop-blur hover:text-foreground">
-					<Bug className="size-3.5" />Debug
-				</button>
-			) : null}
-		</>
-	);
+	const slot = useTitlebarSlot();
+	// Narrow pages show the modes as icons only (the Mac title bar also holds the app's tabs, so it needs more room).
+	const root = useRef<HTMLDivElement | null>(null);
+	const [width, setWidth] = useState(1200);
+	useEffect(() => {
+		const el = root.current;
+		if (!el) return;
+		const ro = new ResizeObserver(() => setWidth(el.clientWidth));
+		ro.observe(el);
+		return () => ro.disconnect();
+	}, []);
+	const compact = width < (slot ? 1100 : 820);
+	const nav = <NavGroup name={name} git={Boolean(scan?.git)} onDebug={onDebug ? () => onDebug(null) : undefined} mode={mode} onMode={setMode} inBar={Boolean(slot)} compact={compact} />;
 
 	return (
-		<div className="relative flex h-full min-h-0 flex-1">
+		// In the Mac app the controls live in the title bar, so the page starts at the top.
+		<div ref={root} className="relative flex h-full min-h-0 flex-1" style={{ "--fm-top": slot ? "0px" : "3.5rem" } as React.CSSProperties}>
 			{/* The canvas, as on the Swarm page, with the plan, files and bugs floating over it as one accordion. */}
 			<div className="absolute inset-0 flex flex-col overflow-hidden">
 				{/* Swarm mode shows the canvas; Code and Audit replace it. The name and the controls stay in every mode. */}
@@ -1112,19 +1134,15 @@ export function SwarmPanel({ folder, name, scan, bridge, session, file: openPath
 						local
 						repo={folder}
 						actions={actions}
-						title={pageTitle}
 					/>
 				) : (
 					<div className="relative h-full w-full bg-background">
-						<div className="absolute left-3 top-3 flex min-w-0 max-w-[calc(100%-14rem)] items-center gap-2">{pageTitle}</div>
 						<div className="absolute right-3 top-3 flex items-center gap-2">{actions}</div>
 					</div>
 				)}
-				<ModeTabs mode={mode} onMode={setMode} />
-				{/* The line under the tabs row, on every mode. */}
-				<div className="pointer-events-none absolute inset-x-0 top-14 z-20 border-b" />
+				{slot ? createPortal(nav, slot) : nav}
 				{mode === "swarm" ? (
-					<section className={`pointer-events-auto absolute left-3 top-[4.25rem] z-10 flex w-[min(20rem,calc(100%-1.5rem))] flex-col overflow-hidden rounded-2xl border bg-muted/80 p-1 shadow-pop backdrop-blur ${planOpen ? "max-h-[calc(100%-5.25rem)]" : ""}`}>
+					<section className={`pointer-events-auto absolute left-3 top-[var(--fm-top)] z-10 flex w-[min(20rem,calc(100%-1.5rem))] flex-col overflow-hidden rounded-2xl border bg-muted/80 p-1 shadow-pop backdrop-blur ${planOpen ? "max-h-[calc(100%-var(--fm-top)-1rem)]" : ""}`}>
 						<button type="button" onClick={() => setPlanOpen(!planOpen)} aria-expanded={planOpen} className="flex h-8 shrink-0 items-center gap-2 px-2.5 text-left">
 							<span className="font-mono text-[11px] font-medium uppercase tracking-wider text-muted-foreground">Plan</span>
 							<span className="text-[11px] text-muted-foreground">{plan.length ? `${done}/${plan.length}` : ""}{entryUnits.length ? ` · ${inPlan.size}/${entryUnits.length} entry points` : ""}</span>
@@ -1135,10 +1153,10 @@ export function SwarmPanel({ folder, name, scan, bridge, session, file: openPath
 				) : null}
 				{mode === "code" ? (
 					// The page is the editor: the file fills the whole page under the tabs.
-					<div className="absolute inset-x-0 bottom-0 top-14 z-10 flex min-h-0 flex-col">
+					<div className="absolute inset-x-0 bottom-0 top-[var(--fm-top)] z-10 flex min-h-0 flex-col">
 						{file ? (
 							<>
-								<div className="flex h-8 shrink-0 items-center gap-2 border-b px-4">
+								<div className="flex h-8 shrink-0 items-center gap-2 border-y px-4">
 									<FileCode2 className="size-3.5 shrink-0 text-muted-foreground" />
 									<Breadcrumbs root={name} path={file.path} files={tree} onOpen={view} />
 									<span className="ml-auto flex items-center gap-1">
@@ -1175,16 +1193,17 @@ export function SwarmPanel({ folder, name, scan, bridge, session, file: openPath
 								<div
 									className={`min-h-0 flex-1 overflow-auto ${navigable(file.path) ? "[&_[data-code]]:cursor-text" : ""}`}
 									ref={codeBox}
-									tabIndex={vim ? 0 : undefined}
+									tabIndex={vim && !slot ? 0 : undefined}
 									onKeyDown={vimKey}
 									onClick={(e) => {
+										if (vim && slot) return;
 										if (vim) {
 											const pos = codePosition(e.clientX, e.clientY);
 											if (pos) setCursor({ line: pos.line, col: pos.character });
 										}
 										goToDefinition(file.path, e);
 									}}
-									onMouseMove={(e) => hoverMove(file.path, e)}
+									onMouseMove={(e) => !(vim && slot) && hoverMove(file.path, e)}
 									onMouseLeave={() => {
 										if (hoverTimer.current) clearTimeout(hoverTimer.current);
 										hoverAt.current = "";
@@ -1192,7 +1211,10 @@ export function SwarmPanel({ folder, name, scan, bridge, session, file: openPath
 									}}
 									onScroll={() => setHover(null)}
 								>
-									{/\.(md|markdown)$/i.test(file.path) && !mdSource ? (
+									{vim && slot ? (
+										// The Mac app runs real Neovim (bundled); the web keeps the light cursor below.
+										<NeovimView bridge={bridge} folder={folder} path={file.path} line={markLine} onFile={(p, l) => view(p, l)} />
+									) : /\.(md|markdown)$/i.test(file.path) && !mdSource ? (
 										<ChatMarkdown className="mx-auto max-w-3xl px-6 py-6 text-[14px]" image={(src) => { const p = imagePath(src, file.path); return p === null ? src : images[p]; }}>{file.text}</ChatMarkdown>
 									) : (
 										<FileView path={file.path} text={file.text} big mark={markLine ? markLine - 1 : null} cursor={vim ? cursor : null} />
@@ -1203,7 +1225,7 @@ export function SwarmPanel({ folder, name, scan, bridge, session, file: openPath
 											<p className="mt-1 text-[10px] text-muted-foreground">{vim ? "gd goes to the definition · ctrl-o comes back" : "⌘-click to go to the definition"}</p>
 										</div>
 									) : null}
-									{vim ? (
+									{vim && !slot ? (
 										<div className="sticky bottom-0 left-0 flex h-6 items-center gap-3 border-t bg-background/95 px-3 font-mono text-[11px] text-muted-foreground backdrop-blur">
 											{vimSearchText !== null ? (
 												<label className="flex flex-1 items-center">
@@ -1245,7 +1267,7 @@ export function SwarmPanel({ folder, name, scan, bridge, session, file: openPath
 					</div>
 				) : null}
 				{mode === "roadmap" ? (
-					<div className="pointer-events-auto absolute inset-x-0 bottom-0 top-14 z-10 flex min-h-0 flex-col overflow-y-auto bg-background">
+					<div className="pointer-events-auto absolute inset-x-0 bottom-0 top-[var(--fm-top)] z-10 flex min-h-0 flex-col overflow-y-auto bg-background">
 						<Suspense fallback={null}>
 							<ProjectView repo={name} />
 						</Suspense>
@@ -1253,7 +1275,7 @@ export function SwarmPanel({ folder, name, scan, bridge, session, file: openPath
 				) : null}
 				{mode === "bugs" ? <BugsView bugs={bugs} openBug={openBug} setOpenBug={setOpenBug} withPoc={withPoc} onOpenFile={view} /> : null}
 				{mode === "audit" ? (
-					<div className="pointer-events-auto absolute bottom-3 left-3 right-3 top-14 z-10 flex min-h-0 flex-col overflow-hidden rounded-2xl border bg-muted/60 p-1">
+					<div className="pointer-events-auto absolute bottom-3 left-3 right-3 top-[var(--fm-top)] z-10 flex min-h-0 flex-col overflow-hidden rounded-2xl border bg-muted/60 p-1">
 						<AuditView folder={folder} scan={scan} invoke={invoke} preferred={openPath ?? null} onOpenFile={view} />
 					</div>
 				) : null}
@@ -1263,7 +1285,7 @@ export function SwarmPanel({ folder, name, scan, bridge, session, file: openPath
 			{/* The chat floats over the canvas on the right: a gray title bar with the run's controls, the white chat inside.
 			    The strip above it stays free for the Live pill and the bell. */}
 			{mode === "chat" ? (
-			<aside className="absolute inset-x-0 bottom-0 top-14 z-20 mx-auto flex w-full max-w-3xl flex-col px-4 pb-3">
+			<aside className="absolute inset-x-0 bottom-0 top-[var(--fm-top)] z-20 mx-auto flex w-full max-w-3xl flex-col px-4 pb-3">
 				<div className="flex h-8 shrink-0 items-center gap-2 pl-2 pr-0.5">
 					<DropdownMenu>
 						<DropdownMenuTrigger className="flex min-w-0 flex-1 items-center gap-1 rounded-md text-left text-[13px] font-medium outline-none hover:text-foreground" title={`${title} — switch sessions`}>

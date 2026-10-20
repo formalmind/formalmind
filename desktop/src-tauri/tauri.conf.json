@@ -4,8 +4,8 @@
   "version": "0.1.16",
   "identifier": "team.formal.desktop",
   "build": {
-    "beforeDevCommand": "bunx vite --config vite.config.mts",
-    "beforeBuildCommand": "bunx vite build --config vite.config.mts",
+    "beforeDevCommand": "sh scripts/fetch-nvim.sh && bunx vite --config vite.config.mts",
+    "beforeBuildCommand": "sh scripts/fetch-nvim.sh && bunx vite build --config vite.config.mts",
     "devUrl": "http://localhost:1420",
     "frontendDist": "../dist"
   },
@@ -55,6 +55,9 @@
       "icons/icon.ico"
     ],
     "createUpdaterArtifacts": true,
+    "resources": {
+      "nvim/": "nvim/"
+    },
     "macOS": {
       "dmg": {
         "background": "dmg-background.tiff",
