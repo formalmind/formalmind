@@ -47,7 +47,13 @@ export function NvimTerminal({ bridge, folder, path, line }: { bridge: Bridge; f
 		term.attachCustomKeyEventHandler((e) => !e.metaKey);
 
 		let id: number | null = null;
-		let ended = false;
+		// Neovim waits for a key: by then the terminal has its real size, so it starts at that size (started straight
+		// away it began at 80×24 and some plugins drew wrongly after the resize). Also the state after it exits.
+		let ended = true;
+		const prompt = (what: string) => {
+			const name = first.current.path?.split("/").pop();
+			term.write(`\x1b[2m${what}Press any key to open Neovim${name ? ` on ${name}` : ""}.\x1b[0m`);
+		};
 		const decode = (b64: string) => Uint8Array.from(atob(b64), (c) => c.charCodeAt(0));
 		const start = (p: string | null, l: number | null) => {
 			ended = false;
@@ -69,12 +75,14 @@ export function NvimTerminal({ bridge, folder, path, line }: { bridge: Bridge; f
 			if (payload.id !== id) return;
 			id = null;
 			ended = true;
-			term.write("\r\n\x1b[2mNeovim exited. Press any key to open it again.\x1b[0m");
+			term.write("\r\n");
+			prompt("Neovim exited. ");
 		});
 		const input = term.onData((data) => {
 			if (ended) {
 				term.reset();
-				start(first.current.path, null);
+				refit();
+				start(first.current.path, first.current.line);
 				return;
 			}
 			if (id !== null) void bridge.invoke("term_write", { id, data }).catch(() => undefined);
@@ -88,13 +96,20 @@ export function NvimTerminal({ bridge, folder, path, line }: { bridge: Bridge; f
 		api.current = {
 			open: (p, l) => {
 				first.current = { path: p, line: l };
-				if (id === null) return ended ? undefined : start(p, l);
+				if (id === null) {
+					// Still waiting for a key: the prompt names the new file.
+					if (ended) {
+						term.reset();
+						prompt("");
+					}
+					return;
+				}
 				// Ctrl-\ Ctrl-N reaches normal mode from any mode (a bare Escape before ":" can read as Alt-:).
 				const arg = p.replace(/([ \\%#|"])/g, "\\$1");
 				void bridge.invoke("term_write", { id, data: `\x1c\x0e:edit ${l ? `+${l} ` : ""}${arg}\r` }).catch(() => undefined);
 			},
 		};
-		start(first.current.path, first.current.line);
+		prompt("");
 		term.focus();
 
 		return () => {
