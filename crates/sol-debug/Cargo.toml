@@ -1,0 +1,21 @@
+[package]
+name = "sol-debug"
+version = "0.1.0"
+edition = "2021"
+description = "A local Solidity debugger: solc source maps to every opcode, revm to run it, storage decoded by the storage layout"
+license = "MIT"
+
+[dependencies]
+alloy-dyn-abi = "1"
+anyhow = "1"
+clap = { version = "4", features = ["derive"] }
+formal-ast = { path = "../formal-ast" }
+revm = { version = "43", default-features = false, features = ["std"] }
+serde_json = "1"
+
+[[bin]]
+name = "sol-debug"
+path = "src/main.rs"
+
+[lib]
+path = "src/lib.rs"
