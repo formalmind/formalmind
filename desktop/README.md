@@ -82,14 +82,14 @@ still works as a last resort.
 ## Local swarm
 
 A folder's page runs a swarm on this computer: **Start the swarm**, optionally with a focus and a spending cap.
-`src-tauri/src/swarm.rs` loops until the plan is proven, an agent reports a bug, the cap is reached, or you press Stop:
+`src-tauri/src/swarm.rs` works continuously until the spending cap is reached or you press Stop (raise the cap from the chat header to keep it going):
 
-1. **Planner** (only when `.formal/plan.md` has no checklist) reads the contracts and writes 5–12 properties to prove.
+1. **Planner** writes `.formal/plan.md` (5–12 properties) when there is none, and extends it with new ones when every item is proven or blocked.
 2. **Prover** takes the next `- [ ]` item: Lean under `formal/`, checked with `lake`; or a Foundry PoC under
    `test/formal/` when the property is false.
 3. **Reviewer** checks the statement against the Solidity and gives a verdict: approve marks the item `- [x]`, changes
    sends it back to the prover (three tries, then `- [!]` blocked).
-4. **report_bug** (any agent) writes `.formal/bugs/NNN-title.md` and stops the swarm so you can look.
+4. **report_bug** (any agent) writes `.formal/bugs/NNN-title.md` with the PoC inlined, marks the item `- [!]`, and the swarm moves on.
 5. **Messages** you send while it runs are answered by the assistant before the next turn and can change the plan.
 
 Files, `lake` and `forge` run here; only the model calls leave, via formal.team's metered Claude proxy

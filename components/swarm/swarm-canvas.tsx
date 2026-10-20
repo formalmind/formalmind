@@ -620,8 +620,10 @@ function cloneScene(scene: Scene): Scene {
  * `fill` makes the board fill its parent, scaled to fit both ways and centred, below a strip kept clear
  * for the pinned controls; otherwise it scales to the width. `title` and `actions` are pinned top-left and top-right.
  */
-export function SwarmCanvas({ state, fill = false, contain = false, title, actions, repo, onTalk }: {
+export function SwarmCanvas({ state, fill = false, contain = false, title, actions, repo, onTalk, local = false }: {
 	state: SwarmState | null;
+	/** A swarm running on this computer (the desktop app): no dispatcher schedule to show. */
+	local?: boolean;
 	/** Fit the board inside its parent's height as well as its width (the landing demo); the replay still plays. */
 	contain?: boolean;
 	/** The proofs repo, for links before the live state has loaded. */
@@ -1180,7 +1182,7 @@ export function SwarmCanvas({ state, fill = false, contain = false, title, actio
 			{hover ? (
 				<ItemHoverCard {...hover} onEnter={keepHover} onLeave={hideHover} />
 			) : null}
-			{fill ? (
+			{fill && !local ? (
 				<div className="pointer-events-none absolute inset-x-3 top-14 flex">
 					<div className="pointer-events-auto flex min-w-0 max-w-full">
 						<NowChip job={shown.job} turn={shown.turn} />

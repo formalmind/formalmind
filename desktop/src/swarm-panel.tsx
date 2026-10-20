@@ -224,6 +224,7 @@ export function SwarmPanel({ folder, name, scan, bridge, session }: { folder: st
 				<SwarmCanvas
 					state={localBoard(folder, plan, events, Boolean(run))}
 					fill
+					local
 					repo={folder}
 					title={
 						<span className={`${pill} min-w-0 gap-2 px-3 text-sm text-muted-foreground`}>

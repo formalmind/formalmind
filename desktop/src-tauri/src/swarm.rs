@@ -207,7 +207,7 @@ Be brief; end with one short paragraph saying what you did and what's next.{}",
         if goal.is_empty() { String::new() } else { format!("\n\nThe maintainer's focus: {goal}") }
     );
     let job = match role {
-        "planner" => "Read the contracts (src/, README, docs/) and write .formal/plan.md: a title line, then 5 to 12 checklist items, most important first. Each item is one property worth proving or one risky area to check, phrased as a claim, naming the contract and function, e.g. `- [ ] Vault.withdraw never sends more than the caller's shares are worth (src/Vault.sol)`. Keep items small enough for one prover turn. Do not prove anything yourself.",
+        "planner" => "If .formal/plan.md already has a checklist and every item is checked or blocked, extend it: append 3 to 8 new `- [ ]` items for properties and risky areas not covered yet (read .formal/bugs/ and what was proven, go deeper where bugs were found), keeping the existing lines. Otherwise read the contracts (src/, README, docs/) and write .formal/plan.md: a title line, then 5 to 12 checklist items, most important first. Each item is one property worth proving or one risky area to check, phrased as a claim, naming the contract and function, e.g. `- [ ] Vault.withdraw never sends more than the caller's shares are worth (src/Vault.sol)`. Keep items small enough for one prover turn. Do not prove anything yourself.",
         "prover" => "Take the plan item you're given: model the relevant Solidity in Lean faithfully (under formal/), state the property, prove it, and check with `lake build` (run from formal/ via `lake build` — the run tool works in the folder root, so use `lake build` only if the lakefile is at the root, otherwise write proofs so that `lake env lean formal/<File>.lean` checks them). If the property is false, that's a bug: show it with a counterexample or a PoC and call report_bug. Address the reviewer's notes if there are any.",
         "reviewer" => "Review the prover's work on the plan item: does the Lean statement really say what the Solidity does (read both), does it check, is there any sorry/admit/axiom? Then call verdict exactly once: approve, or changes with concrete notes. Do not edit proofs yourself. If you spot a real bug in the contract, call report_bug.",
         _ => "The maintainer wrote to the swarm. Answer them directly and briefly, using the tools to look things up. If they ask for a change of focus or a new property, update .formal/plan.md accordingly.",
@@ -222,7 +222,7 @@ fn tools(role: &str) -> Value {
         json!({ "name": "read_file", "description": "Read a text file in the folder. Long files come back in numbered slices: pass start_line and end_line (up to 300 lines at a time).", "input_schema": s(json!({ "path": { "type": "string" }, "start_line": { "type": "integer" }, "end_line": { "type": "integer" } }), vec!["path"]) }),
         json!({ "name": "search", "description": "Find lines matching a regex in the folder's .sol, .lean, .md and .toml files (path:line: text). Use it to locate functions before reading them.", "input_schema": s(json!({ "pattern": { "type": "string" }, "dir": { "type": "string", "description": "Subdirectory, e.g. src; empty for all" } }), vec!["pattern"]) }),
         json!({ "name": "run", "description": "Run `lake build`, `lake env lean <file>`, `lake exe cache get`, `lake init|new <Name>`, `forge build` or `forge test [args]` in the folder. Returns exit code and output.", "input_schema": s(json!({ "command": { "type": "string" } }), vec!["command"]) }),
-        json!({ "name": "report_bug", "description": "Report a real bug in the contracts. The swarm stops so the maintainer can look.", "input_schema": s(json!({
+        json!({ "name": "report_bug", "description": "Report a real bug in the contracts. It's filed for the maintainer and the swarm moves on to the next item.", "input_schema": s(json!({
             "title": { "type": "string" }, "severity": { "type": "string", "enum": ["critical", "high", "medium", "low"] },
             "location": { "type": "string", "description": "file:line" }, "scenario": { "type": "string", "description": "Concrete steps and impact" },
             "evidence": { "type": "string", "description": "PoC test path and the forge output, or the Lean counterexample" } }), vec!["title", "severity", "location", "scenario"]) }),
@@ -349,7 +349,7 @@ impl Turn<'_> {
                                 let file = write_bug(&root, input);
                                 out.bug = Some(input["title"].as_str().unwrap_or("bug").to_string());
                                 self.emit("bug", role, item, format!("{} — {}", input["title"].as_str().unwrap_or("bug"), file));
-                                format!("recorded in {file}; the swarm will stop after this turn")
+                                format!("recorded in {file}; the swarm marks this item and moves on")
                             }
                             "write_file" if role == "planner" && !input["path"].as_str().unwrap_or("").trim_start_matches("./").starts_with(".formal/") => {
                                 "error: the planner only writes under .formal/".to_string()
@@ -475,22 +475,20 @@ async fn run_swarm(turn: &Turn<'_>) -> String {
             continue;
         }
         let plan = read_plan(&root);
-        if plan.is_empty() {
-            match turn.agent("planner", "plan", "Write the plan.".into()).await {
-                Ok(o) if o.bug.is_some() => return format!("bug found: {}", o.bug.unwrap()),
-                Ok(_) => {}
-                Err(e) => return format!("failed: {e}"),
+        // Continuous: an empty plan gets written, a finished one gets extended; only the budget or Stop ends the run.
+        let Some(item) = plan.iter().find(|i| i.mark == " ").cloned() else {
+            let before = plan.len();
+            let task = if plan.is_empty() { "Write the plan.".to_string() } else { format!("All {before} plan items are proven or blocked. Extend the plan with new properties to check.") };
+            if let Err(e) = turn.agent("planner", "plan", task).await {
+                return format!("failed: {e}");
             }
-            let plan = read_plan(&root);
-            turn.emit("plan", "planner", "plan", format!("{} items", plan.len()));
-            if plan.is_empty() {
-                return "failed: the planner wrote no checklist".into();
+            let after = read_plan(&root);
+            let added = after.len().saturating_sub(before);
+            turn.emit("plan", "planner", "plan", if before == 0 { format!("{} items", after.len()) } else { format!("{added} new items") });
+            if added == 0 && after.iter().all(|i| i.mark != " ") {
+                return if after.is_empty() { "failed: the planner wrote no checklist".into() } else { format!("done: the planner found nothing more to check ({} items)", after.len()) };
             }
             continue;
-        }
-        let Some(item) = plan.iter().find(|i| i.mark == " ").cloned() else {
-            let blocked = plan.iter().filter(|i| i.mark == "!").count();
-            return if blocked > 0 { format!("done ({} proven, {blocked} blocked)", plan.len() - blocked) } else { format!("done (all {} proven)", plan.len()) };
         };
         let id = item.index.to_string();
         let tries = attempts.entry(item.index).or_insert(0);
@@ -514,8 +512,11 @@ async fn run_swarm(turn: &Turn<'_>) -> String {
                 files.push(f.clone());
             }
         }
-        if let Some(bug) = proved.bug {
-            return format!("bug found: {bug}");
+        if proved.bug.is_some() {
+            // The property is false: the bug is filed; mark the item and keep going.
+            set_mark(&root, item.index, '!');
+            turn.emit("plan", "prover", &id, format!("item {id}: bug reported, moving on"));
+            continue;
         }
         if turn.swarm.stop.load(Ordering::SeqCst) {
             return "stopped".into();
@@ -525,8 +526,10 @@ async fn run_swarm(turn: &Turn<'_>) -> String {
             Ok(o) => o,
             Err(e) => return format!("failed: {e}"),
         };
-        if let Some(bug) = reviewed.bug {
-            return format!("bug found: {bug}");
+        if reviewed.bug.is_some() {
+            set_mark(&root, item.index, '!');
+            turn.emit("plan", "reviewer", &id, format!("item {id}: bug reported, moving on"));
+            continue;
         }
         match reviewed.verdict {
             Some((true, _)) => {
