@@ -1,4 +1,4 @@
-import { ScriptRunDialog } from "./script-run-dialog";
+import { FORKS_ENABLED, ScriptRunDialog } from "./script-run-dialog";
 import { recordRun } from "@/lib/run-results";
 import { reportError } from "@/lib/report-error";
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -621,6 +621,7 @@ export function DebugView({ folder, file, test: wanted, onPick, embedded }: { fo
 		void invoke<{ name: string; folder: string; chain_id: number; port: number; alive: boolean }[]>("anvil_list").then((l) => setRunningChains(l.filter((f) => f.alive)), () => setRunningChains([]));
 	}, []);
 	useEffect(() => {
+		if (!FORKS_ENABLED) return;
 		loadChains();
 		const t = setInterval(loadChains, 5000);
 		return () => clearInterval(t);
@@ -758,7 +759,7 @@ export function DebugView({ folder, file, test: wanted, onPick, embedded }: { fo
 				</div>
 			</aside>}
 			<main className="flex min-h-0 min-w-0 flex-1 flex-col">
-				<div className="mb-2 flex shrink-0 items-center gap-2 text-[11px] text-muted-foreground">
+				<div className={`mb-2 shrink-0 items-center gap-2 text-[11px] text-muted-foreground ${FORKS_ENABLED ? "flex" : "hidden"}`}>
 					<label className="inline-flex items-center gap-1.5" title="Where runs happen: a running Anvil fork (state read from it), or an empty local chain">
 						<span className="font-mono uppercase tracking-wider">Chain</span>
 						{/* Green: the chain runs are on is up (the local one always is; a fork while it answers). */}

@@ -1,4 +1,4 @@
-import { ScriptRunDialog, type ScriptTarget } from "./script-run-dialog";
+import { FORKS_ENABLED, ScriptRunDialog, type ScriptTarget } from "./script-run-dialog";
 import { fileResult, useRunResults } from "@/lib/run-results";
 import { useCallback, useEffect, useState } from "react";
 import { useLocation, useNavigate, useSearchParams } from "react-router";
@@ -113,7 +113,7 @@ function FolderItem({ path, current, file }: { path: string; current: boolean; f
 					runnables={{
 						has: (f) => /\.[ts]\.sol$/.test(f),
 						list: (f) => invoke<string>("folder_read", { folder: path, path: f }).then((text) => runnablesIn(text, f.endsWith(".s.sol") ? "run" : "test")),
-						onRun: (f, r) => (f.endsWith(".s.sol") ? setAsking({ file: f, r }) : debugRun(f, r)),
+						onRun: (f, r) => (FORKS_ENABLED && f.endsWith(".s.sol") ? setAsking({ file: f, r }) : debugRun(f, r)),
 						current: params.get("mode") === "debug" && file && params.get("test") ? `${file}::${params.get("test")}` : null,
 						result: (f, r) => (r ? results[`${f}::${r.contract}::${r.fn}`] : fileResult(results, f)),
 					}}

@@ -4,6 +4,12 @@ import { invoke } from "@tauri-apps/api/core";
 import { Loader2, Play, Trash2, X } from "lucide-react";
 import { reportError } from "@/lib/report-error";
 
+/**
+ * Chains and Anvil forks for running scripts. Off for now (the audit comes first): scripts run on the local chain
+ * like tests, and the Chain menu is hidden. Flip this to bring the prompt and the menu back.
+ */
+export const FORKS_ENABLED = false;
+
 /** A chain the scripts know (script/config/chains.json), or forge's local chain. */
 type Chain = { key: string; name: string; chainId: number; rpcUrlEnv: string | null };
 type Fork = { name: string; folder: string; chain_id: number; port: number; rpc_env: string; alive: boolean };
