@@ -53,6 +53,10 @@ pub struct Cheats {
     /// Programs `vm.ffi` / `vm.tryFfi` may run (by name: `hnc`), and the folder they run in. Empty: ffi refuses.
     pub ffi_allow: Vec<String>,
     pub ffi_dir: std::path::PathBuf,
+    /// `vm.serialize*` objects being built, by object key.
+    json: HashMap<String, Vec<(String, String)>>,
+    /// The project's `.env` (Foundry loads it for scripts), read once.
+    dotenv: Option<HashMap<String, String>>,
     /// ffi results by argv, so a compiler runs once per distinct call.
     ffi_cache: HashMap<Vec<String>, (i32, Vec<u8>, Vec<u8>)>,
     /// Bytecode a compiler printed through ffi, by the source file it named (`src/AsyncSwap.huff`): lets the session
@@ -88,6 +92,49 @@ const SIGNATURES: &[&str] = &[
     "recordLogs()",
     "ffi(string[])",
     "tryFfi(string[])",
+    // Scripts (script/*.s.sol): environment, broadcasting (a prank), files and JSON. Writes are skipped while debugging.
+    "envOr(string,address)",
+    "envOr(string,uint256)",
+    "envOr(string,int256)",
+    "envOr(string,bool)",
+    "envOr(string,bytes32)",
+    "envOr(string,string)",
+    "envOr(string,bytes)",
+    "envAddress(string)",
+    "envUint(string)",
+    "envInt(string)",
+    "envBool(string)",
+    "envBytes32(string)",
+    "envString(string)",
+    "envBytes(string)",
+    "envExists(string)",
+    "startBroadcast()",
+    "startBroadcast(address)",
+    "startBroadcast(uint256)",
+    "broadcast()",
+    "broadcast(address)",
+    "broadcast(uint256)",
+    "stopBroadcast()",
+    "toString(address)",
+    "toString(uint256)",
+    "toString(int256)",
+    "toString(bool)",
+    "toString(bytes32)",
+    "toString(bytes)",
+    "projectRoot()",
+    "readFile(string)",
+    "writeFile(string,string)",
+    "createDir(string,bool)",
+    "writeJson(string,string)",
+    "writeJson(string,string,string)",
+    "serializeUint(string,string,uint256)",
+    "serializeInt(string,string,int256)",
+    "serializeAddress(string,string,address)",
+    "serializeBool(string,string,bool)",
+    "serializeBytes(string,string,bytes)",
+    "serializeBytes32(string,string,bytes32)",
+    "serializeString(string,string,string)",
+    "getRecordedLogs()",
     "assertTrue(bool)",
     "assertTrue(bool,string)",
     "assertFalse(bool)",
@@ -233,7 +280,89 @@ impl Cheats {
         let name = &sig[..sig.find('(').unwrap()];
         let addr = |i: usize| args[i].as_address().unwrap_or_default();
         let uint = |i: usize| args[i].as_uint().map(|(u, _)| u).unwrap_or_default();
+        let text = |i: usize| args[i].as_str().unwrap_or_default().to_string();
         match name {
+            n if n.starts_with("env") => {
+                let key = text(0);
+                let value = self.env(&key);
+                if n == "envExists" {
+                    return Answer::Ok(DynSolValue::Bool(value.is_some()).abi_encode());
+                }
+                let ty = match n {
+                    "envOr" => sig[sig.find(',').unwrap() + 1..sig.len() - 1].to_string(),
+                    "envAddress" => "address".into(),
+                    "envUint" => "uint256".into(),
+                    "envInt" => "int256".into(),
+                    "envBool" => "bool".into(),
+                    "envBytes32" => "bytes32".into(),
+                    "envString" => "string".into(),
+                    _ => "bytes".into(),
+                };
+                match value {
+                    Some(v) => match parse_env(&ty, &v) {
+                        Some(val) => Answer::Ok(val.abi_encode_params()),
+                        None => Answer::Revert(format!("sol-debug: environment variable {key:?} isn't a valid {ty}")),
+                    },
+                    None if n == "envOr" => Answer::Ok(args[1].abi_encode_params()),
+                    None => Answer::Revert(format!("sol-debug: environment variable {key:?} not found (set it in the project's .env)")),
+                }
+            }
+            // Broadcasting is a prank: calls (and creates) from the script come from the key's address.
+            "startBroadcast" | "broadcast" => {
+                let sender = match args.first() {
+                    Some(DynSolValue::Address(a)) => *a,
+                    Some(DynSolValue::Uint(pk, _)) => match signing_key(*pk) {
+                        Some(k) => key_address(&k),
+                        None => return Answer::Revert("sol-debug: broadcast: bad private key".into()),
+                    },
+                    _ => DEFAULT_SENDER,
+                };
+                self.prank = Some(Prank { sender, origin: Some(sender), caller, depth, single: name == "broadcast" });
+                Answer::Ok(vec![])
+            }
+            "stopBroadcast" => {
+                self.prank = None;
+                Answer::Ok(vec![])
+            }
+            "toString" => {
+                let out = match &args[0] {
+                    DynSolValue::Address(a) => a.to_checksum(None),
+                    DynSolValue::Uint(u, _) => u.to_string(),
+                    DynSolValue::Int(i, _) => i.to_string(),
+                    DynSolValue::Bool(b) => b.to_string(),
+                    other => format!("0x{}", revm::primitives::hex::encode(other.abi_encode_packed())),
+                };
+                Answer::Ok(DynSolValue::String(out).abi_encode_params())
+            }
+            "projectRoot" => Answer::Ok(DynSolValue::String(self.ffi_dir.display().to_string()).abi_encode_params()),
+            "readFile" => {
+                let path = text(0);
+                let full = if path.starts_with('/') { std::path::PathBuf::from(&path) } else { self.ffi_dir.join(&path) };
+                match std::fs::read_to_string(&full) {
+                    Ok(t) => Answer::Ok(DynSolValue::String(t).abi_encode_params()),
+                    Err(e) => Answer::Revert(format!("sol-debug: readFile {path}: {e}")),
+                }
+            }
+            // Debugging never writes to the project.
+            "writeFile" | "writeJson" | "createDir" => Answer::Ok(vec![]),
+            n if n.starts_with("serialize") => {
+                let (obj, key) = (text(0), text(1));
+                let value = match &args[2] {
+                    DynSolValue::String(s) => format!("{s:?}"),
+                    DynSolValue::Bool(b) => b.to_string(),
+                    DynSolValue::Uint(u, _) => u.to_string(),
+                    DynSolValue::Int(i, _) => i.to_string(),
+                    DynSolValue::Address(a) => format!("\"{}\"", a.to_checksum(None)),
+                    other => format!("\"0x{}\"", revm::primitives::hex::encode(other.abi_encode_packed())),
+                };
+                let fields = self.json.entry(obj).or_default();
+                fields.retain(|(k, _)| *k != key);
+                fields.push((key, value));
+                let out = format!("{{{}}}", fields.iter().map(|(k, v)| format!("{k:?}:{v}")).collect::<Vec<_>>().join(","));
+                Answer::Ok(DynSolValue::String(out).abi_encode_params())
+            }
+            // Logs aren't kept: an empty list.
+            "getRecordedLogs" => Answer::Ok(DynSolValue::Array(vec![]).abi_encode_params()),
             "prank" | "startPrank" => {
                 self.prank = Some(Prank {
                     sender: addr(0),
@@ -465,4 +594,61 @@ mod tests {
         let pk = U256::from_be_bytes(keccak256("alice".as_bytes()).0);
         assert_eq!(key_address(&signing_key(pk).unwrap()), address!("328809Bc894f92807417D2dAD6b7C998c1aFdac6"));
     }
+}
+
+/// Foundry's default sender: who a script runs as, and who broadcasts without a key.
+const DEFAULT_SENDER: Address = address!("1804c8AB1F12E6bbf3894d4083f33e07309d1f38");
+
+impl Cheats {
+    /// An environment variable: the process's, else the project's `.env` (as Foundry loads it).
+    fn env(&mut self, key: &str) -> Option<String> {
+        if let Ok(v) = std::env::var(key) {
+            return Some(v);
+        }
+        let root = self.ffi_dir.clone();
+        let file = self.dotenv.get_or_insert_with(|| {
+            let text = std::fs::read_to_string(root.join(".env")).unwrap_or_default();
+            text.lines()
+                .filter_map(|l| {
+                    let l = l.trim();
+                    let l = l.strip_prefix("export ").unwrap_or(l);
+                    if l.starts_with('#') {
+                        return None;
+                    }
+                    let (k, v) = l.split_once('=')?;
+                    let v = v.trim();
+                    let v = v.strip_prefix('"').and_then(|v| v.strip_suffix('"')).or_else(|| v.strip_prefix('\'').and_then(|v| v.strip_suffix('\''))).unwrap_or(v);
+                    Some((k.trim().to_string(), v.to_string()))
+                })
+                .collect()
+        });
+        file.get(key).cloned()
+    }
+}
+
+/// An environment value read as a Solidity type, the way Foundry parses it.
+fn parse_env(ty: &str, v: &str) -> Option<DynSolValue> {
+    let v = v.trim();
+    let hex = |s: &str| revm::primitives::hex::decode(s.trim_start_matches("0x")).ok();
+    Some(match ty {
+        "address" => DynSolValue::Address(v.parse().ok()?),
+        "uint256" => DynSolValue::Uint(if let Some(h) = v.strip_prefix("0x") { U256::from_str_radix(h, 16).ok()? } else { v.parse().ok()? }, 256),
+        "int256" => DynSolValue::Int(v.parse().ok()?, 256),
+        "bool" => DynSolValue::Bool(match v.to_ascii_lowercase().as_str() {
+            "true" | "1" => true,
+            "false" | "0" => false,
+            _ => return None,
+        }),
+        "bytes32" => {
+            let b = hex(v)?;
+            if b.len() > 32 {
+                return None;
+            }
+            let mut w = [0u8; 32];
+            w[..b.len()].copy_from_slice(&b);
+            DynSolValue::FixedBytes(B256::from(w), 32)
+        }
+        "string" => DynSolValue::String(v.to_string()),
+        _ => DynSolValue::Bytes(hex(v)?),
+    })
 }

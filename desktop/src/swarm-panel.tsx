@@ -402,7 +402,7 @@ function NavGroup({ name, git, onDebug, mode, onMode, inBar, compact }: { name: 
 				<span className={`truncate ${compact ? "max-w-28" : "max-w-48"}`}>{name}</span>
 			</span>
 			{onDebug ? (
-				<button type="button" role="tab" aria-selected={mode === "debug"} onClick={onDebug} title="Debug this folder's Foundry tests" className={`${seg} ${h} ${mode === "debug" ? "bg-background text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"}`}>
+				<button type="button" role="tab" aria-selected={mode === "debug"} onClick={onDebug} title="Debug this folder's scripts and tests" className={`${seg} ${h} ${mode === "debug" ? "bg-background text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"}`}>
 					<Bug className="size-3.5" />
 					{compact ? null : "Debug"}
 				</button>
@@ -1183,8 +1183,8 @@ export function SwarmPanel({ folder, name, scan, bridge, session, file: openPath
 									<FileCode2 className="size-3.5 shrink-0 text-muted-foreground" />
 									<Breadcrumbs root={name} path={file.path} files={tree} onOpen={view} />
 									<span className="ml-auto flex items-center gap-1">
-										{debug && file.path.endsWith(".t.sol") ? (
-											<button type="button" onClick={() => debugFile(file.path)} title={`Debug a test in ${file.path}`} className="inline-flex h-6 items-center gap-1 rounded-md px-2 text-[11px] text-muted-foreground hover:bg-muted hover:text-foreground">
+										{debug && /\.[ts]\.sol$/.test(file.path) ? (
+											<button type="button" onClick={() => debugFile(file.path)} title={`Debug ${file.path.endsWith(".s.sol") ? "this script" : "a test in this file"}`} className="inline-flex h-6 items-center gap-1 rounded-md px-2 text-[11px] text-muted-foreground hover:bg-muted hover:text-foreground">
 												<Bug className="size-3" />Debug
 											</button>
 										) : null}
@@ -1324,7 +1324,7 @@ export function SwarmPanel({ folder, name, scan, bridge, session, file: openPath
 				) : null}
 				{mode === "debug" && debug ? (
 					<div className="pointer-events-auto absolute inset-x-0 bottom-0 top-[var(--fm-top)] z-10 flex min-h-0 bg-background">
-						{debug(openPath?.endsWith(".t.sol") ? openPath : null, debugFile)}
+						{debug(openPath && /\.[ts]\.sol$/.test(openPath) ? openPath : null, debugFile)}
 					</div>
 				) : null}
 				{mode === "roadmap" ? (

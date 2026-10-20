@@ -194,13 +194,15 @@ fn err(e: impl std::fmt::Display) -> String {
     format!("{e:#}")
 }
 
-/// The `test…()` functions of the contracts defined in `file`.
+/// The `test…()` functions of the contracts defined in `file`, or a script's `run…()` (scripts under script/ are what
+/// production runs; they debug the same way: setUp, then the function).
 fn tests_in(s: &Session, file: &str) -> Vec<TestFn> {
+    let prefix = if file.ends_with(".s.sol") { "run" } else { "test" };
     let mut out = Vec::new();
     for a in s.artifacts.iter().filter(|a| a.file == file || a.file.ends_with(&format!("/{file}"))) {
         for sig in a.methods.values() {
-            // Fuzz tests take arguments; only the ones that run as they are.
-            if let Some(test) = sig.strip_suffix("()").filter(|t| t.starts_with("test")) {
+            // Fuzz tests (and scripts) taking arguments are left out; only the ones that run as they are.
+            if let Some(test) = sig.strip_suffix("()").filter(|t| t.starts_with(prefix)) {
                 out.push(TestFn { contract: format!("{}:{}", a.file, a.name), name: a.name.clone(), test: test.to_string() });
             }
         }

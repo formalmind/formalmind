@@ -47,6 +47,7 @@ type Compared = { label_a: string; label_b: string; a: RunView; b: RunView; sect
 const KEYS = "j/k op · n/N line · s/S into · f/F out · c/C continue · g/G ends · /search ;, · :b line · :w var · :pc n · :step n";
 const name = (path: string) => path.split(/[\\/]/).filter(Boolean).pop() ?? path;
 const isTest = (f: string) => f.endsWith(".t.sol");
+const isScript = (f: string) => f.endsWith(".s.sol");
 
 /** A card in the app's floating style: a muted frame, a mono caption, the white content inside. */
 function Pane({ title, meta, className = "", children, scrollRef }: { title: string; meta?: string; className?: string; children: React.ReactNode; scrollRef?: React.Ref<HTMLDivElement> }) {
@@ -396,7 +397,7 @@ function TestTree({ files, selected, tests, opening, running, current, onFile, o
 	}, [files]);
 	return (
 		<ul className="space-y-2 p-2 font-mono text-[11px]">
-			{files.length === 0 ? <li className="p-2 font-sans text-[13px] text-muted-foreground">No Foundry tests (*.t.sol) in this folder.</li> : null}
+			{files.length === 0 ? <li className="p-2 font-sans text-[13px] text-muted-foreground">No Foundry scripts (*.s.sol) or tests (*.t.sol) in this folder.</li> : null}
 			{dirs.map(([dir, list]) => (
 				<li key={dir}>
 					<p className="px-1.5 pb-0.5 text-muted-foreground">{dir}/</p>
@@ -405,13 +406,13 @@ function TestTree({ files, selected, tests, opening, running, current, onFile, o
 							<li key={f}>
 								<button type="button" onClick={() => onFile(f)} className={`flex w-full items-center gap-1.5 truncate rounded px-1.5 py-1 text-left hover:bg-muted ${selected === f ? "bg-muted font-medium" : ""}`} title={f}>
 									<ChevronRight className={`size-3 shrink-0 text-muted-foreground transition-transform ${selected === f ? "rotate-90" : ""}`} />
-									<FileCode2 className="size-3 shrink-0 text-sky-500" />
+									<FileCode2 className={`size-3 shrink-0 ${isScript(f) ? "text-amber-500" : "text-sky-500"}`} />
 									<span className="truncate">{name(f)}</span>
 								</button>
 								{selected === f ? (
 									<ul className="ml-4 border-l pl-1">
 										{opening ? <li className="flex items-center gap-1.5 px-1.5 py-1 text-muted-foreground"><Loader2 className="size-3 animate-spin" />Compiling with solc…</li> : null}
-										{tests?.length === 0 ? <li className="px-1.5 py-1 text-muted-foreground">No test…() functions</li> : null}
+										{tests?.length === 0 ? <li className="px-1.5 py-1 text-muted-foreground">{isScript(f) ? "No run…() function without arguments" : "No test…() functions"}</li> : null}
 										{tests?.map((t) => {
 											const key = `${t.contract}::${t.test}`;
 											return (
@@ -611,7 +612,11 @@ export function DebugView({ folder, file, test: wanted, onPick }: { folder: stri
 		// eslint-disable-next-line react-hooks/exhaustive-deps
 	}, [session]);
 
-	const tests = useMemo(() => (scan?.solidity ?? []).filter(isTest), [scan]);
+	// Scripts first (what production runs), then tests.
+	const tests = useMemo(() => {
+		const all = scan?.solidity ?? [];
+		return [...all.filter(isScript).sort(), ...all.filter(isTest)];
+	}, [scan]);
 	const pick = onPick;
 	const onView = useCallback((v: StepView) => setRun((r) => (r ? { ...r, view: v } : r)), []);
 

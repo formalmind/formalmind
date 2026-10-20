@@ -127,6 +127,9 @@ impl Session {
         // Like forge: one byte of code at `vm`, so Solidity's extcodesize check before a call without return
         // values (vm.label, vm.prank) passes. The calls themselves never run it.
         evm.ctx.db_mut().insert_account_info(HEVM, AccountInfo::default().with_code(Bytecode::new_raw(vec![0x00].into())));
+        // Like forge's simulation: the standard CREATE2 deployer that scripts deploy through.
+        let create2 = revm::primitives::hex::decode("7fffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffe03601600081602082378035828234f58015156039578182fd5b8082525050506014600cf3").unwrap();
+        evm.ctx.db_mut().insert_account_info(revm::primitives::address!("4e59b44847b379578588920cA78FbF26c0B4956C"), AccountInfo::default().with_code(Bytecode::new_raw(create2.into())));
         // ffi runs only compilers a test needs to build its contracts (a Huff port compiles with hnc).
         evm.inspector.cheats.ffi_allow = vec!["hnc".into()];
         evm.inspector.cheats.ffi_dir = project.root.clone();
