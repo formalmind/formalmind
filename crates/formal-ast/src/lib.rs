@@ -67,6 +67,62 @@ pub fn audit_json(a: &Analysis, ms: u64) -> serde_json::Value {
         .filter(|c| c.units.len() > 1)
         .map(|c| json!({ "units": c.units.iter().map(|f| g.functions[f].name.clone()).collect::<Vec<_>>(), "shared": names(&c.shared) }))
         .collect();
+    // The contract as the AST has it: the entry and its bases (most derived first), each with its state and functions.
+    let tree: Vec<serde_json::Value> = a
+        .scope
+        .contracts
+        .iter()
+        .map(|c| {
+            let ct = &g.contracts[c];
+            let vars: Vec<serde_json::Value> = ct
+                .state_vars
+                .iter()
+                .map(|v| {
+                    let v = &g.state_vars[v];
+                    json!({ "name": v.name, "type": v.type_string, "slot": v.slot, "offset": v.offset, "constant": v.constant, "immutable": v.immutable, "visibility": v.visibility })
+                })
+                .collect();
+            let fns: Vec<serde_json::Value> = ct
+                .functions
+                .iter()
+                .map(|f| {
+                    let f = &g.functions[f];
+                    json!({
+                        "name": if f.name.is_empty() { f.kind.clone() } else { f.name.clone() },
+                        "kind": f.kind,
+                        "visibility": f.visibility,
+                        "mutability": f.mutability,
+                        "modifiers": f.modifiers.iter().filter_map(|m| g.functions.get(m).map(|m| m.name.clone())).collect::<Vec<_>>(),
+                        "reached": a.scope.reachable.contains(&f.id),
+                        "entry": a.scope.surface.contains(&f.id),
+                    })
+                })
+                .collect();
+            json!({ "name": ct.name, "kind": ct.kind, "file": g.files.get(&ct.file).map(|f| f.path.clone()), "stateVars": vars, "functions": fns })
+        })
+        .collect();
+    let reached: Vec<serde_json::Value> = a
+        .scope
+        .reachable
+        .iter()
+        .map(|f| {
+            let func = &g.functions[f];
+            json!({
+                "name": g.qualified(*f),
+                "kind": func.kind,
+                "visibility": func.visibility,
+                "dependency": g.is_dependency(*f),
+                "arith": func.arith.len(),
+                "asm": func.asm.len(),
+                "calls": func.calls.len(),
+            })
+        })
+        .collect();
+    let scope_files: Vec<serde_json::Value> = g
+        .files
+        .values()
+        .map(|f| json!({ "path": f.path, "inScope": a.scope.files.contains(&f.id), "dependency": g.dependency_files.contains(&f.id), "imports": f.imports.len() }))
+        .collect();
     json!({
         "contract": g.contracts[&a.scope.entry].name,
         "files": g.files.len(),
@@ -76,6 +132,9 @@ pub fn audit_json(a: &Analysis, ms: u64) -> serde_json::Value {
         "ms": ms,
         "units": units,
         "clusters": clusters,
+        "tree": tree,
+        "reached": reached,
+        "scopeFiles": scope_files,
     })
 }
 

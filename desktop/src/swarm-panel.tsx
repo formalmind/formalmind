@@ -160,26 +160,6 @@ function AgentMessage({ e, onBug }: { e: Ev; onBug: () => void }) {
 	);
 }
 
-/** A card floating over the canvas; its header toggles it, and opening one closes the others. */
-function Floating({ id, open, onOpen, title, meta, tone, action, children }: { id: string; open: string | null; onOpen: (id: string | null) => void; title: string; meta?: string; tone?: "red"; action?: React.ReactNode; children: React.ReactNode }) {
-	const isOpen = open === id;
-	return (
-		<section className={`pointer-events-auto flex min-h-0 flex-col overflow-hidden rounded-2xl border p-1 shadow-pop backdrop-blur ${tone === "red" ? "border-red-500/30 bg-red-50/90 dark:bg-red-950/60" : "bg-muted/80"} ${isOpen ? "flex-1" : "shrink-0"}`}>
-			<button type="button" onClick={() => onOpen(isOpen ? null : id)} aria-expanded={isOpen} className="flex h-8 shrink-0 items-center gap-2 px-2.5 text-left">
-				<span className={`font-mono text-[11px] font-medium uppercase tracking-wider ${tone === "red" ? "text-red-700 dark:text-red-400" : "text-muted-foreground"}`}>{title}</span>
-				{meta ? <span className="min-w-0 truncate text-[11px] text-muted-foreground">{meta}</span> : null}
-				<span className="ml-auto" />
-				{isOpen && action ? action : null}
-				<ChevronDown className={`size-3.5 text-muted-foreground transition-transform duration-200 ${isOpen ? "rotate-180" : ""}`} />
-			</button>
-			<div className={`grid min-h-0 transition-[grid-template-rows] duration-200 ease-out motion-reduce:transition-none ${isOpen ? "flex-1 grid-rows-[1fr]" : "grid-rows-[0fr]"}`}>
-				<div className={`min-h-0 overflow-y-auto rounded-xl bg-card ${isOpen ? "border shadow-card" : ""}`}>{children}</div>
-			</div>
-		</section>
-	);
-}
-
-
 /**
  * A local folder's swarm: the canvas on the left (the board, the contract files, bugs) and the chat on the right (start
  * and steer the swarm, the plan, and what each agent says as it works).
@@ -271,13 +251,14 @@ function Breadcrumbs({ root, path, files, onOpen }: { root: string; path: string
 	);
 }
 
-type Mode = "code" | "chat" | "swarm" | "audit";
+type Mode = "code" | "chat" | "swarm" | "audit" | "bugs";
 
 const MODES: { id: Mode; label: string; icon: typeof Code2 }[] = [
 	{ id: "code", label: "Code", icon: Code2 },
 	{ id: "chat", label: "Chat", icon: MessagesSquare },
 	{ id: "swarm", label: "Swarm", icon: Network },
 	{ id: "audit", label: "Audit", icon: ScanSearch },
+	{ id: "bugs", label: "Bugs", icon: Bug },
 ];
 
 /** The page's modes as a macOS-style segmented control, centred at the top. */
@@ -302,11 +283,99 @@ function ModeTabs({ mode, onMode }: { mode: Mode; onMode: (m: Mode) => void }) {
 }
 
 type AstUnit = { name: string; function: string; mutability: string; reads: string[]; writes: string[]; external: number; guards: number; arith: number; unchecked: number; asm: number; closure: number };
-type AstUnits = { contract: string; files: number; inScope: number; reachable: number; unusedImports: string[]; ms: number; units: AstUnit[]; clusters: { units: string[]; shared: string[] }[] };
+type AstVar = { name: string; type: string; slot: string | null; offset: number | null; constant: boolean; immutable: boolean; visibility: string };
+type AstFn = { name: string; kind: string; visibility: string; mutability: string; modifiers: string[]; reached: boolean; entry: boolean };
+type AstContract = { name: string; kind: string; file: string | null; stateVars: AstVar[]; functions: AstFn[] };
+type AstUnits = {
+	contract: string;
+	files: number;
+	inScope: number;
+	reachable: number;
+	unusedImports: string[];
+	ms: number;
+	units: AstUnit[];
+	clusters: { units: string[]; shared: string[] }[];
+	tree?: AstContract[];
+	reached?: { name: string; kind: string; visibility: string; dependency: boolean; arith: number; asm: number; calls: number }[];
+	scopeFiles?: { path: string; inScope: boolean; dependency: boolean; imports: number }[];
+};
+type AuditTab = "tree" | "plan" | "entries" | "functions" | "files";
+
+/** A chip in the AST tree: a bordered, rounded value. */
+function Chip({ children, tone }: { children: React.ReactNode; tone?: "muted" | "amber" | "violet" }) {
+	const color = tone === "amber" ? "text-amber-700 dark:text-amber-400" : tone === "violet" ? "text-violet-700 dark:text-violet-400" : tone === "muted" ? "text-muted-foreground" : "text-foreground";
+	return <span className={`inline-flex h-7 shrink-0 items-center rounded-lg border bg-background px-2.5 font-mono text-[12px] ${color}`}>{children}</span>;
+}
+
+/** One member of a contract in the tree: a row of chips. */
+function TreeRow({ children }: { children: React.ReactNode }) {
+	return <div className="flex min-h-10 flex-wrap items-center gap-2 rounded-xl border bg-muted/40 px-3 py-1.5 text-[13px]">{children}</div>;
+}
+
+/** A contract (or base) as a group: its state, then its functions; the entry contract starts open. */
+function TreeGroup({ c, open: initial }: { c: AstContract; open: boolean }) {
+	const [open, setOpen] = useState(initial);
+	const reached = c.functions.filter((f) => f.reached).length;
+	return (
+		<div className="rounded-2xl border p-3">
+			<button type="button" onClick={() => setOpen(!open)} className="flex w-full items-center gap-2 text-left text-[13px]">
+				<ChevronDown className={`size-3.5 text-muted-foreground transition-transform ${open ? "" : "-rotate-90"}`} />
+				<span className="font-mono font-medium">{c.name}</span>
+				<span className="text-muted-foreground">· {c.kind} · {c.stateVars.length} state · {c.functions.length} functions ({reached} reached)</span>
+				{c.file ? <span className="ml-auto truncate font-mono text-[11px] text-muted-foreground">{c.file}</span> : null}
+			</button>
+			{open ? (
+				<div className="relative mt-3 space-y-2 pl-10">
+					{/* The bracket joining the members, as in a rule builder. */}
+					<span aria-hidden className="absolute bottom-5 left-4 top-5 w-4 rounded-l-lg border-y border-l" />
+					{c.stateVars.map((v) => (
+						<TreeRow key={`v:${v.name}`}>
+							<Chip>{v.name}</Chip>
+							<span className="text-muted-foreground">is</span>
+							<Chip tone="muted">{v.type}</Chip>
+							{v.constant ? <Chip tone="violet">constant</Chip> : v.immutable ? <Chip tone="violet">immutable</Chip> : v.slot != null ? <Chip tone="muted">slot {v.slot}{v.offset ? `+${v.offset}` : ""}</Chip> : null}
+						</TreeRow>
+					))}
+					{c.functions.map((f, i) => (
+						<TreeRow key={`f:${f.name}:${i}`}>
+							<Chip>{f.name}{f.kind === "function" ? "()" : ""}</Chip>
+							<span className="text-muted-foreground">{f.kind === "modifier" ? "modifier" : "is"}</span>
+							{f.kind !== "modifier" ? <Chip tone="muted">{f.visibility}</Chip> : null}
+							{f.mutability && f.mutability !== "nonpayable" ? <Chip tone="muted">{f.mutability}</Chip> : null}
+							{f.modifiers.map((m) => <Chip key={m} tone="violet">{m}</Chip>)}
+							{f.entry ? <Chip tone="amber">entry point</Chip> : f.reached ? null : <span className="text-[11px] text-muted-foreground">not reached</span>}
+						</TreeRow>
+					))}
+					{c.stateVars.length + c.functions.length === 0 ? <p className="text-[12px] text-muted-foreground">No members.</p> : null}
+				</div>
+			) : null}
+		</div>
+	);
+}
+
+/** The entry contract and its bases as the AST has them, in inheritance order, joined by "is". */
+function AstTree({ tree }: { tree: AstContract[] }) {
+	const [entry, ...bases] = tree;
+	return (
+		<div className="min-h-0 overflow-y-auto rounded-xl border bg-card p-5 shadow-card">
+			<p className="mb-3 font-mono text-[12px] font-medium uppercase tracking-wider text-muted-foreground">Contract</p>
+			{entry ? <TreeGroup c={entry} open /> : null}
+			{bases.length ? (
+				<div className="relative mt-3 pl-16">
+					<span aria-hidden className="absolute bottom-6 left-6 top-6 w-6 rounded-l-xl border-y border-l" />
+					<span className="absolute left-0 top-1/2 -translate-y-1/2 rounded-full border bg-background px-2 py-0.5 text-[12px] text-muted-foreground">is</span>
+					<div className="space-y-3">
+						{bases.map((c) => <TreeGroup key={c.name} c={c} open={false} />)}
+					</div>
+				</div>
+			) : null}
+		</div>
+	);
+}
 
 /** Audit mode: the contract as the AST reads it — entry points, their storage footprint and risks, and each one's
  *  slice (what an agent gets). */
-function AuditView({ folder, scan, invoke, preferred }: { folder: string; scan: Scan | null; invoke: Bridge["invoke"]; preferred: string | null }) {
+function AuditView({ folder, scan, invoke, preferred, plan, planMeta }: { folder: string; scan: Scan | null; invoke: Bridge["invoke"]; preferred: string | null; plan: React.ReactNode; planMeta: string }) {
 	const sources = (scan?.solidity ?? []).filter((f) => !f.endsWith(".t.sol") && !f.endsWith(".s.sol"));
 	const pick = preferred && sources.includes(preferred) ? preferred : (sources.find((f) => f.startsWith("src/")) ?? sources[0] ?? null);
 	const [entry, setEntry] = useState<string | null>(pick);
@@ -314,6 +383,7 @@ function AuditView({ folder, scan, invoke, preferred }: { folder: string; scan: 
 	const [error, setError] = useState<string | null>(null);
 	const [unit, setUnit] = useState<string | null>(null);
 	const [slice, setSlice] = useState<string | null>(null);
+	const [tab, setTab] = useState<AuditTab>("tree");
 	useEffect(() => {
 		if (!entry && pick) setEntry(pick);
 	}, [entry, pick]);
@@ -348,12 +418,63 @@ function AuditView({ folder, scan, invoke, preferred }: { folder: string; scan: 
 					</DropdownMenuContent>
 				</DropdownMenu>
 				{data ? (
-					<span className="min-w-0 truncate text-muted-foreground">
-						{data.contract} · {data.units.length} entry points · {data.reachable} functions reached · {data.inScope} of {data.files} files in scope · {data.ms} ms
-					</span>
+					<div role="tablist" aria-label="What to show" className="flex min-w-0 items-center gap-0.5 rounded-lg border bg-background/60 p-0.5">
+						{([
+							["tree", `${data.contract} syntax tree`],
+							["plan", `Plan${planMeta ? ` ${planMeta}` : ""}`],
+							["entries", `${data.units.length} entry points`],
+							["functions", `${data.reachable} functions`],
+							["files", `${data.inScope} of ${data.files} files`],
+						] as [AuditTab, string][]).map(([id, label]) => (
+							<button key={id} type="button" role="tab" aria-selected={tab === id} onClick={() => setTab(id)} className={`h-6 shrink-0 rounded-md px-2.5 text-[12px] transition-colors ${tab === id ? "bg-background font-medium text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"}`}>
+								{label}
+							</button>
+						))}
+					</div>
 				) : null}
+				{data ? <span className="shrink-0 text-[11px] text-muted-foreground">{data.ms} ms</span> : null}
 			</div>
-			<div className="grid min-h-0 flex-1 grid-cols-[minmax(0,22rem)_minmax(0,1fr)] gap-1">
+			{data && tab === "tree" && data.tree ? <AstTree tree={data.tree} /> : null}
+			{data && tab === "plan" ? <div className="min-h-0 overflow-y-auto rounded-xl border bg-card shadow-card">{plan}</div> : null}
+			{data && tab === "functions" ? (
+				<div className="min-h-0 overflow-y-auto rounded-xl border bg-card p-3 shadow-card">
+					{Object.entries(Object.groupBy(data.reached ?? [], (f) => f.name.split(".")[0])).map(([contract, fns]) => (
+						<div key={contract} className="mb-4">
+							<p className="mb-1.5 flex items-center gap-2 font-mono text-[12px] font-medium">
+								{contract}
+								{fns?.[0]?.dependency ? <span className="font-sans text-[11px] font-normal text-muted-foreground">dependency</span> : null}
+							</p>
+							<div className="flex flex-wrap gap-1.5">
+								{fns?.map((f) => (
+									<span key={f.name} title={`${f.kind} · ${f.visibility} · ${f.calls} calls · ${f.arith} arithmetic${f.asm ? ` · ${f.asm} assembly` : ""}`} className={`inline-flex h-7 items-center rounded-lg border px-2.5 font-mono text-[12px] ${f.dependency ? "text-muted-foreground" : "bg-background"}`}>
+										{f.name.split(".").slice(1).join(".") || f.kind}
+										{f.asm ? <span className="ml-1.5 text-violet-600">asm</span> : null}
+									</span>
+								))}
+							</div>
+						</div>
+					))}
+				</div>
+			) : null}
+			{data && tab === "files" ? (
+				<div className="min-h-0 overflow-y-auto rounded-xl border bg-card p-3 font-mono text-[12px] shadow-card">
+					{[true, false].map((inScope) => (
+						<div key={String(inScope)} className="mb-4">
+							<p className="mb-1.5 font-sans text-[12px] font-medium">{inScope ? "In scope" : "Compiled, not reached"}</p>
+							<ul className="space-y-0.5">
+								{(data.scopeFiles ?? []).filter((f) => f.inScope === inScope).sort((a, b) => Number(a.dependency) - Number(b.dependency) || a.path.localeCompare(b.path)).map((f) => (
+									<li key={f.path} className={`flex items-center gap-2 ${inScope && !f.dependency ? "" : "text-muted-foreground"}`}>
+										<span className="truncate">{f.path}</span>
+										{f.dependency ? <span className="font-sans text-[10px]">dependency</span> : null}
+										{data.unusedImports.includes(f.path) ? <span className="font-sans text-[10px] text-amber-700">unused import</span> : null}
+									</li>
+								))}
+							</ul>
+						</div>
+					))}
+				</div>
+			) : null}
+			<div className={`min-h-0 flex-1 grid-cols-[minmax(0,22rem)_minmax(0,1fr)] gap-1 ${data && tab !== "entries" ? "hidden" : "grid"}`}>
 				<div className="min-h-0 overflow-y-auto rounded-xl border bg-card p-1 shadow-card">
 					{error ? <p className="whitespace-pre-wrap p-3 font-mono text-[11px] text-red-600">{error}</p> : null}
 					{!data && !error ? <p className="p-3 text-[13px] text-muted-foreground">{entry ? "Reading the AST…" : "No Solidity sources in this folder."}</p> : null}
@@ -421,7 +542,6 @@ export function SwarmPanel({ folder, name, scan, bridge, session, file: openPath
 	const [error, setError] = useState<string | null>(null);
 	const [openBug, setOpenBug] = useState<string | null>(null);
 	// One floating card open at a time, like an accordion; a bug report opens the bugs card.
-	const [panel, setPanel] = useState<string | null>("plan");
 	const [model, setModel] = useState(() => store.get("fm:model") ?? MODELS[0].value);
 	
 	// Set in Settings (desktop/src/settings.tsx).
@@ -505,7 +625,6 @@ export function SwarmPanel({ folder, name, scan, bridge, session, file: openPath
 			if (runRef.current && payload.run !== runRef.current) return;
 			setEvents((all) => [...all.slice(-600), payload]);
 			if (["plan", "bug", "done", "status"].includes(payload.kind)) refresh();
-			if (payload.kind === "bug") setPanel("bugs");
 			if (payload.kind === "done") {
 				setRun(null);
 				void listSessions();
@@ -591,6 +710,42 @@ export function SwarmPanel({ folder, name, scan, bridge, session, file: openPath
 	const finished = !run ? events.find((e) => e.kind === "done") : undefined;
 	const shown = events.filter((e) => e.kind !== "status");
 
+	// The plan as a list with each item's proof, shown in Audit's Plan tab.
+	const planList = (
+						<ul className="space-y-0.5 p-2 text-[13px]">
+							{plan.length === 0 ? <li className="p-2 text-muted-foreground">The planner writes .formal/plan.md on the first run.</li> : null}
+							{plan.map((i) => {
+								const proof = proofs[String(i.index)];
+								const expanded = openItem === i.index;
+								return (
+									<li key={i.index} className={`rounded-md ${working && working.item === String(i.index) ? "bg-muted" : ""}`}>
+										<button type="button" disabled={!proof} onClick={() => setOpenItem(expanded ? null : i.index)} className="flex w-full gap-2 px-2 py-1 text-left enabled:hover:bg-muted/60 rounded-md">
+											<span className={`mt-0.5 grid size-4 shrink-0 place-items-center rounded border text-[10px] ${i.mark === "x" ? "border-emerald-500 bg-emerald-500 text-white" : i.mark === "!" ? "border-amber-500 text-amber-600" : ""}`}>{i.mark === "x" ? "✓" : i.mark === "!" ? "!" : ""}</span>
+											<span className={`flex-1 ${i.mark === "x" ? "text-muted-foreground" : ""}`}>{i.text}</span>
+											{proof ? <ChevronDown className={`mt-0.5 size-3.5 shrink-0 text-muted-foreground transition-transform ${expanded ? "rotate-180" : ""}`} /> : null}
+										</button>
+										{expanded && proof ? (
+											<div className="mb-1 ml-8 mr-2 space-y-1.5 rounded-lg border bg-muted/40 p-2 text-xs">
+												<p className="font-mono text-[10px] uppercase tracking-wider text-muted-foreground">Proved by</p>
+												{proof.files.length ? (
+													proof.files.map((f) => (
+														<button key={f} type="button" onClick={() => view(f)} className="flex w-full items-center gap-1.5 truncate rounded px-1 py-0.5 text-left font-mono text-[11px] hover:bg-muted" title={`Open ${f}`}>
+															<FileCode2 className={`size-3 shrink-0 ${f.endsWith(".lean") ? "text-violet-500" : "text-sky-500"}`} />
+															<span className="truncate">{f}</span>
+														</button>
+													))
+												) : (
+													<p className="text-muted-foreground">No files recorded for this item.</p>
+												)}
+												{proof.summary ? <p className="whitespace-pre-wrap leading-5 text-muted-foreground">{proof.summary}</p> : null}
+											</div>
+										) : null}
+									</li>
+								);
+							})}
+						</ul>
+	);
+
 	const pageTitle = (
 		<>
 			<span className="inline-flex h-8 min-w-0 items-center rounded-full border bg-background/90 px-3 text-sm shadow-sm backdrop-blur">{scan?.git ? <MarkGithubIcon className="mr-2 size-4 shrink-0" /> : null}<span className="truncate">{name}</span></span>
@@ -649,63 +804,31 @@ export function SwarmPanel({ folder, name, scan, bridge, session, file: openPath
 						)}
 					</div>
 				) : null}
-				{mode === "audit" ? (
-					<div className="pointer-events-auto absolute bottom-3 left-3 right-3 top-14 z-10 flex min-h-0 flex-col overflow-hidden rounded-2xl border bg-muted/60 p-1">
-						<AuditView folder={folder} scan={scan} invoke={invoke} preferred={openPath ?? null} />
-					</div>
-				) : null}
-				<div className={`pointer-events-none absolute left-3 top-14 z-10 flex max-h-[calc(100%-4.5rem)] w-[min(18rem,calc(100%-1.5rem))] flex-col gap-2 ${mode === "swarm" ? "" : "hidden"}`}>
-					<Floating id="plan" open={panel} onOpen={setPanel} title="Plan" meta={plan.length ? `${done}/${plan.length}` : ""}>
-						<ul className="space-y-0.5 p-2 text-[13px]">
-							{plan.length === 0 ? <li className="p-2 text-muted-foreground">The planner writes .formal/plan.md on the first run.</li> : null}
-							{plan.map((i) => {
-								const proof = proofs[String(i.index)];
-								const expanded = openItem === i.index;
-								return (
-									<li key={i.index} className={`rounded-md ${working && working.item === String(i.index) ? "bg-muted" : ""}`}>
-										<button type="button" disabled={!proof} onClick={() => setOpenItem(expanded ? null : i.index)} className="flex w-full gap-2 px-2 py-1 text-left enabled:hover:bg-muted/60 rounded-md">
-											<span className={`mt-0.5 grid size-4 shrink-0 place-items-center rounded border text-[10px] ${i.mark === "x" ? "border-emerald-500 bg-emerald-500 text-white" : i.mark === "!" ? "border-amber-500 text-amber-600" : ""}`}>{i.mark === "x" ? "✓" : i.mark === "!" ? "!" : ""}</span>
-											<span className={`flex-1 ${i.mark === "x" ? "text-muted-foreground" : ""}`}>{i.text}</span>
-											{proof ? <ChevronDown className={`mt-0.5 size-3.5 shrink-0 text-muted-foreground transition-transform ${expanded ? "rotate-180" : ""}`} /> : null}
-										</button>
-										{expanded && proof ? (
-											<div className="mb-1 ml-8 mr-2 space-y-1.5 rounded-lg border bg-muted/40 p-2 text-xs">
-												<p className="font-mono text-[10px] uppercase tracking-wider text-muted-foreground">Proved by</p>
-												{proof.files.length ? (
-													proof.files.map((f) => (
-														<button key={f} type="button" onClick={() => view(f)} className="flex w-full items-center gap-1.5 truncate rounded px-1 py-0.5 text-left font-mono text-[11px] hover:bg-muted" title={`Open ${f}`}>
-															<FileCode2 className={`size-3 shrink-0 ${f.endsWith(".lean") ? "text-violet-500" : "text-sky-500"}`} />
-															<span className="truncate">{f}</span>
-														</button>
-													))
-												) : (
-													<p className="text-muted-foreground">No files recorded for this item.</p>
-												)}
-												{proof.summary ? <p className="whitespace-pre-wrap leading-5 text-muted-foreground">{proof.summary}</p> : null}
-											</div>
-										) : null}
-									</li>
-								);
-							})}
-						</ul>
-					</Floating>
-					{bugs.length ? (
-						<Floating id="bugs" open={panel} onOpen={setPanel} title="Bugs" meta={String(bugs.length)} tone="red">
-							<ul className="divide-y">
+				{mode === "bugs" ? (
+					<div className="absolute inset-x-0 bottom-0 top-14 z-10 overflow-y-auto">
+						<div className="mx-auto w-full max-w-3xl px-4 pb-6">
+							{bugs.length === 0 ? <p className="py-10 text-center text-sm text-muted-foreground">No bugs reported yet. The swarm files them here, each with a proof of concept.</p> : null}
+							<ul className="space-y-2">
 								{bugs.map((b) => (
-									<li key={b.file}>
-										<button type="button" onClick={() => setOpenBug(openBug === b.file ? null : b.file)} className="flex w-full items-center gap-2 px-3 py-2 text-left text-[13px]">
+									<li key={b.file} className="rounded-2xl border border-red-500/25 bg-red-50/60 dark:bg-red-950/30">
+										<button type="button" onClick={() => setOpenBug(openBug === b.file ? null : b.file)} className="flex w-full items-center gap-2 px-4 py-3 text-left text-[14px]">
+											<span className="size-1.5 shrink-0 rounded-full bg-red-500" />
 											<span className="flex-1 font-medium">{b.title}</span>
 											<CopyButton get={() => withPoc(b.body)} label="Copy the report as Markdown, PoC included" />
 											<ChevronDown className={`size-3.5 text-muted-foreground transition-transform ${openBug === b.file ? "rotate-180" : ""}`} />
 										</button>
-										{openBug === b.file ? <div className="prose prose-sm max-w-none border-t px-3 py-2 text-[13px] dark:prose-invert"><ChatMarkdown>{b.body.replace(/^# .*\n/, "")}</ChatMarkdown></div> : null}
+										{openBug === b.file ? <div className="prose prose-sm max-w-none border-t border-red-500/20 bg-background px-4 py-3 text-[13px] dark:prose-invert"><ChatMarkdown>{b.body.replace(/^# .*\n/, "")}</ChatMarkdown></div> : null}
 									</li>
 								))}
 							</ul>
-						</Floating>
-					) : null}
-				</div>
+						</div>
+					</div>
+				) : null}
+				{mode === "audit" ? (
+					<div className="pointer-events-auto absolute bottom-3 left-3 right-3 top-14 z-10 flex min-h-0 flex-col overflow-hidden rounded-2xl border bg-muted/60 p-1">
+						<AuditView folder={folder} scan={scan} invoke={invoke} preferred={openPath ?? null} plan={planList} planMeta={plan.length ? `${done}/${plan.length}` : ""} />
+					</div>
+				) : null}
 			</div>
 
 			{/* The chat: start and steer the swarm, the plan, and the agents' messages. */}
@@ -778,7 +901,7 @@ export function SwarmPanel({ folder, name, scan, bridge, session, file: openPath
 							<AgentMessage key={i} e={block.e} onBug={() => {
 								// Open the bugs card on this report.
 								const hit = bugs.find((b) => block.e.text.includes(b.file));
-								setPanel("bugs");
+								setMode("bugs");
 								if (hit) setOpenBug(hit.file);
 							}} />
 						),
