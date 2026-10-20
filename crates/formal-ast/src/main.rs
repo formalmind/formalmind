@@ -32,6 +32,8 @@ enum Command {
     Slice { function: String },
     /// The whole graph, scope, units and clusters as JSON (writes .formal/ast/graph.json under the root).
     Json,
+    /// Audit mode's data as JSON: units, clusters and every unit's slice.
+    Audit,
     /// A world of linked models: the entry plus `--with file[:Contract]` members, interface calls bound to the
     /// members that implement them.
     Link {
@@ -80,6 +82,11 @@ fn main() -> Result<()> {
             for (f, why) in &model.report.opaque {
                 println!("  opaque {f}: {why}");
             }
+        }
+        Command::Audit => {
+            let mut v = formal_ast::audit_json(&a, took.as_millis() as u64);
+            v["slices"] = serde_json::to_value(formal_ast::all_slices(&a))?;
+            println!("{v}");
         }
         Command::Link { out, with } => {
             let mut parts = vec![lean::Gen::new(&output, g, &a.scope).parts()];

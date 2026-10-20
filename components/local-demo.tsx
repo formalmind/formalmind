@@ -1,4 +1,6 @@
+import { useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "react-router";
+import { loadDemoData, type DemoData } from "@/components/demo/load";
 import { DEMO_TREE } from "@/components/demo-tree";
 import { SettingsMenu } from "@/components/projects/swarm-control";
 import { NotificationCenter } from "@/components/notification-center";
@@ -87,7 +89,8 @@ const EVENTS = [
 ];
 
 const listeners = new Set<(e: { payload: unknown }) => void>();
-const demo: Bridge = {
+/** The demo's bridge: a real repository's files and AST when `data` is there, the sample folder otherwise. */
+const makeDemo = (data: DemoData | null): Bridge => ({
 	apiBase: () => "",
 	listen: async (_event, cb) => {
 		listeners.add(cb as (e: { payload: unknown }) => void);
@@ -100,13 +103,19 @@ const demo: Bridge = {
 			swarm_sessions: [{ run: RUN, title: "Liquidations and the penalty cap", outcome: "", spent: 1.84, events: EVENTS.length }],
 			swarm_history: EVENTS,
 			swarm_proofs: PROOFS,
-			folder_read: SOURCES[String(args?.path ?? "")] ?? "// (demo: no contents)\n",
+			folder_read: data ? (data.sources[String(args?.path ?? "")] ?? "// Not in the demo data (only the repository's own text files are).\n") : (SOURCES[String(args?.path ?? "")] ?? "// (demo: no contents)\n"),
 			swarm_running: RUN,
 			anthropic_key_status: false,
-			folder_tree: { files: DEMO_TREE, truncated: false },
+			folder_tree: { files: data ? data.files : DEMO_TREE, truncated: false },
 			ast_units: AST_UNITS,
 			ast_slice: AST_SLICE,
 		};
+		if (data && (cmd === "ast_units" || cmd === "ast_slice")) {
+			const audit = data.audits[String(args?.entry ?? "")];
+			if (!audit) throw "No deployable contract in this file (libraries, interfaces and types have no audit).";
+			if (cmd === "ast_slice") return (audit.slices?.[String(args?.function ?? "")] ?? "No slice for this unit.") as T;
+			return audit as T;
+		}
 		if (cmd === "swarm_suggest") return new Promise((done) => setTimeout(() => done("Good catch on the penalty cap. Write the PoC for that bug, then move on to the oracle item." as T), 700));
 		if (cmd === "swarm_say") {
 			setTimeout(() => {
@@ -115,7 +124,7 @@ const demo: Bridge = {
 		}
 		return answers[cmd] as T;
 	},
-};
+});
 
 const AST_UNITS = {
 	contract: "Vault",
@@ -152,5 +161,12 @@ external nonpayable · src/Vault.sol:42
 
 export function LocalDemoPage() {
 	const [params] = useSearchParams();
-	return <SwarmPanel folder="/Users/you/code/lending-protocol" name="lending-protocol" scan={FILES} bridge={demo} file={params.get("file")} actions={<><SettingsMenu repos={[]} className="inline-flex size-8 items-center justify-center rounded-full border bg-background/90 text-muted-foreground shadow-sm backdrop-blur hover:text-foreground" /><NotificationCenter /></>} />;
+	const [data, setData] = useState<DemoData | null | undefined>(undefined);
+	useEffect(() => void loadDemoData().then(setData), []);
+	const bridge = useMemo(() => makeDemo(data ?? null), [data]);
+	if (data === undefined) return null;
+	const scan = data
+		? { solidity: data.files.filter((f) => f.endsWith(".sol")), lean: data.files.filter((f) => f.endsWith(".lean")), truncated: false, git: true }
+		: FILES;
+	return <SwarmPanel folder={data?.path ?? "/Users/you/code/lending-protocol"} name={data?.name ?? "lending-protocol"} scan={scan} bridge={bridge} file={params.get("file")} actions={<><SettingsMenu repos={[]} className="inline-flex size-8 items-center justify-center rounded-full border bg-background/90 text-muted-foreground shadow-sm backdrop-blur hover:text-foreground" /><NotificationCenter /></>} />;
 }

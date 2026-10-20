@@ -21,6 +21,7 @@ import { NavUser } from "@/components/nav-user"
 import { LocalHeading, TreeFolder } from "@/components/session-folder"
 import { FileTree } from "@/components/file-tree"
 import { DEMO_TREE } from "@/components/demo-tree"
+import { loadDemoData, type DemoData } from "@/components/demo/load"
 import { SidebarResizer } from "@/components/sidebar-resizer"
 import { LogoMark } from "@/components/logo"
 import { BUILD } from "@/lib/build-info"
@@ -238,6 +239,11 @@ export function AppSidebar({ extra, ...props }: React.ComponentProps<typeof Side
 	const location = useLocation()
 	const navigate = useNavigate()
 	const pathname = location.pathname
+	// On localhost, the demo folder: a real repository's files when its data has been built.
+	const [demo, setDemo] = useState<DemoData | null>(null)
+	useEffect(() => {
+		if (typeof window !== "undefined" && window.location.hostname === "localhost") void loadDemoData().then(setDemo)
+	}, [])
 	// The landing page is a page of its own, even for someone signed in.
 	if (pathname === "/welcome") return null
 
@@ -281,9 +287,9 @@ export function AppSidebar({ extra, ...props }: React.ComponentProps<typeof Side
 					<SidebarGroup>
 						<LocalHeading />
 						<ul className="flex flex-col gap-0.5">
-							<TreeFolder name="lending-protocol" href="/local-demo" current={pathname === "/local-demo"}>
+							<TreeFolder name={demo?.name ?? "lending-protocol"} title={demo?.path} href="/local-demo" current={pathname === "/local-demo"}>
 								<FileTree
-									paths={DEMO_TREE}
+									paths={demo?.files ?? DEMO_TREE}
 									selected={new URLSearchParams(location.search).get("file")}
 									storageKey="fm:tree:demo"
 									onOpen={(f) => {

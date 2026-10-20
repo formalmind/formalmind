@@ -65,3 +65,4 @@ storybook-static/
 # signing keys and certificates
 *.p12
 *.p8
+components/demo/data.json
