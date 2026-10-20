@@ -641,7 +641,7 @@ export function DebugView({ folder, file, test: wanted, onPick, embedded }: { fo
 			setRunning(key);
 			setError(null);
 			try {
-				const r = await invoke<RunView>("debug_run", { id: session.id, contract: t.contract, test: t.test, chainId: chain, forkUrl: fork });
+				const r = await invoke<RunView>("debug_run", { id: session.id, contract: t.contract, test: t.test, chainId: FORKS_ENABLED ? chain : 31337, forkUrl: FORKS_ENABLED ? fork : null });
 				setRun({ ...r, key });
 				recordRun(folder, session.file, t.name, t.test, r.success);
 				setCmp(null);
