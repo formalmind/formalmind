@@ -35,14 +35,15 @@ const Label = ({ children }: { children: React.ReactNode }) => (
 	<p className="font-mono text-[11px] font-medium uppercase tracking-wider text-muted-foreground">{children}</p>
 );
 
-function Card({ label, action, children, className = "" }: { label: string; action?: React.ReactNode; children: React.ReactNode; className?: string }) {
+/** As in the reference: a gray container carrying the title, and the content on a white card inside it. */
+function Card({ label, action, children, className = "", bodyClassName = "p-4" }: { label: string; action?: React.ReactNode; children: React.ReactNode; className?: string; bodyClassName?: string }) {
 	return (
-		<section className={`flex flex-col rounded-2xl border bg-card ${className}`}>
-			<header className="flex h-11 shrink-0 items-center justify-between border-b px-4">
+		<section className={`flex flex-col rounded-2xl border bg-muted/60 p-1.5 ${className}`}>
+			<header className="flex h-9 shrink-0 items-center justify-between gap-2 pl-2.5 pr-1">
 				<Label>{label}</Label>
 				{action}
 			</header>
-			<div className="flex min-h-0 flex-1 flex-col p-4">{children}</div>
+			<div className={`shadow-card flex min-h-0 flex-1 flex-col rounded-xl border bg-card ${bodyClassName}`}>{children}</div>
 		</section>
 	);
 }
@@ -53,18 +54,38 @@ function Delta({ now, before }: { now: number; before: number }) {
 	const pct = before === 0 ? 100 : ((now - before) / before) * 100;
 	const up = pct >= 0;
 	return (
-		<span className={`rounded-md px-1.5 py-0.5 font-mono text-xs font-medium ${up ? "bg-amber-500/10 text-amber-700 dark:text-amber-400" : "bg-emerald-500/10 text-emerald-700 dark:text-emerald-400"}`}>
+		<span className={`rounded-md px-1.5 py-0.5 font-mono text-xs font-medium ${up ? "bg-emerald-500/10 text-emerald-700 dark:text-emerald-400" : "bg-red-500/10 text-red-700 dark:text-red-400"}`}>
 			{up ? "↗" : "↘"} {Math.abs(pct).toFixed(1)}%
 		</span>
 	);
 }
 
+/** A smooth path through the points (monotone cubic, Fritsch–Carlson): no overshoot between days. */
+function smoothPath(pts: [number, number][]) {
+	if (pts.length < 2) return pts.length ? `M${pts[0][0]},${pts[0][1]}` : "";
+	const n = pts.length;
+	const dx = pts.slice(1).map((p, i) => p[0] - pts[i][0]);
+	const slope = pts.slice(1).map((p, i) => (p[1] - pts[i][1]) / dx[i]);
+	const m = pts.map((_, i) => (i === 0 ? slope[0] : i === n - 1 ? slope[n - 2] : slope[i - 1] * slope[i] <= 0 ? 0 : (slope[i - 1] + slope[i]) / 2));
+	for (let i = 0; i < n - 1; i++) {
+		if (slope[i] === 0) { m[i] = 0; m[i + 1] = 0; continue; }
+		const a = m[i] / slope[i], b = m[i + 1] / slope[i], h = Math.hypot(a, b);
+		if (h > 3) { m[i] = (3 * a * slope[i]) / h; m[i + 1] = (3 * b * slope[i]) / h; }
+	}
+	let d = `M${pts[0][0]},${pts[0][1]}`;
+	for (let i = 0; i < n - 1; i++) {
+		const [x0, y0] = pts[i], [x1, y1] = pts[i + 1], h = dx[i] / 3;
+		d += ` C${x0 + h},${y0 + m[i] * h} ${x1 - h},${y1 - m[i + 1] * h} ${x1},${y1}`;
+	}
+	return d;
+}
+
 function Sparkline({ values }: { values: number[] }) {
 	const max = Math.max(0.01, ...values);
-	const pts = values.map((v, i) => `${(i / Math.max(1, values.length - 1)) * 100},${28 - (v / max) * 26}`).join(" ");
+	const d = smoothPath(values.map((v, i) => [(i / Math.max(1, values.length - 1)) * 100, 28 - (v / max) * 26]));
 	return (
 		<svg viewBox="0 0 100 30" preserveAspectRatio="none" className="h-8 w-24" aria-hidden>
-			<polyline points={pts} fill="none" stroke="currentColor" strokeWidth="1.5" vectorEffect="non-scaling-stroke" className="text-foreground/70" />
+			<path d={d} fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" vectorEffect="non-scaling-stroke" className="text-foreground/70" />
 		</svg>
 	);
 }
@@ -88,7 +109,7 @@ function TrendChart({ days }: { days: { date: string; usd: number; runs: number 
 	const top = Math.ceil(max * 1.15 * 100) / 100;
 	const x = (i: number) => (i / Math.max(1, days.length - 1)) * 100;
 	const y = (v: number) => 100 - (v / top) * 100;
-	const line = days.map((d, i) => `${i ? "L" : "M"}${x(i)},${y(d.usd)}`).join(" ");
+	const line = smoothPath(days.map((d, i) => [x(i), y(d.usd)]));
 	const h = hover !== null ? days[hover] : null;
 	return (
 		<div className="relative h-56 pl-10" onMouseLeave={() => setHover(null)}>
@@ -99,12 +120,17 @@ function TrendChart({ days }: { days: { date: string; usd: number; runs: number 
 			))}
 			<svg viewBox="0 0 100 100" preserveAspectRatio="none" className="absolute inset-y-0 left-10 right-0 h-full w-[calc(100%-2.5rem)] overflow-visible" aria-hidden>
 				<path d={`${line} L100,100 L0,100 Z`} className="fill-foreground/[0.06]" />
-				<path d={line} fill="none" stroke="currentColor" strokeWidth="1.75" vectorEffect="non-scaling-stroke" className="text-foreground" />
+				<path d={line} fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round" vectorEffect="non-scaling-stroke" className="text-foreground" />
 			</svg>
 			<div className="absolute inset-y-0 left-10 right-0 flex">
 				{days.map((d, i) => (
 					<div key={d.date} className="relative flex-1" onMouseEnter={() => setHover(i)}>
-						{hover === i ? <div className="absolute inset-y-0 left-1/2 w-px bg-foreground/20" /> : null}
+						{hover === i ? (
+							<>
+								<div className="absolute inset-y-0 left-1/2 w-px bg-foreground/15" />
+								<div className="absolute left-1/2 size-2.5 -translate-x-1/2 -translate-y-1/2 rounded-full border-2 border-foreground bg-card" style={{ top: `${y(d.usd)}%` }} />
+							</>
+						) : null}
 					</div>
 				))}
 			</div>
@@ -259,8 +285,8 @@ export function UsagePage() {
 
 				<div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
 					{stats.map((st) => (
-						<section key={st.label} className="rounded-2xl border bg-muted/40 p-1">
-							<div className="shadow-card rounded-xl bg-card px-4 py-3">
+						<section key={st.label} className="rounded-2xl border bg-muted/60 p-1.5">
+							<div className="shadow-card rounded-xl border bg-card px-4 py-3">
 								<Label>{st.label}</Label>
 								<div className="mt-2 flex h-9 items-center justify-between gap-2">
 									{ready ? <span className="font-mono text-2xl font-medium tabular-nums">{st.value}</span> : <Bone className="h-7 w-28" />}
@@ -272,7 +298,7 @@ export function UsagePage() {
 					))}
 				</div>
 
-				<div className="grid gap-4 lg:grid-cols-[1fr_20rem]">
+				<div className="grid gap-4 md:grid-cols-[minmax(0,1fr)_18rem]">
 					<Card label="Spend trend">
 						<div className="mb-4 flex items-baseline gap-3">
 							{ready ? <span className="font-mono text-xl font-medium tabular-nums">{usd(s.total)}</span> : <Bone className="h-6 w-24" />}
@@ -294,8 +320,20 @@ export function UsagePage() {
 					</Card>
 
 					<Card label="By agent">
-						<div className="flex h-2 overflow-hidden rounded-full bg-muted">
-							{ready ? s.byRole.map(([k, v]) => <span key={k} style={{ width: `${s.total ? (v / s.total) * 100 : 0}%`, background: roleColor(k) }} />) : null}
+						{/* One rounded segment per agent with an even gap: widths come from flex-grow, so the gaps never overflow. */}
+						<div className="flex h-2 gap-1">
+							{ready && s.total > 0 ? (
+								s.byRole.map(([k, v]) => (
+									<span
+										key={k}
+										title={`${k}: ${usd(v)}`}
+										className="min-w-1 basis-0 rounded-full transition-[flex-grow] duration-500 ease-out motion-reduce:transition-none"
+										style={{ flexGrow: v, background: roleColor(k) }}
+									/>
+								))
+							) : (
+								<span className={`flex-1 rounded-full ${ready ? "bg-muted" : "fm-shimmer"}`} />
+							)}
 						</div>
 						<ul className="mt-4 space-y-0.5 text-sm">
 							{ready
@@ -315,7 +353,7 @@ export function UsagePage() {
 					</Card>
 				</div>
 
-				<div className="grid gap-4 lg:grid-cols-[1fr_20rem]">
+				<div className="grid gap-4 md:grid-cols-[minmax(0,1fr)_18rem]">
 					<Card
 						label="Runs"
 						action={
@@ -326,7 +364,7 @@ export function UsagePage() {
 								className="h-7 w-48 rounded-lg border bg-transparent px-2.5 text-xs outline-none focus:border-foreground/30"
 							/>
 						}
-						className="[&>div]:p-0"
+						bodyClassName="p-0 overflow-hidden"
 					>
 						<div className="grid grid-cols-[8.5rem_1fr_5rem] gap-4 border-b px-4 py-2 font-mono text-[11px] uppercase tracking-wider text-muted-foreground">
 							<span>Time</span>
