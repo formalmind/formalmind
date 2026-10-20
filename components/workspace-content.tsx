@@ -5,6 +5,7 @@ import { SidebarInset, SidebarTrigger } from "@/components/ui/sidebar";
 import { Separator } from "@radix-ui/react-separator";
 import BreadCrumbs from "@/components/bread-crumbs";
 import { DesktopHint } from "@/components/desktop-hint";
+import { CreditsBanner } from "@/components/credits-banner";
 
 export function WorkspaceContent({ children }: { children: React.ReactNode }) {
 	const pathname = useLocation().pathname;
@@ -17,6 +18,7 @@ export function WorkspaceContent({ children }: { children: React.ReactNode }) {
 	return (
 		<div className={isChat ? "flex h-dvh min-w-0 flex-1 overflow-hidden bg-background" : "flex-1 overflow-x-auto bg-background"}>
 			<SidebarInset className={isChat ? "min-h-0 min-w-0 flex-1 bg-background" : "flex-1 w-full overflow-x-auto"}>
+				<CreditsBanner />
 				<header className={isChat ? "hidden" : "flex h-16 shrink-0 items-center gap-2"}>
 					<div className="flex items-center gap-2 px-4">
 						<SidebarTrigger className="-ml-1" />
