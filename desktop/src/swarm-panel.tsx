@@ -4,7 +4,7 @@ import { createPortal } from "react-dom";
 import { NvimTerminal } from "./nvim-terminal";
 import { reportError } from "@/lib/report-error";
 import { JsonTree } from "./json-tree";
-import { Bug, Check, ChevronDown, Code2, Copy, FileCode2, Network, Play, Plus, ScanSearch, Square, WandSparkles, Wrench } from "lucide-react";
+import { Bug, Check, ChevronDown, Code2, Copy, FileCode2, Network, Play, Plus, ScanSearch, Settings, Square, WandSparkles, Wrench } from "lucide-react";
 
 // The project roadmap (GitHub Projects-style), the same view the web app had on its own page.
 import { motion as vimMotion, search as vimSearch, setVimMode, useVimMode, type Cursor } from "@/components/vim-mode";
@@ -325,55 +325,154 @@ const SEVERITY: Record<string, string> = {
 };
 
 /** Bug reports: a list on the left, the selected report on the right with its facts as chips. */
-function BugsView({ bugs, openBug, setOpenBug, withPoc, onOpenFile }: { bugs: Bug[]; openBug: string | null; setOpenBug: (f: string | null) => void; withPoc: (body: string) => Promise<string>; onOpenFile: (path: string) => void }) {
-	const selected = bugs.find((b) => b.file === openBug) ?? bugs[0];
-	if (!selected) {
-		return <p className="absolute inset-x-0 top-1/3 text-center text-sm text-muted-foreground">No bugs reported yet. The swarm files them here, each with a proof of concept.</p>;
-	}
-	const facts = bugFacts(selected.body);
+/** The folders a folder's audit reports are read from, kept per folder (set in Bugs). */
+const DEFAULT_REPORT_DIRS = ["audit", "audits", "reports"];
+function useReportDirs(folder: string) {
+	const key = `fm:report-dirs:${folder}`;
+	const [dirs, setDirs] = useState<string[]>(() => {
+		try {
+			const saved = JSON.parse(localStorage.getItem(key) ?? "null");
+			return Array.isArray(saved) ? saved : DEFAULT_REPORT_DIRS;
+		} catch {
+			return DEFAULT_REPORT_DIRS;
+		}
+	});
+	const save = (next: string[]) => {
+		setDirs(next);
+		try {
+			localStorage.setItem(key, JSON.stringify(next));
+		} catch {
+			/* not kept */
+		}
+	};
+	return [dirs, save] as const;
+}
+
+/**
+ * Bugs: the folder's audit reports (Markdown in its report folders, which the gear sets) and the swarm's findings,
+ * each opened on the right.
+ */
+function BugsView({ folder, files, invoke, bugs, openBug, setOpenBug, withPoc, onOpenFile }: { folder: string; files: string[]; invoke: Bridge["invoke"]; bugs: Bug[]; openBug: string | null; setOpenBug: (f: string | null) => void; withPoc: (body: string) => Promise<string>; onOpenFile: (path: string) => void }) {
+	const [dirs, setDirs] = useReportDirs(folder);
+	const [editing, setEditing] = useState<string | null>(null);
+	const reports = files.filter((f) => /\.(md|markdown|txt)$/i.test(f) && dirs.some((d) => f.startsWith(`${d.replace(/\/+$/, "")}/`))).sort();
+	const reportPath = openBug?.startsWith("report:") ? openBug.slice(7) : null;
+	const [report, setReport] = useState<{ path: string; text: string } | null>(null);
+	// What's open: a picked report or finding; with nothing picked, the first report, else the first finding.
+	const selected = reportPath ? null : (bugs.find((b) => b.file === openBug) ?? (reports.length ? null : bugs[0]));
+	const showing = reportPath ?? (selected ? null : reports[0] ? `report:${reports[0]}` : null);
+	const showingPath = showing?.slice(7) ?? null;
+	useEffect(() => {
+		if (!showingPath) return;
+		setReport(null);
+		void invoke<string>("folder_read", { folder, path: showingPath }).then(
+			(text) => setReport({ path: showingPath, text }),
+			(e) => setReport({ path: showingPath, text: `Couldn't read ${showingPath}: ${e}` }),
+		);
+	}, [folder, showingPath, invoke]);
+	const facts = selected ? bugFacts(selected.body) : null;
+	const head = "px-2 pb-1 pt-2 font-mono text-[10px] uppercase tracking-wider text-muted-foreground";
 	return (
 		<div className="absolute inset-x-0 bottom-0 top-[var(--fm-top)] z-10 grid grid-cols-[minmax(0,20rem)_minmax(0,1fr)] gap-3 px-3 pb-3">
-			<ul className="min-h-0 space-y-1 overflow-y-auto">
-				{bugs.map((b) => {
-					const f = bugFacts(b.body);
-					const on = b.file === selected.file;
-					return (
-						<li key={b.file}>
-							<button type="button" onClick={() => setOpenBug(b.file)} className={`w-full rounded-xl border px-3 py-2.5 text-left transition-colors ${on ? "bg-muted" : "border-transparent hover:bg-muted/60"}`}>
-								<span className="flex items-center gap-2">
-									{f.severity ? <span className={`rounded-md border px-1.5 py-px text-[10px] font-medium uppercase tracking-wide ${SEVERITY[f.severity] ?? "border-border text-muted-foreground"}`}>{f.severity}</span> : null}
-									{f.file ? <span className="truncate font-mono text-[11px] text-muted-foreground">{f.file.split("/").pop()}{f.line ? `:${f.line}` : ""}</span> : null}
+			<div className="min-h-0 overflow-y-auto">
+				<div className="flex items-center">
+					<p className={head}>Reports · {reports.length}</p>
+					<button type="button" onClick={() => setEditing(editing === null ? dirs.join(", ") : null)} title="Choose the folders reports are read from" className="ml-auto mt-1 grid size-6 place-items-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground">
+						<Settings className="size-3.5" />
+					</button>
+				</div>
+				{editing !== null ? (
+					<form
+						className="mb-2 space-y-1.5 rounded-xl border bg-card p-2.5 text-[12px]"
+						onSubmit={(e) => {
+							e.preventDefault();
+							const next = editing.split(",").map((d) => d.trim().replace(/^\.?\/+|\/+$/g, "")).filter(Boolean);
+							setDirs(next.length ? next : DEFAULT_REPORT_DIRS);
+							setEditing(null);
+						}}
+					>
+						<label className="block text-muted-foreground">Report folders, comma-separated (relative to the folder)</label>
+						<input autoFocus value={editing} onChange={(e) => setEditing(e.target.value)} placeholder="audit, audits, reports" className="h-7 w-full rounded-md border bg-background px-2 font-mono text-[12px] outline-none focus-visible:ring-2 focus-visible:ring-ring" />
+						<div className="flex justify-end gap-1.5">
+							<button type="button" onClick={() => setEditing(null)} className="h-6 rounded-md px-2 text-muted-foreground hover:bg-muted">Cancel</button>
+							<button type="submit" className="btn-dark h-6 px-2.5 text-[12px]">Save</button>
+						</div>
+					</form>
+				) : null}
+				<ul className="space-y-1">
+					{reports.map((r) => (
+						<li key={r}>
+							<button type="button" onClick={() => setOpenBug(`report:${r}`)} title={r} className={`flex w-full items-center gap-2 rounded-xl border px-3 py-2 text-left transition-colors ${showing === `report:${r}` ? "bg-muted" : "border-transparent hover:bg-muted/60"}`}>
+								<FileCode2 className="size-3.5 shrink-0 text-muted-foreground" />
+								<span className="min-w-0">
+									<span className="block truncate text-[13px] font-medium">{r.split("/").pop()?.replace(/\.(md|markdown|txt)$/i, "").replace(/[_-]+/g, " ")}</span>
+									<span className="block truncate font-mono text-[10px] text-muted-foreground">{r}</span>
 								</span>
-								<span className="mt-1 block text-[13px] font-medium leading-snug">{b.title}</span>
 							</button>
 						</li>
-					);
-				})}
-			</ul>
-			<article className="min-h-0 overflow-y-auto rounded-2xl border bg-card px-6 py-5 shadow-card">
-				<div className="flex items-start gap-3">
-					<h2 className="flex-1 text-[17px] font-semibold leading-snug">{selected.title}</h2>
-					<CopyButton get={() => withPoc(selected.body)} label="Copy the report as Markdown, PoC included" />
-				</div>
-				<div className="mt-3 flex flex-wrap items-center gap-2 text-[12px]">
-					{facts.severity ? <span className={`inline-flex h-7 items-center rounded-lg border px-2.5 font-medium capitalize ${SEVERITY[facts.severity] ?? ""}`}>{facts.severity}</span> : null}
-					{facts.file ? (
-						<button type="button" onClick={() => onOpenFile(facts.file!)} title="Open in Code" className="inline-flex h-7 items-center gap-1.5 rounded-lg border bg-background px-2.5 font-mono hover:bg-muted">
-							<FileCode2 className="size-3.5 text-muted-foreground" />
-							{facts.file}{facts.line ? `:${facts.line}` : ""}
+					))}
+					{reports.length === 0 ? <li className="px-2 py-1 text-[12px] text-muted-foreground">No reports in {dirs.map((d) => `${d}/`).join(", ")}.</li> : null}
+				</ul>
+				<p className={`${head} mt-3`}>Findings · {bugs.length}</p>
+				<ul className="space-y-1">
+					{bugs.map((b) => {
+						const f = bugFacts(b.body);
+						const on = selected && b.file === selected.file;
+						return (
+							<li key={b.file}>
+								<button type="button" onClick={() => setOpenBug(b.file)} className={`w-full rounded-xl border px-3 py-2.5 text-left transition-colors ${on ? "bg-muted" : "border-transparent hover:bg-muted/60"}`}>
+									<span className="flex items-center gap-2">
+										{f.severity ? <span className={`rounded-md border px-1.5 py-px text-[10px] font-medium uppercase tracking-wide ${SEVERITY[f.severity] ?? "border-border text-muted-foreground"}`}>{f.severity}</span> : null}
+										{f.file ? <span className="truncate font-mono text-[11px] text-muted-foreground">{f.file.split("/").pop()}{f.line ? `:${f.line}` : ""}</span> : null}
+									</span>
+									<span className="mt-1 block text-[13px] font-medium leading-snug">{b.title}</span>
+								</button>
+							</li>
+						);
+					})}
+					{bugs.length === 0 ? <li className="px-2 py-1 text-[12px] text-muted-foreground">None yet. The swarm files them here, each with a proof of concept.</li> : null}
+				</ul>
+			</div>
+			{showing ? (
+				<article className="min-h-0 overflow-y-auto rounded-2xl border bg-card px-6 py-5 shadow-card">
+					<div className="flex items-start gap-3">
+						<h2 className="flex-1 font-mono text-[13px] text-muted-foreground">{showing.slice(7)}</h2>
+						{report ? <CopyButton text={report.text} label="Copy the report as Markdown" /> : null}
+						<button type="button" onClick={() => onOpenFile(showing.slice(7))} title="Open in Code" className="inline-flex h-7 items-center gap-1.5 rounded-lg border bg-background px-2.5 text-[12px] hover:bg-muted">
+							<Code2 className="size-3.5 text-muted-foreground" />
+							Code
 						</button>
-					) : null}
-					{facts.poc ? (
-						<button type="button" onClick={() => onOpenFile(facts.poc!)} title="Open the proof of concept in Code" className="inline-flex h-7 items-center gap-1.5 rounded-lg border bg-background px-2.5 font-mono hover:bg-muted">
-							<Bug className="size-3.5 text-muted-foreground" />
-							PoC · {facts.poc.split("/").pop()}
-						</button>
-					) : null}
-				</div>
-				<div className="prose prose-sm mt-4 max-w-none dark:prose-invert">
-					<ChatMarkdown>{facts.rest}</ChatMarkdown>
-				</div>
-			</article>
+					</div>
+					<div className="prose prose-sm mt-4 max-w-none dark:prose-invert">{report && report.path === showing.slice(7) ? <ChatMarkdown>{report.text}</ChatMarkdown> : <p className="text-muted-foreground">Opening…</p>}</div>
+				</article>
+			) : selected && facts ? (
+				<article className="min-h-0 overflow-y-auto rounded-2xl border bg-card px-6 py-5 shadow-card">
+					<div className="flex items-start gap-3">
+						<h2 className="flex-1 text-[17px] font-semibold leading-snug">{selected.title}</h2>
+						<CopyButton get={() => withPoc(selected.body)} label="Copy the report as Markdown, PoC included" />
+					</div>
+					<div className="mt-3 flex flex-wrap items-center gap-2 text-[12px]">
+						{facts.severity ? <span className={`inline-flex h-7 items-center rounded-lg border px-2.5 font-medium capitalize ${SEVERITY[facts.severity] ?? ""}`}>{facts.severity}</span> : null}
+						{facts.file ? (
+							<button type="button" onClick={() => onOpenFile(facts.file!)} title="Open in Code" className="inline-flex h-7 items-center gap-1.5 rounded-lg border bg-background px-2.5 font-mono hover:bg-muted">
+								<FileCode2 className="size-3.5 text-muted-foreground" />
+								{facts.file}{facts.line ? `:${facts.line}` : ""}
+							</button>
+						) : null}
+						{facts.poc ? (
+							<button type="button" onClick={() => onOpenFile(facts.poc!)} title="Open the proof of concept in Code" className="inline-flex h-7 items-center gap-1.5 rounded-lg border bg-background px-2.5 font-mono hover:bg-muted">
+								<Bug className="size-3.5 text-muted-foreground" />
+								PoC · {facts.poc.split("/").pop()}
+							</button>
+						) : null}
+					</div>
+					<div className="prose prose-sm mt-4 max-w-none dark:prose-invert">
+						<ChatMarkdown>{facts.rest}</ChatMarkdown>
+					</div>
+				</article>
+			) : (
+				<p className="self-center text-center text-sm text-muted-foreground">Nothing to show yet: no reports in the report folders and no findings.</p>
+			)}
 		</div>
 	);
 }
@@ -1340,7 +1439,7 @@ export function SwarmPanel({ folder, name, scan, bridge, session, file: openPath
 						{debug(openPath && /\.[ts]\.sol$/.test(openPath) ? openPath : null, params.get("test"), debugFile)}
 					</div>
 				) : null}
-				{mode === "bugs" ? <BugsView bugs={bugs} openBug={openBug} setOpenBug={setOpenBug} withPoc={withPoc} onOpenFile={view} /> : null}
+				{mode === "bugs" ? <BugsView folder={folder} files={tree} invoke={invoke} bugs={bugs} openBug={openBug} setOpenBug={setOpenBug} withPoc={withPoc} onOpenFile={view} /> : null}
 				{mode === "audit" ? (
 					<div className="pointer-events-auto absolute bottom-3 left-3 right-3 top-[var(--fm-top)] z-10 flex min-h-0 flex-col overflow-hidden rounded-2xl border bg-muted/60 p-1">
 						<AuditView folder={folder} scan={scan} invoke={invoke} preferred={openPath ?? null} onOpenFile={view} />
