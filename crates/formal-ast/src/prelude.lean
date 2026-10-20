@@ -62,6 +62,77 @@ def mulDivCeil (x y d : Nat) : M σ Nat := do
 def mulDivRnd (x y d r : Nat) : M σ Nat :=
   if r % 2 = 1 then mulDivCeil x y d else mulDivFloor x y d
 
+/-! Signed words (`intN`): `Int` within [-2^(N-1), 2^(N-1)). Division truncates toward zero, as in Solidity. -/
+
+def smin (bits : Nat) : Int := -((2 ^ (bits - 1) : Nat) : Int)
+def smax (bits : Nat) : Int := ((2 ^ (bits - 1) : Nat) : Int) - 1
+def fits (bits : Nat) (x : Int) : Bool := decide (smin bits ≤ x ∧ x ≤ smax bits)
+
+/-- Two's-complement wrap into `intN`. -/
+def wrapI (bits : Nat) (x : Int) : Int :=
+  let r := x % ((2 ^ bits : Nat) : Int)
+  if r ≥ ((2 ^ (bits - 1) : Nat) : Int) then r - ((2 ^ bits : Nat) : Int) else r
+
+def addcI (bits : Nat) (a b : Int) : M σ Int :=
+  if fits bits (a + b) then pure (a + b) else throw (panic "0x11")
+def subcI (bits : Nat) (a b : Int) : M σ Int :=
+  if fits bits (a - b) then pure (a - b) else throw (panic "0x11")
+def mulcI (bits : Nat) (a b : Int) : M σ Int :=
+  if fits bits (a * b) then pure (a * b) else throw (panic "0x11")
+def negcI (bits : Nat) (a : Int) : M σ Int :=
+  if fits bits (-a) then pure (-a) else throw (panic "0x11")
+def divcI (bits : Nat) (checked : Bool) (a b : Int) : M σ Int :=
+  if b = 0 then throw (panic "0x12")
+  else if checked && !fits bits (Int.tdiv a b) then throw (panic "0x11")
+  else pure (wrapI bits (Int.tdiv a b))
+def modcI (a b : Int) : M σ Int :=
+  if b = 0 then throw (panic "0x12") else pure (Int.tmod a b)
+
+/-- `intN(uintN x)` and back: reinterpretation of the same bits. -/
+def toSigned (bits : Nat) (n : Nat) : Int := wrapI bits n
+def toUnsigned (bits : Nat) (x : Int) : Nat := (x % ((2 ^ bits : Nat) : Int)).toNat
+
+/-! Yul: every value is a 256-bit word (a `Nat` below 2^256). -/
+
+def W : Nat := 2 ^ 256
+def yw (a : Nat) : Nat := a % W
+def ybool (c : Bool) : Nat := if c then 1 else 0
+def yadd (a b : Nat) : Nat := (a + b) % W
+def ysub (a b : Nat) : Nat := (a + W - b % W) % W
+def ymul (a b : Nat) : Nat := (a * b) % W
+def ydiv (a b : Nat) : Nat := if b = 0 then 0 else a / b
+def ymod (a b : Nat) : Nat := if b = 0 then 0 else a % b
+def ysdiv (a b : Nat) : Nat := if b = 0 then 0 else toUnsigned 256 (Int.tdiv (toSigned 256 a) (toSigned 256 b))
+def ysmod (a b : Nat) : Nat := if b = 0 then 0 else toUnsigned 256 (Int.tmod (toSigned 256 a) (toSigned 256 b))
+def yexp (a b : Nat) : Nat := (a ^ b) % W
+def ynot (a : Nat) : Nat := W - 1 - a % W
+def ylt (a b : Nat) : Nat := ybool (decide (a < b))
+def ygt (a b : Nat) : Nat := ybool (decide (a > b))
+def yslt (a b : Nat) : Nat := ybool (decide (toSigned 256 a < toSigned 256 b))
+def ysgt (a b : Nat) : Nat := ybool (decide (toSigned 256 a > toSigned 256 b))
+def yeq (a b : Nat) : Nat := ybool (a == b)
+def yiszero (a : Nat) : Nat := ybool (a == 0)
+def yand (a b : Nat) : Nat := a &&& b
+def yor (a b : Nat) : Nat := a ||| b
+def yxor (a b : Nat) : Nat := a ^^^ b
+def ybyte (i x : Nat) : Nat := if i < 32 then (x >>> (8 * (31 - i))) % 256 else 0
+def yshl (s v : Nat) : Nat := if s < 256 then (v <<< s) % W else 0
+def yshr (s v : Nat) : Nat := if s < 256 then v >>> s else 0
+def ysar (s v : Nat) : Nat :=
+  if s < 256 then toUnsigned 256 (toSigned 256 v / ((2 ^ s : Nat) : Int))
+  else if toSigned 256 v < 0 then W - 1 else 0
+def yaddmod (a b n : Nat) : Nat := if n = 0 then 0 else (a + b) % n
+def ymulmod (a b n : Nat) : Nat := if n = 0 then 0 else (a * b) % n
+def ysignextend (b x : Nat) : Nat :=
+  if b < 31 then
+    let t := 8 * b + 7
+    let v := x % 2 ^ (t + 1)
+    if v ≥ 2 ^ t then (v + W - 2 ^ (t + 1)) % W else v
+  else x
+
+/-- Loops run at most this many iterations, as gas bounds them; a longer run reverts ("loop bound"). -/
+def loopBound : Nat := 2 ^ 64
+
 def require (c : Bool) (reason : String) : M σ Unit :=
   if c then pure () else throw ⟨reason⟩
 
@@ -73,7 +144,7 @@ def view {α : Type} (f : Env → σ → Except Revert α) : M σ α := do
   | .ok v => pure v
   | .error r => throw r
 
-def upd {β : Type} (f : Nat → β) (k : Nat) (v : β) : Nat → β := fun x => if x = k then v else f x
+def upd {κ β : Type} [DecidableEq κ] (f : κ → β) (k : κ) (v : β) : κ → β := fun x => if x = k then v else f x
 
 def idx {α : Type} [Inhabited α] (l : List α) (i : Nat) : M σ α :=
   if h : i < l.length then pure (l[i]'h) else throw (panic "0x32")
@@ -83,7 +154,8 @@ def pop {α : Type} (l : List α) : M σ (List α) :=
 
 end
 
-theorem upd_same {β : Type} (f : Nat → β) (k : Nat) (v : β) : upd f k v k = v := by simp [upd]
-theorem upd_other {β : Type} (f : Nat → β) (k x : Nat) (v : β) (h : x ≠ k) : upd f k v x = f x := by simp [upd, h]
+theorem upd_same {κ β : Type} [DecidableEq κ] (f : κ → β) (k : κ) (v : β) : upd f k v k = v := by simp [upd]
+theorem upd_other {κ β : Type} [DecidableEq κ] (f : κ → β) (k x : κ) (v : β) (h : x ≠ k) : upd f k v x = f x := by
+  simp [upd, h]
 
 end FormalAst

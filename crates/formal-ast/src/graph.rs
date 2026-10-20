@@ -74,6 +74,14 @@ pub struct StateVar {
     pub src: Src,
 }
 
+impl CallKind {
+    /// Code that runs in this contract's own context: internal calls, and public library functions (a delegatecall
+    /// runs the library's code on our storage, with our `msg.sender`).
+    pub fn runs_here(self) -> bool {
+        matches!(self, CallKind::Internal | CallKind::ExternalLibrary)
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum CallKind {

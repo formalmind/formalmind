@@ -1,7 +1,7 @@
 //! From one entry contract to the work: what's reachable, the units (one entry point and everything it runs), and
 //! clusters of units that write the same state.
 
-use crate::graph::{CallKind, Graph, Id, Ref};
+use crate::graph::{Graph, Id, Ref};
 use anyhow::{bail, Result};
 use serde::Serialize;
 use std::collections::{BTreeMap, BTreeSet, HashMap};
@@ -108,7 +108,7 @@ impl Scope {
                 stack.push(s.resolve(g, *m));
             }
             for c in &func.calls {
-                if c.kind == CallKind::Internal {
+                if c.kind.runs_here() {
                     if let Some(t) = c.target {
                         stack.push(if c.direct { t } else { s.resolve(g, t) });
                     }
@@ -218,7 +218,7 @@ impl Scope {
                 None => out.extend(write.map(Step::Write)),
                 Some(i) => {
                     let c = &func.calls[i];
-                    if c.kind == CallKind::Internal {
+                    if c.kind.runs_here() {
                         if let Some(t) = c.target {
                             let args: Vec<Option<Id>> = c.args.iter().map(|a| a.as_ref().and_then(map)).collect();
                             self.sequence(g, if c.direct { t } else { self.resolve(g, t) }, &args, visiting, out);
@@ -259,7 +259,7 @@ impl Scope {
             self.collect(g, self.resolve(g, *m), &[], u, visiting);
         }
         for c in &func.calls {
-            if c.kind == CallKind::Internal {
+            if c.kind.runs_here() {
                 if let Some(t) = c.target {
                     let args: Vec<Option<Id>> = c.args.iter().map(|a| a.as_ref().and_then(map)).collect();
                     self.collect(g, if c.direct { t } else { self.resolve(g, t) }, &args, u, visiting);

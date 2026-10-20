@@ -122,9 +122,9 @@ fn lean_model_type_checks() {
         Err(e) => return eprintln!("skipped: {e}"),
     };
     let model = formal_ast::lean::Gen::new(&output, &a.graph, &a.scope).generate("Model");
-    // Storage parameters are lenses, so deposit → _credit translates; only the assembly is left opaque.
-    assert_eq!(model.report.opaque.len(), 1, "{:?}", model.report.opaque);
-    assert!(model.report.opaque[0].0.ends_with("lockSlot"));
+    // Storage parameters are lenses, so deposit → _credit translates; `sstore(locked.slot, 1)` is a write of `locked`.
+    assert!(model.report.opaque.is_empty(), "{:?}", model.report.opaque);
+    assert!(model.text.contains("-- assembly\n  modify fun s => { s with locked := 1 }"));
     assert!(model.text.contains("def Vault.deposit"));
     assert!(model.text.contains("acc_set"));
     // OpenZeppelin's mulDiv gets the prelude's semantics; the fixture's own library is translated from its code.

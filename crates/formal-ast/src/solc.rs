@@ -47,6 +47,14 @@ impl Project {
                 }
             }
         }
+        // As forge does: a prefix ending in `/` maps to a target ending in `/`.
+        for r in &mut project.remappings {
+            if let Some((prefix, target)) = r.split_once('=') {
+                if prefix.ends_with('/') && !target.ends_with('/') {
+                    *r = format!("{prefix}={target}/");
+                }
+            }
+        }
         if project.libs.is_empty() {
             project.libs.push("lib".into());
         }
