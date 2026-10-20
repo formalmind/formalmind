@@ -2,6 +2,7 @@
 //! back: every AST node to its instructions); revm runs the code with an inspector that records each step; the
 //! storage layout and the recorded keccak preimages name every storage slot a step touches. See desktop/DEBUGGER.md.
 
+pub mod fork;
 pub mod cheats;
 pub mod diff;
 pub mod highlight;

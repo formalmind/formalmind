@@ -10,13 +10,14 @@ use alloy_dyn_abi::{DynSolType, DynSolValue};
 use revm::bytecode::Bytecode;
 use revm::context::JournalTr;
 use revm::context_interface::journaled_state::account::JournaledAccountTr;
-use revm::database::{CacheDB, EmptyDB};
+use crate::fork::Backend;
+use revm::database::CacheDB;
 use revm::handler::MainnetContext;
 use revm::interpreter::{CallInputs, CallOutcome, Gas, InstructionResult, InterpreterResult};
 use revm::primitives::{address, keccak256, Address, Bytes, B256, U256};
 use std::collections::HashMap;
 
-pub type Ctx = MainnetContext<CacheDB<EmptyDB>>;
+pub type Ctx = MainnetContext<CacheDB<Backend>>;
 
 /// forge-std's `vm`.
 pub const HEVM: Address = address!("7109709ECfa91a80626fF3989D68f67F5b1DD12D");

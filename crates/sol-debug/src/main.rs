@@ -31,6 +31,9 @@ struct Args {
     /// The chain id `block.chainid` reads (default 31337, as in forge); scripts read deployments by it.
     #[arg(long = "chain-id")]
     chain_id: Option<u64>,
+    /// Run on a fork: state is read over JSON-RPC from this URL (an Anvil fork, usually) at its latest block.
+    #[arg(long = "fork-url")]
+    fork_url: Option<String>,
     /// With --test: run the same test file in this second project too (a port of the first, e.g. to Huff) and
     /// report where the two runs first disagree on calls, events or storage.
     #[arg(long)]
@@ -88,6 +91,10 @@ fn main() -> Result<()> {
         std::env::set_var("SOL_DEBUG_THEME", t);
     }
     let mut s = Session::compile(&a.root, &a.entry)?;
+    if let Some(url) = &a.fork_url {
+        let f = s.set_fork(url)?;
+        eprintln!("fork: chain {} at block {}", f.chain_id, f.block);
+    }
     if let Some(id) = a.chain_id {
         s.set_chain_id(id);
     }
