@@ -6,23 +6,38 @@
 //!   g / G      first / last step               /text   search source lines (then ; and , for next / previous)
 //!   :b 58  :b File.sol:58   line breakpoint    :w name  break on storage writes naming it
 //!   :pc 1621   jump to that pc in this frame   :step 1200  jump to a step     :q  quit
+//!   [ / ]      focus previous / next pane      H J K L  scroll the focused pane (mouse wheel: the pane under it)
+//!   z          zoom the focused pane           0        reset its scroll
 //!   T / :theme dracula   next theme / a theme by name (opaline's builtins; --theme or $SOL_DEBUG_THEME at start)
 
 use crate::highlight::Solidity;
 use crate::nav::{Dir, Navigator};
 use crate::theme::Theme;
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
 use crate::session::{short_word, Run, Session};
 use crate::srcmap::Jump;
 use crate::trace::StorageAccess;
-use ratatui::crossterm::event::{self, Event, KeyCode, KeyEventKind, KeyModifiers};
+use ratatui::crossterm::event::{self, Event, KeyCode, KeyEventKind, KeyModifiers, MouseEvent, MouseEventKind};
 use ratatui::layout::{Constraint, Layout, Rect};
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Paragraph};
 use ratatui::Frame;
 use revm::bytecode::opcode::OpCode;
+
+/// The panes, in focus order.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum Pane {
+    Source,
+    Calls,
+    Opcodes,
+    Stack,
+    Memory,
+    Storage,
+}
+
+const PANES: [Pane; 6] = [Pane::Source, Pane::Calls, Pane::Opcodes, Pane::Stack, Pane::Memory, Pane::Storage];
 
 pub struct App<'a> {
     s: &'a Session,
@@ -38,6 +53,14 @@ pub struct App<'a> {
     highlighter: Option<Solidity>,
     /// Highlight classes per source file, computed the first time a file is shown.
     classes: RefCell<HashMap<i64, Vec<Option<u8>>>>,
+    pub focus: Pane,
+    pub zoom: bool,
+    /// Per pane: lines scrolled away from where the pane would put the current step, and columns scrolled right.
+    vy: [isize; 6],
+    hx: [u16; 6],
+    /// Per pane, from the last draw: how far `vy` can go (min, max), and where the pane is (for the mouse).
+    bounds: Cell<[(isize, isize); 6]>,
+    rects: RefCell<Vec<(Pane, Rect)>>,
 }
 
 impl<'a> App<'a> {
@@ -62,7 +85,54 @@ impl<'a> App<'a> {
             theme: Theme::initial(None),
             highlighter: Solidity::new(),
             classes: RefCell::new(HashMap::new()),
+            focus: Pane::Source,
+            zoom: false,
+            vy: [0; 6],
+            hx: [0; 6],
+            bounds: Cell::new([(0, 0); 6]),
+            rects: RefCell::new(vec![]),
         }
+    }
+
+    /// Scrolls a pane: `dy` lines down, `dx` columns right (negative: up / left).
+    pub fn scroll(&mut self, pane: Pane, dy: isize, dx: isize) {
+        let i = pane as usize;
+        let (lo, hi) = self.bounds.get()[i];
+        self.vy[i] = (self.vy[i] + dy).clamp(lo.min(0), hi.max(0));
+        self.hx[i] = (self.hx[i] as isize + dx).clamp(0, 2000) as u16;
+    }
+
+    /// The pane at a screen position (from the last draw).
+    pub fn pane_at(&self, col: u16, row: u16) -> Option<Pane> {
+        self.rects.borrow().iter().find(|(_, r)| col >= r.x && col < r.x + r.width && row >= r.y && row < r.y + r.height).map(|(p, _)| *p)
+    }
+
+    /// The first line a pane shows: where it would center the step (`auto`), moved by its scroll, kept in range.
+    fn top(&self, pane: Pane, auto: usize, total: usize, height: usize) -> usize {
+        let max_top = total.saturating_sub(height) as isize;
+        let auto = (auto as isize).clamp(0, max_top);
+        let mut b = self.bounds.get();
+        b[pane as usize] = (-auto, max_top - auto);
+        self.bounds.set(b);
+        (auto + self.vy[pane as usize]).clamp(0, max_top) as usize
+    }
+
+    /// A pane's frame: the accent border and a marker when it has focus, and its horizontal scroll in the title.
+    fn pane_block(&self, pane: Pane, title: impl Into<String>) -> Block<'static> {
+        let focused = self.focus == pane;
+        let hx = self.hx[pane as usize];
+        let title = format!("{}{}{}", if focused { "▸" } else { "" }, title.into(), if hx > 0 { format!("→{hx} ") } else { String::new() });
+        let border = if focused { self.theme.border_focused } else { self.theme.border };
+        Block::bordered()
+            .border_style(Style::new().fg(border))
+            .title(Span::styled(title, Style::new().fg(self.theme.accent).add_modifier(Modifier::BOLD)))
+            .style(Style::new().bg(self.theme.bg).fg(self.theme.text))
+    }
+
+    /// Draws a pane's lines (already windowed vertically) with its horizontal scroll, and remembers where it is.
+    fn render_pane(&self, f: &mut Frame, area: Rect, pane: Pane, title: impl Into<String>, lines: Vec<Line<'static>>) {
+        self.rects.borrow_mut().push((pane, area));
+        f.render_widget(Paragraph::new(lines).block(self.pane_block(pane, title)).scroll((0, self.hx[pane as usize])), area);
     }
 
     pub fn with_theme(mut self, theme: Theme) -> Self {
@@ -70,12 +140,6 @@ impl<'a> App<'a> {
         self
     }
 
-    fn block(&self, title: impl Into<String>) -> Block<'static> {
-        Block::bordered()
-            .border_style(Style::new().fg(self.theme.border))
-            .title(Span::styled(title.into(), Style::new().fg(self.theme.accent).add_modifier(Modifier::BOLD)))
-            .style(Style::new().bg(self.theme.bg).fg(self.theme.text))
-    }
 
     /// Moves to a step and presses keys, as the UI would (for tests and scripted views).
     pub fn press(&mut self, keys: &str) {
@@ -106,11 +170,13 @@ impl<'a> App<'a> {
             return Ok(());
         }
         let mut terminal = ratatui::init();
+        mouse(true);
         let result = loop {
             if let Err(e) = terminal.draw(|f| self.draw(f)) {
                 break Err(e);
             }
             match event::read() {
+                Ok(Event::Mouse(m)) => self.mouse(m),
                 Ok(Event::Key(k)) if k.kind == KeyEventKind::Press => {
                     if k.modifiers.contains(KeyModifiers::CONTROL) && k.code == KeyCode::Char('c') {
                         break Ok(());
@@ -123,8 +189,25 @@ impl<'a> App<'a> {
                 Err(e) => break Err(e),
             }
         };
+        mouse(false);
         ratatui::restore();
         result
+    }
+
+    /// The wheel scrolls the pane under the pointer (shift or a sideways swipe: horizontally); a click focuses it.
+    pub fn mouse(&mut self, m: MouseEvent) {
+        let Some(pane) = self.pane_at(m.column, m.row) else { return };
+        let shift = m.modifiers.contains(KeyModifiers::SHIFT);
+        match m.kind {
+            MouseEventKind::ScrollDown if shift => self.scroll(pane, 0, 6),
+            MouseEventKind::ScrollUp if shift => self.scroll(pane, 0, -6),
+            MouseEventKind::ScrollDown => self.scroll(pane, 3, 0),
+            MouseEventKind::ScrollUp => self.scroll(pane, -3, 0),
+            MouseEventKind::ScrollRight => self.scroll(pane, 0, 6),
+            MouseEventKind::ScrollLeft => self.scroll(pane, 0, -6),
+            MouseEventKind::Down(_) => self.focus = pane,
+            _ => {}
+        }
     }
 
     /// Handles a key; true to quit.
@@ -173,6 +256,27 @@ impl<'a> App<'a> {
                 self.input = Some("/".into());
                 None
             }
+            KeyCode::Char(']') | KeyCode::Char('[') => {
+                let i = PANES.iter().position(|p| *p == self.focus).unwrap_or(0) as isize;
+                let step = if code == KeyCode::Char(']') { 1 } else { -1 };
+                self.focus = PANES[(i + step).rem_euclid(PANES.len() as isize) as usize];
+                return false;
+            }
+            KeyCode::Char('J') => return self.scrolled(1, 0),
+            KeyCode::Char('K') => return self.scrolled(-1, 0),
+            KeyCode::Char('L') => return self.scrolled(0, 8),
+            KeyCode::Char('H') => return self.scrolled(0, -8),
+            KeyCode::PageDown => return self.scrolled(10, 0),
+            KeyCode::PageUp => return self.scrolled(-10, 0),
+            KeyCode::Char('0') => {
+                self.vy[self.focus as usize] = 0;
+                self.hx[self.focus as usize] = 0;
+                return false;
+            }
+            KeyCode::Char('z') => {
+                self.zoom = !self.zoom;
+                return false;
+            }
             KeyCode::Char('T') => {
                 self.theme = self.theme.cycle(1);
                 self.status = format!("theme {}", self.theme.name);
@@ -184,10 +288,17 @@ impl<'a> App<'a> {
             Some(i) => {
                 self.cur = i;
                 self.status.clear();
+                // Panes follow the new step again.
+                self.vy = [0; 6];
             }
             None if !matches!(code, KeyCode::Char(':') | KeyCode::Char('/')) => self.status = "no further step that way".into(),
             None => {}
         }
+        false
+    }
+
+    fn scrolled(&mut self, dy: isize, dx: isize) -> bool {
+        self.scroll(self.focus, dy, dx);
         false
     }
 
@@ -268,13 +379,23 @@ impl<'a> App<'a> {
             Constraint::Percentage(30),
         ])
         .areas(bottom);
+        self.rects.borrow_mut().clear();
         self.draw_header(f, header, focused);
-        self.draw_source(f, source);
-        self.draw_calls(f, calls);
-        self.draw_ops(f, ops);
-        self.draw_stack(f, stack);
-        self.draw_memory(f, memory);
-        self.draw_storage(f, storage);
+        let areas = [source, calls, ops, stack, memory, storage];
+        for (pane, area) in PANES.into_iter().zip(areas) {
+            let area = if self.zoom { body } else { area };
+            if self.zoom && pane != self.focus {
+                continue;
+            }
+            match pane {
+                Pane::Source => self.draw_source(f, area),
+                Pane::Calls => self.draw_calls(f, area),
+                Pane::Opcodes => self.draw_ops(f, area),
+                Pane::Stack => self.draw_stack(f, area),
+                Pane::Memory => self.draw_memory(f, area),
+                Pane::Storage => self.draw_storage(f, area),
+            }
+        }
         self.draw_footer(f, footer);
     }
 
@@ -304,7 +425,7 @@ impl<'a> App<'a> {
     fn draw_source(&self, f: &mut Frame, area: Rect) {
         let loc = self.nav.locs[self.cur].as_ref().or_else(|| (0..self.cur).rev().find_map(|i| self.nav.locs[i].as_ref()));
         let Some(loc) = loc else {
-            f.render_widget(Paragraph::new("no source for this step").block(self.block(" source ")), area);
+            self.render_pane(f, area, Pane::Source, " source ", vec![Line::raw("no source for this step")]);
             return;
         };
         let file = &self.s.sources.files[&loc.entry.file];
@@ -314,7 +435,7 @@ impl<'a> App<'a> {
             _ => vec![None; file.text.len()],
         });
         let height = area.height.saturating_sub(2) as usize;
-        let first = loc.line.saturating_sub(height / 2).max(1);
+        let first = self.top(Pane::Source, loc.line.saturating_sub(height / 2 + 1), file.line_count(), height) + 1;
         let exact = self.nav.locs[self.cur].is_some();
         let (start, end) = (loc.entry.start as usize, (loc.entry.start + loc.entry.length) as usize);
         let t = &self.theme;
@@ -354,7 +475,7 @@ impl<'a> App<'a> {
             lines.push(Line::from(spans));
         }
         let title = format!(" {} ", file.name);
-        f.render_widget(Paragraph::new(lines).block(self.block(title)), area);
+        self.render_pane(f, area, Pane::Source, title, lines);
     }
 
     fn draw_calls(&self, f: &mut Frame, area: Rect) {
@@ -384,7 +505,7 @@ impl<'a> App<'a> {
             } else {
                 format!("{} → {}", self.s.name_of(fr.caller), self.s.name_of(fr.target))
             };
-            let call = shorten(&compact_hex(&self.s.describe_call(fr.code_address, &fr.input)), 70);
+            let call = compact_hex(&self.s.describe_call(fr.code_address, &fr.input));
             let ok = match fr.success {
                 Some(true) => "",
                 Some(false) => " ✗",
@@ -393,9 +514,9 @@ impl<'a> App<'a> {
             lines.push(Line::styled(format!("{}{} {who} {call}{ok}", "  ".repeat(fr.depth), short_kind(fr.kind)), style));
         }
         let height = area.height.saturating_sub(2) as usize;
-        let skip = cur_frame.saturating_sub(height / 2).min(lines.len().saturating_sub(height));
-        let lines: Vec<Line> = lines.into_iter().skip(skip).collect();
-        f.render_widget(Paragraph::new(lines).block(self.block(" calls ")), area);
+        let skip = self.top(Pane::Calls, cur_frame.saturating_sub(height / 2), lines.len(), height);
+        let lines: Vec<Line> = lines.into_iter().skip(skip).take(height).collect();
+        self.render_pane(f, area, Pane::Calls, " calls ", lines);
     }
 
     fn draw_ops(&self, f: &mut Frame, area: Rect) {
@@ -405,7 +526,7 @@ impl<'a> App<'a> {
         match self.s.code_of(&self.run.trace, st) {
             Some((_, map)) => {
                 let ix = map.pc_to_ix.get(st.pc).copied().unwrap_or(0);
-                let from = ix.saturating_sub(height / 2);
+                let from = self.top(Pane::Opcodes, ix.saturating_sub(height / 2), map.ix_to_pc.len(), height);
                 for i in from..(from + height).min(map.ix_to_pc.len()) {
                     let pc = map.ix_to_pc[i];
                     let op = map.code[pc];
@@ -421,7 +542,7 @@ impl<'a> App<'a> {
                         Some(Jump::Out) if op == 0x56 => " ↗",
                         _ => "",
                     };
-                    let text = shorten(&format!("{pc:>5} {name}{imm}{jump}"), area.width.saturating_sub(3) as usize);
+                    let text = format!("{pc:>5} {name}{imm}{jump}");
                     let style = if pc == st.pc {
                         Style::new().fg(self.theme.bg).bg(self.theme.warn).add_modifier(Modifier::BOLD)
                     } else if matches!(op, 0x55 | 0x54) {
@@ -436,24 +557,27 @@ impl<'a> App<'a> {
             }
             None => lines.push(Line::raw("code not from this compile")),
         }
-        f.render_widget(Paragraph::new(lines).block(self.block(" opcodes ")), area);
+        self.render_pane(f, area, Pane::Opcodes, " opcodes ", lines);
     }
 
     fn draw_stack(&self, f: &mut Frame, area: Rect) {
         let st = &self.run.trace.steps[self.cur];
+        let height = area.height.saturating_sub(2) as usize;
+        let skip = self.top(Pane::Stack, 0, st.stack.len(), height);
         let lines: Vec<Line> = st
             .stack
             .iter()
             .rev()
             .enumerate()
-            .take(area.height.saturating_sub(2) as usize)
+            .skip(skip)
+            .take(height)
             .map(|(i, v)| Line::from(vec![Span::styled(format!("{i:>2} "), Style::new().fg(self.theme.dim)), Span::styled(short_word(*v), Style::new().fg(self.theme.code_color(None)))]))
             .collect();
         let title = match st.result {
             Some(r) => format!(" stack · result {} ", short_word(r)),
             None => " stack ".into(),
         };
-        f.render_widget(Paragraph::new(lines).block(self.block(title)), area);
+        self.render_pane(f, area, Pane::Stack, title, lines);
     }
 
     fn draw_memory(&self, f: &mut Frame, area: Rect) {
@@ -486,13 +610,14 @@ impl<'a> App<'a> {
             let label = if off == 0x40 { "fp" } else { "  " };
             lines.push(Line::from(vec![
                 Span::styled(format!("{off:>4x}{label} "), Style::new().fg(self.theme.dim)),
-                Span::styled(shorten_mid(&hex, area.width.saturating_sub(10) as usize), style),
+                Span::styled(if self.hx[Pane::Memory as usize] > 0 || self.zoom { hex.clone() } else { shorten_mid(&hex, area.width.saturating_sub(10) as usize) }, style),
             ]));
         }
         let height = area.height.saturating_sub(2) as usize;
-        let skip = lines.len().saturating_sub(height).min(fresh.first().map(|o| o / 32).unwrap_or(0).saturating_sub(height / 2));
-        let lines: Vec<Line> = lines.into_iter().skip(skip).collect();
-        f.render_widget(Paragraph::new(lines).block(self.block(format!(" memory · {} bytes ", st.memory_size))), area);
+        let auto = fresh.first().map(|o| o / 32).unwrap_or(0).saturating_sub(height / 2);
+        let skip = self.top(Pane::Memory, auto, lines.len(), height);
+        let lines: Vec<Line> = lines.into_iter().skip(skip).take(height).collect();
+        self.render_pane(f, area, Pane::Memory, format!(" memory · {} bytes ", st.memory_size), lines);
     }
 
     fn draw_storage(&self, f: &mut Frame, area: Rect) {
@@ -508,16 +633,21 @@ impl<'a> App<'a> {
             };
             let style = if i == self.cur { Style::new().fg(color).add_modifier(Modifier::BOLD | Modifier::REVERSED) } else { Style::new().fg(color) };
             let who = self.s.name_of(steps[i].address);
-            lines.push(Line::styled(shorten(&compact_hex(&format!("{who}: {text}")), area.width.saturating_sub(2) as usize), style));
-            if lines.len() >= height {
+            let text = format!("{who}: {text}");
+            // Full keys when scrolled sideways or zoomed; compact ones otherwise.
+            let text = if self.hx[Pane::Storage as usize] > 0 || self.zoom { text } else { compact_hex(&text) };
+            lines.push(Line::styled(text, style));
+            if lines.len() >= 2000 {
                 break;
             }
         }
-        f.render_widget(Paragraph::new(lines).block(self.block(" storage (newest first) ")), area);
+        let skip = self.top(Pane::Storage, 0, lines.len(), height);
+        let lines: Vec<Line> = lines.into_iter().skip(skip).take(height).collect();
+        self.render_pane(f, area, Pane::Storage, " storage (newest first) ", lines);
     }
 
     fn draw_footer(&self, f: &mut Frame, area: Rect) {
-        let help = "Tab other run (split)  = divergence  T theme  j/k op  n/N line  s/S into  f/F out  c/C continue  g/G ends  /search ;,  :b line  :w var  :pc n  :q";
+        let help = "[ ] pane  HJKL scroll  z zoom  T theme  Tab/= split  j/k op  n/N line  s/S into  f/F out  c/C continue  g/G ends  /search ;,  :b line  :w var  :pc n  :q";
         let second = match &self.input {
             Some(i) => Line::styled(i.clone(), Style::new().fg(self.theme.text).add_modifier(Modifier::BOLD)),
             None => Line::styled(self.status.clone(), Style::new().fg(self.theme.accent)),
@@ -535,15 +665,6 @@ fn short_kind(kind: &str) -> &str {
     }
 }
 
-fn shorten(s: &str, max: usize) -> String {
-    if s.chars().count() <= max {
-        s.to_string()
-    } else {
-        let mut t: String = s.chars().take(max.saturating_sub(1)).collect();
-        t.push('…');
-        t
-    }
-}
 
 fn shorten_mid(s: &str, max: usize) -> String {
     if s.len() <= max || max < 8 {
@@ -608,6 +729,7 @@ pub fn split(sa: &Session, ra: &Run, la: &str, sb: &Session, rb: &Run, lb: &str,
     }
     let mut focus_b = false;
     let mut terminal = ratatui::init();
+    mouse(true);
     let result = loop {
         let drawn = terminal.draw(|f| {
             let [top, bottom] = Layout::vertical([Constraint::Percentage(50), Constraint::Percentage(50)]).areas(f.area());
@@ -618,6 +740,13 @@ pub fn split(sa: &Session, ra: &Run, la: &str, sb: &Session, rb: &Run, lb: &str,
             break Err(e);
         }
         match event::read() {
+            Ok(Event::Mouse(m)) => {
+                if a.pane_at(m.column, m.row).is_some() {
+                    a.mouse(m);
+                } else {
+                    b.mouse(m);
+                }
+            }
             Ok(Event::Key(k)) if k.kind == KeyEventKind::Press => {
                 if k.modifiers.contains(KeyModifiers::CONTROL) && k.code == KeyCode::Char('c') {
                     break Ok(());
@@ -649,13 +778,44 @@ pub fn split(sa: &Session, ra: &Run, la: &str, sb: &Session, rb: &Run, lb: &str,
             Err(e) => break Err(e),
         }
     };
+    mouse(false);
     ratatui::restore();
     result
+}
+
+/// Mouse reporting on or off (the wheel then scrolls panes instead of the terminal's history).
+fn mouse(on: bool) {
+    use ratatui::crossterm::{event::DisableMouseCapture, event::EnableMouseCapture, execute};
+    let mut out = std::io::stdout();
+    let _ = if on { execute!(out, EnableMouseCapture) } else { execute!(out, DisableMouseCapture) };
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Panes scroll on their own, sideways too, and zoom; moving to another step re-centres them.
+    #[test]
+    fn panes_scroll_and_zoom() {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/diff_fixture/a");
+        let Ok(mut s) = Session::compile(&root, "test/Counter.t.sol") else { return };
+        let run = s.run_test("CounterTest", "test_bumpTwice", false).unwrap();
+        let mut app = App::new(&s, &run.test, "t".into());
+        let before = app.render_text(100, 30);
+        app.press("]"); // focus calls
+        assert_eq!(app.focus, Pane::Calls);
+        app.press("[");
+        app.press("KKK"); // scroll the source up (it already shows the end of this short file)
+        let scrolled = app.render_text(100, 30);
+        assert_ne!(before, scrolled);
+        app.press("LL"); // and sideways
+        assert!(app.render_text(100, 30).contains("→16"));
+        app.press("z");
+        let zoomed = app.render_text(100, 30);
+        assert!(!zoomed.contains(" calls "), "zoom shows only the focused pane");
+        app.press("zk"); // unzoom, step back: panes follow the step again
+        assert_eq!(app.vy, [0; 6]);
+    }
 
     /// The source pane colours Solidity by the theme's code tokens.
     #[test]

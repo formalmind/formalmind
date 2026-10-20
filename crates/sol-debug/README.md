@@ -29,6 +29,10 @@ Drop `--tui` to print the trace (`--lines` for one line per Solidity line) and t
 | `:b 58`, `:b File.sol:58` | toggle a line breakpoint |
 | `:w priceBooks` | stop on storage writes whose name contains it |
 | `:pc 1621`, `:step 1200` | jump |
+| `[` / `]` | focus the previous / next pane |
+| `H` `J` `K` `L`, PgUp/PgDn | scroll the focused pane (the mouse wheel scrolls the pane under it; shift-wheel sideways) |
+| `z` / `0` | zoom the focused pane / reset its scroll |
+| `T`, `:theme dracula` | next theme / a theme by name (`--theme` at start) |
 | `q` | quit |
 
 ## Compare a protocol with its port
