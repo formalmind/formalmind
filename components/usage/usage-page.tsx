@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { GitFork, Star } from "lucide-react";
+import { Download, GitFork, Star } from "lucide-react";
 import { notify } from "@/lib/notifications";
 import { ROLE_COLORS } from "@/lib/swarm-roles";
 import type { SwarmCost, SwarmItem, SwarmRole } from "@/lib/swarm";
@@ -23,14 +23,142 @@ function sumBy(costs: SwarmCost[], key: (c: SwarmCost) => string) {
 	return [...totals].sort((a, b) => b[1] - a[1]);
 }
 
-/** Historical spend: every cost line the swarm wrote to its ledger issue, by day, role and project. */
-
 /** The ledger names a run by its job (prove, review, ...); colour each by the agent that does it. */
 const LEDGER_ROLES: Record<string, SwarmRole> = { plan: "planner", prove: "prover", rebuild: "rebuilder", review: "reviewer", merge: "merger", edit: "editor", chief: "chief", assist: "assistant", answer: "assistant" };
+const roleColor = (role: string) => ROLE_COLORS[(LEDGER_ROLES[role] ?? role) as SwarmRole] ?? "hsl(var(--muted-foreground))";
+const PAGE = 8;
+
+/** A shimmering block the exact size of what it stands in for, so nothing moves when the data lands. */
+const Bone = ({ className = "" }: { className?: string }) => <span className={`fm-shimmer inline-block rounded ${className}`} aria-hidden />;
+
+const Label = ({ children }: { children: React.ReactNode }) => (
+	<p className="font-mono text-[11px] font-medium uppercase tracking-wider text-muted-foreground">{children}</p>
+);
+
+function Card({ label, action, children, className = "" }: { label: string; action?: React.ReactNode; children: React.ReactNode; className?: string }) {
+	return (
+		<section className={`flex flex-col rounded-2xl border bg-card ${className}`}>
+			<header className="flex h-11 shrink-0 items-center justify-between border-b px-4">
+				<Label>{label}</Label>
+				{action}
+			</header>
+			<div className="flex min-h-0 flex-1 flex-col p-4">{children}</div>
+		</section>
+	);
+}
+
+/** Up or down against the previous period of the same length. */
+function Delta({ now, before }: { now: number; before: number }) {
+	if (before === 0 && now === 0) return <span className="font-mono text-xs text-muted-foreground">no change</span>;
+	const pct = before === 0 ? 100 : ((now - before) / before) * 100;
+	const up = pct >= 0;
+	return (
+		<span className={`rounded-md px-1.5 py-0.5 font-mono text-xs font-medium ${up ? "bg-amber-500/10 text-amber-700 dark:text-amber-400" : "bg-emerald-500/10 text-emerald-700 dark:text-emerald-400"}`}>
+			{up ? "↗" : "↘"} {Math.abs(pct).toFixed(1)}%
+		</span>
+	);
+}
+
+function Sparkline({ values }: { values: number[] }) {
+	const max = Math.max(0.01, ...values);
+	const pts = values.map((v, i) => `${(i / Math.max(1, values.length - 1)) * 100},${28 - (v / max) * 26}`).join(" ");
+	return (
+		<svg viewBox="0 0 100 30" preserveAspectRatio="none" className="h-8 w-24" aria-hidden>
+			<polyline points={pts} fill="none" stroke="currentColor" strokeWidth="1.5" vectorEffect="non-scaling-stroke" className="text-foreground/70" />
+		</svg>
+	);
+}
+
+function MiniBars({ values }: { values: number[] }) {
+	const last = values.slice(-8);
+	const max = Math.max(1, ...last);
+	return (
+		<div className="flex h-8 items-end gap-0.5" aria-hidden>
+			{last.map((v, i) => (
+				<span key={i} className={`w-1.5 rounded-sm ${i === last.length - 1 ? "bg-foreground" : "bg-foreground/25"}`} style={{ height: `${Math.max(8, (v / max) * 100)}%` }} />
+			))}
+		</div>
+	);
+}
+
+/** Daily spend as a line with an area under it; hovering a day shows its total and runs. */
+function TrendChart({ days }: { days: { date: string; usd: number; runs: number }[] }) {
+	const [hover, setHover] = useState<number | null>(null);
+	const max = Math.max(0.01, ...days.map((d) => d.usd));
+	const top = Math.ceil(max * 1.15 * 100) / 100;
+	const x = (i: number) => (i / Math.max(1, days.length - 1)) * 100;
+	const y = (v: number) => 100 - (v / top) * 100;
+	const line = days.map((d, i) => `${i ? "L" : "M"}${x(i)},${y(d.usd)}`).join(" ");
+	const h = hover !== null ? days[hover] : null;
+	return (
+		<div className="relative h-56 pl-10" onMouseLeave={() => setHover(null)}>
+			{[0, 0.5, 1].map((f) => (
+				<div key={f} className="absolute inset-x-0 border-t border-dashed border-border" style={{ top: `${(1 - f) * 100}%` }}>
+					<span className="absolute -top-2 left-0 font-mono text-[10px] text-muted-foreground">{usd(top * f)}</span>
+				</div>
+			))}
+			<svg viewBox="0 0 100 100" preserveAspectRatio="none" className="absolute inset-y-0 left-10 right-0 h-full w-[calc(100%-2.5rem)] overflow-visible" aria-hidden>
+				<path d={`${line} L100,100 L0,100 Z`} className="fill-foreground/[0.06]" />
+				<path d={line} fill="none" stroke="currentColor" strokeWidth="1.75" vectorEffect="non-scaling-stroke" className="text-foreground" />
+			</svg>
+			<div className="absolute inset-y-0 left-10 right-0 flex">
+				{days.map((d, i) => (
+					<div key={d.date} className="relative flex-1" onMouseEnter={() => setHover(i)}>
+						{hover === i ? <div className="absolute inset-y-0 left-1/2 w-px bg-foreground/20" /> : null}
+					</div>
+				))}
+			</div>
+			{h && hover !== null ? (
+				<div className="shadow-pop pointer-events-none absolute top-2 z-10 rounded-xl bg-popover px-3 py-2 text-xs" style={{ left: `calc(2.5rem + ${x(hover)}% * (100% - 2.5rem) / 100%)`, transform: `translateX(${x(hover) > 70 ? "-105%" : "8px"})` }}>
+					<p className="font-medium">{h.date}</p>
+					<p className="mt-1 flex justify-between gap-4 font-mono"><span className="text-muted-foreground">spent</span>{usd(h.usd)}</p>
+					<p className="flex justify-between gap-4 font-mono"><span className="text-muted-foreground">runs</span>{h.runs}</p>
+				</div>
+			) : null}
+		</div>
+	);
+}
+
+/** Runs per day, a column per week, like GitHub's contribution graph. */
+function Heatmap({ costs }: { costs: SwarmCost[] }) {
+	const weeks = 13;
+	const today = new Date();
+	const start = new Date(today.getFullYear(), today.getMonth(), today.getDate() - today.getDay() - (weeks - 1) * 7);
+	const counts = new Map<string, number>();
+	for (const c of costs) counts.set(day(new Date(c.createdAt)), (counts.get(day(new Date(c.createdAt))) ?? 0) + 1);
+	const cells = Array.from({ length: weeks * 7 }, (_, i) => {
+		const d = new Date(start.getFullYear(), start.getMonth(), start.getDate() + i);
+		return { date: day(d), runs: counts.get(day(d)) ?? 0, future: d > today };
+	});
+	const max = Math.max(1, ...cells.map((c) => c.runs));
+	const level = (n: number) => (n === 0 ? 0 : Math.ceil((n / max) * 4));
+	const shade = ["bg-muted", "bg-foreground/20", "bg-foreground/40", "bg-foreground/65", "bg-foreground/90"];
+	return (
+		<div>
+			<div className="grid grid-flow-col grid-rows-7 gap-1">
+				{cells.map((c) => (
+					<span key={c.date} title={`${c.date}: ${c.runs} runs`} className={`aspect-square rounded-[3px] ${c.future ? "opacity-0" : shade[level(c.runs)]}`} />
+				))}
+			</div>
+			<div className="mt-3 flex items-center gap-1 text-[11px] text-muted-foreground">
+				Less {shade.map((s) => <span key={s} className={`size-2.5 rounded-[2px] ${s}`} />)} More
+			</div>
+		</div>
+	);
+}
+
+function toCsv(costs: SwarmCost[]) {
+	const rows = [["time", "role", "ref", "repo", "usd"], ...costs.map((c) => [c.createdAt, c.role, c.ref, c.repo, c.usd.toFixed(4)])];
+	return rows.map((r) => r.map((v) => `"${String(v).replace(/"/g, '""')}"`).join(",")).join("\n");
+}
+
+/** Historical spend: every cost line the swarm recorded, by day, role and project. */
 export function UsagePage() {
 	const [costs, setCosts] = useState<SwarmCost[] | null>(null);
 	const [error, setError] = useState<string | null>(null);
 	const [range, setRange] = useState<Range>(30);
+	const [query, setQuery] = useState("");
+	const [page, setPage] = useState(0);
 
 	useEffect(() => {
 		// Spend is kept on Cloudflare (the Project Durable Object), so this page works while GitHub is unreachable.
@@ -43,119 +171,221 @@ export function UsagePage() {
 			.catch((err) => {
 				const message = err instanceof Error ? err.message : "Could not load usage.";
 				setError(message);
+				setCosts([]);
 				notify.error("Could not load usage", { id: "usage", description: message });
 			});
 	}, []);
 
-	const { days, inRange, total, peak } = useMemo(() => {
-		const days: { date: string; usd: number }[] = [];
+	const s = useMemo(() => {
+		const all = costs ?? [];
 		const today = new Date();
-		for (let i = range - 1; i >= 0; i--) days.push({ date: day(new Date(today.getFullYear(), today.getMonth(), today.getDate() - i)), usd: 0 });
+		const dayAt = (back: number) => day(new Date(today.getFullYear(), today.getMonth(), today.getDate() - back));
+		const days = Array.from({ length: range }, (_, i) => ({ date: dayAt(range - 1 - i), usd: 0, runs: 0 }));
 		const index = new Map(days.map((d, i) => [d.date, i]));
-		const inRange = (costs ?? []).filter((c) => index.has(day(new Date(c.createdAt))));
-		for (const c of inRange) days[index.get(day(new Date(c.createdAt)))!].usd += c.usd;
-		const total = inRange.reduce((s, c) => s + c.usd, 0);
-		return { days, inRange, total, peak: Math.max(0.01, ...days.map((d) => d.usd)) };
+		const prevStart = dayAt(2 * range - 1);
+		const prevEnd = dayAt(range);
+		let prev = 0;
+		let prevRuns = 0;
+		const inRange: SwarmCost[] = [];
+		for (const c of all) {
+			const d = day(new Date(c.createdAt));
+			const i = index.get(d);
+			if (i !== undefined) {
+				days[i].usd += c.usd;
+				days[i].runs += 1;
+				inRange.push(c);
+			} else if (d >= prevStart && d <= prevEnd) {
+				prev += c.usd;
+				prevRuns += 1;
+			}
+		}
+		const total = inRange.reduce((t, c) => t + c.usd, 0);
+		const peak = days.reduce((a, b) => (b.usd > a.usd ? b : a), days[0]);
+		return {
+			days, inRange, total, prev, prevRuns, peak,
+			today: days.at(-1)!,
+			allTime: all.reduce((t, c) => t + c.usd, 0),
+			byRole: sumBy(inRange, (c) => c.role),
+			byRepo: sumBy(inRange, (c) => c.repo || "unknown"),
+		};
 	}, [costs, range]);
 
-	const byRole = sumBy(inRange, (c) => c.role);
-	const byRepo = sumBy(inRange, (c) => c.repo || "unknown");
-	const allTime = (costs ?? []).reduce((s, c) => s + c.usd, 0);
+	const filtered = useMemo(() => {
+		const q = query.trim().toLowerCase();
+		const rows = [...s.inRange].reverse();
+		return q ? rows.filter((c) => `${c.role} ${c.ref} ${c.repo}`.toLowerCase().includes(q)) : rows;
+	}, [s.inRange, query]);
+	const pages = Math.max(1, Math.ceil(filtered.length / PAGE));
+	const shown = filtered.slice(page * PAGE, page * PAGE + PAGE);
+	useEffect(() => setPage(0), [query, range]);
+
+	const ready = costs !== null;
+	const exportCsv = () => {
+		const url = URL.createObjectURL(new Blob([toCsv(s.inRange)], { type: "text/csv" }));
+		const a = Object.assign(document.createElement("a"), { href: url, download: `formal-mind-usage-${range}d.csv` });
+		a.click();
+		URL.revokeObjectURL(url);
+	};
+
+	const stats: { label: string; value: string; side: React.ReactNode; foot: React.ReactNode }[] = [
+		{ label: "Spent", value: usd(s.total), side: <Sparkline values={s.days.map((d) => d.usd)} />, foot: <><Delta now={s.total} before={s.prev} /><span>vs previous {range} days</span></> },
+		{ label: "Runs", value: String(s.inRange.length), side: <MiniBars values={s.days.map((d) => d.runs)} />, foot: <><Delta now={s.inRange.length} before={s.prevRuns} /><span>vs previous {range} days</span></> },
+		{ label: "Per run", value: usd(s.inRange.length ? s.total / s.inRange.length : 0), side: null, foot: <span>average cost of one agent turn</span> },
+		{ label: "Today", value: usd(s.today.usd), side: null, foot: <span>{s.today.runs} runs · {usd(s.allTime)} all time</span> },
+	];
 
 	return (
 		<div className="flex min-h-0 flex-1 flex-col overflow-y-auto">
-			<main className="mx-auto w-full max-w-4xl space-y-6 px-6 pb-10 pt-2">
-				{error ? <p className="text-sm text-destructive">{error}</p> : null}
-				<div className="flex flex-wrap items-center justify-between gap-4">
+			<main className="mx-auto w-full max-w-6xl space-y-4 px-6 pb-10 pt-4">
+				<div className="flex flex-wrap items-end justify-between gap-4">
 					<div>
-						<p className="text-sm text-muted-foreground">Spent in the last {range} days</p>
-						<p className="mt-1 text-3xl font-semibold tabular-nums">{costs ? usd(total) : "…"}</p>
-						<p className="mt-1 text-xs text-muted-foreground">
-							{costs ? `${inRange.length} runs · ${usd(allTime)} all time` : "Reading the ledger…"}
-						</p>
+						<h1 className="text-2xl font-semibold tracking-tight">Usage</h1>
+						<p className="mt-1 text-sm text-muted-foreground">What the swarm spent, and on what.</p>
 					</div>
-					<div className="inline-flex rounded-full border p-0.5 text-sm">
-						{RANGES.map((r) => (
-							<button
-								key={r}
-								type="button"
-								onClick={() => setRange(r)}
-								className={`rounded-full px-3 py-1 ${r === range ? "bg-foreground text-background" : "text-muted-foreground hover:text-foreground"}`}
-							>
-								{r}d
-							</button>
-						))}
-					</div>
-				</div>
-
-				<section className="rounded-xl border p-5">
-					<div className="flex h-40 items-end gap-px">
-						{days.map((d) => (
-							<div key={d.date} className="group relative flex h-full flex-1 items-end" title={`${d.date}: ${usd(d.usd)}`}>
-								<div
-									className="w-full rounded-t-sm bg-foreground/80 transition-colors group-hover:bg-foreground"
-									style={{ height: `${(d.usd / peak) * 100}%`, minHeight: d.usd > 0 ? 2 : 0 }}
-								/>
-							</div>
-						))}
-					</div>
-					<div className="mt-3 flex justify-between text-xs text-muted-foreground tabular-nums">
-						<span>{days[0]?.date}</span>
-						<span>peak {usd(peak === 0.01 ? 0 : peak)} / day</span>
-						<span>{days.at(-1)?.date}</span>
-					</div>
-				</section>
-
-				<div className="grid items-start gap-4 sm:grid-cols-2">
-					<Breakdown title="By role" rows={byRole} total={total} color={(k) => ROLE_COLORS[(LEDGER_ROLES[k] ?? k) as SwarmRole]} />
-					<Breakdown title="By project" rows={byRepo} total={total} />
-				</div>
-
-				<section className="rounded-xl border">
-					<h2 className="border-b px-5 py-3 text-sm font-medium">Runs</h2>
-					{inRange.length === 0 ? (
-						<p className="px-5 py-4 text-sm text-muted-foreground">No runs in this range.</p>
-					) : (
-						<ul className="max-h-96 divide-y overflow-y-auto text-sm">
-							{[...inRange].reverse().map((c, i) => (
-								<li key={`${c.createdAt}-${i}`} className="flex items-center gap-4 px-5 py-2.5">
-									<span className="w-32 shrink-0 text-xs text-muted-foreground tabular-nums">{localTime(c.createdAt)}</span>
-									<span className="min-w-0 flex-1 truncate">
-										{c.role}
-										{c.ref ? <> <span className="text-muted-foreground">on</span> <RefCard repo={c.repo} ref_={c.ref} /></> : null}
-										<span className="text-muted-foreground"> · </span>
-										<RepoCard repo={c.repo} />
-									</span>
-									<span className="tabular-nums">{usd(c.usd)}</span>
-								</li>
+					<div className="flex items-center gap-2">
+						<div className="inline-flex rounded-xl bg-muted p-1 text-sm">
+							{RANGES.map((r) => (
+								<button key={r} type="button" onClick={() => setRange(r)} className={`rounded-lg px-3 py-1 ${r === range ? "shadow-card bg-background font-medium" : "text-muted-foreground hover:text-foreground"}`}>
+									{r === 7 ? "7 days" : r === 30 ? "30 days" : "90 days"}
+								</button>
 							))}
+						</div>
+						<button type="button" onClick={exportCsv} disabled={!ready || s.inRange.length === 0} className="btn-dark h-9 gap-2 px-3 text-sm disabled:opacity-50">
+							<Download className="size-4" /> Export CSV
+						</button>
+					</div>
+				</div>
+				{error ? <p className="text-sm text-destructive">{error}</p> : null}
+
+				<div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+					{stats.map((st) => (
+						<section key={st.label} className="rounded-2xl border bg-muted/40 p-1">
+							<div className="shadow-card rounded-xl bg-card px-4 py-3">
+								<Label>{st.label}</Label>
+								<div className="mt-2 flex h-9 items-center justify-between gap-2">
+									{ready ? <span className="font-mono text-2xl font-medium tabular-nums">{st.value}</span> : <Bone className="h-7 w-28" />}
+									{ready ? st.side : null}
+								</div>
+							</div>
+							<div className="flex h-8 items-center gap-2 px-3 text-xs text-muted-foreground">{ready ? st.foot : <Bone className="h-3 w-40" />}</div>
+						</section>
+					))}
+				</div>
+
+				<div className="grid gap-4 lg:grid-cols-[1fr_20rem]">
+					<Card label="Spend trend">
+						<div className="mb-4 flex items-baseline gap-3">
+							{ready ? <span className="font-mono text-xl font-medium tabular-nums">{usd(s.total)}</span> : <Bone className="h-6 w-24" />}
+							<span className="text-xs text-muted-foreground">over {range} days</span>
+						</div>
+						{ready ? <TrendChart days={s.days} /> : <Bone className="h-56 w-full rounded-lg" />}
+						<div className="mt-4 grid grid-cols-3 divide-x rounded-xl border text-sm">
+							{[
+								["Avg / day", usd(s.total / range)],
+								["Busiest day", s.peak.usd > 0 ? s.peak.date : "—"],
+								["All time", usd(s.allTime)],
+							].map(([k, v]) => (
+								<div key={k} className="px-4 py-2.5">
+									<p className="text-xs text-muted-foreground">{k}</p>
+									<p className="mt-0.5 h-5 font-mono tabular-nums">{ready ? v : <Bone className="h-4 w-20" />}</p>
+								</div>
+							))}
+						</div>
+					</Card>
+
+					<Card label="By agent">
+						<div className="flex h-2 overflow-hidden rounded-full bg-muted">
+							{ready ? s.byRole.map(([k, v]) => <span key={k} style={{ width: `${s.total ? (v / s.total) * 100 : 0}%`, background: roleColor(k) }} />) : null}
+						</div>
+						<ul className="mt-4 space-y-0.5 text-sm">
+							{ready
+								? s.byRole.map(([k, v]) => (
+										<li key={k} className="flex h-9 items-center gap-2 border-b last:border-0">
+											<span className="size-2 rounded-sm" style={{ background: roleColor(k) }} />
+											<span className="flex-1 capitalize">{k}</span>
+											<span className="font-mono tabular-nums">{usd(v)}</span>
+											<span className="w-10 text-right font-mono text-xs text-muted-foreground">{s.total ? Math.round((v / s.total) * 100) : 0}%</span>
+										</li>
+									))
+								: Array.from({ length: 5 }, (_, i) => (
+										<li key={i} className="flex h-9 items-center gap-2"><Bone className="h-3 w-full" /></li>
+									))}
+							{ready && s.byRole.length === 0 ? <li className="py-2 text-muted-foreground">Nothing in this range.</li> : null}
 						</ul>
-					)}
-				</section>
+					</Card>
+				</div>
+
+				<div className="grid gap-4 lg:grid-cols-[1fr_20rem]">
+					<Card
+						label="Runs"
+						action={
+							<input
+								value={query}
+								onChange={(e) => setQuery(e.target.value)}
+								placeholder="Search runs…"
+								className="h-7 w-48 rounded-lg border bg-transparent px-2.5 text-xs outline-none focus:border-foreground/30"
+							/>
+						}
+						className="[&>div]:p-0"
+					>
+						<div className="grid grid-cols-[8.5rem_1fr_5rem] gap-4 border-b px-4 py-2 font-mono text-[11px] uppercase tracking-wider text-muted-foreground">
+							<span>Time</span>
+							<span>Agent · item · project</span>
+							<span className="text-right">Cost</span>
+						</div>
+						<ul className="divide-y text-sm">
+							{ready
+								? shown.map((c, i) => (
+										<li key={`${c.createdAt}-${i}`} className="grid h-11 grid-cols-[8.5rem_1fr_5rem] items-center gap-4 px-4">
+											<span className="font-mono text-xs text-muted-foreground tabular-nums">{localTime(c.createdAt)}</span>
+											<span className="flex min-w-0 items-center gap-2 truncate">
+												<span className="inline-flex shrink-0 items-center gap-1.5 rounded-full bg-muted px-2 py-0.5 text-xs capitalize">
+													<span className="size-1.5 rounded-full" style={{ background: roleColor(c.role) }} />
+													{c.role}
+												</span>
+												{c.ref ? <RefCard repo={c.repo} ref_={c.ref} /> : null}
+												<span className="truncate"><RepoCard repo={c.repo} /></span>
+											</span>
+											<span className="text-right font-mono tabular-nums">{usd(c.usd)}</span>
+										</li>
+									))
+								: Array.from({ length: PAGE }, (_, i) => (
+										<li key={i} className="flex h-11 items-center px-4"><Bone className="h-3 w-full" /></li>
+									))}
+							{ready && shown.length === 0 ? <li className="flex h-11 items-center px-4 text-muted-foreground">{query ? "No runs match." : "No runs in this range."}</li> : null}
+						</ul>
+						<div className="flex h-12 items-center justify-between border-t px-4 text-xs text-muted-foreground">
+							<span>{ready ? `${filtered.length} runs` : ""}</span>
+							<div className="flex items-center gap-1">
+								<button type="button" disabled={page === 0} onClick={() => setPage(page - 1)} className="rounded-md border px-2 py-1 disabled:opacity-40">Previous</button>
+								<span className="px-2 font-mono">{page + 1} / {pages}</span>
+								<button type="button" disabled={page >= pages - 1} onClick={() => setPage(page + 1)} className="rounded-md border px-2 py-1 disabled:opacity-40">Next</button>
+							</div>
+						</div>
+					</Card>
+
+					<div className="space-y-4">
+						<Card label="Activity">
+							<p className="text-xs text-muted-foreground">Runs per day, last 13 weeks</p>
+							<div className="mt-3">{ready ? <Heatmap costs={costs ?? []} /> : <Bone className="aspect-[13/7] w-full rounded-lg" />}</div>
+						</Card>
+						<Card label="By project">
+							<ul className="space-y-0.5 text-sm">
+								{ready
+									? s.byRepo.map(([k, v]) => (
+											<li key={k} className="flex h-9 items-center gap-2 border-b last:border-0">
+												<span className="flex-1 truncate"><RepoCard repo={k} /></span>
+												<span className="font-mono tabular-nums">{usd(v)}</span>
+											</li>
+										))
+									: Array.from({ length: 2 }, (_, i) => <li key={i} className="flex h-9 items-center"><Bone className="h-3 w-full" /></li>)}
+								{ready && s.byRepo.length === 0 ? <li className="py-2 text-muted-foreground">Nothing in this range.</li> : null}
+							</ul>
+						</Card>
+					</div>
+				</div>
 			</main>
 		</div>
-	);
-}
-
-function Breakdown({ title, rows, total, color }: { title: string; rows: [string, number][]; total: number; color?: (key: string) => string | undefined }) {
-	return (
-		<section className="rounded-xl border p-4">
-			<h2 className="mb-2.5 text-sm font-medium">{title}</h2>
-			{rows.length === 0 ? <p className="text-sm text-muted-foreground">Nothing yet.</p> : null}
-			<ul className="space-y-2 text-sm">
-				{rows.map(([key, value]) => (
-					<li key={key}>
-						<div className="flex justify-between gap-2">
-							<span className="truncate">{key}</span>
-							<span className="tabular-nums">{usd(value)}</span>
-						</div>
-						<div className="mt-1 h-1 rounded-full bg-muted">
-							<div className="h-full rounded-full bg-foreground/70" style={{ width: `${total ? (value / total) * 100 : 0}%`, background: color?.(key) }} />
-						</div>
-					</li>
-				))}
-			</ul>
-		</section>
 	);
 }
 
