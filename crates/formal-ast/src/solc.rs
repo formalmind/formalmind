@@ -47,32 +47,47 @@ impl Project {
                 }
             }
         }
+        // Like forge, a remapping between folders ends in `/` on both sides (`v4-core/=dependencies/v4-core/src` →
+        // `…/src/`); solc takes them literally and would look for `dependencies/v4-core/srctypes/…`.
+        for r in &mut project.remappings {
+            *r = normalize_remapping(r);
+        }
         if project.libs.is_empty() {
             project.libs.push("lib".into());
         }
-        // Each dependency resolves its own imports with its own remappings (solc context remappings, as forge does).
+        // A dependency's own remappings.txt, scoped to imports from inside it (forge does the same): v4-core's
+        // `solmate/=lib/solmate/` becomes `dependencies/v4-core/:solmate/=dependencies/v4-core/lib/solmate/`.
         for lib in project.libs.clone() {
-            let Ok(entries) = std::fs::read_dir(root.join(&lib)) else { continue };
-            for dep in entries.flatten() {
-                let Ok(text) = std::fs::read_to_string(dep.path().join("remappings.txt")) else { continue };
-                let dir = format!("{}/{}", lib.trim_end_matches('/'), dep.file_name().to_string_lossy());
+            let Ok(dirs) = std::fs::read_dir(root.join(&lib)) else { continue };
+            let mut dirs: Vec<_> = dirs.flatten().map(|d| d.file_name().to_string_lossy().to_string()).collect();
+            dirs.sort();
+            for dep in dirs {
+                let Ok(text) = std::fs::read_to_string(root.join(&lib).join(&dep).join("remappings.txt")) else { continue };
+                let base = format!("{lib}/{dep}/");
                 for line in text.lines().map(str::trim).filter(|l| !l.is_empty() && !l.starts_with('#') && !l.contains(':')) {
-                    if let Some((prefix, target)) = line.split_once('=') {
-                        project.remappings.push(format!("{dir}/:{prefix}={dir}/{target}"));
+                    if let Some((from, to)) = line.split_once('=') {
+                        if root.join(&base).join(to).exists() {
+                            project.remappings.push(normalize_remapping(&format!("{base}:{from}={base}{to}")));
+                        }
                     }
                 }
             }
         }
-        // As forge does: a prefix ending in `/` maps to a target ending in `/`.
-        for r in &mut project.remappings {
-            if let Some((prefix, target)) = r.split_once('=') {
-                let prefix = prefix.rsplit(':').next().unwrap_or(prefix);
-                if prefix.ends_with('/') && !target.ends_with('/') {
-                    *r = format!("{prefix}={target}/");
-                }
-            }
-        }
         Ok(project)
+    }
+}
+
+/// `[context:]from=to` with a trailing `/` added to both sides when `from` names a folder (ends in `/`).
+fn normalize_remapping(r: &str) -> String {
+    let (ctx, rest) = match r.split_once(':') {
+        Some((c, rest)) if !c.contains('=') => (format!("{c}:"), rest),
+        _ => (String::new(), r),
+    };
+    let Some((from, to)) = rest.split_once('=') else { return r.to_string() };
+    if from.ends_with('/') && !to.is_empty() && !to.ends_with('/') {
+        format!("{ctx}{from}={to}/")
+    } else {
+        r.to_string()
     }
 }
 
@@ -156,5 +171,13 @@ mod tests {
         assert_eq!(pragma_version("pragma solidity 0.8.30;"), Some("0.8.30".into()));
         assert_eq!(pragma_version("pragma solidity =0.8.26;"), Some("0.8.26".into()));
         assert_eq!(pragma_version("pragma solidity ^0.8.0;"), None);
+    }
+
+    #[test]
+    fn remappings_get_trailing_slashes() {
+        assert_eq!(normalize_remapping("v4-core/=dependencies/v4-core/src"), "v4-core/=dependencies/v4-core/src/");
+        assert_eq!(normalize_remapping("dep/=lib/dep/"), "dep/=lib/dep/");
+        assert_eq!(normalize_remapping("src:a/=lib/a"), "src:a/=lib/a/");
+        assert_eq!(normalize_remapping("forge-std=lib/forge-std/src/Test.sol"), "forge-std=lib/forge-std/src/Test.sol");
     }
 }
