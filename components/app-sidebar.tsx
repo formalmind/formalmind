@@ -16,6 +16,7 @@ import {
 } from "@/components/ui/sidebar"
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible"
 import { NavUser } from "@/components/nav-user"
+import { SidebarResizer } from "@/components/sidebar-resizer"
 import { LogoMark } from "@/components/logo"
 import { BUILD } from "@/lib/build-info"
 import { projectPath, useProjectChats, useProjects, type Project } from "@/components/projects/use-projects"
@@ -212,6 +213,7 @@ export function AppSidebar({ extra, ...props }: React.ComponentProps<typeof Side
 				<NavUser />
 				<p className="px-2 text-[11px] text-muted-foreground/70 tabular-nums group-data-[collapsible=icon]:hidden" title="Version and commit">{BUILD}</p>
 			</SidebarFooter>
+			<SidebarResizer />
 		</Sidebar>
 	)
 }
