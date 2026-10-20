@@ -41,7 +41,7 @@ fi
 echo "release: building $TAG"
 # A mounted Formal Mind image (or one left from a failed build) makes the .dmg step fail with "Resource busy".
 for v in /Volumes/dmg.* "/Volumes/Formal Mind"; do [ -d "$v" ] && diskutil eject force "$v" >/dev/null 2>&1 || true; done
-TAURI_SIGNING_PRIVATE_KEY="$(cat "$KEY")" TAURI_SIGNING_PRIVATE_KEY_PASSWORD="" bun run desktop:build
+PATH="$PWD/scripts/shims:$PATH" TAURI_SIGNING_PRIVATE_KEY="$(cat "$KEY")" TAURI_SIGNING_PRIVATE_KEY_PASSWORD="" bun run desktop:build
 
 BUNDLE=desktop/src-tauri/target/release/bundle
 DMG=$(ls -t "$BUNDLE"/dmg/*"$VERSION"*.dmg | head -1)

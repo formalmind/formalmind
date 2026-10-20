@@ -1,0 +1,12 @@
+#!/usr/bin/env bash
+# Used only while the release builds the .dmg (scripts/release.sh puts this first on PATH).
+# macOS often opens a freshly mounted image (Spotlight, the malware scan) just as Tauri's bundle_dmg.sh detaches it,
+# and the script gives up on the first "Resource busy". Retry the detach, then force it.
+if [ "$1" = detach ]; then
+  for _ in 1 2 3 4 5; do
+    /usr/bin/hdiutil "$@" && exit 0
+    sleep 2
+  done
+  exec /usr/bin/hdiutil "$@" -force
+fi
+exec /usr/bin/hdiutil "$@"
