@@ -546,8 +546,8 @@ export function SwarmPanel({ folder, name, scan, bridge, session, file: openPath
 				)}
 				<ModeTabs mode={mode} onMode={setMode} />
 				{mode === "code" ? (
-					// The page is the editor: the file fills the space under the tabs, up to the chat.
-					<div className="absolute bottom-0 left-0 right-[25.75rem] top-14 z-10 flex min-h-0 flex-col">
+					// The page is the editor: the file fills the whole page under the tabs; the chat floats over its right side.
+					<div className="absolute inset-x-0 bottom-0 top-14 z-10 flex min-h-0 flex-col">
 						{file ? (
 							<>
 								<div className="flex h-8 shrink-0 items-center gap-2 border-b px-4">
