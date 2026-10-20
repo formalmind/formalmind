@@ -33,6 +33,15 @@ impl Sources {
         String::from_utf8_lossy(&file[src.start.min(end)..end]).into_owned()
     }
 
+    /// The code at `src` from the start of its first line, so the first line keeps its indentation.
+    pub fn lines(&mut self, src: Src) -> String {
+        let file = self.file(src.file).as_bytes();
+        let start = src.start.min(file.len());
+        let from = file[..start].iter().rposition(|b| *b == b'\n').map_or(0, |i| i + 1);
+        let from = if file[from..start].iter().all(|b| *b == b' ' || *b == b'\t') { from } else { start };
+        self.text(Src { start: from, len: src.start + src.len - from, file: src.file })
+    }
+
     /// `File.sol:line`, short, for lists.
     pub fn short(&mut self, src: Src) -> String {
         let path = self.paths.get(&src.file).cloned().unwrap_or_default();

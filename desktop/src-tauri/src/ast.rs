@@ -1,6 +1,6 @@
 //! Audit mode: what formal-ast reads from solc's AST for a folder's contract.
 
-use formal_ast::{analyze, slice};
+use formal_ast::{analyze, analyze_full, slice};
 use serde_json::Value;
 use std::path::Path;
 
@@ -31,6 +31,20 @@ pub async fn ast_slice(folder: String, entry: String, function: String) -> Resul
         let unit = a.units.iter().find(|u| u.name == function || a.graph.functions[&u.function].name == function).ok_or("no such unit")?;
         let mut sources = slice::Sources::new(&a.project.root, &a.graph);
         Ok(slice::render(&a.graph, &a.scope, unit, &mut sources))
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+/// The Lean model's coverage of the entry contract: every function it reached (its Lean definition, or why it is
+/// opaque) and the folder's own theorems that name it.
+#[tauri::command]
+pub async fn ast_formal(folder: String, entry: String) -> Result<Value, String> {
+    check(&folder)?;
+    tauri::async_runtime::spawn_blocking(move || {
+        let started = std::time::Instant::now();
+        let (a, output) = analyze_full(Path::new(&folder), &entry, None).map_err(|e| format!("{e:#}"))?;
+        Ok(formal_ast::formal_json(&a, &output, started.elapsed().as_millis() as u64))
     })
     .await
     .map_err(|e| e.to_string())?

@@ -24,6 +24,23 @@ pub struct Report {
     pub opaque: Vec<(String, String)>,
     /// Every `Ext` field: immutables, external calls, opaque functions.
     pub ext: Vec<String>,
+    /// Every function the model reached, in order: its Lean definition, or why it was left opaque.
+    pub functions: Vec<FnModel>,
+}
+
+/// One Solidity function in the model.
+#[derive(Debug, Clone, Serialize)]
+pub struct FnModel {
+    #[serde(skip)]
+    pub id: Id,
+    /// `Contract.name`.
+    pub name: String,
+    /// The Lean name (`Contract.name`), or the `Ext` field standing in for it.
+    pub lean: String,
+    /// The generated definition, when translated.
+    pub def: Option<String>,
+    /// Why it was left opaque.
+    pub why: Option<String>,
 }
 
 pub struct Model {
@@ -827,17 +844,20 @@ impl<'a> Gen<'a> {
                 }
             }
         }
-        let mut report = Report { translated: vec![], opaque: vec![], ext: vec![] };
+        let mut report = Report { translated: vec![], opaque: vec![], ext: vec![], functions: vec![] };
         let done = std::mem::take(&mut self.done);
         let mut defs = vec![];
         for (f, r) in &done {
             match r {
                 Ok(text) => {
                     report.translated.push(self.g.qualified(*f));
+                    let lean = self.fn_name.get(f).cloned().unwrap_or_default();
+                    report.functions.push(FnModel { id: *f, name: self.g.qualified(*f), lean, def: Some(text.clone()), why: None });
                     defs.push(text.clone());
                 }
                 Err(why) => {
                     report.opaque.push((self.g.qualified(*f), why.clone()));
+                    report.functions.push(FnModel { id: *f, name: self.g.qualified(*f), lean: self.ext_fn_field(*f), def: None, why: Some(why.clone()) });
                     let sig = self.opaque_sig(*f);
                     self.ext.insert(format!("{} : {sig}", self.ext_fn_field(*f)), format!("opaque {}: {why}", self.g.qualified(*f)));
                 }

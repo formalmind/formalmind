@@ -81,6 +81,7 @@ pub fn run() {
             local::folder_tree,
             ast::ast_units,
             ast::ast_slice,
+            ast::ast_formal,
             executor::model_key_set,
             executor::model_key_status,
             executor::turn_start,

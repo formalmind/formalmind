@@ -168,13 +168,13 @@ function AgentMessage({ e, onBug }: { e: Ev; onBug: () => void }) {
  * and steer the swarm, the plan, and what each agent says as it works).
  */
 /** A whole file, highlighted by its extension, with a line-number gutter. */
-function FileView({ path, text, big }: { path: string; text: string; big?: boolean }) {
+function FileView({ path, text, big, start = 1 }: { path: string; text: string; big?: boolean; start?: number }) {
 	const lines = useHighlightedCode(text, EXT[path.split(".").pop() ?? ""] ?? "text");
 	return (
 		<pre className={`overflow-x-auto py-2 font-mono ${big ? "text-[12.5px] leading-6" : "text-[11px] leading-5"}`}>
 			{lines.map((line, i) => (
 				<span key={i} className="block whitespace-pre pr-3">
-					<span className="mr-3 inline-block w-9 select-none text-right text-muted-foreground/60">{i + 1}</span>
+					<span className="mr-3 inline-block w-9 select-none text-right text-muted-foreground/60">{i + start}</span>
 					{line}
 				</span>
 			))}
@@ -378,134 +378,196 @@ type AstUnits = {
 	scopeFiles?: { path: string; inScope: boolean; dependency: boolean; imports: number }[];
 };
 
+type FormalFn = {
+	name: string;
+	kind: string;
+	visibility: string;
+	mutability: string;
+	entry: boolean;
+	dependency: boolean;
+	file: string | null;
+	line: number;
+	endLine: number;
+	solidity: string;
+	lean: string;
+	def: string | null;
+	why: string | null;
+	theorems: number[];
+};
+type FormalTheorem = { name: string; file: string; line: number; sorry: boolean; text: string };
+type Formal = { contract: string; namespace: string; modelLines: number; translated: number; opaque: number; ext: number; functions: FormalFn[]; theorems: FormalTheorem[]; ms: number };
+
+/** Where a function stands: proved by a finished theorem, modeled in Lean, or left opaque (and why). */
+function fnStatus(f: FormalFn, theorems: FormalTheorem[]) {
+	if (f.why) return { key: "opaque", label: "Opaque", dot: "bg-amber-500", text: "text-amber-700 dark:text-amber-400" } as const;
+	const by = f.theorems.map((i) => theorems[i]);
+	if (by.some((t) => !t.sorry)) return { key: "proved", label: "Proved", dot: "bg-emerald-500", text: "text-emerald-700 dark:text-emerald-400" } as const;
+	if (by.length) return { key: "sorry", label: "Has sorry", dot: "bg-sky-500", text: "text-sky-700 dark:text-sky-400" } as const;
+	return { key: "modeled", label: "In Lean", dot: "bg-violet-500", text: "text-violet-700 dark:text-violet-400" } as const;
+}
+
+const COVERAGE_FILTERS = [
+	{ id: "all", label: "All" },
+	{ id: "proved", label: "Proved" },
+	{ id: "modeled", label: "Not proved" },
+	{ id: "opaque", label: "Opaque" },
+] as const;
+
 /**
- * Which entry point touches which storage: rows are state variables (most-written first), columns are entry points
- * (state-changing first). A variable written by many entry points is where invariants and bugs live. Clicking a cell
- * or a column opens that entry point's slice beside the matrix.
+ * What the agents have established for one contract, read from the AST: every function the Lean model reached, its
+ * Solidity beside its Lean, and the theorems in the folder that name it. Opaque functions say why they couldn't be
+ * translated (the model then holds for every behaviour of them).
  */
-function StorageMatrix({ data, unit, slice, onOpen, onClose }: { data: AstUnits; unit: string | null; slice: string | null; onOpen: (name: string) => void; onClose: () => void }) {
-	const [hover, setHover] = useState<{ row: string | null; col: string | null }>({ row: null, col: null });
-	const [views, setViews] = useState(false);
-	// Rows: every mutable state variable of the contract and its bases, plus any the units touch.
-	const declared = (data.tree ?? []).flatMap((c) => c.stateVars.filter((v) => !v.constant && !v.immutable).map((v) => ({ ...v, contract: c.name })));
-	const touched = new Set(data.units.flatMap((u) => [...u.reads, ...u.writes]));
-	const rows = [...declared.filter((v) => touched.has(v.name)), ...declared.filter((v) => !touched.has(v.name))];
-	const writers = (name: string) => data.units.filter((u) => u.writes.includes(name)).length;
-	rows.sort((a, b) => writers(b.name) - writers(a.name));
-	const mutating = data.units.filter((u) => u.mutability !== "view" && u.mutability !== "pure");
-	const cols = views ? [...mutating, ...data.units.filter((u) => !mutating.includes(u))] : mutating;
-	const short = (n: string) => n.split(".").slice(1).join(".") || n;
+function CoverageView({ data, onOpenFile }: { data: Formal; onOpenFile: (path: string) => void }) {
+	const [filter, setFilter] = useState<(typeof COVERAGE_FILTERS)[number]["id"]>("all");
+	const [deps, setDeps] = useState(false);
+	const shown = data.functions.filter((f) => (deps || !f.dependency) && (filter === "all" || (filter === "modeled" ? ["modeled", "sorry"].includes(fnStatus(f, data.theorems).key) : fnStatus(f, data.theorems).key === filter)));
+	const groups = [
+		{ title: "Entry points", fns: shown.filter((f) => f.entry) },
+		{ title: "Internal", fns: shown.filter((f) => !f.entry && !f.dependency) },
+		{ title: "Libraries", fns: shown.filter((f) => !f.entry && f.dependency) },
+	].filter((g) => g.fns.length);
+	const [picked, setPicked] = useState<string | null>(null);
+	const current = data.functions.find((f) => f.name === picked) ?? shown.find((f) => f.entry) ?? shown[0] ?? null;
+	const own = data.functions.filter((f) => !f.dependency);
+	const proved = own.filter((f) => fnStatus(f, data.theorems).key === "proved").length;
+	const inLean = own.filter((f) => !f.why).length;
+	const status = current ? fnStatus(current, data.theorems) : null;
 	return (
-		<div className={`grid min-h-0 flex-1 gap-1 ${unit ? "grid-cols-[minmax(0,1fr)_minmax(0,28rem)]" : "grid-cols-1"}`}>
-			<div className="min-h-0 overflow-auto rounded-xl border bg-card shadow-card">
-				<div className="sticky left-0 top-0 z-20 flex items-center gap-3 border-b bg-card/95 px-3 py-2 text-[11px] text-muted-foreground backdrop-blur">
-					<span className="inline-flex items-center gap-1"><span className="size-2.5 rounded-sm bg-red-500/80" /> writes</span>
-					<span className="inline-flex items-center gap-1"><span className="size-2.5 rounded-sm bg-sky-500/50" /> reads</span>
-					<span className="inline-flex items-center gap-1"><span className="size-2.5 rounded-sm bg-gradient-to-br from-sky-500/50 from-50% to-red-500/80 to-50%" /> both</span>
-					<label className="ml-auto inline-flex cursor-pointer items-center gap-1.5">
-						<input type="checkbox" checked={views} onChange={(e) => setViews(e.target.checked)} className="size-3" />
-						include view functions
-					</label>
-				</div>
-				<table className="border-separate border-spacing-0 text-[12px]">
-					<thead>
-						<tr>
-							<th className="sticky left-0 top-9 z-10 min-w-56 border-b bg-card px-3 py-2 text-left align-bottom font-normal text-muted-foreground">
-								<span className="font-mono">{rows.length}</span> state · <span className="font-mono">{cols.length}</span> entry points
-							</th>
-							{cols.map((u) => (
-								<th key={u.name} className={`sticky top-9 z-[5] h-36 w-8 border-b bg-card px-0 align-bottom font-normal ${hover.col === u.name || unit === u.name ? "bg-muted" : ""}`}>
-									<button
-										type="button"
-										onClick={() => onOpen(u.name)}
-										onMouseEnter={() => setHover({ row: null, col: u.name })}
-										onMouseLeave={() => setHover({ row: null, col: null })}
-										title={`${u.name} — open its slice`}
-										className={`mx-auto block max-h-36 truncate pb-2 font-mono text-[11px] [writing-mode:vertical-rl] rotate-180 hover:text-foreground ${unit === u.name ? "font-semibold text-foreground" : "text-muted-foreground"} ${u.mutability === "view" || u.mutability === "pure" ? "opacity-60" : ""}`}
-									>
-										{short(u.name)}
-									</button>
-								</th>
-							))}
-						</tr>
-					</thead>
-					<tbody>
-						{rows.map((v) => {
-							const n = writers(v.name);
-							return (
-								<tr key={`${v.contract}.${v.name}`}>
-									<th className={`sticky left-0 z-[5] border-b bg-card px-3 py-1.5 text-left font-normal ${hover.row === v.name ? "bg-muted" : ""}`}>
-										<span className="flex items-center gap-2">
-											<span className="truncate font-mono text-[12px] text-foreground">{v.name}</span>
-											{n ? <span className="shrink-0 rounded bg-red-500/10 px-1 font-mono text-[10px] text-red-700 dark:text-red-400" title={`written by ${n} entry points`}>{n}w</span> : null}
-										</span>
-									</th>
-									{cols.map((u) => {
-										const r = u.reads.includes(v.name);
-										const w = u.writes.includes(v.name);
-										const lit = hover.row === v.name || hover.col === u.name || unit === u.name;
-										return (
-											<td
-												key={u.name}
-												onMouseEnter={() => setHover({ row: v.name, col: u.name })}
-												onMouseLeave={() => setHover({ row: null, col: null })}
-												onClick={() => (r || w ? onOpen(u.name) : undefined)}
-												title={`${short(u.name)} ${w && r ? "reads and writes" : w ? "writes" : r ? "reads" : "doesn't touch"} ${v.name}`}
-												className={`h-7 w-8 border-b p-0 text-center ${lit ? "bg-muted/70" : ""} ${r || w ? "cursor-pointer" : ""}`}
-											>
-												{w || r ? (
-													<span
-														className={`mx-auto block size-4 rounded-[4px] ${w && r ? "bg-gradient-to-br from-sky-500/50 from-50% to-red-500/80 to-50%" : w ? "bg-red-500/80" : "bg-sky-500/50"}`}
-													/>
-												) : null}
-											</td>
-										);
-									})}
-								</tr>
-							);
-						})}
-					</tbody>
-				</table>
+		<div className="flex min-h-0 flex-1 flex-col gap-1">
+			<div className="flex shrink-0 flex-wrap items-center gap-x-4 gap-y-1 rounded-xl border bg-card px-3 py-2 text-[12px]">
+				<span><span className="font-mono font-medium">{inLean}</span><span className="text-muted-foreground">/{own.length} functions in Lean</span></span>
+				<span><span className="font-mono font-medium text-emerald-700 dark:text-emerald-400">{proved}</span><span className="text-muted-foreground"> proved</span></span>
+				<span><span className="font-mono font-medium text-amber-700 dark:text-amber-400">{own.length - inLean}</span><span className="text-muted-foreground"> opaque</span></span>
+				<span className="text-muted-foreground"><span className="font-mono">{data.theorems.length}</span> theorems{data.theorems.some((t) => t.sorry) ? ` · ${data.theorems.filter((t) => t.sorry).length} with sorry` : ""}</span>
+				<span className="ml-auto text-[11px] text-muted-foreground">{data.namespace} model · {data.modelLines} lines</span>
 			</div>
-			{unit ? (
-				<div className="relative min-h-0 overflow-y-auto rounded-xl border bg-card px-4 py-3 shadow-card">
-					<button type="button" onClick={onClose} title="Close the slice" className="absolute right-2 top-2 grid size-6 place-items-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground">×</button>
-					{slice ? <div className="prose prose-sm max-w-none dark:prose-invert"><ChatMarkdown>{slice}</ChatMarkdown></div> : <p className="text-[13px] text-muted-foreground">Building the slice…</p>}
-				</div>
-			) : null}
+			<div className="flex min-h-0 flex-1 gap-1">
+				<nav className="flex w-72 shrink-0 flex-col overflow-hidden rounded-xl border bg-card">
+					<div className="flex shrink-0 flex-wrap items-center gap-1 border-b p-1.5">
+						{COVERAGE_FILTERS.map((f) => (
+							<button key={f.id} type="button" onClick={() => setFilter(f.id)} className={`h-6 rounded-md px-2 text-[11px] ${filter === f.id ? "bg-muted font-medium text-foreground" : "text-muted-foreground hover:text-foreground"}`}>
+								{f.label}
+							</button>
+						))}
+						<label className="ml-auto flex items-center gap-1 pr-1 text-[11px] text-muted-foreground">
+							<input type="checkbox" checked={deps} onChange={(e) => setDeps(e.target.checked)} className="size-3" />
+							libraries
+						</label>
+					</div>
+					<div className="min-h-0 flex-1 overflow-y-auto p-1">
+						{groups.map((g) => (
+							<div key={g.title} className="mb-1">
+								<p className="px-2 pb-0.5 pt-1.5 font-mono text-[10px] uppercase tracking-wider text-muted-foreground">{g.title} · {g.fns.length}</p>
+								{g.fns.map((f) => {
+									const st = fnStatus(f, data.theorems);
+									return (
+										<button
+											key={f.name}
+											type="button"
+											onClick={() => setPicked(f.name)}
+											title={st.label}
+											className={`flex w-full items-center gap-2 rounded-md px-2 py-1 text-left font-mono text-[12px] ${current?.name === f.name ? "bg-muted text-foreground" : "text-muted-foreground hover:bg-muted/60 hover:text-foreground"}`}
+										>
+											<span className={`size-2 shrink-0 rounded-full ${st.dot}`} />
+											<span className="truncate">{f.name.split(".").slice(-1)[0]}</span>
+											{f.theorems.length ? <span className="ml-auto shrink-0 text-[10px]">{f.theorems.length}</span> : null}
+										</button>
+									);
+								})}
+							</div>
+						))}
+						{groups.length === 0 ? <p className="p-2 text-[12px] text-muted-foreground">Nothing matches.</p> : null}
+					</div>
+				</nav>
+				{current && status ? (
+					<section className="flex min-w-0 flex-1 flex-col overflow-hidden rounded-xl border bg-card">
+						<header className="flex shrink-0 flex-wrap items-center gap-2 border-b px-3 py-2">
+							<span className="font-mono text-[13px] font-medium">{current.name}</span>
+							<span className={`inline-flex items-center gap-1.5 rounded-full bg-muted px-2 py-0.5 text-[11px] ${status.text}`}>
+								<span className={`size-1.5 rounded-full ${status.dot}`} />
+								{status.label}
+							</span>
+							<span className="text-[11px] text-muted-foreground">{[current.visibility, current.mutability !== "nonpayable" ? current.mutability : ""].filter(Boolean).join(" · ")}</span>
+							{current.file ? (
+								<button type="button" onClick={() => onOpenFile(current.file!)} className="ml-auto inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 font-mono text-[11px] text-muted-foreground hover:bg-muted hover:text-foreground" title="Open in Code">
+									<FileCode2 className="size-3" />
+									{current.file}:{current.line}
+								</button>
+							) : null}
+						</header>
+						<div className="min-h-0 flex-1 overflow-y-auto">
+							<div className="grid min-h-0 grid-cols-1 divide-y xl:grid-cols-2 xl:divide-x xl:divide-y-0">
+								<div className="min-w-0">
+									<p className="px-3 pt-2 font-mono text-[10px] uppercase tracking-wider text-muted-foreground">Solidity</p>
+									<FileView path="f.sol" text={current.solidity} start={current.line} />
+								</div>
+								<div className="min-w-0">
+									<p className="px-3 pt-2 font-mono text-[10px] uppercase tracking-wider text-muted-foreground">Lean{current.def ? ` · ${current.lean}` : ""}</p>
+									{current.def ? (
+										<FileView path="f.lean" text={current.def.trimEnd()} />
+									) : (
+										<div className="m-3 rounded-lg border border-amber-500/30 bg-amber-500/5 p-3 text-[12px] leading-5">
+											<p className="font-medium text-amber-800 dark:text-amber-300">Not translated: {current.why}</p>
+											<p className="mt-1 text-muted-foreground">
+												The model keeps it as <code className="rounded bg-muted px-1 font-mono text-[11px]">ext.{current.lean}</code>, so every theorem holds for any behaviour of it.
+											</p>
+										</div>
+									)}
+								</div>
+							</div>
+							<div className="border-t">
+								<p className="px-3 pt-2 font-mono text-[10px] uppercase tracking-wider text-muted-foreground">Theorems · {current.theorems.length}</p>
+								{current.theorems.length === 0 ? (
+									<p className="px-3 pb-3 pt-1 text-[12px] text-muted-foreground">No theorem in this folder names {current.def ? <code className="font-mono">{current.lean}</code> : "it"} yet.</p>
+								) : (
+									current.theorems.map((i) => {
+										const t = data.theorems[i];
+										return (
+											<div key={i} className="mx-2 mb-2 mt-1 overflow-hidden rounded-lg border">
+												<div className="flex items-center gap-2 border-b bg-muted/40 px-2.5 py-1 text-[11px]">
+													<span className={`size-1.5 rounded-full ${t.sorry ? "bg-sky-500" : "bg-emerald-500"}`} />
+													<span className="font-mono font-medium">{t.name}</span>
+													{t.sorry ? <span className="text-sky-700 dark:text-sky-400">sorry</span> : null}
+													<button type="button" onClick={() => onOpenFile(t.file)} className="ml-auto font-mono text-muted-foreground hover:text-foreground">
+														{t.file}:{t.line}
+													</button>
+												</div>
+												<FileView path="f.lean" text={t.text} start={t.line} />
+											</div>
+										);
+									})
+								)}
+							</div>
+						</div>
+					</section>
+				) : null}
+			</div>
 		</div>
 	);
 }
 
-/** Audit mode: which entry point touches which storage, for the contract picked here (read from the AST). */
-function AuditView({ folder, scan, invoke, preferred }: { folder: string; scan: Scan | null; invoke: Bridge["invoke"]; preferred: string | null }) {
+/** Audit mode: what's been established for the contract picked here, as Lean coverage. */
+function AuditView({ folder, scan, invoke, preferred, onOpenFile }: { folder: string; scan: Scan | null; invoke: Bridge["invoke"]; preferred: string | null; onOpenFile: (path: string) => void }) {
 	const sources = (scan?.solidity ?? []).filter((f) => !f.endsWith(".t.sol") && !f.endsWith(".s.sol"));
 	const pick = preferred && sources.includes(preferred) ? preferred : (sources.find((f) => f.startsWith("src/")) ?? sources[0] ?? null);
 	const [entry, setEntry] = useState<string | null>(pick);
-	const [data, setData] = useState<AstUnits | null>(null);
+	const [formal, setFormal] = useState<Formal | null>(null);
 	const [error, setError] = useState<string | null>(null);
-	const [unit, setUnit] = useState<string | null>(null);
-	const [slice, setSlice] = useState<string | null>(null);
 	useEffect(() => {
 		if (!entry && pick) setEntry(pick);
 	}, [entry, pick]);
 	useEffect(() => {
 		if (!entry) return;
-		setData(null);
+		setFormal(null);
 		setError(null);
-		setUnit(null);
-		setSlice(null);
-		void invoke<AstUnits>("ast_units", { folder, entry }).then(setData, (e) => setError(String(e)));
+		void invoke<Formal>("ast_formal", { folder, entry }).then(setFormal, (e) => setError(String(e)));
 	}, [folder, entry, invoke]);
-	const open = (name: string) => {
-		setUnit(name);
-		setSlice(null);
-		void invoke<string>("ast_slice", { folder, entry, function: name }).then(setSlice, (e) => setSlice(`Couldn't build the slice: ${e}`));
-	};
+	const ready = formal;
 	return (
 		<>
-			<div className="flex h-8 shrink-0 items-center gap-2 px-2.5 text-[12px]">
-				<span className="font-mono text-[11px] font-medium uppercase tracking-wider text-muted-foreground">Storage × entry points</span>
+			<div className="flex h-8 shrink-0 items-center gap-2 px-1.5 text-[12px]">
+				<span className="pl-1 font-mono text-[11px] font-medium uppercase tracking-wider text-muted-foreground">Lean coverage</span>
 				<DropdownMenu>
 					<DropdownMenuTrigger className="inline-flex h-6 min-w-0 items-center gap-1 rounded-md border bg-background px-2 font-mono text-[11px] outline-none hover:bg-muted" title="The contract to read">
 						<span className="truncate">{entry ?? "No Solidity sources"}</span>
@@ -519,11 +581,11 @@ function AuditView({ folder, scan, invoke, preferred }: { folder: string; scan: 
 						</DropdownMenuRadioGroup>
 					</DropdownMenuContent>
 				</DropdownMenu>
-				{data ? <span className="ml-auto shrink-0 text-[11px] text-muted-foreground">{data.contract} · {data.ms} ms</span> : null}
+				{ready ? <span className="ml-auto shrink-0 text-[11px] text-muted-foreground">{ready.contract} · {ready.ms} ms</span> : null}
 			</div>
 			{error ? <p className="whitespace-pre-wrap rounded-xl border bg-card p-3 font-mono text-[11px] text-red-600">{error}</p> : null}
-			{!data && !error ? <p className="p-3 text-[13px] text-muted-foreground">{entry ? "Reading the AST…" : "No Solidity sources in this folder."}</p> : null}
-			{data ? <StorageMatrix data={data} unit={unit} slice={slice} onOpen={open} onClose={() => setUnit(null)} /> : null}
+			{!ready && !error ? <p className="p-3 text-[13px] text-muted-foreground">{entry ? "Building the Lean model from the AST…" : "No Solidity sources in this folder."}</p> : null}
+			{formal ? <CoverageView key={entry} data={formal} onOpenFile={onOpenFile} /> : null}
 		</>
 	);
 }
@@ -765,8 +827,10 @@ export function SwarmPanel({ folder, name, scan, bridge, session, file: openPath
 	const working = [...events].reverse().find((e) => e.kind === "status" && e.role !== "swarm");
 	const done = plan.filter((i) => i.mark === "x").length;
 	// Entry points a plan item names, matched as whole words in its text.
-	const named = (text: string) => entryUnits.filter((u) => new RegExp(`\\b${u.function}\\b`).test(text));
-	const inPlan = new Set(plan.flatMap((i) => named(i.text).map((u) => u.function)));
+	// constructor, receive and fallback have no name of their own in the AST.
+	const label = (u: AstUnit) => u.function || (u.name.split(".").pop() ?? u.name);
+	const named = (text: string) => entryUnits.filter((u) => u.function && new RegExp(`\\b${u.function}\\b`).test(text));
+	const inPlan = new Set(plan.flatMap((i) => named(i.text).map((u) => u.name)));
 	const finished = !run ? events.find((e) => e.kind === "done") : undefined;
 	const shown = events.filter((e) => e.kind !== "status");
 
@@ -786,7 +850,7 @@ export function SwarmPanel({ folder, name, scan, bridge, session, file: openPath
 												{named(i.text).length ? (
 													<span className="mt-1 flex flex-wrap gap-1">
 														{named(i.text).map((u) => (
-															<span key={u.name} className="rounded bg-muted px-1 font-mono text-[10px] text-muted-foreground" title={u.writes.length ? `writes ${u.writes.join(", ")}` : "writes nothing"}>{u.function}</span>
+															<span key={u.name} className="rounded bg-muted px-1 font-mono text-[10px] text-muted-foreground" title={u.writes.length ? `writes ${u.writes.join(", ")}` : "writes nothing"}>{label(u)}</span>
 														))}
 													</span>
 												) : null}
@@ -815,26 +879,41 @@ export function SwarmPanel({ folder, name, scan, bridge, session, file: openPath
 						</ul>
 	);
 
-	// Every state-changing entry point; the ones no plan item names are the gaps.
+	// Every state-changing entry point and the storage it writes and reads (from the AST); the ones no plan item
+	// names are the gaps.
 	const entryList = entryUnits.length ? (
 		<div className="border-t p-2">
-			<div className="flex items-center gap-2 px-2 pb-1.5 text-[11px] text-muted-foreground">
+			<div className="flex items-center gap-2 px-2 pb-1 text-[11px] text-muted-foreground">
 				<span className="font-mono uppercase tracking-wider">Entry points</span>
 				<span>{inPlan.size}/{entryUnits.length} in the plan</span>
+				<span className="ml-auto inline-flex items-center gap-2">
+					<span className="inline-flex items-center gap-1"><span className="size-2 rounded-sm bg-red-500/70" />writes</span>
+					<span className="inline-flex items-center gap-1"><span className="size-2 rounded-sm bg-sky-500/50" />reads</span>
+				</span>
 			</div>
-			<div className="flex flex-wrap gap-1 px-1.5">
-				{entryUnits.map((u) => (
-					<button
-						key={u.name}
-						type="button"
-						onClick={() => setMode("audit")}
-						title={`${inPlan.has(u.function) ? "In the plan" : "Not in the plan"} · ${u.writes.length ? `writes ${u.writes.join(", ")}` : "writes nothing"}`}
-						className={`rounded-md border px-1.5 py-0.5 font-mono text-[10.5px] hover:bg-muted ${inPlan.has(u.function) ? "border-emerald-500/40 bg-emerald-500/10 text-emerald-700 dark:text-emerald-400" : "border-dashed text-muted-foreground"}`}
-					>
-						{u.function}
-					</button>
-				))}
-			</div>
+			<ul className="space-y-px">
+				{entryUnits.map((u) => {
+					const reads = u.reads.filter((v) => !u.writes.includes(v));
+					return (
+						<li key={u.name} className="rounded-md px-2 py-1 hover:bg-muted/50">
+							<div className="flex items-center gap-1.5">
+								<span className={`size-1.5 shrink-0 rounded-full ${inPlan.has(u.name) ? "bg-emerald-500" : "border border-dashed border-muted-foreground/60"}`} title={inPlan.has(u.name) ? "In the plan" : "Not in the plan"} />
+								<span className={`truncate font-mono text-[11.5px] ${inPlan.has(u.name) ? "text-foreground" : "text-muted-foreground"}`}>{label(u)}</span>
+							</div>
+							{u.writes.length || reads.length ? (
+								<div className="ml-3 mt-0.5 flex flex-wrap gap-1">
+									{u.writes.map((v) => (
+										<span key={`w${v}`} className="rounded bg-red-500/10 px-1 font-mono text-[10px] text-red-700 dark:text-red-400">{v}</span>
+									))}
+									{reads.map((v) => (
+										<span key={`r${v}`} className="rounded bg-sky-500/10 px-1 font-mono text-[10px] text-sky-700 dark:text-sky-400">{v}</span>
+									))}
+								</div>
+							) : null}
+						</li>
+					);
+				})}
+			</ul>
 		</div>
 	) : null;
 
@@ -942,7 +1021,7 @@ export function SwarmPanel({ folder, name, scan, bridge, session, file: openPath
 				{mode === "bugs" ? <BugsView bugs={bugs} openBug={openBug} setOpenBug={setOpenBug} withPoc={withPoc} onOpenFile={view} /> : null}
 				{mode === "audit" ? (
 					<div className="pointer-events-auto absolute bottom-3 left-3 right-3 top-14 z-10 flex min-h-0 flex-col overflow-hidden rounded-2xl border bg-muted/60 p-1">
-						<AuditView folder={folder} scan={scan} invoke={invoke} preferred={openPath ?? null} />
+						<AuditView folder={folder} scan={scan} invoke={invoke} preferred={openPath ?? null} onOpenFile={view} />
 					</div>
 				) : null}
 			</div>

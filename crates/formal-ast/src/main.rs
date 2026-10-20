@@ -34,6 +34,8 @@ enum Command {
     Json,
     /// Audit mode's data as JSON: units, clusters and every unit's slice.
     Audit,
+    /// The Audit page's coverage as JSON: each function's Lean model (or why it is opaque) and the theorems naming it.
+    Formal,
     /// A world of linked models: the entry plus `--with file[:Contract]` members, interface calls bound to the
     /// members that implement them.
     Link {
@@ -82,6 +84,9 @@ fn main() -> Result<()> {
             for (f, why) in &model.report.opaque {
                 println!("  opaque {f}: {why}");
             }
+        }
+        Command::Formal => {
+            println!("{}", formal_ast::formal_json(&a, &output, took.as_millis() as u64));
         }
         Command::Audit => {
             let mut v = formal_ast::audit_json(&a, took.as_millis() as u64);
