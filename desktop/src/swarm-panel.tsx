@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { ChevronDown, FileCode2, Play, Send, Square } from "lucide-react";
+import { ChatMarkdown } from "@/components/chat-markdown";
 import { SwarmCanvas } from "@/components/swarm/swarm-canvas";
 import { ROLE_COLORS } from "@/lib/swarm-roles";
 import { localBoard } from "./local-board";
@@ -160,7 +161,7 @@ export function SwarmPanel({ folder, name, scan, bridge }: { folder: string; nam
 						</span>
 					}
 				/>
-				<div className="pointer-events-none absolute left-3 top-14 z-10 flex max-h-[calc(100%-4.5rem)] w-80 flex-col gap-2">
+				<div className="pointer-events-none absolute left-3 top-[6.5rem] z-10 flex max-h-[calc(100%-7.5rem)] w-72 flex-col gap-2">
 					<Floating id="plan" open={panel} onOpen={setPanel} title="Plan" meta={plan.length ? `${done}/${plan.length}` : ""}>
 						<ul className="space-y-0.5 p-2 text-[13px]">
 							{plan.length === 0 ? <li className="p-2 text-muted-foreground">The planner writes .formal/plan.md on the first run.</li> : null}
@@ -192,7 +193,7 @@ export function SwarmPanel({ folder, name, scan, bridge }: { folder: string; nam
 											<span className="flex-1 font-medium">{b.title}</span>
 											<ChevronDown className={`size-3.5 text-muted-foreground transition-transform ${openBug === b.file ? "rotate-180" : ""}`} />
 										</button>
-										{openBug === b.file ? <pre className="whitespace-pre-wrap border-t px-3 py-2 font-sans text-[13px] leading-5">{b.body}</pre> : null}
+										{openBug === b.file ? <div className="prose prose-sm max-w-none border-t px-3 py-2 text-[13px] dark:prose-invert"><ChatMarkdown>{b.body.replace(/^# .*\n/, "")}</ChatMarkdown></div> : null}
 									</li>
 								))}
 							</ul>
@@ -229,7 +230,23 @@ export function SwarmPanel({ folder, name, scan, bridge }: { folder: string; nam
 									{e.kind === "bug" ? "bug reported" : e.role}
 									{/^\d+$/.test(e.item) ? <span className="font-normal text-muted-foreground">· item {e.item}</span> : null}
 								</p>
-								<div className={`whitespace-pre-wrap rounded-2xl rounded-tl-md px-3 py-2 ${e.kind === "bug" ? "bg-red-500/10" : e.kind === "plan" || e.kind === "done" ? "bg-muted/60 text-muted-foreground" : "bg-muted"}`}>{e.text}</div>
+								{e.kind === "bug" ? (
+									<button
+										type="button"
+										onClick={() => {
+											// Open the bugs card on this report.
+											const hit = bugs.find((b) => e.text.includes(b.file));
+											setPanel("bugs");
+											if (hit) setOpenBug(hit.file);
+										}}
+										className="whitespace-pre-wrap rounded-2xl rounded-tl-md bg-red-500/10 px-3 py-2 text-left hover:bg-red-500/15"
+									>
+										{e.text.split(" — ")[0]}
+										<span className="mt-1 block text-xs text-red-700/70 dark:text-red-400/70">Open the report →</span>
+									</button>
+								) : (
+									<div className={`whitespace-pre-wrap rounded-2xl rounded-tl-md px-3 py-2 ${e.kind === "plan" || e.kind === "done" ? "bg-muted/60 text-muted-foreground" : "bg-muted"}`}>{e.text}</div>
+								)}
 							</div>
 						),
 					)}

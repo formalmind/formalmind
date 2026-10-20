@@ -22,6 +22,9 @@ const MAX_ATTEMPTS: usize = 3;
 pub struct Swarm {
     stop: AtomicBool,
     inbox: Mutex<Vec<String>>,
+    /// Where the run's log lives and what it has spent, so quitting can record the pause.
+    folder: String,
+    spent: Mutex<f64>,
 }
 
 #[derive(Default)]
@@ -231,12 +234,11 @@ struct Turn<'a> {
     req: &'a SwarmRequest,
     swarm: &'a Swarm,
     client: reqwest::Client,
-    spent: Mutex<f64>,
 }
 
 impl Turn<'_> {
     fn emit(&self, kind: &'static str, role: &str, item: &str, text: String) {
-        let spent = *self.spent.lock().unwrap();
+        let spent = *self.swarm.spent.lock().unwrap();
         let ev = SwarmEvent { run: self.run.into(), kind, role: role.into(), item: item.into(), text, spent };
         // Kept in the folder too: .formal/runs/<run>.jsonl.
         let log = Path::new(&self.req.folder).join(".formal").join("runs");
@@ -301,7 +303,7 @@ impl Turn<'_> {
             if !status.is_success() {
                 return Err(reply["error"]["message"].as_str().unwrap_or("The model call failed").to_string());
             }
-            *self.spent.lock().unwrap() += cost(&reply["usage"]);
+            *self.swarm.spent.lock().unwrap() += cost(&reply["usage"]);
             let content = reply["content"].clone();
             messages.push(json!({ "role": "assistant", "content": content }));
             let mut results = vec![];
@@ -383,7 +385,7 @@ async fn run_swarm(turn: &Turn<'_>) -> String {
         if turn.swarm.stop.load(Ordering::SeqCst) {
             return "stopped".into();
         }
-        let spent = *turn.spent.lock().unwrap();
+        let spent = *turn.swarm.spent.lock().unwrap();
         if spent >= turn.req.budget_usd {
             return format!("budget reached (${spent:.2})");
         }
@@ -472,12 +474,12 @@ pub fn swarm_start(app: AppHandle, swarms: State<'_, Swarms>, request: SwarmRequ
         return Err("A swarm is already running; stop it first".into());
     }
     let run = format!("local-{:x}", now_ms());
-    let swarm = Arc::new(Swarm { stop: AtomicBool::new(false), inbox: Mutex::new(vec![]) });
+    let swarm = Arc::new(Swarm { stop: AtomicBool::new(false), inbox: Mutex::new(vec![]), folder: request.folder.clone(), spent: Mutex::new(0.0) });
     swarms.0.lock().unwrap().insert(run.clone(), swarm.clone());
     let id = run.clone();
     tauri::async_runtime::spawn(async move {
         let client = reqwest::Client::builder().timeout(Duration::from_secs(600)).build().unwrap_or_default();
-        let turn = Turn { app: &app, run: &id, req: &request, swarm: &swarm, client, spent: Mutex::new(0.0) };
+        let turn = Turn { app: &app, run: &id, req: &request, swarm: &swarm, client };
         turn.emit("status", "swarm", "", "starting".into());
         let outcome = run_swarm(&turn).await;
         turn.emit("done", "swarm", "", outcome);
@@ -550,6 +552,19 @@ pub fn swarm_history(folder: String, run: String) -> Result<Vec<Value>, String> 
     }
     let text = std::fs::read_to_string(runs_dir(&folder).join(format!("{run}.jsonl"))).map_err(|e| e.to_string())?;
     Ok(text.lines().filter_map(|l| serde_json::from_str(l).ok()).collect())
+}
+
+/// The app is quitting: stop every swarm and record the pause in its session, so Resume picks up from the plan.
+pub fn pause_all(app: &AppHandle) {
+    let swarms = app.state::<Swarms>();
+    for (run, s) in swarms.0.lock().unwrap().iter() {
+        s.stop.store(true, Ordering::SeqCst);
+        let ev = SwarmEvent { run: run.clone(), kind: "done", role: "swarm".into(), item: String::new(), text: "paused: the app quit. Resume to carry on from the plan.".into(), spent: *s.spent.lock().unwrap() };
+        if let Ok(line) = serde_json::to_string(&ev) {
+            use std::io::Write;
+            let _ = std::fs::OpenOptions::new().append(true).open(runs_dir(&s.folder).join(format!("{run}.jsonl"))).and_then(|mut f| writeln!(f, "{line}"));
+        }
+    }
 }
 
 /// The running swarm, if any (so the page can reattach after a reload).

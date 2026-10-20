@@ -89,6 +89,25 @@ pub fn run() {
             swarm::swarm_sessions,
             swarm::swarm_history
         ])
-        .run(tauri::generate_context!())
-        .expect("error while running the Formal Mind desktop app");
+        // Closing the window hides it: a running swarm keeps working, and the Dock icon brings the window back.
+        .on_window_event(|window, event| {
+            if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+                let _ = window.hide();
+                api.prevent_close();
+            }
+        })
+        .build(tauri::generate_context!())
+        .expect("error while building the Formal Mind desktop app")
+        .run(|app, event| match event {
+            #[cfg(target_os = "macos")]
+            tauri::RunEvent::Reopen { .. } => {
+                if let Some(window) = app.get_webview_window("main") {
+                    let _ = window.show();
+                    let _ = window.set_focus();
+                }
+            }
+            // Quitting (⌘Q) pauses any swarm cleanly; its plan and session stay in the folder for Resume.
+            tauri::RunEvent::ExitRequested { .. } => swarm::pause_all(app),
+            _ => {}
+        });
 }
