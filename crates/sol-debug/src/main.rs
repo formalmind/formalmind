@@ -22,9 +22,15 @@ struct Args {
     root: PathBuf,
     /// The file to compile, relative to the root.
     entry: String,
-    /// The contract to deploy.
+    /// The contract to deploy (or, with --test, the test contract).
     #[arg(long)]
     contract: String,
+    /// Run a Foundry test of --contract: setUp() then this function, with cheatcodes.
+    #[arg(long)]
+    test: Option<String>,
+    /// Trace setUp() too (slow on big fixtures).
+    #[arg(long)]
+    trace_setup: bool,
     /// Constructor arguments, in order.
     #[arg(long = "ctor-arg")]
     ctor_args: Vec<String>,
@@ -46,6 +52,9 @@ struct Args {
     /// Wei sent with the call.
     #[arg(long, default_value = "0")]
     value: U256,
+    /// Open the terminal debugger on the run instead of printing the trace.
+    #[arg(long)]
+    tui: bool,
     /// One line per change of Solidity line instead of one per opcode.
     #[arg(long)]
     lines: bool,
@@ -92,6 +101,28 @@ fn main() -> Result<()> {
         return Ok(());
     }
 
+    if let Some(test) = &a.test {
+        let t = std::time::Instant::now();
+        let run = s.run_test(&a.contract, test, a.trace_setup)?;
+        if a.tui {
+            let title = format!("{}::{test}", a.contract);
+            sol_debug::tui::App::new(&s, &run.test, title).run()?;
+            return Ok(());
+        }
+        let mut out = std::io::stdout().lock();
+        if a.trace_setup {
+            s.print_trace(&run.setup, a.lines, &mut out)?;
+        }
+        s.print_trace(&run.test, a.lines, &mut out)?;
+        let verdict = if run.test.success { "PASS".to_string() } else { format!("FAIL: {}", run.test.revert_reason().unwrap_or_default()) };
+        println!("\n{verdict}  {}::{test}  ({} steps, {} gas, {:.1?})", a.contract, run.test.trace.steps.len(), run.test.gas_used, t.elapsed());
+        print_writes(&s, &run.test);
+        if !s.evm.inspector.cheats.missing.is_empty() {
+            println!("unsupported cheatcodes called: {:?}", s.evm.inspector.cheats.missing);
+        }
+        return Ok(());
+    }
+
     let ctor = if a.ctor_args.is_empty() {
         vec![]
     } else {
@@ -113,6 +144,10 @@ fn main() -> Result<()> {
     }
     let Some(call) = &a.call else { return Ok(()) };
     let run = s.call(addr, call, &a.args, a.from.unwrap_or(SENDER), a.value)?;
+    if a.tui {
+        sol_debug::tui::App::new(&s, &run, format!("{}.{call}", a.contract)).run()?;
+        return Ok(());
+    }
     let mut out = std::io::stdout().lock();
     s.print_trace(&run, a.lines, &mut out)?;
     println!(
@@ -122,9 +157,15 @@ fn main() -> Result<()> {
         run.gas_used,
         hex::encode(&run.output)
     );
-    println!("storage writes:");
-    for w in s.storage_writes(&run) {
-        println!("  {}:{}  {}: {} → {}", a.entry, w.line.map(|l| l.to_string()).unwrap_or("?".into()), w.path, w.old.unwrap_or("?".into()), w.new);
-    }
+    print_writes(&s, &run);
     Ok(())
+}
+
+fn print_writes(s: &Session, run: &sol_debug::Run) {
+    println!("storage writes:");
+    for w in s.storage_writes(run) {
+        let at = run.trace.steps[w.step].clone();
+        let place = s.locate(&run.trace, &at).map(|l| format!("{}:{}", l.file, l.line)).unwrap_or("<no source>".into());
+        println!("  {:<12} {:<24} {}: {} → {}", s.name_of(w.address), place, w.path, w.old.unwrap_or("?".into()), w.new);
+    }
 }

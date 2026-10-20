@@ -28,6 +28,25 @@ $ sol-debug crates/formal-ast/tests/fixture src/Vault.sol --contract Vault \
 ok: 646 steps, 116427 gas
 ```
 
+**Running a project's own tests.** `sol-debug <root> test/AsyncSwap.t.sol --contract AsyncSwapTest --test
+test_swap_createsOrderWithPrice --tui` deploys the test contract, runs `setUp()` untraced, and records the test:
+32,902 steps through Router → PoolManager → the AsyncSwap hook → DELEGATECALLs into its libraries, in about 30 ms
+after a 2 s compile. To get there the session:
+
+- answers forge's common cheatcodes itself (`cheats.rs`): prank, deal, etch, getCode (and so `deployCodeTo`), warp,
+  roll, addr, sign, label, assume, expectRevert and the assert* family. There's a one-byte stub at the `vm` address
+  for Solidity's extcodesize check. An unsupported cheatcode reverts with its selector, so it shows in the trace at
+  the step that needed it;
+- deploys and links external libraries the way forge does;
+- recognises code by its bytes, not by who deployed it: each frame records the hash of the code it ran, matched
+  against solc's init and runtime code with immutables, library addresses and a library's own address masked. So
+  code etched by `deployCodeTo` or created by `new` in setUp is still placed in the source;
+- reads remappings like forge: `v4-core/=dependencies/v4-core/src` gets its trailing slash, and a dependency's own
+  `remappings.txt` is scoped to it (`dependencies/v4-core/:solmate/=…`). This lives in formal-ast's `Project`, so
+  the audit engine benefits too.
+
+The terminal UI (`tui.rs`, section 8) and the step-in/over/out logic (`nav.rs`, section 6) are built.
+
 ## 1. Pipeline
 
 ```mermaid
@@ -298,8 +317,9 @@ debugger" action.
 ## 10. Next steps
 
 1. `generatedSources` to place the compiler helper steps.
-2. A virtual call stack from `j` markers; `n`/`s`/`f` over a trace in the library, with tests.
-3. Replaying call sequences from JSON (the agent hook), with an invariant checked after each call.
-4. The ratatui TUI.
-5. Recompiling from on-chain metadata, to debug deployed contracts.
-6. The Tauri debug mode on the canvas.
+2. Replaying call sequences from JSON (the agent hook), with an invariant checked after each call.
+3. Tests picked from the file tree: in Formal Mind, the user selects a local repository, sees its files, and starts
+   analysis or debugging from there. `Session::compile(root, file)` already takes a project folder and one file.
+   The desktop app passes the selected folder and the clicked test file, then lists the `test_…` functions to run.
+4. Recompiling from on-chain metadata, to debug deployed contracts.
+5. The Tauri debug mode on the canvas, on the same `Session` + `Navigator`.

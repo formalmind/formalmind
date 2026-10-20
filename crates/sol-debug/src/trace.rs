@@ -2,12 +2,13 @@
 //! writes), every call frame with its calldata, every log, and every KECCAK256 input (to name mapping slots later).
 //! Mapping steps back to Solidity happens afterwards, in [`crate::session`]: the recorder knows only the EVM.
 
+use crate::cheats::{Cheats, Ctx};
 use crate::layout::Preimages;
 use revm::bytecode::opcode;
 use revm::context::{ContextTr, JournalTr};
-use revm::interpreter::interpreter_types::{InputsTr, Jumps, MemoryTr};
+use revm::interpreter::interpreter_types::{InputsTr, Jumps, LegacyBytecode, MemoryTr};
 use revm::interpreter::{CallInputs, CallOutcome, CreateInputs, CreateOutcome, Interpreter};
-use revm::primitives::{keccak256, Address, Bytes, Log, U256};
+use revm::primitives::{keccak256, Address, Bytes, Log, B256, U256};
 use revm::{Database, Inspector};
 use std::collections::HashMap;
 
@@ -62,6 +63,8 @@ pub struct Frame {
     pub first_step: usize,
     pub success: Option<bool>,
     pub output: Bytes,
+    /// keccak of the code the frame runs (a key into [`Trace::codes`]); None for precompiles and cheatcodes.
+    pub code_hash: Option<B256>,
 }
 
 #[derive(Debug, Clone)]
@@ -76,12 +79,16 @@ pub struct Trace {
     pub frames: Vec<Frame>,
     pub logs: Vec<TraceLog>,
     pub preimages: Preimages,
+    /// Every piece of code that ran, by hash.
+    pub codes: HashMap<B256, Bytes>,
 }
 
 /// The inspector. Clear it with [`Recorder::take`] between transactions.
-#[derive(Default)]
 pub struct Recorder {
     pub trace: Trace,
+    /// Off: cheatcodes still work, but no steps are kept (setUp, deploying fixtures).
+    pub enabled: bool,
+    pub cheats: Cheats,
     /// Open frames, innermost last.
     open: Vec<usize>,
     /// Per depth: the memory as the frame's previous step left it, and that step's index.
@@ -90,23 +97,57 @@ pub struct Recorder {
     seen: HashMap<(Address, U256), U256>,
 }
 
-impl Recorder {
-    pub fn take(&mut self) -> Trace {
-        let t = std::mem::take(&mut self.trace);
-        *self = Recorder::default();
-        t
+impl Default for Recorder {
+    fn default() -> Self {
+        Recorder {
+            trace: Trace::default(),
+            enabled: true,
+            cheats: Cheats::new(),
+            open: vec![],
+            memory: HashMap::new(),
+            seen: HashMap::new(),
+        }
     }
 }
 
-impl<CTX> Inspector<CTX> for Recorder
-where
-    CTX: ContextTr,
-{
-    fn initialize_interp(&mut self, interp: &mut Interpreter, _: &mut CTX) {
+impl Recorder {
+    /// The trace so far; the recorder is ready for the next transaction (cheatcode state carries over).
+    pub fn take(&mut self) -> Trace {
+        self.open.clear();
+        self.memory.clear();
+        self.seen.clear();
+        std::mem::take(&mut self.trace)
+    }
+}
+
+/// Ops that can change memory: the next step of the frame diffs memory only after one of these.
+fn writes_memory(op: u8) -> bool {
+    matches!(
+        op,
+        opcode::MSTORE | opcode::MSTORE8 | opcode::CALLDATACOPY | opcode::CODECOPY | opcode::EXTCODECOPY
+            | opcode::RETURNDATACOPY | opcode::MCOPY | opcode::CALL | opcode::CALLCODE | opcode::DELEGATECALL
+            | opcode::STATICCALL
+    )
+}
+
+impl Inspector<Ctx> for Recorder {
+    fn initialize_interp(&mut self, interp: &mut Interpreter, _: &mut Ctx) {
         self.memory.remove(&interp.input.depth());
+        if !self.enabled {
+            return;
+        }
+        let code = interp.bytecode.bytecode_slice();
+        let hash = keccak256(code);
+        self.trace.codes.entry(hash).or_insert_with(|| Bytes::copy_from_slice(code));
+        if let Some(&f) = self.open.last() {
+            self.trace.frames[f].code_hash = Some(hash);
+        }
     }
 
-    fn step(&mut self, interp: &mut Interpreter, context: &mut CTX) {
+    fn step(&mut self, interp: &mut Interpreter, context: &mut Ctx) {
+        if !self.enabled {
+            return;
+        }
         let depth = interp.input.depth();
         let pc = interp.bytecode.pc();
         let op = interp.bytecode.opcode();
@@ -119,11 +160,17 @@ where
         let index = self.trace.steps.len();
 
         // Memory the previous step of this frame changed (including a sub-call's return data).
-        let mem = interp.memory.slice(0..interp.memory.size()).to_vec();
-        if let Some((before, prev)) = self.memory.get(&depth) {
-            let writes = diff(before, &mem);
-            if !writes.is_empty() {
-                self.trace.steps[*prev].memory_writes = writes;
+        let mem_size = interp.memory.size();
+        let prev = self.memory.get(&depth).map(|(_, p)| *p);
+        let wrote = prev.is_some_and(|p| writes_memory(self.trace.steps[p].op));
+        let need_mem = wrote || prev.is_none() || op == opcode::KECCAK256;
+        let mem = if need_mem { interp.memory.slice(0..mem_size).to_vec() } else { vec![] };
+        if wrote {
+            if let Some((before, prev)) = self.memory.get(&depth) {
+                let writes = diff(before, &mem);
+                if !writes.is_empty() {
+                    self.trace.steps[*prev].memory_writes = writes;
+                }
             }
         }
 
@@ -151,7 +198,14 @@ where
             _ => {}
         }
 
-        self.memory.insert(depth, (mem.clone(), index));
+        // Keep a snapshot only before an op that may write memory; otherwise just move the step pointer.
+        if writes_memory(op) {
+            let snap = if need_mem { mem } else { interp.memory.slice(0..mem_size).to_vec() };
+            self.memory.insert(depth, (snap, index));
+        } else {
+            let entry = self.memory.entry(depth).or_insert_with(|| (vec![], index));
+            entry.1 = index;
+        }
         self.trace.steps.push(Step {
             frame: self.open.last().copied().unwrap_or(0),
             depth,
@@ -162,13 +216,16 @@ where
             stack,
             result: None,
             gas_left: interp.gas.remaining(),
-            memory_size: mem.len(),
+            memory_size: mem_size,
             memory_writes: vec![],
             storage,
         });
     }
 
-    fn step_end(&mut self, interp: &mut Interpreter, _: &mut CTX) {
+    fn step_end(&mut self, interp: &mut Interpreter, _: &mut Ctx) {
+        if !self.enabled {
+            return;
+        }
         let Some(step) = self.trace.steps.last_mut() else { return };
         let pushes = !matches!(
             step.op,
@@ -187,12 +244,20 @@ where
         }
     }
 
-    fn log_full(&mut self, _: &mut Interpreter, _: &mut CTX, log: Log) {
+    fn log_full(&mut self, _: &mut Interpreter, _: &mut Ctx, log: Log) {
+        if !self.enabled {
+            return;
+        }
         self.trace.logs.push(TraceLog { step: self.trace.steps.len().saturating_sub(1), log });
     }
 
-    fn call(&mut self, context: &mut CTX, inputs: &mut CallInputs) -> Option<CallOutcome> {
+    fn call(&mut self, context: &mut Ctx, inputs: &mut CallInputs) -> Option<CallOutcome> {
         let depth = context.journal_mut().depth();
+        let input = inputs.input.bytes(context);
+        let answered = self.cheats.call(context, inputs, &input, depth);
+        if !self.enabled {
+            return answered;
+        }
         self.trace.frames.push(Frame {
             depth,
             kind: match inputs.scheme {
@@ -205,24 +270,33 @@ where
             target: inputs.target_address,
             code_address: inputs.bytecode_address,
             value: inputs.value.get(),
-            input: inputs.input.bytes(context),
+            input,
             first_step: self.trace.steps.len(),
             success: None,
             output: Bytes::new(),
+            code_hash: None,
         });
         self.open.push(self.trace.frames.len() - 1);
-        None
+        answered
     }
 
-    fn call_end(&mut self, _: &mut CTX, _: &CallInputs, outcome: &mut CallOutcome) {
+    fn call_end(&mut self, _: &mut Ctx, _: &CallInputs, outcome: &mut CallOutcome) {
+        self.cheats.frame_end(&mut outcome.result);
+        if !self.enabled {
+            return;
+        }
         if let Some(i) = self.open.pop() {
             self.trace.frames[i].success = Some(outcome.result.result.is_ok());
             self.trace.frames[i].output = outcome.result.output.clone();
         }
     }
 
-    fn create(&mut self, context: &mut CTX, inputs: &mut CreateInputs) -> Option<CreateOutcome> {
+    fn create(&mut self, context: &mut Ctx, inputs: &mut CreateInputs) -> Option<CreateOutcome> {
         let depth = context.journal_mut().depth();
+        self.cheats.create(inputs, depth);
+        if !self.enabled {
+            return None;
+        }
         self.trace.frames.push(Frame {
             depth,
             kind: "CREATE",
@@ -234,12 +308,17 @@ where
             first_step: self.trace.steps.len(),
             success: None,
             output: Bytes::new(),
+            code_hash: None,
         });
         self.open.push(self.trace.frames.len() - 1);
         None
     }
 
-    fn create_end(&mut self, _: &mut CTX, _: &CreateInputs, outcome: &mut CreateOutcome) {
+    fn create_end(&mut self, _: &mut Ctx, _: &CreateInputs, outcome: &mut CreateOutcome) {
+        self.cheats.frame_end(&mut outcome.result);
+        if !self.enabled {
+            return;
+        }
         if let Some(i) = self.open.pop() {
             let f = &mut self.trace.frames[i];
             f.success = Some(outcome.result.result.is_ok());

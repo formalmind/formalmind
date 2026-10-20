@@ -20,8 +20,11 @@ pub fn compile(project: &Project, entry: &str) -> Result<Value> {
         "abi",
         "evm.bytecode.object",
         "evm.bytecode.sourceMap",
+        "evm.bytecode.linkReferences",
         "evm.deployedBytecode.object",
         "evm.deployedBytecode.sourceMap",
+        "evm.deployedBytecode.linkReferences",
+        "evm.deployedBytecode.immutableReferences",
         "evm.deployedBytecode.opcodes",
         "evm.methodIdentifiers",
         "storageLayout",
@@ -146,6 +149,10 @@ pub struct Artifact {
     pub init: CodeMap,
     pub runtime: CodeMap,
     pub storage_layout: Value,
+    /// Libraries the init code needs: (library file, library name, byte offsets of the 20-byte placeholders).
+    pub links: Vec<(String, String, Vec<usize>)>,
+    /// Byte ranges of the runtime code that differ once deployed: immutables and library addresses.
+    pub runtime_holes: Vec<(usize, usize)>,
 }
 
 impl Artifact {
@@ -154,13 +161,21 @@ impl Artifact {
         if c.is_null() {
             bail!("no contract {name} in {file}");
         }
+        // Unlinked library placeholders (`__$<hash>$__`, 40 hex chars) decode as zeros; `links` says where they are.
         let code = |v: &Value| -> Result<Vec<u8>> {
-            let s = v.as_str().unwrap_or("");
-            if s.contains("__$") {
-                bail!("{name} needs linked libraries; the prototype doesn't link them yet");
+            let mut s = v.as_str().unwrap_or("").to_string();
+            while let Some(i) = s.find("__$") {
+                s.replace_range(i..i + 40, &"0".repeat(40));
             }
             Ok(hex::decode(s)?)
         };
+        let mut links = Vec::new();
+        for (lib_file, libs) in c["evm"]["bytecode"]["linkReferences"].as_object().into_iter().flatten() {
+            for (lib, refs) in libs.as_object().into_iter().flatten() {
+                let at = refs.as_array().into_iter().flatten().filter_map(|r| r["start"].as_u64().map(|s| s as usize)).collect();
+                links.push((lib_file.clone(), lib.clone(), at));
+            }
+        }
         let init = code(&c["evm"]["bytecode"]["object"])?;
         if init.is_empty() {
             bail!("{name} has no bytecode (abstract contract or interface?)");
@@ -178,7 +193,26 @@ impl Artifact {
             init: CodeMap::new(init, c["evm"]["bytecode"]["sourceMap"].as_str().unwrap_or(""), sources),
             runtime: CodeMap::new(runtime, c["evm"]["deployedBytecode"]["sourceMap"].as_str().unwrap_or(""), sources),
             storage_layout: c["storageLayout"].clone(),
+            links,
+            runtime_holes: holes(&c["evm"]["deployedBytecode"]),
         })
+    }
+
+    /// Whether `code` is this contract's runtime code (as deployed: immutables and libraries filled in).
+    pub fn is_runtime(&self, code: &[u8]) -> bool {
+        // A library's runtime code starts with `PUSH20 <its own address>` (the call guard), filled in at deploy.
+        let mut holes = self.runtime_holes.clone();
+        if self.runtime.code.first() == Some(&0x73) {
+            holes.push((1, 20));
+        }
+        code.len() == self.runtime.code.len() && same_outside(code, &self.runtime.code, &holes)
+    }
+
+    /// Whether `code` is this contract's init code (libraries linked, constructor arguments appended).
+    pub fn is_init(&self, code: &[u8]) -> bool {
+        let n = self.init.code.len();
+        let holes: Vec<(usize, usize)> = self.links.iter().flat_map(|l| l.2.iter().map(|&s| (s, 20))).collect();
+        code.len() >= n && same_outside(&code[..n], &self.init.code, &holes)
     }
 
     /// The full signature for a name or a signature: `deposit` → `deposit(uint256)`.
@@ -193,4 +227,35 @@ impl Artifact {
             many => bail!("{name_or_sig} is overloaded; pick one of {many:?}"),
         }
     }
+}
+
+/// `linkReferences` and `immutableReferences` of a bytecode object, as (start, length).
+fn holes(obj: &Value) -> Vec<(usize, usize)> {
+    let mut out = Vec::new();
+    let mut add = |refs: &Value| {
+        for r in refs.as_array().into_iter().flatten() {
+            if let (Some(s), Some(l)) = (r["start"].as_u64(), r["length"].as_u64()) {
+                out.push((s as usize, l as usize));
+            }
+        }
+    };
+    for libs in obj["linkReferences"].as_object().into_iter().flatten().map(|(_, l)| l) {
+        for refs in libs.as_object().into_iter().flatten().map(|(_, r)| r) {
+            add(refs);
+        }
+    }
+    for refs in obj["immutableReferences"].as_object().into_iter().flatten().map(|(_, r)| r) {
+        add(refs);
+    }
+    out
+}
+
+fn same_outside(a: &[u8], b: &[u8], holes: &[(usize, usize)]) -> bool {
+    let mut mask = vec![false; b.len()];
+    for &(s, l) in holes {
+        for m in mask.iter_mut().skip(s).take(l) {
+            *m = true;
+        }
+    }
+    a.iter().zip(b).zip(&mask).all(|((x, y), hole)| *hole || x == y)
 }

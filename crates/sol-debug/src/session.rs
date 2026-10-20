@@ -1,12 +1,14 @@
-//! A debugging session: one compile, an in-memory chain (revm over a CacheDB), contracts deployed into it, and
-//! transactions run with the [`Recorder`]. Each recorded step is then placed in the Solidity source through the
-//! contract's source map and AST.
+//! A debugging session: one compile, an in-memory chain (revm over a CacheDB), and transactions run with the
+//! [`Recorder`]. Code is recognised by its bytes (solc's init or runtime code, immutables and library addresses
+//! masked), so contracts created anywhere (a test's setUp, `new`, forge-std's `deployCodeTo`) are placed in the
+//! source without the session having deployed them itself.
 
+use crate::cheats::{error_string, HEVM};
 use crate::layout::Layout;
 use crate::solc::{self, Artifact, CodeMap};
 use crate::source::Sources;
 use crate::srcmap::{Jump, SrcEntry};
-use crate::trace::{CodeRef, Recorder, StorageAccess, Trace};
+use crate::trace::{Recorder, Step, StorageAccess, Trace};
 use alloy_dyn_abi::{DynSolType, DynSolValue};
 use anyhow::{anyhow, bail, Context as _, Result};
 use formal_ast::solc::Project;
@@ -15,7 +17,7 @@ use revm::context::result::{ExecutionResult, Output};
 use revm::context::{Context, ContextTr, TxEnv};
 use revm::database::{CacheDB, EmptyDB};
 use revm::handler::{MainBuilder, MainContext, MainnetContext, MainnetEvm};
-use revm::primitives::{hex, keccak256, Address, Bytes, TxKind, U256};
+use revm::primitives::{address, hex, keccak256, Address, Bytes, TxKind, B256, U256};
 use revm::state::AccountInfo;
 use revm::{DatabaseRef, InspectCommitEvm};
 use std::collections::HashMap;
@@ -23,15 +25,25 @@ use std::path::Path;
 
 pub type Evm = MainnetEvm<MainnetContext<CacheDB<EmptyDB>>, Recorder>;
 
-/// The default sender: an EOA with plenty of ether.
-pub const SENDER: Address = Address::new([0x5e; 20]);
+/// The default sender: forge's, so tests see the same `msg.sender`.
+pub const SENDER: Address = address!("1804c8AB1F12E6bbf3894d4083f33e07309d1f38");
+/// Gas for one transaction: far above any block, like forge's test gas limit.
+const TX_GAS: u64 = 1 << 32;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CodeKind {
+    Init,
+    Runtime,
+}
 
 pub struct Session {
     pub project: Project,
     pub sources: Sources,
     pub artifacts: Vec<Artifact>,
-    /// Deployed address → artifact index.
-    pub deployed: HashMap<Address, usize>,
+    /// Deployed libraries: artifact index → address.
+    pub libraries: HashMap<usize, Address>,
+    /// Code hash → which artifact's code it is (None: not code from this compile).
+    pub code_index: HashMap<B256, Option<(usize, CodeKind)>>,
     pub evm: Evm,
 }
 
@@ -55,8 +67,27 @@ pub struct Run {
     pub output: Bytes,
     pub created: Option<Address>,
     pub gas_used: u64,
-    /// For a deploy: the artifact whose init code ran.
-    pub creating: Option<usize>,
+}
+
+impl Run {
+    /// The revert reason, when the output is `Error(string)`.
+    pub fn revert_reason(&self) -> Option<String> {
+        let out = &self.output;
+        if out.len() < 4 || out[..4] != keccak256("Error(string)".as_bytes())[..4] {
+            return None;
+        }
+        match DynSolType::Tuple(vec![DynSolType::String]).abi_decode_params(&out[4..]).ok()? {
+            DynSolValue::Tuple(v) => v.first().and_then(|s| s.as_str()).map(str::to_string),
+            _ => None,
+        }
+    }
+}
+
+/// A Foundry test run: `setUp()` (not traced unless asked) and the test function.
+pub struct TestRun {
+    pub address: Address,
+    pub setup: Run,
+    pub test: Run,
 }
 
 impl Session {
@@ -73,43 +104,94 @@ impl Session {
                 }
             }
         }
-        let ctx = Context::mainnet().with_db(CacheDB::new(EmptyDB::default())).modify_cfg_chained(|cfg| {
+        let mut ctx = Context::mainnet().with_db(CacheDB::new(EmptyDB::default())).modify_cfg_chained(|cfg| {
             cfg.disable_nonce_check = true;
+            // Unoptimized builds of real protocols are over EIP-170's 24 KiB; the debugger doesn't care.
+            cfg.limit_contract_code_size = Some(usize::MAX);
+            cfg.limit_contract_initcode_size = Some(usize::MAX);
+            cfg.tx_gas_limit_cap = Some(u64::MAX);
         });
+        // forge's defaults: block 1 at timestamp 1.
+        ctx.block.number = U256::from(1);
+        ctx.block.timestamp = U256::from(1);
+        ctx.block.gas_limit = u64::MAX;
         let mut evm = ctx.build_mainnet_with_inspector(Recorder::default());
-        evm.ctx.db_mut().insert_account_info(SENDER, AccountInfo { balance: U256::from(10).pow(U256::from(24)), ..Default::default() });
-        Ok(Session { project, sources, artifacts, deployed: HashMap::new(), evm })
+        evm.ctx.db_mut().insert_account_info(SENDER, AccountInfo { balance: U256::from(1) << 96, ..Default::default() });
+        // Like forge: one byte of code at `vm`, so Solidity's extcodesize check before a call without return
+        // values (vm.label, vm.prank) passes. The calls themselves never run it.
+        evm.ctx.db_mut().insert_account_info(HEVM, AccountInfo::default().with_code(Bytecode::new_raw(vec![0x00].into())));
+        Ok(Session { project, sources, artifacts, libraries: HashMap::new(), code_index: HashMap::new(), evm })
     }
 
+    /// A contract by name, or `File.sol:Name` when the name is ambiguous.
     pub fn artifact(&self, name: &str) -> Result<usize> {
-        let found: Vec<usize> = self.artifacts.iter().enumerate().filter(|(_, a)| a.name == name).map(|(i, _)| i).collect();
+        let (file, name) = name.rsplit_once(':').map(|(f, n)| (Some(f), n)).unwrap_or((None, name));
+        let found: Vec<usize> = self
+            .artifacts
+            .iter()
+            .enumerate()
+            .filter(|(_, a)| a.name == name && file.is_none_or(|f| a.file == f || a.file.ends_with(&format!("/{f}"))))
+            .map(|(i, _)| i)
+            .collect();
         match found.as_slice() {
             [one] => Ok(*one),
-            [] => bail!("no deployable contract {name} (have: {})", self.artifacts.iter().map(|a| a.name.as_str()).collect::<Vec<_>>().join(", ")),
-            _ => bail!("{name} is defined in more than one file"),
+            [] => bail!("no deployable contract {name}"),
+            _ => bail!("{name} is defined in more than one file; write it as File.sol:{name}"),
         }
+    }
+
+    /// The init code with its libraries linked, deploying them first if needed.
+    pub fn linked_init(&mut self, contract: usize) -> Result<Vec<u8>> {
+        let mut code = self.artifacts[contract].init.code.clone();
+        for (file, lib, at) in self.artifacts[contract].links.clone() {
+            let li = self.artifact(&format!("{file}:{lib}"))?;
+            let addr = match self.libraries.get(&li) {
+                Some(a) => *a,
+                None => {
+                    let init = self.linked_init(li)?;
+                    let run = self.transact(SENDER, TxKind::Create, init.into(), U256::ZERO)?;
+                    let a = run.created.ok_or_else(|| anyhow!("deploying library {lib} failed"))?;
+                    self.libraries.insert(li, a);
+                    a
+                }
+            };
+            for s in at {
+                code[s..s + 20].copy_from_slice(addr.as_slice());
+            }
+        }
+        Ok(code)
     }
 
     /// Deploys a contract with ABI-encoded constructor arguments; the run's trace covers the init code.
     pub fn deploy(&mut self, contract: usize, ctor_args: &[u8]) -> Result<(Address, Run)> {
-        let mut data = self.artifacts[contract].init.code.clone();
+        let mut data = self.linked_init(contract)?;
         data.extend_from_slice(ctor_args);
-        let mut run = self.transact(SENDER, TxKind::Create, data.into(), U256::ZERO)?;
-        run.creating = Some(contract);
-        let addr = run.created.ok_or_else(|| anyhow!("deploying {} failed: 0x{}", self.artifacts[contract].name, hex::encode(&run.output)))?;
-        // The runtime map follows the code actually on chain (immutables filled in; same layout as solc's).
-        let code = self.evm.ctx.db().basic_ref(addr)?.and_then(|a| a.code).map(|c| c.original_bytes().to_vec()).unwrap_or_default();
-        let a = &mut self.artifacts[contract];
-        if !code.is_empty() && code.len() == a.runtime.code.len() {
-            a.runtime.code = code;
-        }
-        self.deployed.insert(addr, contract);
+        let run = self.transact(SENDER, TxKind::Create, data.into(), U256::ZERO)?;
+        let addr = run.created.ok_or_else(|| {
+            let why = run.revert_reason().unwrap_or_else(|| format!("0x{}", hex::encode(&run.output)));
+            anyhow!("deploying {} failed: {why}", self.artifacts[contract].name)
+        })?;
         Ok((addr, run))
     }
 
     /// Runs one transaction with the recorder on, and commits it.
     pub fn transact(&mut self, from: Address, kind: TxKind, data: Bytes, value: U256) -> Result<Run> {
-        let tx = TxEnv::builder().caller(from).kind(kind).data(data).value(value).gas_limit(16_000_000).build_fill();
+        self.evm.inspector.enabled = true;
+        let run = self.run_tx(from, kind, data, value)?;
+        self.index_codes(&run.trace);
+        Ok(run)
+    }
+
+    /// Runs one transaction with cheatcodes but without recording steps (fast: fixtures, setUp).
+    pub fn transact_quiet(&mut self, from: Address, kind: TxKind, data: Bytes, value: U256) -> Result<Run> {
+        self.evm.inspector.enabled = false;
+        let run = self.run_tx(from, kind, data, value);
+        self.evm.inspector.enabled = true;
+        run
+    }
+
+    fn run_tx(&mut self, from: Address, kind: TxKind, data: Bytes, value: U256) -> Result<Run> {
+        let tx = TxEnv::builder().caller(from).kind(kind).data(data).value(value).gas_limit(TX_GAS).build_fill();
         let result = self.evm.inspect_tx_commit(tx).map_err(|e| anyhow!("transaction failed to run: {e:?}"))?;
         let trace = self.evm.inspector.take();
         Ok(match result {
@@ -118,25 +200,108 @@ impl Session {
                     Output::Create(out, addr) => (addr, out),
                     Output::Call(out) => (None, out),
                 };
-                Run { trace, success: true, output, created, gas_used: gas.tx_gas_used(), creating: None }
+                Run { trace, success: true, output, created, gas_used: gas.tx_gas_used() }
             }
-            ExecutionResult::Revert { output, gas, .. } => Run { trace, success: false, output, created: None, gas_used: gas.tx_gas_used(), creating: None },
-            ExecutionResult::Halt { gas, .. } => Run { trace, success: false, output: Bytes::new(), created: None, gas_used: gas.tx_gas_used(), creating: None },
+            ExecutionResult::Revert { output, gas, .. } => {
+                Run { trace, success: false, output, created: None, gas_used: gas.tx_gas_used() }
+            }
+            ExecutionResult::Halt { reason, gas, .. } => Run {
+                trace,
+                success: false,
+                output: error_string(&format!("halted: {reason:?}")),
+                created: None,
+                gas_used: gas.tx_gas_used(),
+            },
         })
+    }
+
+    fn index_codes(&mut self, trace: &Trace) {
+        for (hash, code) in &trace.codes {
+            if !self.code_index.contains_key(hash) {
+                let found = self.identify(code);
+                self.code_index.insert(*hash, found);
+            }
+        }
+    }
+
+    /// Which artifact's code this is.
+    pub fn identify(&self, code: &[u8]) -> Option<(usize, CodeKind)> {
+        let runtime = self.artifacts.iter().position(|a| a.is_runtime(code)).map(|i| (i, CodeKind::Runtime));
+        runtime.or_else(|| self.artifacts.iter().position(|a| a.is_init(code)).map(|i| (i, CodeKind::Init)))
+    }
+
+    /// The artifact whose runtime code is deployed at an address now.
+    pub fn artifact_at(&self, at: Address) -> Option<usize> {
+        let code = self.evm.ctx.db().basic_ref(at).ok().flatten()?.code?;
+        let bytes = code.original_bytes();
+        match self.code_index.get(&keccak256(&bytes)) {
+            Some(Some((i, CodeKind::Runtime))) => Some(*i),
+            Some(_) => None,
+            None => self.identify(&bytes).filter(|(_, k)| *k == CodeKind::Runtime).map(|(i, _)| i),
+        }
     }
 
     /// Calls `sig` (`deposit` or `deposit(uint256)`) on a deployed contract with arguments written as Solidity
     /// literals.
     pub fn call(&mut self, to: Address, sig: &str, args: &[String], from: Address, value: U256) -> Result<Run> {
-        let contract = *self.deployed.get(&to).ok_or_else(|| anyhow!("nothing deployed at {to}"))?;
+        let contract = self.artifact_at(to).ok_or_else(|| anyhow!("no contract from this compile at {to}"))?;
         let sig = self.artifacts[contract].signature(sig)?;
         let data = encode_call(&sig, args)?;
         self.transact(from, TxKind::Call(to), data.into(), value)
     }
 
+    /// Runs a Foundry test: deploys the test contract, runs `setUp()` (traced only when asked), then the test.
+    pub fn run_test(&mut self, contract: &str, test: &str, trace_setup: bool) -> Result<TestRun> {
+        let ci = self.artifact(contract)?;
+        self.serve_get_code()?;
+        let init = self.linked_init(ci)?;
+        let deploy = self.transact_quiet(SENDER, TxKind::Create, init.into(), U256::ZERO)?;
+        let address = deploy
+            .created
+            .ok_or_else(|| anyhow!("deploying {contract} failed: {}", deploy.revert_reason().unwrap_or_else(|| format!("0x{}", hex::encode(&deploy.output)))))?;
+        // forge funds the test contract.
+        let mut info = self.evm.ctx.db().basic_ref(address)?.unwrap_or_default();
+        info.balance = U256::from(1) << 96;
+        self.evm.ctx.db_mut().insert_account_info(address, info);
+        let name = self.artifacts[ci].name.clone();
+        self.evm.inspector.cheats.labels.insert(address, name);
+
+        let has_setup = self.artifacts[ci].methods.values().any(|s| s == "setUp()");
+        let setup_data: Bytes = keccak256("setUp()".as_bytes())[..4].to_vec().into();
+        let setup = if !has_setup {
+            Run { trace: Trace::default(), success: true, output: Bytes::new(), created: None, gas_used: 0 }
+        } else if trace_setup {
+            self.transact(SENDER, TxKind::Call(address), setup_data, U256::ZERO)?
+        } else {
+            self.transact_quiet(SENDER, TxKind::Call(address), setup_data, U256::ZERO)?
+        };
+        if !setup.success {
+            let why = setup.revert_reason().unwrap_or_else(|| format!("0x{}", hex::encode(&setup.output)));
+            bail!("setUp() reverted: {why}");
+        }
+        let sig = self.artifacts[ci].signature(test)?;
+        let test = self.transact(SENDER, TxKind::Call(address), encode_call(&sig, &[])?.into(), U256::ZERO)?;
+        Ok(TestRun { address, setup, test })
+    }
+
+    /// Makes `vm.getCode` answer with this compile's (linked) creation code, by file, name or both.
+    fn serve_get_code(&mut self) -> Result<()> {
+        let mut code = HashMap::new();
+        for i in 0..self.artifacts.len() {
+            let init = self.linked_init(i)?;
+            let a = &self.artifacts[i];
+            let base = a.file.rsplit('/').next().unwrap_or(&a.file).to_string();
+            for key in [base.clone(), format!("{base}:{}", a.name), a.file.clone(), format!("{}:{}", a.file, a.name), a.name.clone()] {
+                code.entry(key).or_insert_with(|| init.clone());
+            }
+        }
+        self.evm.inspector.cheats.code = code;
+        Ok(())
+    }
+
     /// Writes a root state variable directly (setup a constructor or setter doesn't offer).
     pub fn set_var(&mut self, at: Address, name: &str, value: &str) -> Result<()> {
-        let contract = *self.deployed.get(&at).ok_or_else(|| anyhow!("nothing deployed at {at}"))?;
+        let contract = self.artifact_at(at).ok_or_else(|| anyhow!("no contract from this compile at {at}"))?;
         let layout = Layout::new(&self.artifacts[contract].storage_layout);
         let (slot, offset, ty) = layout.var(name).ok_or_else(|| anyhow!("no state variable {name}"))?;
         let label = layout.label(&ty);
@@ -166,21 +331,18 @@ impl Session {
         self.evm.ctx.db_mut().insert_account_info(at, AccountInfo::default().with_code(Bytecode::new_raw(code.into())));
     }
 
-    /// The code map a step ran (None for code the session didn't compile).
-    pub fn code_map(&self, code: CodeRef) -> Option<(&Artifact, &CodeMap)> {
-        match code {
-            CodeRef::Runtime(a) => self.deployed.get(&a).map(|&i| (&self.artifacts[i], &self.artifacts[i].runtime)),
-            CodeRef::Init(_) => None,
-        }
+    /// The artifact and code map a step ran.
+    pub fn code_of(&self, trace: &Trace, step: &Step) -> Option<(usize, &CodeMap)> {
+        let hash = trace.frames.get(step.frame)?.code_hash?;
+        let (i, kind) = (*self.code_index.get(&hash)?)?;
+        let a = &self.artifacts[i];
+        Some((i, if kind == CodeKind::Init { &a.init } else { &a.runtime }))
     }
 
-    /// Bytecode → Solidity for one instruction. Init code is placed with the contract being created.
-    pub fn locate(&self, code: CodeRef, pc: usize, creating: Option<usize>) -> Option<Located> {
-        let map = match (code, creating) {
-            (CodeRef::Init(_), Some(i)) => &self.artifacts[i].init,
-            _ => self.code_map(code)?.1,
-        };
-        let (entry, node) = map.at_pc(pc);
+    /// Bytecode → Solidity for one step.
+    pub fn locate(&self, trace: &Trace, step: &Step) -> Option<Located> {
+        let (_, map) = self.code_of(trace, step)?;
+        let (entry, node) = map.at_pc(step.pc);
         let entry = entry?;
         if !entry.has_source() {
             return None;
@@ -196,22 +358,30 @@ impl Session {
         })
     }
 
+    pub fn layout_at(&self, address: Address) -> Option<Layout> {
+        self.artifact_at(address).map(|i| Layout::new(&self.artifacts[i].storage_layout))
+    }
+
     /// Storage accesses named by the storage layout of the contract that owns the storage.
     pub fn describe_storage(&self, address: Address, access: &StorageAccess, trace: &Trace) -> String {
-        let layout = self.deployed.get(&address).map(|&i| Layout::new(&self.artifacts[i].storage_layout));
+        self.describe_storage_with(self.layout_at(address).as_ref(), access, trace)
+    }
+
+    pub fn describe_storage_with(&self, layout: Option<&Layout>, access: &StorageAccess, trace: &Trace) -> String {
         let (slot, kind) = match access {
             StorageAccess::Read { slot, .. } => (*slot, "read"),
             StorageAccess::Write { slot, .. } => (*slot, "write"),
         };
-        let places = layout.as_ref().map(|l| l.places(slot, &trace.preimages)).unwrap_or_default();
-        if places.is_empty() {
+        let places = layout.map(|l| l.places(slot, &trace.preimages)).unwrap_or_default();
+        let Some(l) = layout.filter(|_| !places.is_empty()) else {
             let v = match access {
                 StorageAccess::Read { value, .. } => format!("{value:#x}"),
-                StorageAccess::Write { old, new, .. } => format!("{} → {new:#x}", old.map(|o| format!("{o:#x}")).unwrap_or("?".into())),
+                StorageAccess::Write { old, new, .. } => {
+                    format!("{} → {new:#x}", old.map(|o| format!("{o:#x}")).unwrap_or("?".into()))
+                }
             };
-            return format!("{kind} slot {slot:#x}: {v}");
-        }
-        let l = layout.unwrap();
+            return format!("{kind} slot {}: {v}", short_word(slot));
+        };
         places
             .iter()
             .map(|p| match access {
@@ -225,45 +395,78 @@ impl Session {
             .join(", ")
     }
 
-    /// The storage writes of a run, named: `(contract file:line, "accounts[0x…].shares", old, new)`.
+    /// The storage writes of a run, named (`accounts[0x…].shares: 0 → 50`), with the line that wrote each.
     pub fn storage_writes(&self, run: &Run) -> Vec<StorageWrite> {
+        let mut layouts: HashMap<Address, Option<Layout>> = HashMap::new();
         let mut out = Vec::new();
         for (i, s) in run.trace.steps.iter().enumerate() {
             let Some(StorageAccess::Write { slot, old, new }) = &s.storage else { continue };
-            let loc = self.locate(s.code, s.pc, run.creating);
-            let layout = self.deployed.get(&s.address).map(|&i| Layout::new(&self.artifacts[i].storage_layout));
-            let places = layout.as_ref().map(|l| l.places(*slot, &run.trace.preimages)).unwrap_or_default();
+            let line = self.locate(&run.trace, s).map(|l| l.line);
+            let layout = layouts.entry(s.address).or_insert_with(|| self.layout_at(s.address)).as_ref();
+            let places = layout.map(|l| l.places(*slot, &run.trace.preimages)).unwrap_or_default();
             for p in &places {
-                let l = layout.as_ref().unwrap();
+                let l = layout.unwrap();
                 out.push(StorageWrite {
                     step: i,
-                    line: loc.as_ref().map(|l| l.line),
+                    address: s.address,
+                    line,
                     path: p.path.clone(),
                     old: old.map(|o| l.decode(p, o)),
                     new: l.decode(p, *new),
                 });
             }
             if places.is_empty() {
-                out.push(StorageWrite { step: i, line: loc.as_ref().map(|l| l.line), path: format!("{slot:#x}"), old: old.map(|o| format!("{o:#x}")), new: format!("{new:#x}") });
+                out.push(StorageWrite {
+                    step: i,
+                    address: s.address,
+                    line,
+                    path: format!("{slot:#x}"),
+                    old: old.map(|o| format!("{o:#x}")),
+                    new: format!("{new:#x}"),
+                });
             }
         }
         out
     }
 
+    /// A short name for an address: its label, or the contract deployed there, or a shortened hex.
+    pub fn name_of(&self, a: Address) -> String {
+        if let Some(l) = self.evm.inspector.cheats.label(&a) {
+            return l.to_string();
+        }
+        if a == HEVM {
+            return "vm".into();
+        }
+        if let Some(i) = self.artifact_at(a) {
+            return self.artifacts[i].name.clone();
+        }
+        let s = a.to_checksum(None);
+        format!("{}…{}", &s[..6], &s[s.len() - 4..])
+    }
+
     /// Prints the trace: one line per opcode, or (with `lines_only`) one per change of Solidity line.
     pub fn print_trace(&self, run: &Run, lines_only: bool, out: &mut impl std::io::Write) -> std::io::Result<()> {
-        let mut last: Option<(usize, CodeRef, String, usize)> = None;
+        let mut layouts: HashMap<Address, Option<Layout>> = HashMap::new();
+        let mut last: Option<(usize, String, usize)> = None;
         for (i, s) in run.trace.steps.iter().enumerate() {
-            let loc = self.locate(s.code, s.pc, run.creating);
-            let key = (s.depth, s.code, loc.as_ref().map(|l| l.file.clone()).unwrap_or_default(), loc.as_ref().map(|l| l.line).unwrap_or(0));
-            let storage = s.storage.as_ref().map(|a| self.describe_storage(s.address, a, &run.trace));
-            if lines_only && last.as_ref() == Some(&key) && storage.is_none() {
+            let loc = self.locate(&run.trace, s);
+            let key = (s.frame, loc.as_ref().map(|l| l.file.clone()).unwrap_or_default(), loc.as_ref().map(|l| l.line).unwrap_or(0));
+            let storage = s.storage.as_ref().map(|a| {
+                let layout = layouts.entry(s.address).or_insert_with(|| self.layout_at(s.address)).as_ref();
+                self.describe_storage_with(layout, a, &run.trace)
+            });
+            if let Some(f) = run.trace.frames.get(s.frame).filter(|f| f.first_step == i) {
+                let call = self.describe_call(f.code_address, &f.input);
+                let who = if f.kind == "DELEGATECALL" {
+                    format!("{} ⇒ {}", self.name_of(f.target), self.name_of(f.code_address))
+                } else {
+                    format!("{} → {}", self.name_of(f.caller), self.name_of(f.target))
+                };
+                writeln!(out, "{}── {} {who} {call}", "  ".repeat(s.depth), f.kind)?;
+            } else if lines_only && last.as_ref() == Some(&key) && storage.is_none() {
                 continue;
             }
             last = Some(key);
-            if let Some(f) = run.trace.frames.get(s.frame).filter(|f| f.first_step == i) {
-                writeln!(out, "{}── {} {} → {} {}", "  ".repeat(s.depth), f.kind, short(f.caller), short(f.target), self.describe_call(f.target, &f.input))?;
-            }
             let op = OpCode::new(s.op).map(|o| o.as_str()).unwrap_or("INVALID");
             let top: Vec<String> = s.stack.iter().rev().take(3).map(|v| short_word(*v)).collect();
             let place = match &loc {
@@ -279,7 +482,8 @@ impl Session {
                 Some(Jump::Out) => " ↗",
                 _ => "",
             };
-            write!(out, "{i:>6} {}{place:<16} {:<14} pc={:<5} {op:<12}{jump:<2} [{}]", "  ".repeat(s.depth), loc.as_ref().map(|l| l.scope.as_str()).unwrap_or(""), s.pc, top.join(", "))?;
+            let scope = loc.as_ref().map(|l| l.scope.as_str()).unwrap_or("");
+            write!(out, "{i:>7} {}{place:<22} {scope:<28} pc={:<5} {op:<12}{jump:<2} [{}]", "  ".repeat(s.depth), s.pc, top.join(", "))?;
             if lines_only {
                 write!(out, "  │ {text}")?;
             }
@@ -294,19 +498,20 @@ impl Session {
     /// `deposit(100)` for calldata the session can decode, else the selector.
     pub fn describe_call(&self, to: Address, input: &[u8]) -> String {
         if input.len() < 4 {
-            return format!("0x{}", hex::encode(input));
+            return if input.is_empty() { "()".into() } else { format!("0x{}", hex::encode(input)) };
         }
         let selector = hex::encode(&input[..4]);
-        let Some(sig) = self.deployed.get(&to).and_then(|&i| self.artifacts[i].methods.get(&selector)) else {
-            return format!("0x{selector}…");
-        };
-        let params = sig.split_once('(').map(|(_, p)| format!("({}", p)).unwrap_or_default();
+        let cheat = (to == HEVM).then(|| self.evm.inspector.cheats.signature(input)).flatten().map(str::to_string);
+        let sig = cheat
+            .as_ref()
+            .or_else(|| self.artifact_at(to).and_then(|i| self.artifacts[i].methods.get(&selector)))
+            .or_else(|| self.artifacts.iter().find_map(|a| a.methods.get(&selector)));
+        let Some(sig) = sig else { return format!("0x{selector}…") };
+        let params = sig.split_once('(').map(|(_, p)| format!("({p}")).unwrap_or_default();
         let decoded = DynSolType::parse(&params).ok().and_then(|t| t.abi_decode_params(&input[4..]).ok());
+        let name = sig.split('(').next().unwrap_or("");
         match decoded {
-            Some(DynSolValue::Tuple(vals)) => {
-                let name = sig.split('(').next().unwrap_or("");
-                format!("{name}({})", vals.iter().map(show_value).collect::<Vec<_>>().join(", "))
-            }
+            Some(DynSolValue::Tuple(vals)) => format!("{name}({})", vals.iter().map(show_value).collect::<Vec<_>>().join(", ")),
             _ => sig.clone(),
         }
     }
@@ -315,6 +520,7 @@ impl Session {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct StorageWrite {
     pub step: usize,
+    pub address: Address,
     pub line: Option<usize>,
     pub path: String,
     pub old: Option<String>,
@@ -328,25 +534,32 @@ pub fn encode_call(sig: &str, args: &[String]) -> Result<Vec<u8>> {
     if types.len() != args.len() {
         bail!("{sig} takes {} arguments, got {}", types.len(), args.len());
     }
-    let values = types.iter().zip(args).map(|(t, a)| t.coerce_str(a).with_context(|| format!("{a} isn't a {t}"))).collect::<Result<Vec<_>>>()?;
+    let values = types
+        .iter()
+        .zip(args)
+        .map(|(t, a)| t.coerce_str(a).with_context(|| format!("{a} isn't a {t}")))
+        .collect::<Result<Vec<_>>>()?;
     let mut data = keccak256(sig.as_bytes())[..4].to_vec();
     data.extend(DynSolValue::Tuple(values).abi_encode_params());
     Ok(data)
 }
 
-fn show_value(v: &DynSolValue) -> String {
+pub fn show_value(v: &DynSolValue) -> String {
     match v {
+        DynSolValue::Uint(u, _) if *u == U256::MAX => "type(uint256).max".into(),
         DynSolValue::Uint(u, _) => u.to_string(),
         DynSolValue::Int(i, _) => i.to_string(),
         DynSolValue::Address(a) => a.to_checksum(None),
         DynSolValue::Bool(b) => b.to_string(),
+        DynSolValue::FixedBytes(b, n) => format!("0x{}", hex::encode(&b[..*n])),
+        DynSolValue::Bytes(b) if b.len() > 32 => format!("0x{}…({} bytes)", hex::encode(&b[..8]), b.len()),
+        DynSolValue::Bytes(b) => format!("0x{}", hex::encode(b)),
+        DynSolValue::String(s) => format!("{s:?}"),
+        DynSolValue::Tuple(vs) | DynSolValue::Array(vs) | DynSolValue::FixedArray(vs) => {
+            format!("({})", vs.iter().map(show_value).collect::<Vec<_>>().join(", "))
+        }
         other => format!("{other:?}"),
     }
-}
-
-fn short(a: Address) -> String {
-    let s = a.to_checksum(None);
-    format!("{}…{}", &s[..6], &s[s.len() - 4..])
 }
 
 /// A stack word, short: small numbers in decimal, the rest in hex (long ones elided in the middle).
@@ -361,4 +574,3 @@ pub fn short_word(v: U256) -> String {
         format!("0x{}…{}", &h[..6], &h[h.len() - 4..])
     }
 }
-

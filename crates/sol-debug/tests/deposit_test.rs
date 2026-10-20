@@ -45,6 +45,7 @@ fn deposit_storage_writes_are_named_and_placed() {
     let sender = SENDER.to_checksum(None);
     let w = |line: &str, path: &str, old: &str, new: &str| StorageWrite {
         step: 0,
+        address: vault,
         line: Some(line_of(&s, line)),
         path: path.to_string(),
         old: Some(old.to_string()),
@@ -69,7 +70,7 @@ fn every_step_of_deposit_has_a_place() {
     let credit_line = line_of(&s, "acc.shares += shares;");
 
     // The call into deposit's body lands on its declaration; the oracle read is an SLOAD of `oracle` on line 56.
-    let located: Vec<_> = run.trace.steps.iter().map(|st| (st, s.locate(st.code, st.pc, None))).collect();
+    let located: Vec<_> = run.trace.steps.iter().map(|st| (st, s.locate(&run.trace, st))).collect();
     assert!(located.iter().any(|(_, l)| l.as_ref().is_some_and(|l| l.line == deposit_line && l.scope == "Vault.deposit")));
     let oracle_read = located
         .iter()
