@@ -6,7 +6,7 @@ import type { Bridge } from "./swarm-panel";
  * (src-tauri/src/nvim.rs). The grid lives outside React; a flush re-renders only the rows that changed.
  */
 
-type Attr = { fg?: number; bg?: number; sp?: number; bold?: boolean; italic?: boolean; underline?: boolean; undercurl?: boolean; strikethrough?: boolean; reverse?: boolean };
+type Attr = { fg?: number; bg?: number; sp?: number; bold?: boolean; italic?: boolean; underline?: boolean; undercurl?: boolean; underdouble?: boolean; underdotted?: boolean; underdashed?: boolean; strikethrough?: boolean; reverse?: boolean; dim?: boolean };
 type Cell = [text: string, hl: number];
 type ModeInfo = { cursor_shape?: "block" | "horizontal" | "vertical"; cell_percentage?: number; name?: string };
 
@@ -57,8 +57,9 @@ const Row = memo(function Row({ cells, attrs, version, fg: dfg, bg: dbg }: { cel
 							background: bg,
 							fontWeight: a.bold ? 600 : undefined,
 							fontStyle: a.italic ? "italic" : undefined,
-							textDecoration: [a.underline || a.undercurl ? "underline" : "", a.strikethrough ? "line-through" : ""].filter(Boolean).join(" ") || undefined,
-							textDecorationStyle: a.undercurl ? "wavy" : undefined,
+							textDecoration: [a.underline || a.undercurl || a.underdouble || a.underdotted || a.underdashed ? "underline" : "", a.strikethrough ? "line-through" : ""].filter(Boolean).join(" ") || undefined,
+							textDecorationStyle: a.undercurl ? "wavy" : a.underdouble ? "double" : a.underdotted ? "dotted" : a.underdashed ? "dashed" : undefined,
+							opacity: a.dim ? 0.6 : undefined,
 							textDecorationColor: hex(a.sp),
 						}}
 					>
@@ -116,7 +117,13 @@ export function NeovimView({ bridge, folder, path, line, onFile }: { bridge: Bri
 								g.versions = g.versions.map((v) => v + 1);
 								break;
 							case "hl_attr_define":
-								g.attrs.set(args[0] as number, args[1] as Attr);
+							{
+								// Neovim names RGB colours foreground/background/special.
+								const rgb = args[1] as Attr & { foreground?: number; background?: number; special?: number };
+								g.attrs.set(args[0] as number, { ...rgb, fg: rgb.foreground, bg: rgb.background, sp: rgb.special });
+								// Rows already drawn with this id pick up the change.
+								g.versions = g.versions.map((v) => v + 1);
+							}
 								break;
 							case "grid_line": {
 								const [, r, c0, cells] = args as [number, number, number, [string, number?, number?][]];
