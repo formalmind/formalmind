@@ -4,7 +4,7 @@ import { createPortal } from "react-dom";
 import { NvimTerminal } from "./nvim-terminal";
 import { reportError } from "@/lib/report-error";
 import { JsonTree } from "./json-tree";
-import { Bug, Check, ChevronDown, Code2, Copy, FileCode2, MessagesSquare, Network, Play, Plus, ScanSearch, Square, WandSparkles, Wrench } from "lucide-react";
+import { Bug, Check, ChevronDown, Code2, Copy, FileCode2, Network, Play, Plus, ScanSearch, Square, WandSparkles, Wrench } from "lucide-react";
 
 // The project roadmap (GitHub Projects-style), the same view the web app had on its own page.
 import { motion as vimMotion, search as vimSearch, setVimMode, useVimMode, type Cursor } from "@/components/vim-mode";
@@ -382,7 +382,6 @@ type Mode = "code" | "chat" | "swarm" | "roadmap" | "audit" | "bugs" | "debug";
 
 const MODES: { id: Mode; label: string; icon: typeof Code2 }[] = [
 	{ id: "code", label: "Code", icon: Code2 },
-	{ id: "chat", label: "Chat", icon: MessagesSquare },
 	{ id: "swarm", label: "Swarm", icon: Network },
 	{ id: "audit", label: "Audit", icon: ScanSearch },
 	{ id: "bugs", label: "Bugs", icon: Bug },
@@ -416,6 +415,16 @@ function NavGroup({ name, git, onDebug, mode, onMode, inBar, compact }: { name: 
 			))}
 		</div>
 	);
+}
+
+/**
+ * The mode a link asks for, as the page has it: Debug only with a debugger (else Code); Roadmap and Chat have no tab
+ * now (the roadmap is on the Swarm canvas), so they open Swarm. The Chat view stays in the code for later.
+ */
+function resolveMode(asked: Mode, hasDebug: boolean): Mode {
+	if (asked === "debug" && !hasDebug) return "code";
+	if (asked === "roadmap" || asked === "chat") return "swarm";
+	return asked;
 }
 
 /** The Mac app's title bar slot (desktop/src/tabs.tsx), when there is one. */
@@ -757,8 +766,8 @@ export function SwarmPanel({ folder, name, scan, bridge, session, file: openPath
 	const [params, setParams] = useSearchParams();
 	// Debug mode exists only where the page is given a debugger; an old link to it opens Code instead.
 	const asked = (params.get("mode") as Mode | null) ?? "swarm";
-	// The roadmap lives on the Swarm canvas now; an old link to its tab opens Swarm.
-	const mode: Mode = asked === "debug" && !debug ? "code" : asked === "roadmap" ? "swarm" : asked;
+	// The roadmap lives on the Swarm canvas now and Chat has no tab; old links to either open Swarm.
+	const mode = resolveMode(asked, Boolean(debug));
 	// The main contract's entry points, read from the AST, so the plan can name the ones each item covers.
 	const [entryUnits, setEntryUnits] = useState<AstUnit[]>([]);
 	const mainSource = (scan?.solidity ?? []).find((f) => f.startsWith("src/") && !f.endsWith(".t.sol") && !f.endsWith(".s.sol")) ?? null;
