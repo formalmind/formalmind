@@ -74,6 +74,7 @@ pub fn run() {
             local::folder_add,
             local::folder_remove,
             local::folder_scan,
+            local::folder_tree,
             executor::model_key_set,
             executor::model_key_status,
             executor::turn_start,

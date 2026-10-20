@@ -25,6 +25,7 @@ const pages = () => import("@/components/projects/project-pages");
 const SwarmChatPage = lazy(() => pages().then((m) => ({ default: m.SwarmChatPage })));
 const FirstProject = lazy(() => pages().then((m) => ({ default: m.FirstProject })));
 const ProjectHomePage = lazy(() => pages().then((m) => ({ default: m.ProjectHomePage })));
+const ProjectFilePage = lazy(() => import("@/components/projects/project-file").then((m) => ({ default: m.ProjectFilePage })));
 
 type User = SessionData["user"];
 
@@ -53,6 +54,7 @@ function Shell({ user }: { user: User }) {
 								<Route path="/roadmap" element={<FirstProject page="roadmap" />} />
 								<Route path="/usage" element={<UsagePage />} />
 								<Route path="/projects/:owner/:name" element={<ProjectHomePage />} />
+								<Route path="/projects/:owner/:name/file" element={<ProjectFilePage />} />
 								<Route path="/local" element={<LocalFolderPage />} />
 								<Route path="/settings" element={<SettingsPage />} />
 								{/* Other pages come over from the web app as the desktop app grows. */}

@@ -1,3 +1,4 @@
+import { useSearchParams } from "react-router";
 import { SettingsMenu } from "@/components/projects/swarm-control";
 import { NotificationCenter } from "@/components/notification-center";
 import { SwarmPanel, type Bridge } from "@/desktop/src/swarm-panel";
@@ -113,5 +114,6 @@ const demo: Bridge = {
 };
 
 export function LocalDemoPage() {
-	return <SwarmPanel folder="/Users/you/code/lending-protocol" name="lending-protocol" scan={FILES} bridge={demo} actions={<><SettingsMenu repos={[]} className="inline-flex size-8 items-center justify-center rounded-full border bg-background/90 text-muted-foreground shadow-sm backdrop-blur hover:text-foreground" /><NotificationCenter /></>} />;
+	const [params] = useSearchParams();
+	return <SwarmPanel folder="/Users/you/code/lending-protocol" name="lending-protocol" scan={FILES} bridge={demo} file={params.get("file")} actions={<><SettingsMenu repos={[]} className="inline-flex size-8 items-center justify-center rounded-full border bg-background/90 text-muted-foreground shadow-sm backdrop-blur hover:text-foreground" /><NotificationCenter /></>} />;
 }

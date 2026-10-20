@@ -5,7 +5,9 @@ import { open } from "@tauri-apps/plugin-dialog";
 import { Plus } from "lucide-react";
 import { listen } from "@tauri-apps/api/event";
 import { apiBase } from "./api";
-import { LocalHeading, SessionFolder } from "@/components/session-folder";
+import { LocalHeading, TreeFolder } from "@/components/session-folder";
+import { FileTree } from "@/components/file-tree";
+import { useNavigate } from "react-router";
 import { SwarmPanel, type Bridge } from "./swarm-panel";
 
 const tauri: Bridge = { invoke, listen, apiBase };
@@ -36,41 +38,42 @@ function useFolders() {
 	return { folders, add, remove };
 }
 
-/** The sidebar section: local folders, with + to add one. */
-type SessionRow = { run: string; title: string; outcome: string };
+type Tree = { files: string[]; truncated: boolean };
 
-/** A folder's swarm sessions, newest first, refreshed when a session starts or ends. */
-function useSessions(folder: string) {
-	const [rows, setRows] = useState<SessionRow[]>([]);
+/** A folder's files, read when it's selected (and again when the swarm writes, e.g. new proofs). */
+function useTree(folder: string, on: boolean) {
+	const [tree, setTree] = useState<Tree | null>(null);
 	useEffect(() => {
-		const look = () => void invoke<SessionRow[]>("swarm_sessions", { folder }).then(setRows, () => setRows([]));
+		if (!on) return;
+		const look = () => void invoke<Tree>("folder_tree", { path: folder }).then(setTree, () => setTree({ files: [], truncated: false }));
 		look();
 		window.addEventListener("fm:sessions", look);
 		return () => window.removeEventListener("fm:sessions", look);
-	}, [folder]);
-	return rows;
+	}, [folder, on]);
+	return tree;
 }
 
-/** A folder in the sidebar with its swarm sessions underneath, like a project's chats on the web. */
-function FolderItem({ path, current, run }: { path: string; current: boolean; run: string | null }) {
-	const sessions = useSessions(path);
-	const [live, setLive] = useState<string | null>(null);
-	useEffect(() => {
-		const look = () => void invoke<string | null>("swarm_running").then(setLive, () => setLive(null));
-		look();
-		window.addEventListener("fm:sessions", look);
-		return () => window.removeEventListener("fm:sessions", look);
-	}, []);
+/** A folder in the sidebar: selected, its file tree; a file opens in the canvas's file card. */
+function FolderItem({ path, current, file }: { path: string; current: boolean; file: string | null }) {
+	const tree = useTree(path, current);
+	const navigate = useNavigate();
+	const [params] = useSearchParams();
 	return (
-		<SessionFolder
-			name={name(path)}
-			title={path}
-			href={href(path)}
-			current={current}
-			currentSession={run}
-			newHref={`${href(path)}&run=new`}
-			sessions={sessions.slice(0, 12).map((x, i) => ({ id: x.run, title: x.title || (x.run === "swarm" ? "Main session" : `Session ${sessions.length - i}`), href: `${href(path)}&run=${x.run}`, live: x.run === live }))}
-		/>
+		<TreeFolder name={name(path)} title={path} href={href(path)} current={current}>
+			{tree ? (
+				<FileTree
+					paths={tree.files}
+					truncated={tree.truncated}
+					selected={file}
+					storageKey={`fm:tree:${path}`}
+					onOpen={(f) => {
+						const next = new URLSearchParams(params);
+						next.set("file", f);
+						navigate(`/local?${next.toString()}`);
+					}}
+				/>
+			) : null}
+		</TreeFolder>
 	);
 }
 
@@ -84,7 +87,7 @@ export function LocalFolders() {
 			<LocalHeading onAdd={() => void add()} />
 			<ul className="flex flex-col gap-0.5">
 				{folders.map((path) => (
-					<FolderItem key={path} path={path} current={current === path} run={current === path ? params.get("run") : null} />
+					<FolderItem key={path} path={path} current={current === path} file={current === path ? params.get("file") : null} />
 				))}
 			</ul>
 			<SidebarMenu>
@@ -113,5 +116,5 @@ export function LocalFolderPage() {
 		invoke<Scan>("folder_scan", { path }).then(setScan, (e) => setError(String(e)));
 	}, [path]);
 	if (error) return <p className="p-6 text-sm text-red-600">{error}</p>;
-	return path ? <SwarmPanel folder={path} name={name(path)} scan={scan} bridge={tauri} session={params.get("run")} /> : null;
+	return path ? <SwarmPanel folder={path} name={name(path)} scan={scan} bridge={tauri} session={params.get("run")} file={params.get("file")} /> : null;
 }

@@ -116,6 +116,49 @@ pub fn folder_scan(path: String) -> Result<Scan, String> {
     Ok(scan)
 }
 
+#[derive(Serialize)]
+pub struct Tree {
+    /// Every file, relative to the folder, sorted.
+    pub files: Vec<String>,
+    pub truncated: bool,
+}
+
+/// Folders the tree leaves out: version control, dependencies, build output.
+const TREE_SKIP: [&str; 12] = [".git", "node_modules", "lib", "dependencies", "out", "cache", "target", ".lake", "dist", "broadcast", ".formal", ".next"];
+
+/// All files in a folder that's been added, for the sidebar's file tree.
+#[tauri::command]
+pub fn folder_tree(path: String) -> Result<Tree, String> {
+    if !read()?.folders.contains(&path) {
+        return Err("Add the folder first".into());
+    }
+    let root = PathBuf::from(&path);
+    let mut tree = Tree { files: vec![], truncated: false };
+    let mut stack = vec![root.clone()];
+    while let Some(dir) = stack.pop() {
+        let Ok(entries) = fs::read_dir(&dir) else { continue };
+        for entry in entries.flatten() {
+            if tree.files.len() >= LIMIT {
+                tree.truncated = true;
+                break;
+            }
+            let name = entry.file_name().to_string_lossy().to_string();
+            let Ok(kind) = entry.file_type() else { continue };
+            if kind.is_dir() {
+                if !TREE_SKIP.contains(&name.as_str()) {
+                    stack.push(entry.path());
+                }
+            } else if name != ".DS_Store" {
+                if let Ok(rel) = entry.path().strip_prefix(&root) {
+                    tree.files.push(rel.to_string_lossy().replace('\\', "/"));
+                }
+            }
+        }
+    }
+    tree.files.sort();
+    Ok(tree)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -137,6 +180,8 @@ mod tests {
         let scan = folder_scan(path.clone()).unwrap();
         assert_eq!(scan.solidity, vec!["src/Pool.sol"]);
         assert_eq!(scan.lean, vec!["Proofs.lean"]);
+        let tree = folder_tree(path.clone()).unwrap();
+        assert_eq!(tree.files, vec!["Proofs.lean", "src/Pool.sol"], "node_modules is left out");
         assert!(folder_remove(path).unwrap().folders.is_empty());
         fs::remove_dir_all(tmp).unwrap();
     }

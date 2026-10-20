@@ -2,7 +2,8 @@
 
 import { useEffect, useState } from "react";
 import { Link, useLocation, useNavigate } from "react-router";
-import { BookOpen, Folder, FolderOpen, ChevronRight, GanttChart, Network, Plus } from "lucide-react"
+import { BookOpen, Folder, FolderOpen, ChevronRight, GanttChart, MessagesSquare, Network, Plus } from "lucide-react"
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
 import { SwarmMenu } from "@/components/projects/swarm-control"
 import {
 	Sidebar,
@@ -17,7 +18,9 @@ import {
 } from "@/components/ui/sidebar"
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible"
 import { NavUser } from "@/components/nav-user"
-import { LocalHeading, SessionFolder, type FolderSession } from "@/components/session-folder"
+import { LocalHeading, TreeFolder } from "@/components/session-folder"
+import { FileTree } from "@/components/file-tree"
+import { DEMO_TREE } from "@/components/demo-tree"
 import { SidebarResizer } from "@/components/sidebar-resizer"
 import { LogoMark } from "@/components/logo"
 import { BUILD } from "@/lib/build-info"
@@ -29,10 +32,6 @@ type NavItem = { title: string; url: string; icon: React.ElementType; anim?: str
 const FOOTER: NavItem[] = [
 	{ title: "Get started", url: "/github", icon: BookOpen, anim: "book" },
 ]
-
-/* Plain text throughout, no bold: the current page gets a soft pill, everything else stays quiet. */
-const ROW = "flex h-8 w-full items-center gap-2 rounded-md px-2 text-left text-sm font-normal text-sidebar-foreground/90 outline-none transition-colors hover:bg-sidebar-accent focus-visible:ring-2 focus-visible:ring-sidebar-ring"
-const ACTIVE = "bg-sidebar-accent text-sidebar-foreground"
 
 function NavLink({ item, active }: { item: NavItem; active: boolean }) {
 	return (
@@ -70,12 +69,77 @@ function useOpenFolders() {
 }
 
 /** One project as a folder: its icon, name, a chevron, and a + for a new chat; inside, its chats. */
-function ProjectFolder({ project, open, onOpenChange, pathname, collapsed, onExpand }: { project: Project; open: boolean; onOpenChange: (open: boolean) => void; pathname: string; collapsed: boolean; onExpand: () => void }) {
-	const chats = useProjectChats(project.repo)
+type RepoTree = { files: string[]; truncated: boolean }
+const trees = new Map<string, Promise<RepoTree>>()
+
+/** A project's files on its default branch, fetched once per session. */
+function useRepoTree(repo: string, on: boolean) {
+	const [tree, setTree] = useState<RepoTree | null>(null)
+	const [error, setError] = useState<string | null>(null)
+	useEffect(() => {
+		if (!on) return
+		if (!trees.has(repo)) {
+			trees.set(
+				repo,
+				fetch(`/api/projects/tree?repo=${encodeURIComponent(repo)}`).then(async (r) => {
+					const body = await r.json().catch(() => ({}))
+					if (!r.ok) throw new Error(body.error ?? "Couldn't list the files.")
+					return body as RepoTree
+				}),
+			)
+		}
+		let live = true
+		trees.get(repo)!.then(
+			(t) => live && setTree(t),
+			(e) => {
+				trees.delete(repo)
+				if (live) setError(String(e.message ?? e))
+			},
+		)
+		return () => {
+			live = false
+		}
+	}, [repo, on])
+	return { tree, error }
+}
+
+/** The project's chats, from the row: they live by the chat, not in the sidebar. */
+function ChatsMenu({ repo }: { repo: string }) {
+	const chats = useProjectChats(repo)
 	const working = useWorkingChats()
+	const navigate = useNavigate()
+	return (
+		<DropdownMenu>
+			<DropdownMenuTrigger
+				aria-label={`Chats in ${repo}`}
+				title="Chats"
+				className="flex size-6 shrink-0 items-center justify-center rounded-md text-muted-foreground opacity-0 outline-none hover:bg-background hover:text-sidebar-foreground group-hover/folder:opacity-100 focus-visible:opacity-100 data-[state=open]:opacity-100 group-data-[collapsible=icon]:hidden"
+			>
+				<MessagesSquare className="size-3.5" />
+			</DropdownMenuTrigger>
+			<DropdownMenuContent align="start" className="w-64">
+				<DropdownMenuLabel className="text-xs font-normal text-muted-foreground">Chats</DropdownMenuLabel>
+				{chats.length === 0 ? <DropdownMenuItem disabled className="text-[13px]">No chats yet</DropdownMenuItem> : null}
+				{chats.slice(0, 20).map((c) => (
+					<DropdownMenuItem key={c.id} onSelect={() => navigate(projectPath(repo, `chat/${c.id}`))} className="text-[13px]">
+						<span className="min-w-0 flex-1 truncate">{c.title}</span>
+						{working.has(`${repo}:${c.id}`) ? <span className="size-2 shrink-0 rounded-full bg-blue-500 motion-safe:animate-pulse" aria-label="Agent working" /> : null}
+					</DropdownMenuItem>
+				))}
+			</DropdownMenuContent>
+		</DropdownMenu>
+	)
+}
+
+function ProjectFolder({ project, open, onOpenChange, pathname, collapsed, onExpand }: { project: Project; open: boolean; onOpenChange: (open: boolean) => void; pathname: string; collapsed: boolean; onExpand: () => void }) {
 	const name = project.repo.split("/")[1] ?? project.repo
 	const navigate = useNavigate()
 	const home = projectPath(project.repo)
+	// Selected (any page of the project), its files show underneath.
+	const current = pathname === home || pathname.startsWith(`${home}/`)
+	const { tree, error } = useRepoTree(project.repo, current && open)
+	const location = useLocation()
+	const file = pathname === projectPath(project.repo, "file") ? new URLSearchParams(location.search).get("path") : null
 
 	return (
 		<Collapsible open={open} onOpenChange={onOpenChange} asChild>
@@ -113,24 +177,23 @@ function ProjectFolder({ project, open, onOpenChange, pathname, collapsed, onExp
 					>
 						<Plus className="size-3.5" />
 					</Link>
+					<ChatsMenu repo={project.repo} />
 					{project.proofsRepo ? <SwarmMenu repo={project.repo} /> : null}
 				</div>
-				<CollapsibleContent className="group-data-[collapsible=icon]:hidden">
-					<ul className="flex flex-col gap-0.5 pb-2 pl-6">
-						{chats.map((c) => {
-							const url = projectPath(project.repo, `chat/${c.id}`)
-							return (
-								<li key={c.id}>
-									<Link to={url} title={c.title} className={`${ROW} ${pathname === url ? ACTIVE : ""}`}>
-										<span className="min-w-0 flex-1 truncate">{c.title}</span>
-										{working.has(`${project.repo}:${c.id}`) ? (
-											<span className="ml-auto size-2 shrink-0 rounded-full bg-blue-500 motion-safe:animate-pulse" role="status" aria-label="Agent working" />
-										) : null}
-									</Link>
-								</li>
-							)
-						})}
-					</ul>
+				<CollapsibleContent className="pl-3 group-data-[collapsible=icon]:hidden">
+					{current ? (
+						tree ? (
+							<FileTree
+								paths={tree.files}
+								truncated={tree.truncated}
+								selected={file}
+								storageKey={`fm:tree:${project.repo}`}
+								onOpen={(f) => navigate(`${projectPath(project.repo, "file")}?path=${encodeURIComponent(f)}`)}
+							/>
+						) : (
+							<p className="px-2 py-1 text-[12px] text-muted-foreground">{error ?? "Listing the files…"}</p>
+						)
+					) : null}
 				</CollapsibleContent>
 			</li>
 		</Collapsible>
@@ -170,15 +233,10 @@ function Projects({ pathname }: { pathname: string }) {
 	)
 }
 
-const DEMO_SESSIONS: FolderSession[] = [
-	{ id: "local-19a2b3c4d5e", title: "Liquidations and the penalty cap", href: "/local-demo?run=local-19a2b3c4d5e", live: true },
-	{ id: "local-19a2b3c4d00", title: "Vault share math", href: "/local-demo?run=local-19a2b3c4d00" },
-	{ id: "local-19a2b3c4c00", title: "Session 1", href: "/local-demo?run=local-19a2b3c4c00" },
-]
-
 /** `extra` is for a host's own sections under the projects (the desktop app's local folders). */
 export function AppSidebar({ extra, ...props }: React.ComponentProps<typeof Sidebar> & { extra?: React.ReactNode }) {
 	const location = useLocation()
+	const navigate = useNavigate()
 	const pathname = location.pathname
 	// The landing page is a page of its own, even for someone signed in.
 	if (pathname === "/welcome") return null
@@ -224,14 +282,18 @@ export function AppSidebar({ extra, ...props }: React.ComponentProps<typeof Side
 					<SidebarGroup>
 						<LocalHeading />
 						<ul className="flex flex-col gap-0.5">
-							<SessionFolder
-								name="lending-protocol"
-								href="/local-demo"
-								current={pathname === "/local-demo"}
-								currentSession={pathname === "/local-demo" ? new URLSearchParams(location.search).get("run") : null}
-								sessions={DEMO_SESSIONS}
-								newHref="/local-demo?run=new"
-							/>
+							<TreeFolder name="lending-protocol" href="/local-demo" current={pathname === "/local-demo"}>
+								<FileTree
+									paths={DEMO_TREE}
+									selected={new URLSearchParams(location.search).get("file")}
+									storageKey="fm:tree:demo"
+									onOpen={(f) => {
+										const next = new URLSearchParams(location.search)
+										next.set("file", f)
+										navigate(`/local-demo?${next.toString()}`)
+									}}
+								/>
+							</TreeFolder>
 						</ul>
 					</SidebarGroup>
 				) : null}

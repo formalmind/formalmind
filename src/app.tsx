@@ -38,6 +38,7 @@ const ProjectHomePage = page(() => import("@/components/projects/project-pages")
 const SwarmChatPage = page(() => import("@/components/projects/project-pages"), (m) => m.SwarmChatPage);
 const ProjectRoadmapPage = page(() => import("@/components/projects/project-pages"), (m) => m.ProjectRoadmapPage);
 const ProjectChatPage = page(() => import("@/components/projects/project-pages"), (m) => m.ProjectChatPage);
+const ProjectFilePage = page(() => import("@/components/projects/project-file"), (m) => m.ProjectFilePage);
 const LocalDemoPage = page(() => import("@/components/local-demo"), (m) => m.LocalDemoPage);
 const UsagePage = page(() => import("@/components/usage/usage-page"), (m) => m.UsagePage);
 const BillingPage = page(() => import("@/components/billing/billing-page"), (m) => m.BillingPage);
@@ -118,6 +119,7 @@ export function App() {
 							<Route path="/local-demo" element={<Title text="Local demo · Formal Mind"><LocalDemoPage /></Title>} />
 							<Route path="/usage" element={<Title text="Usage · Formal Mind"><UsagePage /></Title>} />
 							<Route path="/projects/:owner/:name" element={<ProjectHomePage />} />
+							<Route path="/projects/:owner/:name/file" element={<Title text="File · Formal Mind"><ProjectFilePage /></Title>} />
 							<Route path="/projects/:owner/:name/roadmap" element={<Title text="Roadmap · Formal Mind"><ProjectRoadmapPage /></Title>} />
 							<Route path="/projects/:owner/:name/chat" element={<Title text="Chat · Formal Mind"><ProjectChatPage /></Title>} />
 							<Route path="/projects/:owner/:name/chat/:chatId" element={<Title text="Chat · Formal Mind"><ProjectChatPage /></Title>} />

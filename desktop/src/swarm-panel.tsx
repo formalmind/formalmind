@@ -1,8 +1,9 @@
 import { MarkGithubIcon } from "@primer/octicons-react";
 import { useEffect, useRef, useState } from "react";
-import { Check, ChevronDown, Copy, FileCode2, Play, Square, WandSparkles, Wrench } from "lucide-react";
+import { Check, ChevronDown, Copy, FileCode2, Play, Plus, Square, WandSparkles, Wrench } from "lucide-react";
+import { useSearchParams } from "react-router";
 import { ChatComposer } from "@/components/chat-composer";
-import { DropdownMenu, DropdownMenuContent, DropdownMenuLabel, DropdownMenuRadioGroup, DropdownMenuRadioItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuRadioGroup, DropdownMenuRadioItem, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { ChatMarkdown } from "@/components/chat-markdown";
 import { CodeBlock, CodeBlockContent } from "@/components/ui/code-block";
 import { useHighlightedCode } from "@/hooks/use-highlighted-code";
@@ -183,7 +184,7 @@ function Floating({ id, open, onOpen, title, meta, tone, action, children }: { i
  * A local folder's swarm: the canvas on the left (the board, the contract files, bugs) and the chat on the right (start
  * and steer the swarm, the plan, and what each agent says as it works).
  */
-export function SwarmPanel({ folder, name, scan, bridge, session, actions }: { folder: string; name: string; scan: Scan | null; bridge: Bridge; session?: string | null; actions?: React.ReactNode }) {
+export function SwarmPanel({ folder, name, scan, bridge, session, file: openPath, actions }: { folder: string; name: string; scan: Scan | null; bridge: Bridge; session?: string | null; file?: string | null; actions?: React.ReactNode }) {
 	const { invoke, listen, apiBase } = bridge;
 	const [run, setRun] = useState<string | null>(null);
 	const [events, setEvents] = useState<Ev[]>([]);
@@ -289,6 +290,18 @@ export function SwarmPanel({ folder, name, scan, bridge, session, actions }: { f
 		if (session && session !== viewing && !run) load(session);
 		// eslint-disable-next-line react-hooks/exhaustive-deps
 	}, [session]);
+	// A file picked in the sidebar's tree opens in the file card.
+	useEffect(() => {
+		if (openPath) view(openPath);
+		// eslint-disable-next-line react-hooks/exhaustive-deps
+	}, [openPath, folder]);
+	// Sessions are picked from the chat card's title (the sidebar holds the folder's files).
+	const [params, setParams] = useSearchParams();
+	const pickSession = (run: string) => {
+		const next = new URLSearchParams(params);
+		next.set("run", run);
+		setParams(next);
+	};
 	useEffect(() => {
 		// Braces matter: scrollTo returns a Promise in newer browsers, and an effect must return nothing or a cleanup.
 		chat.current?.scrollTo({ top: chat.current.scrollHeight });
@@ -430,7 +443,27 @@ export function SwarmPanel({ folder, name, scan, bridge, session, actions }: { f
 					<button type="button" onClick={() => setChatOpen(!chatOpen)} aria-expanded={chatOpen} title={chatOpen ? "Collapse the chat" : "Open the chat"} className="flex items-center gap-1.5">
 						<ChevronDown className={`size-3.5 text-muted-foreground transition-transform duration-200 ${chatOpen ? "rotate-180" : ""}`} />
 					</button>
-					<span className="min-w-0 flex-1 truncate text-[13px] font-medium" title={title}>{title}</span>
+					<DropdownMenu>
+						<DropdownMenuTrigger className="flex min-w-0 flex-1 items-center gap-1 rounded-md text-left text-[13px] font-medium outline-none hover:text-foreground" title={`${title} — switch sessions`}>
+							<span className="truncate">{title}</span>
+							<ChevronDown className="size-3 shrink-0 text-muted-foreground" />
+						</DropdownMenuTrigger>
+						<DropdownMenuContent align="start" className="w-64">
+							<DropdownMenuLabel className="text-xs font-normal text-muted-foreground">Sessions in {name}</DropdownMenuLabel>
+							<DropdownMenuRadioGroup value={viewing ?? ""} onValueChange={pickSession}>
+								{sessions.map((x, i) => (
+									<DropdownMenuRadioItem key={x.run} value={x.run} className="text-[13px]">
+										<span className="truncate">{x.title || (x.run === "swarm" ? "Main session" : `Session ${sessions.length - i}`)}</span>
+										{x.run === run ? <span className="ml-auto size-1.5 shrink-0 animate-pulse rounded-full bg-emerald-500" aria-label="running" /> : null}
+									</DropdownMenuRadioItem>
+								))}
+							</DropdownMenuRadioGroup>
+							<DropdownMenuSeparator />
+							<DropdownMenuItem onSelect={() => pickSession("new")} className="text-[13px]">
+								<Plus className="size-3.5" /> New session
+							</DropdownMenuItem>
+						</DropdownMenuContent>
+					</DropdownMenu>
 					<DropdownMenu>
 						<DropdownMenuTrigger className="inline-flex h-7 shrink-0 items-center gap-1 rounded-md border bg-background px-2 text-[11px] tabular-nums text-muted-foreground outline-none hover:text-foreground" title="Spending cap">
 							{run || viewing ? `$${spent.toFixed(2)} / $${budget}` : `Budget $${budget}`}
