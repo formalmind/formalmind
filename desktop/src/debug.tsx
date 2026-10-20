@@ -1,9 +1,10 @@
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router";
 import { invoke } from "@tauri-apps/api/core";
-import { Bug, ChevronRight, FileCode2, FlaskConical, Loader2, Play } from "lucide-react";
+import { Bug, ChevronDown, ChevronRight, Columns2, FileCode2, FlaskConical, FolderPlus, Link2, Loader2, Play, Unlink2, X } from "lucide-react";
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { useHighlightedCode } from "@/hooks/use-highlighted-code";
-import type { Scan } from "./local";
+import { useFolders, type Scan } from "./local";
 
 /**
  * Debug mode: a local folder's Foundry test, one EVM step at a time, on the sol-debug engine (src-tauri/src/debug.rs).
@@ -38,6 +39,10 @@ type StepView = {
 	status: string;
 };
 type RunView = { title: string; success: boolean; verdict: string; gas: number; calls: Call[]; missing: string[]; view: StepView };
+type Divergence = { what: string; index: number; a: string | null; b: string | null; a_step: number | null; b_step: number | null };
+type Section = { name: string; matched: number; total_a: number; total_b: number; divergence: Divergence | null };
+/** Two runs of one test, in this folder (a) and another (b), and where they disagree (crates/sol-debug/src/diff.rs). */
+type Compared = { label_a: string; label_b: string; a: RunView; b: RunView; sections: Section[]; uncompared: [string, number, number][]; first: Divergence | null };
 
 const KEYS = "j/k op · n/N line · s/S into · f/F out · c/C continue · g/G ends · /search ;, · :b line · :w var · :pc n · :step n";
 const name = (path: string) => path.split(/[\\/]/).filter(Boolean).pop() ?? path;
@@ -217,7 +222,22 @@ function Storage({ view, go }: { view: StepView; go: (step: number) => void }) {
 }
 
 /** The debugger for one run: the panes, the vim keys and the `:` / `/` line. */
-function Debugger({ id, run, onView }: { id: number; run: RunView; onView: (v: StepView) => void }) {
+function Debugger({ id, run, onView, side = false, focused = true, label, typing, onFocus, onMoved, actions }: {
+	id: number;
+	run: RunView;
+	onView: (v: StepView) => void;
+	/** The compared folder's run (`b` in the commands). */
+	side?: boolean;
+	/** Which of two debuggers the keys move. */
+	focused?: boolean;
+	label?: string;
+	/** Set while the `:` / `/` line is open, so the page's own keys (Tab, =) wait. */
+	typing?: React.MutableRefObject<boolean>;
+	onFocus?: () => void;
+	/** After a move (not a breakpoint or watch): the page keeps the other side in step. */
+	onMoved?: () => void;
+	actions?: React.ReactNode;
+}) {
 	const view = run.view;
 	const [files, setFiles] = useState<Record<number, { name: string; text: string }>>({});
 	const [input, setInput] = useState<string | null>(null);
@@ -227,23 +247,27 @@ function Debugger({ id, run, onView }: { id: number; run: RunView; onView: (v: S
 	const file = view.place?.file;
 	useEffect(() => {
 		if (file === undefined || files[file]) return;
-		void invoke<{ name: string; text: string }>("debug_file", { id, file }).then((f) => setFiles((all) => ({ ...all, [file]: f })), (e) => setError(String(e)));
-	}, [id, file, files]);
+		void invoke<{ name: string; text: string }>("debug_file", { id, file, b: side }).then((f) => setFiles((all) => ({ ...all, [file]: f })), (e) => setError(String(e)));
+	}, [id, file, files, side]);
+	useEffect(() => {
+		if (typing && focused) typing.current = input !== null;
+	}, [typing, focused, input]);
 
 	const call = useCallback(
 		async (cmd: string, args: Record<string, unknown>) => {
 			if (busy.current) return;
 			busy.current = true;
 			try {
-				onView(await invoke<StepView>(cmd, { id, ...args }));
+				onView(await invoke<StepView>(cmd, { id, b: side, ...args }));
 				setError(null);
+				if (cmd === "debug_nav") onMoved?.();
 			} catch (e) {
 				setError(String(e));
 			} finally {
 				busy.current = false;
 			}
 		},
-		[id, onView],
+		[id, onView, side, onMoved],
 	);
 	const move = useCallback((to: string, back = false, arg?: string) => call("debug_nav", { to, back, arg: arg ?? null }), [call]);
 	const go = useCallback((step: number) => void move("step", false, String(step)), [move]);
@@ -271,7 +295,7 @@ function Debugger({ id, run, onView }: { id: number; run: RunView; onView: (v: S
 
 	useEffect(() => {
 		const onKey = (e: KeyboardEvent) => {
-			if (e.metaKey || e.ctrlKey || e.altKey) return;
+			if (!focused || e.metaKey || e.ctrlKey || e.altKey) return;
 			const t = e.target as HTMLElement | null;
 			if (t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.isContentEditable)) return;
 			// The `:` / `/` line takes every key until Enter or Escape, as in the terminal UI.
@@ -322,14 +346,16 @@ function Debugger({ id, run, onView }: { id: number; run: RunView; onView: (v: S
 
 	const f = file !== undefined ? files[file] : undefined;
 	return (
-		<div className="flex min-h-0 flex-1 flex-col gap-2">
+		<div onMouseDown={onFocus} className={`flex min-h-0 flex-1 flex-col gap-2 ${label ? `rounded-2xl p-1.5 ring-1 transition-shadow ${focused ? "ring-amber-500/60" : "ring-transparent"}` : ""}`}>
 			<header className="flex shrink-0 flex-wrap items-center gap-x-3 gap-y-1 px-1 text-[13px]">
+				{label ? <span className={`rounded-md px-1.5 py-0.5 font-mono text-[11px] font-medium ${focused ? "bg-amber-500/20 text-amber-800 dark:text-amber-300" : "bg-muted text-muted-foreground"}`}>{label}</span> : null}
 				<span className="font-medium">{run.title}</span>
 				<span className={`rounded-full px-2 py-0.5 text-[11px] font-medium ${run.success ? "bg-emerald-500/15 text-emerald-700 dark:text-emerald-400" : "bg-red-500/15 text-red-700 dark:text-red-400"}`}>{run.success ? "pass" : run.verdict}</span>
 				<span className="font-mono text-[11px] tabular-nums text-muted-foreground">
 					step {view.step}/{view.total - 1} · depth {view.depth} · pc {view.pc} · {view.op} · gas {view.gas.toLocaleString()}
 				</span>
 				{run.missing.length ? <span className="text-[11px] text-amber-600">unsupported cheatcodes: {run.missing.join(", ")}</span> : null}
+				{actions ? <span className="ml-auto flex items-center gap-1.5">{actions}</span> : null}
 			</header>
 			<div className="flex min-h-0 flex-[11] gap-2">
 				{f ? <Source text={f.text} fileName={f.name} place={view.place} breakpoints={view.breakpoints} onToggle={toggle} /> : <Pane title="Source" className="flex-[3]"><p className="p-3 text-muted-foreground">{view.place ? "Loading the file…" : "No source for this step"}</p></Pane>}
@@ -408,6 +434,106 @@ function TestTree({ files, selected, tests, opening, running, current, onFile, o
 	);
 }
 
+/** "Compare with…": the other added folders (a port of the protocol, a fork), or add one. */
+function CompareMenu({ folder, busy, onPick }: { folder: string; busy: boolean; onPick: (other: string) => void }) {
+	const { folders, add } = useFolders();
+	const others = folders.filter((f) => f !== folder);
+	return (
+		<DropdownMenu>
+			<DropdownMenuTrigger disabled={busy} title="Run this test in another folder too and show where the two runs differ" className="inline-flex h-7 items-center gap-1.5 rounded-md border bg-background px-2 text-[11px] text-foreground outline-none hover:bg-muted disabled:opacity-50">
+				{busy ? <Loader2 className="size-3 animate-spin" /> : <Columns2 className="size-3" />}
+				{busy ? "Comparing…" : "Compare with…"}
+				<ChevronDown className="size-3 text-muted-foreground" />
+			</DropdownMenuTrigger>
+			<DropdownMenuContent align="end" className="min-w-56">
+				<DropdownMenuLabel className="text-xs font-normal text-muted-foreground">Run the same test in</DropdownMenuLabel>
+				{others.map((f) => (
+					<DropdownMenuItem key={f} onSelect={() => onPick(f)} title={f} className="text-[13px]">
+						{name(f)}
+					</DropdownMenuItem>
+				))}
+				{others.length ? <DropdownMenuSeparator /> : null}
+				<DropdownMenuItem
+					className="text-[13px]"
+					onSelect={() =>
+						void add().then((path) => {
+							if (path && path !== folder) onPick(path);
+						})
+					}
+				>
+					<FolderPlus className="size-3.5" />
+					Add a folder…
+				</DropdownMenuItem>
+			</DropdownMenuContent>
+		</DropdownMenu>
+	);
+}
+
+/** What the comparison found: each kind of observation matched or not, and the first divergence on both sides. */
+function Report({ cmp, linked, slotMap, onLink, onHome, onGo, onSlotMap, onClose }: { cmp: Compared; linked: boolean; slotMap: string; onLink: () => void; onHome: () => void; onGo: (b: boolean, step: number) => void; onSlotMap: (path: string) => void; onClose: () => void }) {
+	const d = cmp.first;
+	const [map, setMap] = useState(slotMap);
+	const btn = "inline-flex h-7 shrink-0 items-center gap-1.5 rounded-md border bg-background px-2 text-[11px] text-foreground hover:bg-muted";
+	return (
+		<section className="mb-2 shrink-0 rounded-2xl border bg-muted/80 p-1">
+			<div className="flex h-8 items-center gap-2 px-2">
+				<span className="font-mono text-[11px] font-medium uppercase tracking-wider text-muted-foreground">Compare</span>
+				<span className="min-w-0 truncate text-[12px]">
+					<span className="font-medium">{cmp.label_a}</span> vs <span className="font-medium">{cmp.label_b}</span>
+				</span>
+				<span className={`rounded-full px-2 py-0.5 text-[11px] font-medium ${d ? "bg-red-500/15 text-red-700 dark:text-red-400" : "bg-emerald-500/15 text-emerald-700 dark:text-emerald-400"}`}>{d ? `${d.what} #${d.index} differs` : "no divergence"}</span>
+				<span className="ml-auto" />
+				{d ? <button type="button" onClick={onHome} title="Both sides back to the first divergence (=)" className={btn}>= Divergence</button> : null}
+				<button type="button" onClick={onLink} title="Moving one side moves the other to the same external call" className={`${btn} ${linked ? "border-amber-500/50 bg-amber-500/10" : ""}`}>
+					{linked ? <Link2 className="size-3" /> : <Unlink2 className="size-3" />}
+					{linked ? "In step" : "Apart"}
+				</button>
+				<button type="button" onClick={onClose} title="Back to one run" className="grid size-7 place-items-center rounded-md text-muted-foreground hover:bg-background hover:text-foreground">
+					<X className="size-3.5" />
+				</button>
+			</div>
+			<div className="shadow-card space-y-1.5 rounded-xl border bg-card p-2 font-mono text-[11px]">
+				<div className="flex flex-wrap gap-1.5">
+					{cmp.sections.map((x) => (
+						<span key={x.name} title={`${cmp.label_a} ${x.total_a}, ${cmp.label_b} ${x.total_b}`} className={`rounded-md px-1.5 py-0.5 ${x.divergence ? "bg-red-500/10 text-red-700 dark:text-red-400" : "bg-emerald-500/10 text-emerald-700 dark:text-emerald-400"}`}>
+							{x.divergence ? "✗" : "✓"} {x.name} {x.matched}/{Math.max(x.total_a, x.total_b)}
+						</span>
+					))}
+					{cmp.uncompared.map(([n, a, b]) => (
+						<span key={n} title="The two layouts differ: a slot map names the other side's slots" className="rounded-md bg-muted px-1.5 py-0.5 text-muted-foreground">
+							· storage {n} not compared ({a} / {b} writes)
+						</span>
+					))}
+				</div>
+				{d ? (
+					<div className="space-y-0.5">
+						{([[false, cmp.label_a, d.a_step, d.a], [true, cmp.label_b, d.b_step, d.b]] as const).map(([b, l, step, text]) => (
+							<button key={String(b)} type="button" disabled={step === null} onClick={() => step !== null && onGo(b, step)} className="flex w-full gap-2 truncate rounded px-1 text-left enabled:hover:bg-muted" title={text ?? "(nothing)"}>
+								<span className="w-20 shrink-0 truncate text-muted-foreground">{l}</span>
+								<span className="w-16 shrink-0 tabular-nums text-muted-foreground">{step ?? "-"}</span>
+								<span className="truncate">{text ?? "(nothing)"}</span>
+							</button>
+						))}
+					</div>
+				) : null}
+				{cmp.uncompared.length || slotMap ? (
+					<form
+						className="flex items-center gap-2"
+						onSubmit={(e) => {
+							e.preventDefault();
+							onSlotMap(map.trim());
+						}}
+					>
+						<span className="shrink-0 text-muted-foreground">slot map in {cmp.label_b}</span>
+						<input value={map} onChange={(e) => setMap(e.target.value)} placeholder="storage-layout.json (solc storageLayout per contract name)" className="h-6 min-w-0 flex-1 rounded border bg-background px-1.5 outline-none focus:border-ring" />
+						<button type="submit" className="h-6 rounded border bg-background px-2 hover:bg-muted">Compare again</button>
+					</form>
+				) : null}
+			</div>
+		</section>
+	);
+}
+
 /** /debug?path=<folder>&file=<test file>&test=<Contract::test>: pick a test file, pick a test, debug it. */
 export function DebugPage() {
 	const [params] = useSearchParams();
@@ -421,6 +547,12 @@ export function DebugPage() {
 	const [running, setRunning] = useState<string | null>(null);
 	const [run, setRun] = useState<(RunView & { key: string }) | null>(null);
 	const [error, setError] = useState<string | null>(null);
+	// "Compare with…": both runs, which one the keys move, and whether moving one moves the other.
+	const [cmp, setCmp] = useState<(Compared & { key: string; other: string; slotMap: string }) | null>(null);
+	const [comparing, setComparing] = useState(false);
+	const [focusB, setFocusB] = useState(false);
+	const [linked, setLinked] = useState(true);
+	const typing = useRef(false);
 
 	useEffect(() => {
 		setScan(null);
@@ -434,6 +566,7 @@ export function DebugPage() {
 		let gone = false;
 		setSession(null);
 		setRun(null);
+		setCmp(null);
 		setError(null);
 		setOpening(true);
 		invoke<{ id: number; tests: TestFn[] }>("debug_open", { folder, file })
@@ -458,6 +591,7 @@ export function DebugPage() {
 			try {
 				const r = await invoke<RunView>("debug_run", { id: session.id, contract: t.contract, test: t.test });
 				setRun({ ...r, key });
+				setCmp(null);
 			} catch (e) {
 				setError(String(e));
 			} finally {
@@ -477,6 +611,72 @@ export function DebugPage() {
 	const pick = (f: string) => navigate(`/debug?path=${encodeURIComponent(folder)}&file=${encodeURIComponent(f)}`, { replace: true });
 	const onView = useCallback((v: StepView) => setRun((r) => (r ? { ...r, view: v } : r)), []);
 
+	const compare = useCallback(
+		async (other: string, slotMap = "") => {
+			const t = session?.tests.find((x) => run && `${x.contract}::${x.test}` === run.key);
+			if (!session || !t || !run) return;
+			setComparing(true);
+			setError(null);
+			try {
+				const c = await invoke<Compared>("debug_compare", { id: session.id, other, contract: t.contract, test: t.test, slotMap: slotMap || null });
+				setCmp({ ...c, key: `${run.key}@${other}#${Date.now()}`, other, slotMap });
+				setRun((r) => (r ? { ...r, ...c.a } : r));
+				setFocusB(false);
+			} catch (e) {
+				setError(String(e));
+			} finally {
+				setComparing(false);
+			}
+		},
+		[session, run],
+	);
+	const setSide = useCallback((b: boolean, v: StepView) => setCmp((c) => (c ? { ...c, [b ? "b" : "a"]: { ...c[b ? "b" : "a"], view: v } } : c)), []);
+	const onViewA = useCallback((v: StepView) => setSide(false, v), [setSide]);
+	const onViewB = useCallback((v: StepView) => setSide(true, v), [setSide]);
+	// In step: the other side goes to the start of the same external call.
+	const follow = useCallback(
+		(b: boolean) => {
+			if (!linked || !session) return;
+			void invoke<StepView>("debug_sync", { id: session.id, b }).then((v) => setSide(!b, v), () => {});
+		},
+		[linked, session, setSide],
+	);
+	const onMovedA = useCallback(() => follow(false), [follow]);
+	const onMovedB = useCallback(() => follow(true), [follow]);
+	const home = useCallback(() => {
+		const d = cmp?.first;
+		if (!d || !session) return;
+		for (const [b, step] of [[false, d.a_step], [true, d.b_step]] as const) {
+			if (step !== null) void invoke<StepView>("debug_nav", { id: session.id, to: "step", back: false, arg: String(step), b }).then((v) => setSide(b, v), () => {});
+		}
+	}, [cmp, session, setSide]);
+	const goSide = useCallback(
+		(b: boolean, step: number) => {
+			if (!session) return;
+			setFocusB(b);
+			void invoke<StepView>("debug_nav", { id: session.id, to: "step", back: false, arg: String(step), b }).then((v) => setSide(b, v), () => {});
+		},
+		[session, setSide],
+	);
+	// Tab switches the side the keys move; = puts both back at the divergence (the TUI's split view).
+	useEffect(() => {
+		if (!cmp) return;
+		const onKey = (e: KeyboardEvent) => {
+			if (typing.current || e.metaKey || e.ctrlKey || e.altKey) return;
+			const t = e.target as HTMLElement | null;
+			if (t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA")) return;
+			if (e.key === "Tab") {
+				e.preventDefault();
+				setFocusB((f) => !f);
+			} else if (e.key === "=") {
+				e.preventDefault();
+				home();
+			}
+		};
+		window.addEventListener("keydown", onKey);
+		return () => window.removeEventListener("keydown", onKey);
+	}, [cmp, home]);
+
 	return (
 		<div className="flex h-full min-h-0 flex-1 gap-2 p-2">
 			<aside className="flex w-60 shrink-0 flex-col rounded-2xl border bg-muted/80 p-1">
@@ -493,8 +693,20 @@ export function DebugPage() {
 			</aside>
 			<main className="flex min-h-0 min-w-0 flex-1 flex-col">
 				{error ? <p className="mb-2 whitespace-pre-wrap rounded-xl border border-red-500/30 bg-red-50/80 p-3 font-mono text-[11px] text-red-700 dark:bg-red-950/40 dark:text-red-400">{error}</p> : null}
-				{run && session ? (
-					<Debugger key={run.key + run.title} id={session.id} run={run} onView={onView} />
+				{cmp && session ? (
+					<>
+						<Report key={cmp.key} cmp={cmp} linked={linked} slotMap={cmp.slotMap} onLink={() => setLinked((l) => !l)} onHome={home} onGo={goSide} onSlotMap={(m) => void compare(cmp.other, m)} onClose={() => {
+							// Back to one run, where side a is now.
+							setRun((r) => (r ? { ...r, ...cmp.a } : r));
+							setCmp(null);
+						}} />
+						<div className="flex min-h-0 flex-1 flex-col gap-2">
+							<Debugger key={`a${cmp.key}`} id={session.id} run={cmp.a} onView={onViewA} label={cmp.label_a} focused={!focusB} typing={typing} onFocus={() => setFocusB(false)} onMoved={onMovedA} />
+							<Debugger key={`b${cmp.key}`} id={session.id} run={cmp.b} onView={onViewB} side label={cmp.label_b} focused={focusB} typing={typing} onFocus={() => setFocusB(true)} onMoved={onMovedB} />
+						</div>
+					</>
+				) : run && session ? (
+					<Debugger key={run.key + run.title} id={session.id} run={run} onView={onView} actions={<CompareMenu folder={folder} busy={comparing} onPick={(o) => void compare(o)} />} />
 				) : (
 					<div className="grid flex-1 place-items-center">
 						<div className="max-w-sm space-y-2 text-center text-[13px] text-muted-foreground">

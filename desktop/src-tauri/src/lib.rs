@@ -106,7 +106,9 @@ pub fn run() {
             debug::debug_nav,
             debug::debug_break,
             debug::debug_watch,
-            debug::debug_file
+            debug::debug_file,
+            debug::debug_compare,
+            debug::debug_sync
         ])
         // Closing the window hides it: a running swarm keeps working, and the Dock icon brings the window back.
         .on_window_event(|window, event| {

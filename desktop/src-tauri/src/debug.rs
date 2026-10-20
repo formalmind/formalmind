@@ -31,6 +31,8 @@ pub struct Debugger {
     /// A compile no test has run in yet: the first run uses it, later runs compile again for a clean chain.
     fresh: Option<Session>,
     loaded: Option<Loaded>,
+    /// "Compare with…": the same test in a second folder, and how the two runs differ.
+    other: Option<Loaded>,
 }
 
 struct Loaded {
@@ -179,6 +181,15 @@ fn loaded(d: &mut Debugger) -> Result<&mut Loaded, String> {
     d.loaded.as_mut().ok_or_else(|| "Run a test first".into())
 }
 
+/// The run on one side of a comparison: `b` is the other folder's.
+fn side(d: &mut Debugger, b: bool) -> Result<&mut Loaded, String> {
+    if b {
+        d.other.as_mut().ok_or_else(|| "Compare with another folder first".into())
+    } else {
+        loaded(d)
+    }
+}
+
 fn err(e: impl std::fmt::Display) -> String {
     format!("{e:#}")
 }
@@ -216,7 +227,7 @@ pub async fn open(state: &Debuggers, folder: String, file: String) -> Result<Ope
             let mut d = match Session::compile(&root, &file) {
                 Ok(s) => {
                     let _ = ready.send(Ok(tests_in(&s, &file)));
-                    Debugger { root, file, fresh: Some(s), loaded: None }
+                    Debugger { root, file, fresh: Some(s), loaded: None, other: None }
                 }
                 Err(e) => return drop(ready.send(Err(err(e)))),
             };
@@ -249,57 +260,229 @@ pub async fn debug_run(state: tauri::State<'_, Debuggers>, id: u32, contract: St
 
 pub async fn run_test(state: &Debuggers, id: u32, contract: String, test: String) -> Result<RunView, String> {
     ask(state, id, move |d| {
-        let mut s = match d.fresh.take() {
+        let s = match d.fresh.take() {
             Some(s) => s,
             None => Session::compile(&d.root, &d.file).map_err(err)?,
         };
-        let run = s.run_test(&contract, &test, false).map_err(err)?.test;
-        let mut nav = Navigator::new(&s, &run);
-        // Breakpoints and watches carry over to the next test of the same file.
-        if let Some(old) = d.loaded.take() {
-            nav.breakpoints = old.nav.breakpoints;
-            nav.watches = old.nav.watches;
-        }
-        // Open on the first statement inside a function (past the dispatcher and the function header), as the TUI.
-        let in_body = |i: usize| {
-            nav.locs[i].as_ref().is_some_and(|l| l.scope.contains('.') && !matches!(l.node_type.as_str(), "FunctionDefinition" | "ContractDefinition"))
-        };
-        let cur = (0..nav.len()).find(|&i| in_body(i)).or_else(|| (0..nav.len()).find(|&i| nav.locs[i].is_some())).unwrap_or(0);
-        let l = Loaded { s, run, nav, cur };
-        if l.nav.is_empty() {
-            return Err("The run recorded no steps".into());
-        }
-        let verdict = if l.run.success { "ok".to_string() } else { format!("reverted: {}", l.run.revert_reason().unwrap_or_default()) };
-        let calls = l
-            .run
-            .trace
-            .frames
-            .iter()
-            .map(|fr| Call {
-                depth: fr.depth,
-                kind: fr.kind,
-                who: if fr.kind == "DELEGATECALL" {
-                    format!("{} ⇒ {}", l.s.name_of(fr.target), l.s.name_of(fr.code_address))
-                } else {
-                    format!("{} → {}", l.s.name_of(fr.caller), l.s.name_of(fr.target))
-                },
-                call: compact_hex(&l.s.describe_call(fr.code_address, &fr.input)),
-                ok: fr.success,
-                first_step: fr.first_step,
-            })
-            .collect();
-        let name = contract.rsplit(':').next().unwrap_or(&contract).to_string();
-        let out = RunView {
-            title: format!("{name}::{test}"),
-            success: l.run.success,
-            verdict: verdict.clone(),
-            gas: l.run.gas_used,
-            calls,
-            missing: l.s.evm.inspector.cheats.missing.clone(),
-            view: view(&l, verdict),
-        };
+        let l = load(s, &contract, &test, d.loaded.take())?;
+        let out = run_view(&l, &contract, &test);
         d.loaded = Some(l);
+        d.other = None;
         Ok(out)
+    })
+    .await
+}
+
+/// Runs a test in a compiled session and opens it on the first statement in the test's body, as the TUI does.
+/// Breakpoints and watches of the previous run of the file carry over.
+fn load(mut s: Session, contract: &str, test: &str, previous: Option<Loaded>) -> Result<Loaded, String> {
+    let run = s.run_test(contract, test, false).map_err(err)?.test;
+    let mut nav = Navigator::new(&s, &run);
+    if let Some(old) = previous {
+        nav.breakpoints = old.nav.breakpoints;
+        nav.watches = old.nav.watches;
+    }
+    if nav.is_empty() {
+        return Err("The run recorded no steps".into());
+    }
+    // Past the dispatcher and the function header.
+    let in_body = |i: usize| {
+        nav.locs[i].as_ref().is_some_and(|l| l.scope.contains('.') && !matches!(l.node_type.as_str(), "FunctionDefinition" | "ContractDefinition"))
+    };
+    let cur = (0..nav.len()).find(|&i| in_body(i)).or_else(|| (0..nav.len()).find(|&i| nav.locs[i].is_some())).unwrap_or(0);
+    Ok(Loaded { s, run, nav, cur })
+}
+
+fn run_view(l: &Loaded, contract: &str, test: &str) -> RunView {
+    let verdict = if l.run.success { "ok".to_string() } else { format!("reverted: {}", l.run.revert_reason().unwrap_or_default()) };
+    let calls = l
+        .run
+        .trace
+        .frames
+        .iter()
+        .map(|fr| Call {
+            depth: fr.depth,
+            kind: fr.kind,
+            who: if fr.kind == "DELEGATECALL" {
+                format!("{} ⇒ {}", l.s.name_of(fr.target), l.s.name_of(fr.code_address))
+            } else {
+                format!("{} → {}", l.s.name_of(fr.caller), l.s.name_of(fr.target))
+            },
+            call: compact_hex(&l.s.describe_call(fr.code_address, &fr.input)),
+            ok: fr.success,
+            first_step: fr.first_step,
+        })
+        .collect();
+    let name = contract.rsplit(':').next().unwrap_or(contract);
+    RunView {
+        title: format!("{name}::{test}"),
+        success: l.run.success,
+        verdict: verdict.clone(),
+        gas: l.run.gas_used,
+        calls,
+        missing: l.s.evm.inspector.cheats.missing.clone(),
+        view: view(l, verdict),
+    }
+}
+
+#[derive(Serialize)]
+pub struct Divergence {
+    what: String,
+    index: usize,
+    a: Option<String>,
+    b: Option<String>,
+    a_step: Option<usize>,
+    b_step: Option<usize>,
+}
+
+#[derive(Serialize)]
+pub struct Section {
+    name: String,
+    matched: usize,
+    total_a: usize,
+    total_b: usize,
+    divergence: Option<Divergence>,
+}
+
+#[derive(Serialize)]
+pub struct Compared {
+    /// The folders' names, for the pane titles.
+    label_a: String,
+    label_b: String,
+    a: RunView,
+    b: RunView,
+    sections: Vec<Section>,
+    /// Ported contracts whose storage wasn't compared: (name, writes in A, writes in B).
+    uncompared: Vec<(String, usize, usize)>,
+    /// The earliest divergence in run A; both views open on it.
+    first: Option<Divergence>,
+}
+
+fn divergence(d: &sol_debug::diff::Divergence) -> Divergence {
+    Divergence { what: d.what.clone(), index: d.index, a: d.a.clone(), b: d.b.clone(), a_step: d.a_step, b_step: d.b_step }
+}
+
+/// "Compare with…": runs the same test of the same file in `other` (another added folder, such as a port of the
+/// protocol), compares the two runs where they must agree (crates/sol-debug/src/diff.rs) and opens both on the first
+/// divergence. `slot_map` (optional, a path in `other`) names the port's storage slots for the comparison.
+#[tauri::command]
+pub async fn debug_compare(state: tauri::State<'_, Debuggers>, id: u32, other: String, contract: String, test: String, slot_map: Option<String>) -> Result<Compared, String> {
+    compare(&state, id, other, contract, test, slot_map).await
+}
+
+pub async fn compare(state: &Debuggers, id: u32, other: String, contract: String, test: String, slot_map: Option<String>) -> Result<Compared, String> {
+    if !crate::local::read()?.folders.contains(&other) {
+        return Err("Add the other folder first".into());
+    }
+    ask(state, id, move |d| {
+        let root_b = PathBuf::from(&other);
+        let map: sol_debug::diff::SlotMap = match slot_map.filter(|p| !p.trim().is_empty()) {
+            Some(p) => {
+                let text = std::fs::read_to_string(root_b.join(p.trim())).map_err(|e| format!("slot map: {e}"))?;
+                serde_json::from_str(&text).map_err(|e| format!("slot map: {e}"))?
+            }
+            None => Default::default(),
+        };
+        let sa = match d.fresh.take() {
+            Some(s) => s,
+            None => Session::compile(&d.root, &d.file).map_err(err)?,
+        };
+        let mut a = load(sa, &contract, &test, d.loaded.take())?;
+        let sb = Session::compile(&root_b, &d.file).map_err(|e| format!("{}: {}", root_b.display(), err(e)))?;
+        let mut b = load(sb, &contract, &test, d.other.take())?;
+        let report = sol_debug::diff::compare(&a.s, &a.run, &b.s, &b.run, &map);
+        let first = report.first().map(divergence);
+        if let Some(f) = &first {
+            a.cur = f.a_step.unwrap_or(a.cur).min(a.nav.len() - 1);
+            b.cur = f.b_step.unwrap_or(b.cur).min(b.nav.len() - 1);
+        }
+        let label = |p: &std::path::Path| p.file_name().map(|f| f.to_string_lossy().to_string()).unwrap_or_default();
+        let out = Compared {
+            label_a: label(&d.root),
+            label_b: label(&root_b),
+            a: run_view(&a, &contract, &test),
+            b: run_view(&b, &contract, &test),
+            sections: report
+                .sections
+                .iter()
+                .map(|s| Section { name: s.name.clone(), matched: s.matched, total_a: s.total_a, total_b: s.total_b, divergence: s.divergence.as_ref().map(divergence) })
+                .collect(),
+            uncompared: report.uncompared.clone(),
+            first,
+        };
+        d.loaded = Some(a);
+        d.other = Some(b);
+        Ok(out)
+    })
+    .await
+}
+
+/// Where a step is among the calls an outside observer sees (diff.rs compares the same ones: no cheatcodes,
+/// console.log or library DELEGATECALLs): how many of them have started, and which one the step runs in (its
+/// position in that list). A step in a library DELEGATECALL counts as the call that made it.
+struct CallPlaces {
+    starts: Vec<usize>,
+    inside: Vec<Option<usize>>,
+}
+
+impl CallPlaces {
+    fn new(run: &Run) -> Self {
+        use sol_debug::cheats::{CONSOLE, HEVM};
+        let frames = &run.trace.frames;
+        let observed = |f: &sol_debug::trace::Frame| f.kind != "DELEGATECALL" && f.target != HEVM && f.target != CONSOLE && f.code_address != HEVM;
+        // Each frame's observed call: itself, or its caller's.
+        let mut call_of: Vec<Option<usize>> = Vec::with_capacity(frames.len());
+        let mut index = vec![None; frames.len()];
+        let mut n = 0;
+        for (i, f) in frames.iter().enumerate() {
+            if observed(f) {
+                index[i] = Some(n);
+                n += 1;
+            }
+            let parent = (0..i).rev().find(|&p| f.depth > 0 && frames[p].depth + 1 == f.depth);
+            call_of.push(if observed(f) { index[i] } else { parent.and_then(|p| call_of[p]) });
+        }
+        let (mut starts, mut inside) = (Vec::with_capacity(run.trace.steps.len()), Vec::with_capacity(run.trace.steps.len()));
+        let mut started = 0;
+        for (i, st) in run.trace.steps.iter().enumerate() {
+            if frames.get(st.frame).is_some_and(|f| f.first_step == i && index[st.frame].is_some()) {
+                started += 1;
+            }
+            starts.push(started);
+            inside.push(call_of.get(st.frame).copied().flatten());
+        }
+        CallPlaces { starts, inside }
+    }
+
+    fn at(&self, step: usize) -> (usize, Option<usize>) {
+        (self.starts.get(step).copied().unwrap_or(0), self.inside.get(step).copied().flatten())
+    }
+}
+
+/// Keeps the compared runs in step: when the other side isn't in the external call this side (`b` or not) is in, it
+/// moves to the first step where it is, with as many calls started (so after the same child calls returned).
+#[tauri::command]
+pub async fn debug_sync(state: tauri::State<'_, Debuggers>, id: u32, b: bool) -> Result<StepView, String> {
+    sync(&state, id, b).await
+}
+
+pub async fn sync(state: &Debuggers, id: u32, b: bool) -> Result<StepView, String> {
+    ask(state, id, move |d| {
+        let (Some(la), Some(lb)) = (d.loaded.as_mut(), d.other.as_mut()) else { return Err("Compare with another folder first".into()) };
+        let (from, to) = if b { (&*lb, la) } else { (&*la, lb) };
+        let here = CallPlaces::new(&from.run).at(from.cur);
+        let there = CallPlaces::new(&to.run);
+        if there.at(to.cur) == here {
+            return Ok(view(to, String::new()));
+        }
+        let status = match (0..to.nav.len()).find(|&i| there.at(i) == here).or_else(|| (0..to.nav.len()).find(|&i| there.at(i).0 == here.0)) {
+            Some(i) => {
+                to.cur = i;
+                format!("in step: external call #{}", here.1.map(|c| c.to_string()).unwrap_or("-".into()))
+            }
+            None => format!("no step here matches external call #{}", here.1.map(|c| c.to_string()).unwrap_or("-".into())),
+        };
+        Ok(view(to, status))
     })
     .await
 }
@@ -307,12 +490,12 @@ pub async fn run_test(state: &Debuggers, id: u32, contract: String, test: String
 /// Moves through the run: `op`, `into`, `over`, `out`, `continue`, `search` (with `arg`), each forward or `back`;
 /// `first`, `last`, `step` and `pc` (with `arg`).
 #[tauri::command]
-pub async fn debug_nav(state: tauri::State<'_, Debuggers>, id: u32, to: String, back: bool, arg: Option<String>) -> Result<StepView, String> {
-    step(&state, id, to, back, arg).await
+pub async fn debug_nav(state: tauri::State<'_, Debuggers>, id: u32, to: String, back: bool, arg: Option<String>, b: Option<bool>) -> Result<StepView, String> {
+    step(&state, id, to, back, arg, b.unwrap_or(false)).await
 }
 
-pub async fn step(state: &Debuggers, id: u32, to: String, back: bool, arg: Option<String>) -> Result<StepView, String> {
-    ask(state, id, move |d| move_to(loaded(d)?, &to, back, arg.unwrap_or_default())).await
+pub async fn step(state: &Debuggers, id: u32, to: String, back: bool, arg: Option<String>, b: bool) -> Result<StepView, String> {
+    ask(state, id, move |d| move_to(side(d, b)?, &to, back, arg.unwrap_or_default())).await
 }
 
 fn move_to(l: &mut Loaded, to: &str, back: bool, arg: String) -> Result<StepView, String> {
@@ -353,13 +536,13 @@ fn move_to(l: &mut Loaded, to: &str, back: bool, arg: String) -> Result<StepView
 /// Toggles a line breakpoint: in source `file` (an id), in the file named `name` (`AsyncSwap.sol`), or else in the
 /// current step's file.
 #[tauri::command]
-pub async fn debug_break(state: tauri::State<'_, Debuggers>, id: u32, line: usize, file: Option<i64>, name: Option<String>) -> Result<StepView, String> {
-    toggle_break(&state, id, line, file, name).await
+pub async fn debug_break(state: tauri::State<'_, Debuggers>, id: u32, line: usize, file: Option<i64>, name: Option<String>, b: Option<bool>) -> Result<StepView, String> {
+    toggle_break(&state, id, line, file, name, b.unwrap_or(false)).await
 }
 
-pub async fn toggle_break(state: &Debuggers, id: u32, line: usize, file: Option<i64>, name: Option<String>) -> Result<StepView, String> {
+pub async fn toggle_break(state: &Debuggers, id: u32, line: usize, file: Option<i64>, name: Option<String>, b: bool) -> Result<StepView, String> {
     ask(state, id, move |d| {
-    let l = loaded(d)?;
+    let l = side(d, b)?;
     let file = match (file, name) {
         (Some(f), _) => Some(f),
         (None, Some(n)) => l.s.sources.files.values().find(|x| x.name.ends_with(n.as_str())).map(|x| x.id),
@@ -380,13 +563,13 @@ pub async fn toggle_break(state: &Debuggers, id: u32, line: usize, file: Option<
 
 /// Adds (or, with `on: false`, removes) a storage watch: `continue` stops on writes whose name contains `text`.
 #[tauri::command]
-pub async fn debug_watch(state: tauri::State<'_, Debuggers>, id: u32, text: String, on: bool) -> Result<StepView, String> {
-    watch(&state, id, text, on).await
+pub async fn debug_watch(state: tauri::State<'_, Debuggers>, id: u32, text: String, on: bool, b: Option<bool>) -> Result<StepView, String> {
+    watch(&state, id, text, on, b.unwrap_or(false)).await
 }
 
-pub async fn watch(state: &Debuggers, id: u32, text: String, on: bool) -> Result<StepView, String> {
+pub async fn watch(state: &Debuggers, id: u32, text: String, on: bool, b: bool) -> Result<StepView, String> {
     ask(state, id, move |d| {
-    let l = loaded(d)?;
+    let l = side(d, b)?;
     l.nav.watches.retain(|w| w != &text);
     let status = if on {
         l.nav.watches.push(text.clone());
@@ -401,13 +584,14 @@ pub async fn watch(state: &Debuggers, id: u32, text: String, on: bool) -> Result
 
 /// A source file of the compile, whole (the webview highlights it once and keeps it).
 #[tauri::command]
-pub async fn debug_file(state: tauri::State<'_, Debuggers>, id: u32, file: i64) -> Result<File, String> {
-    source_file(&state, id, file).await
+pub async fn debug_file(state: tauri::State<'_, Debuggers>, id: u32, file: i64, b: Option<bool>) -> Result<File, String> {
+    source_file(&state, id, file, b.unwrap_or(false)).await
 }
 
-pub async fn source_file(state: &Debuggers, id: u32, file: i64) -> Result<File, String> {
+pub async fn source_file(state: &Debuggers, id: u32, file: i64, b: bool) -> Result<File, String> {
     ask(state, id, move |d| {
-        let s = d.loaded.as_ref().map(|l| &l.s).or(d.fresh.as_ref()).ok_or("Run a test first")?;
+        let s = if b { d.other.as_ref().map(|l| &l.s) } else { d.loaded.as_ref().map(|l| &l.s).or(d.fresh.as_ref()) };
+        let s = s.ok_or("Run a test first")?;
         let f = s.sources.files.get(&file).ok_or("no such file in this compile")?;
         Ok(File { name: f.name.clone(), text: f.text.clone() })
     })
@@ -573,6 +757,24 @@ fn compact_hex(s: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Compare with…: sol-debug's diff fixture (`bumps += 1` against `+= 2`) diverges on the storage write, and the
+    /// divergent steps sit in the same external call on both sides, so keeping them in step leaves both there.
+    #[test]
+    fn compare_fixture_diverges_in_the_same_call() {
+        let fixture = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../crates/sol-debug/tests/diff_fixture");
+        let Ok(sa) = Session::compile(&fixture.join("a"), "test/Counter.t.sol") else { return };
+        let sb = Session::compile(&fixture.join("b"), "test/Counter.t.sol").unwrap();
+        let a = load(sa, "CounterTest", "test_bumpTwice", None).unwrap();
+        let b = load(sb, "CounterTest", "test_bumpTwice", None).unwrap();
+        let report = sol_debug::diff::compare(&a.s, &a.run, &b.s, &b.run, &Default::default());
+        let d = report.first().expect("the fixture diverges");
+        assert!(d.what.starts_with("storage"), "{}", d.what);
+        let (sa, sb) = (d.a_step.unwrap(), d.b_step.unwrap());
+        let (pa, pb) = (CallPlaces::new(&a.run), CallPlaces::new(&b.run));
+        assert_eq!(pa.at(sa), pb.at(sb));
+        assert!(pa.at(sa).1.is_some_and(|c| c > 0), "inside a call the test made, not the test itself");
+    }
 
     /// The Async Swap test from DEBUGGER.md, when that repository is checked out next to this one.
     #[test]

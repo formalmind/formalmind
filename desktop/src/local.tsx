@@ -19,7 +19,7 @@ const name = (path: string) => path.split(/[\\/]/).filter(Boolean).pop() ?? path
 const href = (path: string) => `/local?path=${encodeURIComponent(path)}`;
 
 /** Folders on this machine, kept in ~/.formalmind/config.json. Shared by every view through a small event. */
-function useFolders() {
+export function useFolders() {
 	const [folders, setFolders] = useState<string[]>([]);
 	useEffect(() => {
 		const load = () => void invoke<Config>("config_get").then((c) => setFolders(c.folders), () => {});
