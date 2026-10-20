@@ -79,6 +79,23 @@ the browser side finishes, then the token once). So sign-in completes even where
 open the app, such as `tauri dev` on macOS, which only registers the link for an installed app. Pasting the code
 still works as a last resort.
 
+## Local swarm
+
+A folder's page runs a swarm on this computer: **Start the swarm**, optionally with a focus and a spending cap.
+`src-tauri/src/swarm.rs` loops until the plan is proven, an agent reports a bug, the cap is reached, or you press Stop:
+
+1. **Planner** (only when `.formal/plan.md` has no checklist) reads the contracts and writes 5–12 properties to prove.
+2. **Prover** takes the next `- [ ]` item: Lean under `formal/`, checked with `lake`; or a Foundry PoC under
+   `test/formal/` when the property is false.
+3. **Reviewer** checks the statement against the Solidity and gives a verdict: approve marks the item `- [x]`, changes
+   sends it back to the prover (three tries, then `- [!]` blocked).
+4. **report_bug** (any agent) writes `.formal/bugs/NNN-title.md` and stops the swarm so you can look.
+5. **Messages** you send while it runs are answered by the assistant before the next turn and can change the plan.
+
+Files, `lake` and `forge` run here; only the model calls leave, via formal.team's metered Claude proxy
+(`/api/desktop/model-session` mints a session per agent turn with the desktop sign-in). They're charged to your credits
+as `local/<folder>` with the agent and item, and every event is logged to `.formal/runs/<run>.jsonl`.
+
 ## Local executor
 
 A folder's page has **Run a turn here**: pick Prover or Reviewer, say what to prove or review, and the agent works
