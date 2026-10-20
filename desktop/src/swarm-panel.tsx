@@ -3,7 +3,9 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { ChevronDown, Square, Play, Send, Bug as BugIcon } from "lucide-react";
 import { ROLE_COLORS } from "@/lib/swarm-roles";
+import { SwarmCanvas } from "@/components/swarm/swarm-canvas";
 import { apiBase } from "./api";
+import { localBoard } from "./local-board";
 
 type Ev = { run: string; kind: "status" | "say" | "tool" | "result" | "you" | "bug" | "plan" | "done"; role: string; item: string; text: string; spent: number };
 type Item = { index: number; mark: string; text: string };
@@ -192,6 +194,13 @@ export function SwarmPanel({ folder }: { folder: string }) {
 					</ul>
 				</section>
 			) : null}
+
+			<section className="rounded-2xl border bg-muted/60 p-1.5">
+				<header className="flex h-9 items-center pl-2.5 font-mono text-[11px] font-medium uppercase tracking-wider text-muted-foreground">Board</header>
+				<div className="shadow-card relative flex h-[520px] overflow-hidden rounded-xl border bg-card">
+					<SwarmCanvas state={localBoard(folder, plan, events, Boolean(run))} fill repo={folder} />
+				</div>
+			</section>
 
 			<div className="grid gap-4 md:grid-cols-[minmax(0,1fr)_18rem]">
 				<section className="rounded-2xl border bg-muted/60 p-1.5">

@@ -192,6 +192,7 @@ pub(crate) async fn run_command(root: &Path, command: &str) -> Result<String, St
         .args(&argv[1..])
         .current_dir(root)
         .env("PATH", tool_path())
+        .env("ELAN_TOOLCHAIN", std::env::var("ELAN_TOOLCHAIN").unwrap_or_else(|_| "leanprover/lean4:v4.35.0".into()))
         .kill_on_drop(true)
         .output();
     let out = tokio::time::timeout(COMMAND_TIMEOUT, child).await.map_err(|_| "Timed out after 15 minutes".to_string())?.map_err(|e| e.to_string())?;
@@ -230,18 +231,73 @@ pub(crate) fn list_files(root: &Path, dir: &str) -> Result<String, String> {
     Ok(clip(files.join("\n")))
 }
 
+/// Lines matching a regex in the folder's text files (Solidity, Lean, Markdown, TOML), as path:line: text.
+fn search(root: &Path, pattern: &str, dir: &str) -> Result<String, String> {
+    let re = regex::Regex::new(pattern).map_err(|e| format!("bad pattern: {e}"))?;
+    let files = list_files(root, if dir.is_empty() { "." } else { dir })?;
+    let mut hits = vec![];
+    for f in files.lines().filter(|f| [".sol", ".lean", ".md", ".toml"].iter().any(|x| f.ends_with(x))) {
+        let Ok(text) = std::fs::read_to_string(root.join(f)) else { continue };
+        for (i, line) in text.lines().enumerate() {
+            if re.is_match(line) {
+                hits.push(format!("{f}:{}: {}", i + 1, line.trim().chars().take(200).collect::<String>()));
+                if hits.len() >= 200 {
+                    hits.push("… (200 matches shown)".into());
+                    return Ok(hits.join("\n"));
+                }
+            }
+        }
+    }
+    Ok(if hits.is_empty() { "no matches".into() } else { hits.join("\n") })
+}
+
+/// Lean can run code at build time (#eval, IO actions); refuse to build files that could reach the machine.
+fn lean_guard(root: &Path) -> Result<(), String> {
+    const RISKY: [&str; 6] = ["#eval", "IO.Process", "IO.FS", "System.FilePath", "run_cmd", "initialize "];
+    let files = list_files(root, ".")?;
+    for f in files.lines().filter(|f| f.ends_with(".lean")) {
+        let text = std::fs::read_to_string(root.join(f)).unwrap_or_default();
+        if let Some(bad) = RISKY.iter().find(|r| text.contains(*r)) {
+            return Err(format!("{f} uses `{bad}`, which can run code on this machine; proofs here must be pure Lean. Remove it (use read_file and search to read the contracts)."));
+        }
+    }
+    Ok(())
+}
+
 pub(crate) async fn call_tool(root: &Path, name: &str, args: &Value) -> String {
     let s = |k: &str| args.get(k).and_then(Value::as_str).unwrap_or("").to_string();
     let result = match name {
         "list_files" => list_files(root, &s("dir")),
-        "read_file" => inside(root, &s("path")).and_then(|p| std::fs::read_to_string(p).map_err(|e| e.to_string())).map(clip),
+        "read_file" => inside(root, &s("path")).and_then(|p| std::fs::read_to_string(p).map_err(|e| e.to_string())).map(|text| {
+            let n = |k: &str| args.get(k).and_then(Value::as_u64).map(|v| v as usize);
+            match (n("start_line"), n("end_line")) {
+                (None, None) if text.len() <= OUTPUT_LIMIT => text,
+                (start, end) => {
+                    // A slice with line numbers, so long contracts can be read piece by piece.
+                    let total = text.lines().count();
+                    let from = start.unwrap_or(1).max(1);
+                    let to = end.unwrap_or(from + 299).min(total);
+                    let body: String = text.lines().enumerate().skip(from - 1).take(to.saturating_sub(from) + 1).map(|(i, l)| format!("{:>5}  {l}\n", i + 1)).collect();
+                    clip(format!("{}lines {from}-{to} of {total}\n{body}", if start.is_none() && end.is_none() { "File is long; showing the start. Pass start_line/end_line for more.\n" } else { "" }))
+                }
+            }
+        }),
+        "search" => search(root, &s("pattern"), &s("dir")),
         "write_file" => inside(root, &s("path")).and_then(|p| {
             if let Some(parent) = p.parent() {
                 std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
             }
             std::fs::write(&p, s("content")).map_err(|e| e.to_string()).map(|_| format!("wrote {}", s("path")))
         }),
-        "run" => run_command(root, &s("command")).await,
+        "run" => {
+            let cmd = s("command");
+            if cmd.trim_start().starts_with("lake") {
+                if let Err(e) = lean_guard(root) {
+                    return format!("error: {e}");
+                }
+            }
+            run_command(root, &cmd).await
+        }
         _ => Err(format!("No tool called {name}")),
     };
     result.unwrap_or_else(|e| format!("error: {e}"))

@@ -180,7 +180,7 @@ pub fn swarm_bugs(folder: String) -> Result<Vec<Bug>, String> {
 fn system(role: &str, folder: &str, goal: &str) -> String {
     let common = format!(
         "You are the formalmind {role}, one agent of a small swarm verifying the Ethereum smart contracts in a local folder ({folder}). \
-Paths are relative to that folder. Tools run here, on the maintainer's machine: list_files, read_file, write_file, run (only lake/forge, no shell), report_bug. \
+Paths are relative to that folder. Tools run here, on the maintainer's machine: list_files, search, read_file (numbered line ranges), write_file, run (only lake/forge, no shell), report_bug. Proofs must be pure Lean: no #eval or IO. \
 The shared state is .formal/: plan.md is the checklist of properties to prove (`- [ ]` todo, `- [x]` proven, `- [!]` blocked); bugs/ holds reported bugs. \
 Lean proofs live under formal/ (a Lake project; create it with `lake init Formal` inside formal/ if it's missing — write formal/lakefile.toml and formal/lean-toolchain yourself, toolchain leanprover/lean4:v4.35.0, no Mathlib unless needed). \
 Never leave `sorry`, `admit` or new axioms. If you find a real bug (a reachable violation of an intended property, loss of funds, broken accounting, access control), call report_bug with a concrete scenario; a Foundry PoC under test/formal/ that `forge test --match-path` shows failing or exploiting is strongly preferred. \
@@ -200,7 +200,8 @@ fn tools(role: &str) -> Value {
     let s = |props: Value, req: Vec<&str>| json!({ "type": "object", "properties": props, "required": req, "additionalProperties": false });
     let mut t = vec![
         json!({ "name": "list_files", "description": "List files under a directory of the folder (skips .git, node_modules, lib, out, cache, target, .lake).", "input_schema": s(json!({ "dir": { "type": "string" } }), vec!["dir"]) }),
-        json!({ "name": "read_file", "description": "Read a text file in the folder.", "input_schema": s(json!({ "path": { "type": "string" } }), vec!["path"]) }),
+        json!({ "name": "read_file", "description": "Read a text file in the folder. Long files come back in numbered slices: pass start_line and end_line (up to 300 lines at a time).", "input_schema": s(json!({ "path": { "type": "string" }, "start_line": { "type": "integer" }, "end_line": { "type": "integer" } }), vec!["path"]) }),
+        json!({ "name": "search", "description": "Find lines matching a regex in the folder's .sol, .lean, .md and .toml files (path:line: text). Use it to locate functions before reading them.", "input_schema": s(json!({ "pattern": { "type": "string" }, "dir": { "type": "string", "description": "Subdirectory, e.g. src; empty for all" } }), vec!["pattern"]) }),
         json!({ "name": "run", "description": "Run `lake build`, `lake env lean <file>`, `lake exe cache get`, `lake init|new <Name>`, `forge build` or `forge test [args]` in the folder. Returns exit code and output.", "input_schema": s(json!({ "command": { "type": "string" } }), vec!["command"]) }),
         json!({ "name": "report_bug", "description": "Report a real bug in the contracts. The swarm stops so the maintainer can look.", "input_schema": s(json!({
             "title": { "type": "string" }, "severity": { "type": "string", "enum": ["critical", "high", "medium", "low"] },

@@ -1137,6 +1137,7 @@ name = "formalmind-desktop"
 version = "0.1.5"
 dependencies = [
  "keyring",
+ "regex",
  "reqwest 0.12.28",
  "serde",
  "serde_json",
