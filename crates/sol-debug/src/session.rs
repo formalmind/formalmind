@@ -117,6 +117,8 @@ impl Session {
             cfg.limit_contract_code_size = Some(usize::MAX);
             cfg.limit_contract_initcode_size = Some(usize::MAX);
             cfg.tx_gas_limit_cap = Some(u64::MAX);
+            // forge's chain (anvil's id) unless a run sets another: scripts read deployments by chain id.
+            cfg.chain_id = 31337;
         });
         // forge's defaults: block 1 at timestamp 1.
         ctx.block.number = U256::from(1);
@@ -204,7 +206,9 @@ impl Session {
     }
 
     fn run_tx(&mut self, from: Address, kind: TxKind, data: Bytes, value: U256) -> Result<Run> {
-        let tx = TxEnv::builder().caller(from).kind(kind).data(data).value(value).gas_limit(TX_GAS).build_fill();
+        // The transaction's chain id must be the chain's.
+        let chain = self.evm.ctx.cfg.chain_id;
+        let tx = TxEnv::builder().caller(from).kind(kind).data(data).value(value).gas_limit(TX_GAS).chain_id(Some(chain)).build_fill();
         let result = self.evm.inspect_tx_commit(tx).map_err(|e| anyhow!("transaction failed to run: {e:?}"))?;
         let trace = self.evm.inspector.take();
         Ok(match result {
@@ -295,6 +299,11 @@ impl Session {
         let sig = self.artifacts[contract].signature(sig)?;
         let data = encode_call(&sig, args)?;
         self.transact(from, TxKind::Call(to), data.into(), value)
+    }
+
+    /// The chain id `block.chainid` reads (31337 by default, as in forge).
+    pub fn set_chain_id(&mut self, id: u64) {
+        self.evm.ctx.cfg.chain_id = id;
     }
 
     /// Runs a Foundry test: deploys the test contract, runs `setUp()` (traced only when asked), then the test.

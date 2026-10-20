@@ -256,16 +256,18 @@ pub fn close(state: &Debuggers, id: u32) {
 
 /// Runs one test (setUp untraced, then the test recorded) and opens on its first statement.
 #[tauri::command]
-pub async fn debug_run(state: tauri::State<'_, Debuggers>, id: u32, contract: String, test: String) -> Result<RunView, String> {
-    run_test(&state, id, contract, test).await
+pub async fn debug_run(state: tauri::State<'_, Debuggers>, id: u32, contract: String, test: String, chain_id: Option<u64>) -> Result<RunView, String> {
+    run_test(&state, id, contract, test, chain_id).await
 }
 
-pub async fn run_test(state: &Debuggers, id: u32, contract: String, test: String) -> Result<RunView, String> {
+/// `chain_id`: what `block.chainid` reads (scripts read deployments/<chainId>/ by it); 31337 when unset.
+pub async fn run_test(state: &Debuggers, id: u32, contract: String, test: String, chain_id: Option<u64>) -> Result<RunView, String> {
     ask(state, id, move |d| {
-        let s = match d.fresh.take() {
+        let mut s = match d.fresh.take() {
             Some(s) => s,
             None => Session::compile(&d.root, &d.file).map_err(err)?,
         };
+        s.set_chain_id(chain_id.unwrap_or(31337));
         let l = load(s, &contract, &test, d.loaded.take())?;
         let out = run_view(&l, &contract, &test);
         d.loaded = Some(l);

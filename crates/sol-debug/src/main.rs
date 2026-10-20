@@ -28,6 +28,9 @@ struct Args {
     /// Run a Foundry test of --contract: setUp() then this function, with cheatcodes.
     #[arg(long)]
     test: Option<String>,
+    /// The chain id `block.chainid` reads (default 31337, as in forge); scripts read deployments by it.
+    #[arg(long = "chain-id")]
+    chain_id: Option<u64>,
     /// With --test: run the same test file in this second project too (a port of the first, e.g. to Huff) and
     /// report where the two runs first disagree on calls, events or storage.
     #[arg(long)]
@@ -85,6 +88,9 @@ fn main() -> Result<()> {
         std::env::set_var("SOL_DEBUG_THEME", t);
     }
     let mut s = Session::compile(&a.root, &a.entry)?;
+    if let Some(id) = a.chain_id {
+        s.set_chain_id(id);
+    }
     let ci = s.artifact(&a.contract)?;
 
     if let Some(line) = a.map_line {

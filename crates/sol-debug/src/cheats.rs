@@ -135,6 +135,15 @@ const SIGNATURES: &[&str] = &[
     "serializeBytes32(string,string,bytes32)",
     "serializeString(string,string,string)",
     "getRecordedLogs()",
+    "parseJsonAddress(string,string)",
+    "parseJsonUint(string,string)",
+    "parseJsonInt(string,string)",
+    "parseJsonBool(string,string)",
+    "parseJsonBytes32(string,string)",
+    "parseJsonString(string,string)",
+    "parseJsonBytes(string,string)",
+    "keyExistsJson(string,string)",
+    "keyExists(string,string)",
     "assertTrue(bool)",
     "assertTrue(bool,string)",
     "assertFalse(bool)",
@@ -360,6 +369,32 @@ impl Cheats {
                 fields.push((key, value));
                 let out = format!("{{{}}}", fields.iter().map(|(k, v)| format!("{k:?}:{v}")).collect::<Vec<_>>().join(","));
                 Answer::Ok(DynSolValue::String(out).abi_encode_params())
+            }
+            // A value at a key path (`.contracts.AsyncSwap.address`) in a JSON string, read as the type asked for.
+            n if n.starts_with("parseJson") || n.starts_with("keyExists") => {
+                let (json, key) = (text(0), text(1));
+                let found = serde_json::from_str::<serde_json::Value>(&json).ok().and_then(|v| json_at(&v, &key).cloned());
+                if n.starts_with("keyExists") {
+                    return Answer::Ok(DynSolValue::Bool(found.is_some()).abi_encode());
+                }
+                let Some(v) = found else { return Answer::Revert(format!("sol-debug: {n}: no key {key:?}")) };
+                let raw = match &v {
+                    serde_json::Value::String(s) => s.clone(),
+                    other => other.to_string(),
+                };
+                let ty = match n {
+                    "parseJsonAddress" => "address",
+                    "parseJsonUint" => "uint256",
+                    "parseJsonInt" => "int256",
+                    "parseJsonBool" => "bool",
+                    "parseJsonBytes32" => "bytes32",
+                    "parseJsonString" => "string",
+                    _ => "bytes",
+                };
+                match parse_env(ty, &raw) {
+                    Some(val) => Answer::Ok(val.abi_encode_params()),
+                    None => Answer::Revert(format!("sol-debug: {n}: {key:?} isn't a valid {ty}")),
+                }
             }
             // Logs aren't kept: an empty list.
             "getRecordedLogs" => Answer::Ok(DynSolValue::Array(vec![]).abi_encode_params()),
@@ -651,4 +686,20 @@ fn parse_env(ty: &str, v: &str) -> Option<DynSolValue> {
         "string" => DynSolValue::String(v.to_string()),
         _ => DynSolValue::Bytes(hex(v)?),
     })
+}
+
+/// The value at a jq-style key path: `.a.b`, `$.a.b`, `.list[0]`, `.` for the whole document.
+fn json_at<'a>(v: &'a serde_json::Value, key: &str) -> Option<&'a serde_json::Value> {
+    let path = key.trim_start_matches('$');
+    let mut at = v;
+    for part in path.split('.').filter(|p| !p.is_empty()) {
+        let (name, rest) = part.split_once('[').map_or((part, ""), |(n, r)| (n, r));
+        if !name.is_empty() {
+            at = at.get(name)?;
+        }
+        for idx in rest.split('[').filter(|s| !s.is_empty()) {
+            at = at.get(idx.trim_end_matches(']').parse::<usize>().ok()?)?;
+        }
+    }
+    Some(at)
 }

@@ -607,6 +607,32 @@ export function DebugView({ folder, file, test: wanted, onPick, embedded }: { fo
 		};
 	}, [folder, file]);
 
+	// The chain id runs use (scripts read deployments/<chainId>/ by it), kept per folder; the ones the folder has
+	// deployments for are offered.
+	const chainKey = `fm:chain:${folder}`;
+	const [chain, setChainState] = useState(() => {
+		try {
+			return Number(localStorage.getItem(chainKey)) || 31337;
+		} catch {
+			return 31337;
+		}
+	});
+	const setChain = (id: number) => {
+		setChainState(id);
+		try {
+			localStorage.setItem(chainKey, String(id));
+		} catch {
+			/* not kept */
+		}
+	};
+	const [chains, setChains] = useState<number[]>([]);
+	useEffect(() => {
+		void invoke<{ files: string[] }>("folder_tree", { path: folder }).then(
+			(t) => setChains([...new Set(t.files.map((f) => f.match(/^deployments\/(\d+)\//)?.[1]).filter(Boolean).map(Number))].sort((a, b) => a - b)),
+			() => setChains([]),
+		);
+	}, [folder]);
+
 	const start = useCallback(
 		async (t: TestFn) => {
 			if (!session) return;
@@ -614,7 +640,7 @@ export function DebugView({ folder, file, test: wanted, onPick, embedded }: { fo
 			setRunning(key);
 			setError(null);
 			try {
-				const r = await invoke<RunView>("debug_run", { id: session.id, contract: t.contract, test: t.test });
+				const r = await invoke<RunView>("debug_run", { id: session.id, contract: t.contract, test: t.test, chainId: chain });
 				setRun({ ...r, key });
 				recordRun(folder, session.file, t.name, t.test, r.success);
 				setCmp(null);
@@ -626,7 +652,7 @@ export function DebugView({ folder, file, test: wanted, onPick, embedded }: { fo
 				setRunning(null);
 			}
 		},
-		[session, folder],
+		[session, folder, chain],
 	);
 	// A test named in the URL (`&test=Contract::test`) runs once its file has compiled, and again when it changes.
 	useEffect(() => {
@@ -634,6 +660,13 @@ export function DebugView({ folder, file, test: wanted, onPick, embedded }: { fo
 		if (t && run?.key !== `${t.contract}::${t.test}` && !running) void start(t);
 		// eslint-disable-next-line react-hooks/exhaustive-deps
 	}, [session, wanted]);
+
+	// A new chain runs the current one again.
+	useEffect(() => {
+		const t = session?.tests.find((x) => run && `${x.contract}::${x.test}` === run.key);
+		if (t && !running) void start(t);
+		// eslint-disable-next-line react-hooks/exhaustive-deps
+	}, [chain]);
 
 	// Scripts first (what production runs), then tests.
 	const tests = useMemo(() => {
@@ -725,6 +758,23 @@ export function DebugView({ folder, file, test: wanted, onPick, embedded }: { fo
 				</div>
 			</aside>}
 			<main className="flex min-h-0 min-w-0 flex-1 flex-col">
+				<div className="mb-2 flex shrink-0 items-center gap-2 text-[11px] text-muted-foreground">
+					<label className="inline-flex items-center gap-1.5" title="What block.chainid reads. Scripts read deployments/<chainId>/ by it; forge's local chain is 31337.">
+						<span className="font-mono uppercase tracking-wider">Chain</span>
+						<select
+							value={chain}
+							onChange={(e) => setChain(Number(e.target.value))}
+							className="h-6 rounded-md border bg-background px-1.5 font-mono text-[11px] text-foreground"
+						>
+							{[...new Set([31337, ...chains, chain])].map((id) => (
+								<option key={id} value={id}>
+									{id}
+									{id === 31337 ? " · local" : chains.includes(id) ? " · deployments" : ""}
+								</option>
+							))}
+						</select>
+					</label>
+				</div>
 				{error ? <p className="mb-2 whitespace-pre-wrap rounded-xl border border-red-500/30 bg-red-50/80 p-3 font-mono text-[11px] text-red-700 dark:bg-red-950/40 dark:text-red-400">{error}</p> : null}
 				{cmp && session ? (
 					<>
