@@ -1,4 +1,5 @@
 import { useSearchParams } from "react-router";
+import { DEMO_TREE } from "@/components/demo-tree";
 import { SettingsMenu } from "@/components/projects/swarm-control";
 import { NotificationCenter } from "@/components/notification-center";
 import { SwarmPanel, type Bridge } from "@/desktop/src/swarm-panel";
@@ -102,6 +103,7 @@ const demo: Bridge = {
 			folder_read: SOURCES[String(args?.path ?? "")] ?? "// (demo: no contents)\n",
 			swarm_running: RUN,
 			anthropic_key_status: false,
+			folder_tree: { files: DEMO_TREE, truncated: false },
 			ast_units: AST_UNITS,
 			ast_slice: AST_SLICE,
 		};

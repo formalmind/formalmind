@@ -3,7 +3,7 @@ import { useEffect, useRef, useState } from "react";
 import { Bug, Check, ChevronDown, Code2, Copy, FileCode2, Network, Play, Plus, ScanSearch, Square, WandSparkles, Wrench } from "lucide-react";
 import { useSearchParams } from "react-router";
 import { ChatComposer } from "@/components/chat-composer";
-import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuRadioGroup, DropdownMenuRadioItem, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuRadioGroup, DropdownMenuRadioItem, DropdownMenuSeparator, DropdownMenuSub, DropdownMenuSubContent, DropdownMenuSubTrigger, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { ChatMarkdown } from "@/components/chat-markdown";
 import { CodeBlock, CodeBlockContent } from "@/components/ui/code-block";
 import { useHighlightedCode } from "@/hooks/use-highlighted-code";
@@ -196,6 +196,78 @@ function FileView({ path, text, big }: { path: string; text: string; big?: boole
 				</span>
 			))}
 		</pre>
+	);
+}
+
+/** A folder's direct entries among `files`: subfolders and files, each sorted by name. */
+function entries(files: string[], dir: string) {
+	const prefix = dir ? `${dir}/` : "";
+	const dirs = new Set<string>();
+	const own: string[] = [];
+	for (const f of files) {
+		if (!f.startsWith(prefix)) continue;
+		const rest = f.slice(prefix.length);
+		const slash = rest.indexOf("/");
+		if (slash < 0) own.push(f);
+		else dirs.add(prefix + rest.slice(0, slash));
+	}
+	return { dirs: [...dirs].sort(), files: own.sort() };
+}
+
+/** A folder's contents as menu items: files open, subfolders open a submenu. */
+function FolderItems({ files, dir, current, onOpen }: { files: string[]; dir: string; current: string; onOpen: (path: string) => void }) {
+	const { dirs, files: own } = entries(files, dir);
+	return (
+		<>
+			{dirs.map((d) => (
+				<DropdownMenuSub key={d}>
+					<DropdownMenuSubTrigger className="font-mono text-[12px]">{d.split("/").pop()}/</DropdownMenuSubTrigger>
+					<DropdownMenuSubContent className="max-h-96 overflow-y-auto">
+						<FolderItems files={files} dir={d} current={current} onOpen={onOpen} />
+					</DropdownMenuSubContent>
+				</DropdownMenuSub>
+			))}
+			{own.map((f) => (
+				<DropdownMenuItem key={f} onSelect={() => onOpen(f)} className={`font-mono text-[12px] ${f === current ? "font-semibold text-foreground" : ""}`}>
+					{f.split("/").pop()}
+				</DropdownMenuItem>
+			))}
+		</>
+	);
+}
+
+/** The open file's path as breadcrumbs: each folder lists its contents, the file lists its siblings. */
+function Breadcrumbs({ root, path, files, onOpen }: { root: string; path: string; files: string[]; onOpen: (path: string) => void }) {
+	const parts = path.split("/");
+	return (
+		<nav aria-label="File path" className="flex min-w-0 items-center overflow-hidden font-mono text-[12px] text-muted-foreground">
+			<DropdownMenu>
+				<DropdownMenuTrigger className="shrink-0 rounded px-1 py-0.5 outline-none hover:bg-muted hover:text-foreground data-[state=open]:bg-muted" title={`What's in ${root}`}>
+					{root}
+				</DropdownMenuTrigger>
+				<DropdownMenuContent align="start" className="max-h-96 overflow-y-auto">
+					<FolderItems files={files.length ? files : [path]} dir="" current={path} onOpen={onOpen} />
+				</DropdownMenuContent>
+			</DropdownMenu>
+			<span className="px-1 text-muted-foreground/50">/</span>
+			{parts.map((part, i) => {
+				const dir = parts.slice(0, i).join("/");
+				const last = i === parts.length - 1;
+				return (
+					<span key={i} className="flex min-w-0 items-center">
+						{i > 0 ? <span className="px-1 text-muted-foreground/50">/</span> : null}
+						<DropdownMenu>
+							<DropdownMenuTrigger className={`truncate rounded px-1 py-0.5 outline-none hover:bg-muted hover:text-foreground data-[state=open]:bg-muted ${last ? "text-foreground" : ""}`} title={last ? `Files next to ${part}` : `What's in ${parts.slice(0, i + 1).join("/")}`}>
+								{part}
+							</DropdownMenuTrigger>
+							<DropdownMenuContent align="start" className="max-h-96 overflow-y-auto">
+								<FolderItems files={files.length ? files : [path]} dir={last ? dir : parts.slice(0, i + 1).join("/")} current={path} onOpen={onOpen} />
+							</DropdownMenuContent>
+						</DropdownMenu>
+					</span>
+				);
+			})}
+		</nav>
 	);
 }
 
@@ -452,6 +524,12 @@ export function SwarmPanel({ folder, name, scan, bridge, session, file: openPath
 		if (session && session !== viewing && !run) load(session);
 		// eslint-disable-next-line react-hooks/exhaustive-deps
 	}, [session]);
+	// Every file in the folder, for the breadcrumbs' menus.
+	const [tree, setTree] = useState<string[]>([]);
+	useEffect(() => {
+		void invoke<{ files: string[] }>("folder_tree", { path: folder }).then((t) => setTree(t.files), () => setTree([]));
+		// eslint-disable-next-line react-hooks/exhaustive-deps
+	}, [folder]);
 	// The file picked in the sidebar's tree (or a proof link) is what the Code tab shows.
 	useEffect(() => {
 		if (openPath) loadFile(openPath);
@@ -552,7 +630,7 @@ export function SwarmPanel({ folder, name, scan, bridge, session, file: openPath
 							<>
 								<div className="flex h-8 shrink-0 items-center gap-2 border-b px-4">
 									<FileCode2 className="size-3.5 shrink-0 text-muted-foreground" />
-									<span className="min-w-0 truncate font-mono text-[12px] text-muted-foreground" title={file.path}>{file.path}</span>
+									<Breadcrumbs root={name} path={file.path} files={tree} onOpen={view} />
 									<span className="ml-auto flex items-center gap-1">
 										{onDebug && file.path.endsWith(".t.sol") ? (
 											<button type="button" onClick={() => onDebug(file.path)} title={`Debug a test in ${file.path}`} className="inline-flex h-6 items-center gap-1 rounded-md px-2 text-[11px] text-muted-foreground hover:bg-muted hover:text-foreground">
