@@ -14,6 +14,7 @@ import {
 	SidebarMenu,
 	SidebarMenuButton,
 	SidebarMenuItem,
+	SidebarTrigger,
 	useSidebar,
 } from "@/components/ui/sidebar"
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible"
@@ -239,6 +240,7 @@ export function AppSidebar({ extra, ...props }: React.ComponentProps<typeof Side
 	const location = useLocation()
 	const navigate = useNavigate()
 	const pathname = location.pathname
+	const inApp = typeof window !== "undefined" && "__TAURI_INTERNALS__" in window
 	// On localhost, the demo folder: a real repository's files when its data has been built.
 	const [demo, setDemo] = useState<DemoData | null>(null)
 	useEffect(() => {
@@ -252,7 +254,7 @@ export function AppSidebar({ extra, ...props }: React.ComponentProps<typeof Side
 			{/* The toggle sits at the top, the way macOS sidebars carry it. */}
 			{/* Collapsed, the logo stays as the icon of the wordmark. It keeps one inset in both states so it holds
 			    still while the wordmark fades off its right. The toggle is on each page, just outside the sidebar. */}
-			<SidebarHeader className="flex-row items-center">
+			<SidebarHeader className="flex-row items-center group-data-[collapsible=icon]:flex-col group-data-[collapsible=icon]:gap-1">
 				<Link to="/" aria-label="Formal Mind" className="flex h-8 items-center gap-2 px-1.5 text-sm font-semibold tracking-tight group-data-[collapsible=icon]:gap-0">
 					<LogoMark size={20} className="shrink-0" />
 					{/* Fades out with the transitions.dev text-swap timing as the rail narrows. */}
@@ -260,6 +262,8 @@ export function AppSidebar({ extra, ...props }: React.ComponentProps<typeof Side
 						Formal Mind.
 					</span>
 				</Link>
+				{/* The sidebar's own toggle, in the same place on every page (the Mac app keeps it in its tab bar). */}
+				{inApp ? null : <SidebarTrigger className="ml-auto size-7 text-muted-foreground hover:text-foreground group-data-[collapsible=icon]:ml-0" />}
 			</SidebarHeader>
 			<SidebarContent>
 				<SidebarGroup>

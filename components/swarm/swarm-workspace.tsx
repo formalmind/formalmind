@@ -11,7 +11,6 @@ import { X, RefreshCw } from "lucide-react";
 import type { SwarmState } from "@/lib/swarm";
 import { ChatComposer } from "@/components/chat-composer";
 import type { OpenAIModel } from "@/lib/models";
-import { SidebarTrigger } from "@/components/ui/sidebar";
 import { isLiveRun, SwarmCanvas } from "./swarm-canvas";
 import { TextSwap } from "@/components/motion/text-swap";
 import { NotificationCenter } from "@/components/notification-center";
@@ -135,7 +134,6 @@ export function SwarmWorkspace({ repo, only }: { repo: string; only?: string }) 
 				onTalk={setTalkTo}
 				title={
 					<>
-						<SidebarTrigger className={`${pill} size-8 shrink-0 justify-center`} />
 						<HoverCard openDelay={150} closeDelay={100}>
 							<HoverCardTrigger asChild>
 								<span className={`${pill} min-w-0 cursor-default gap-2 px-3 text-sm text-muted-foreground`}>

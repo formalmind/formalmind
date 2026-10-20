@@ -1,7 +1,7 @@
 "use client";
 
 import { useLocation } from "react-router";
-import { SidebarInset, SidebarTrigger } from "@/components/ui/sidebar";
+import { SidebarInset } from "@/components/ui/sidebar";
 import { Separator } from "@radix-ui/react-separator";
 import BreadCrumbs from "@/components/bread-crumbs";
 import { DesktopHint } from "@/components/desktop-hint";
@@ -21,7 +21,6 @@ export function WorkspaceContent({ children }: { children: React.ReactNode }) {
 				<CreditsBanner />
 				<header className={isChat ? "hidden" : "flex h-16 shrink-0 items-center gap-2"}>
 					<div className="flex items-center gap-2 px-4">
-						<SidebarTrigger className="-ml-1" />
 						<Separator orientation="vertical" className="mr-2 h-4" />
 						<BreadCrumbs />
 					</div>

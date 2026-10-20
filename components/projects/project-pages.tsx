@@ -11,7 +11,6 @@ import { ProjectPicker } from "@/components/projects/project-picker";
 import { useChatWithInterruptions } from "@/hooks/useChatWithInterruptions";
 import type { OpenAIModel } from "@/lib/llm";
 import { SWARM_REPO } from "@/lib/swarm-repo";
-import { SidebarTrigger } from "@/components/ui/sidebar";
 import {
 	getProjectChat,
 	newChatId,
@@ -49,7 +48,6 @@ function NotStarted({ repo, what }: { repo: string; what: string }) {
 	return (
 		<div className="flex flex-1 flex-col p-4 sm:p-6">
 			<div className="flex items-center gap-3">
-				<SidebarTrigger className="-ml-1" />
 				<h1 className="text-sm">{repo}</h1>
 			</div>
 			<div className="mt-10 max-w-md">
@@ -125,7 +123,6 @@ function ProjectChat({ repo, chatId }: { repo: string; chatId: string }) {
 	return (
 		<div className="flex min-h-0 flex-1 flex-col">
 			<div className="flex items-center gap-3 p-4 pb-0 sm:px-6 sm:pt-6">
-				<SidebarTrigger className="-ml-1" />
 				<h1 className="min-w-0 truncate text-sm">{saved?.title ?? "New chat"}</h1>
 			</div>
 			<div className="mx-auto flex min-h-0 w-full max-w-3xl flex-1 flex-col">
@@ -188,7 +185,6 @@ export function SwarmChatPage() {
 	return (
 		<div className="flex min-h-0 flex-1 flex-col">
 			<div className="flex items-center gap-3 p-4 pb-0 sm:px-6 sm:pt-6">
-				<SidebarTrigger className="-ml-1" />
 				<h1 className="text-sm">Ask the swarm</h1>
 				<Link to="/" className="text-sm text-muted-foreground hover:text-foreground">Back to the swarm</Link>
 			</div>
