@@ -34,8 +34,12 @@ pub struct App<'a> {
 impl<'a> App<'a> {
     pub fn new(s: &'a Session, run: &'a Run, title: String) -> Self {
         let nav = Navigator::new(s, run);
-        // Open on the first step with source.
-        let cur = (0..nav.len()).find(|&i| nav.locs[i].is_some()).unwrap_or(0);
+        // Open on the first statement inside a function (past the dispatcher and the function's own header),
+        // else the first step with source.
+        let in_body = |i: usize| {
+            nav.locs[i].as_ref().is_some_and(|l| l.scope.contains('.') && !matches!(l.node_type.as_str(), "FunctionDefinition" | "ContractDefinition"))
+        };
+        let cur = (0..nav.len()).find(|&i| in_body(i)).or_else(|| (0..nav.len()).find(|&i| nav.locs[i].is_some())).unwrap_or(0);
         let verdict = if run.success { "ok".to_string() } else { format!("reverted: {}", run.revert_reason().unwrap_or_default()) };
         App { s, run, title, nav, cur, input: None, last_search: None, status: verdict }
     }
