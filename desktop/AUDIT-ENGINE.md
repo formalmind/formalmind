@@ -138,7 +138,7 @@ structs, `State` in slot order, `Ext`, constants, then every reachable function,
 
 ### Bindings: interfaces replaced by implementations
 
-`formal-ast --root <repo> <entry.sol> link <out.lean> --with <impl.sol>[:Contract] …` links models into one world:
+`formalmind --root <repo> <entry.sol> link <out.lean> --with <impl.sol>[:Contract] …` links models into one world:
 
 - **Generic over the world.** Every model is generic over a world `σ`: its `Ext` is a lens (`get`/`set`) onto its
   own `State`, and structs are shared, so AsyncSwap's `PoolKey` and PoolManager's `PoolKey` are the same type.
