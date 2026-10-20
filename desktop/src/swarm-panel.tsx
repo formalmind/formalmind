@@ -1121,8 +1121,10 @@ export function SwarmPanel({ folder, name, scan, bridge, session, file: openPath
 					</div>
 				)}
 				<ModeTabs mode={mode} onMode={setMode} />
+				{/* The line under the tabs row, on every mode. */}
+				<div className="pointer-events-none absolute inset-x-0 top-14 z-20 border-b" />
 				{mode === "swarm" ? (
-					<section className={`pointer-events-auto absolute left-3 top-14 z-10 flex w-[min(20rem,calc(100%-1.5rem))] flex-col overflow-hidden rounded-2xl border bg-muted/80 p-1 shadow-pop backdrop-blur ${planOpen ? "max-h-[calc(100%-4.5rem)]" : ""}`}>
+					<section className={`pointer-events-auto absolute left-3 top-[4.25rem] z-10 flex w-[min(20rem,calc(100%-1.5rem))] flex-col overflow-hidden rounded-2xl border bg-muted/80 p-1 shadow-pop backdrop-blur ${planOpen ? "max-h-[calc(100%-5.25rem)]" : ""}`}>
 						<button type="button" onClick={() => setPlanOpen(!planOpen)} aria-expanded={planOpen} className="flex h-8 shrink-0 items-center gap-2 px-2.5 text-left">
 							<span className="font-mono text-[11px] font-medium uppercase tracking-wider text-muted-foreground">Plan</span>
 							<span className="text-[11px] text-muted-foreground">{plan.length ? `${done}/${plan.length}` : ""}{entryUnits.length ? ` · ${inPlan.size}/${entryUnits.length} entry points` : ""}</span>
