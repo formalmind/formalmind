@@ -3,6 +3,7 @@
 //! with settings in ~/.formalmind (local.rs), and the local executor that runs agent turns here (executor.rs).
 
 mod executor;
+mod swarm;
 mod local;
 
 use keyring::Entry;
@@ -57,6 +58,7 @@ pub fn run() {
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_process::init())
         .manage(executor::Runs::default())
+        .manage(swarm::Swarms::default())
         .setup(|app| {
             // Installed builds register formalmind:// from tauri.conf.json; this covers `tauri dev` on Windows/Linux.
             #[cfg(any(windows, target_os = "linux"))]
@@ -75,7 +77,13 @@ pub fn run() {
             executor::model_key_set,
             executor::model_key_status,
             executor::turn_start,
-            executor::turn_stop
+            executor::turn_stop,
+            swarm::swarm_start,
+            swarm::swarm_stop,
+            swarm::swarm_say,
+            swarm::swarm_running,
+            swarm::swarm_plan,
+            swarm::swarm_bugs
         ])
         .run(tauri::generate_context!())
         .expect("error while running the Formal Mind desktop app");

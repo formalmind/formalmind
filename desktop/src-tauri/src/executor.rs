@@ -134,7 +134,7 @@ fn tools(role: &str) -> Value {
 }
 
 /// A path inside the folder, or an error: relative, no `..`, and (when it exists) not a symlink out of it.
-fn inside(root: &Path, rel: &str) -> Result<PathBuf, String> {
+pub(crate) fn inside(root: &Path, rel: &str) -> Result<PathBuf, String> {
     // Models often echo the folder's absolute path back; that's fine as long as it points inside.
     let rel = Path::new(rel).strip_prefix(root).unwrap_or(Path::new(rel));
     let rel = rel.strip_prefix("./").unwrap_or(rel);
@@ -153,7 +153,7 @@ fn inside(root: &Path, rel: &str) -> Result<PathBuf, String> {
     Ok(path)
 }
 
-fn clip(mut s: String) -> String {
+pub(crate) fn clip(mut s: String) -> String {
     if s.len() > OUTPUT_LIMIT {
         let mut cut = OUTPUT_LIMIT / 2;
         while !s.is_char_boundary(cut) {
@@ -175,16 +175,18 @@ fn tool_path() -> String {
     format!("{}{sep}{current}", extra.join(sep))
 }
 
-async fn run_command(root: &Path, command: &str) -> Result<String, String> {
+pub(crate) async fn run_command(root: &Path, command: &str) -> Result<String, String> {
     let argv: Vec<&str> = command.split_whitespace().collect();
     let allowed = match argv.as_slice() {
         ["lake", "build", ..] => true,
+        ["lake", "exe", "cache", "get"] => true,
+        ["lake", "init" | "new", name, ..] => name.chars().all(|c| c.is_ascii_alphanumeric() || c == '_'),
         ["lake", "env", "lean", file] => inside(root, file).is_ok(),
         ["forge", "build" | "test", ..] => true,
         _ => false,
     };
     if !allowed {
-        return Err("Only `lake build`, `lake env lean <file>`, `forge build` and `forge test` may run.".into());
+        return Err("Only `lake build`, `lake env lean <file>`, `lake exe cache get`, `lake init|new <Name>`, `forge build` and `forge test` may run.".into());
     }
     let child = tokio::process::Command::new(argv[0])
         .args(&argv[1..])
@@ -202,7 +204,7 @@ async fn run_command(root: &Path, command: &str) -> Result<String, String> {
     Ok(clip(text))
 }
 
-fn list_files(root: &Path, dir: &str) -> Result<String, String> {
+pub(crate) fn list_files(root: &Path, dir: &str) -> Result<String, String> {
     let start = inside(root, if dir.is_empty() { "." } else { dir })?;
     let skip = [".git", "node_modules", "lib", "out", "cache", "target", ".lake", "dist"];
     let mut files = vec![];
@@ -228,7 +230,7 @@ fn list_files(root: &Path, dir: &str) -> Result<String, String> {
     Ok(clip(files.join("\n")))
 }
 
-async fn call_tool(root: &Path, name: &str, args: &Value) -> String {
+pub(crate) async fn call_tool(root: &Path, name: &str, args: &Value) -> String {
     let s = |k: &str| args.get(k).and_then(Value::as_str).unwrap_or("").to_string();
     let result = match name {
         "list_files" => list_files(root, &s("dir")),

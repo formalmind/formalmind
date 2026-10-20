@@ -3,7 +3,7 @@ import { Link, useLocation, useSearchParams } from "react-router";
 import { invoke } from "@tauri-apps/api/core";
 import { open } from "@tauri-apps/plugin-dialog";
 import { HardDrive, Plus, X } from "lucide-react";
-import { TurnPanel } from "./turn-panel";
+import { SwarmPanel } from "./swarm-panel";
 import { SidebarGroup, SidebarGroupAction, SidebarGroupLabel, SidebarMenu, SidebarMenuAction, SidebarMenuButton, SidebarMenuItem } from "@/components/ui/sidebar";
 
 type Config = { folders: string[] };
@@ -101,13 +101,13 @@ export function LocalFolderPage() {
 		invoke<Scan>("folder_scan", { path }).then(setScan, (e) => setError(String(e)));
 	}, [path]);
 	return (
-		<div className="mx-auto w-full max-w-3xl space-y-6 p-6">
+		<div className="mx-auto w-full max-w-5xl space-y-6 p-6">
 			<header className="space-y-1">
 				<h1 className="text-xl font-semibold">{name(path)}</h1>
 				<p className="truncate font-mono text-xs text-muted-foreground">{path}</p>
 			</header>
 			{error ? <p className="text-sm text-red-600">{error}</p> : null}
-			{path && !error ? <TurnPanel folder={path} /> : null}
+			{path && !error ? <SwarmPanel folder={path} /> : null}
 			{scan ? (
 				<>
 					<div className="grid gap-6 md:grid-cols-2">

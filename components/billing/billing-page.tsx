@@ -35,13 +35,14 @@ function historyLines(entries: CreditEntry[]): Line[] {
 		// A spend's ref is <proofs repo>:<run>[:<job>:<issue or PR>]:<call>.
 		const [repo, run, role = "", ref = ""] = e.ref.split(":");
 		const key = `${repo}:${run}:${role}:${ref}`;
+		const local = repo.startsWith("local/");
 		let line = jobs.get(key);
 		if (!line) {
 			line = {
 				key, at: e.at, cents: 0, repo,
 				label: AGENTS[role] ?? (role ? role[0].toUpperCase() + role.slice(1) : "Swarm run"),
-				item: ref ? { text: `#${ref}`, href: `https://github.com/${repo}/issues/${ref}` } : undefined,
-				run: run ? { text: "run", href: `https://github.com/${repo}/actions/runs/${run}` } : undefined,
+				item: ref ? { text: local ? ref : `#${ref}`, href: local ? "" : `https://github.com/${repo}/issues/${ref}` } : undefined,
+				run: run && !local ? { text: "run", href: `https://github.com/${repo}/actions/runs/${run}` } : undefined,
 			};
 			jobs.set(key, line);
 			lines.push(line);
@@ -153,8 +154,10 @@ export function BillingPage() {
 											) : (
 												<span className="font-medium">{l.label}</span>
 											)}
-											{l.item ? <a href={l.item.href} target="_blank" rel="noreferrer" className="text-muted-foreground hover:text-foreground hover:underline">{l.item.text}</a> : null}
-											{l.repo ? <a href={`https://github.com/${l.repo}`} target="_blank" rel="noreferrer" className="truncate text-muted-foreground hover:text-foreground hover:underline">{l.repo}</a> : null}
+											{l.item && !l.item.href ? <span className="text-muted-foreground">{l.item.text}</span> : null}
+											{l.item?.href ? <a href={l.item.href} target="_blank" rel="noreferrer" className="text-muted-foreground hover:text-foreground hover:underline">{l.item.text}</a> : null}
+											{l.repo?.startsWith("local/") ? <span className="truncate text-muted-foreground">{l.repo.slice(6)} (on your computer)</span> : null}
+											{l.repo && !l.repo.startsWith("local/") ? <a href={`https://github.com/${l.repo}`} target="_blank" rel="noreferrer" className="truncate text-muted-foreground hover:text-foreground hover:underline">{l.repo}</a> : null}
 											{l.run ? <a href={l.run.href} target="_blank" rel="noreferrer" className="text-xs text-muted-foreground underline-offset-2 hover:text-foreground hover:underline">{l.run.text} ↗</a> : null}
 										</span>
 										{l.tokens ? (
