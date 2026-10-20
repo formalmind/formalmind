@@ -92,6 +92,13 @@ A folder's page runs a swarm on this computer: **Start the swarm**, optionally w
 4. **report_bug** (any agent) writes `.formal/bugs/NNN-title.md` with the PoC inlined, marks the item `- [!]`, and the swarm moves on.
 5. **Messages** you send while it runs are answered by the assistant before the next turn and can change the plan.
 
+**Picking back up.** Each folder has one continuous session. The work is a durable queue in `.formal/queue.json`
+(plan, prove item N, review item N, answer you): a job is marked running before its agent starts and done when it
+ends, and every step of the agent's conversation is saved to `.formal/jobs/<job>.json`. Quit any time; on the next
+start an interrupted job continues the same conversation (prompt caching keeps that cheap), your unanswered messages
+are still queued, and finished work is never redone. Spend is the session's running total; the cap in the chat header
+can be raised to keep going.
+
 Files, `lake` and `forge` run here; only the model calls leave, via formal.team's metered Claude proxy
 (`/api/desktop/model-session` mints a session per agent turn with the desktop sign-in). They're charged to your credits
 as `local/<folder>` with the agent and item, and every event is logged to `.formal/runs/<run>.jsonl`.

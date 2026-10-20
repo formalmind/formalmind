@@ -21,7 +21,6 @@ const MAX_ATTEMPTS: usize = 3;
 
 pub struct Swarm {
     stop: AtomicBool,
-    inbox: Mutex<Vec<String>>,
     /// Where the run's log lives and what it has spent, so quitting can record the pause.
     folder: String,
     spent: Mutex<f64>,
@@ -194,6 +193,115 @@ pub fn swarm_bugs(folder: String) -> Result<Vec<Bug>, String> {
     Ok(bugs)
 }
 
+
+// ---- the durable queue: .formal/queue.json ----
+//
+// Every unit of work is a job: plan, prove item N, review item N, answer the maintainer. A job is marked running before
+// its agent starts and done (with what it wrote and said) when it ends, and the file is rewritten after each change. If
+// the app quits mid-job, the next start finds it still running and resumes it — told what it had already written — so
+// finished work is never redone and nothing you sent is lost. Spend is kept here too, as the session's running total.
+
+#[derive(Serialize, Deserialize, Clone, Default)]
+struct Job {
+    id: u64,
+    /// "plan" | "prove" | "review" | "answer"
+    kind: String,
+    #[serde(default)]
+    item: usize,
+    /// The plan item's text, or the maintainer's message.
+    #[serde(default)]
+    text: String,
+    /// "queued" | "running" | "done"
+    state: String,
+    #[serde(default)]
+    attempt: usize,
+    /// The reviewer's notes for a retry, or the prover's summary for a review.
+    #[serde(default)]
+    notes: String,
+    #[serde(default)]
+    files: Vec<String>,
+    #[serde(default)]
+    summary: String,
+    /// "approve" | "changes" | "bug" | ""
+    #[serde(default)]
+    result: String,
+}
+
+#[derive(Serialize, Deserialize, Default)]
+struct Queue {
+    #[serde(default)]
+    next_id: u64,
+    #[serde(default)]
+    jobs: Vec<Job>,
+    /// Dollars spent by this folder's swarm, across every start.
+    #[serde(default)]
+    spent: f64,
+}
+
+/// One writer at a time for every folder's queue (the loop and swarm_say both touch it).
+static QUEUE_LOCK: Mutex<()> = Mutex::new(());
+
+fn queue_path(root: &Path) -> PathBuf {
+    root.join(".formal").join("queue.json")
+}
+
+fn load_queue(root: &Path) -> Queue {
+    std::fs::read_to_string(queue_path(root)).ok().and_then(|t| serde_json::from_str(&t).ok()).unwrap_or_default()
+}
+
+fn save_queue(root: &Path, q: &Queue) {
+    let _ = std::fs::create_dir_all(root.join(".formal"));
+    let tmp = root.join(".formal").join("queue.json.tmp");
+    if std::fs::write(&tmp, serde_json::to_string_pretty(q).unwrap_or_default()).is_ok() {
+        let _ = std::fs::rename(&tmp, queue_path(root));
+    }
+}
+
+/// Load, change and save the queue under the lock; returns what `f` returns.
+fn with_queue<T>(root: &Path, f: impl FnOnce(&mut Queue) -> T) -> T {
+    let _guard = QUEUE_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let mut q = load_queue(root);
+    let out = f(&mut q);
+    save_queue(root, &q);
+    out
+}
+
+fn enqueue(q: &mut Queue, kind: &str, item: usize, text: &str, attempt: usize, notes: &str) -> u64 {
+    q.next_id += 1;
+    let id = q.next_id;
+    q.jobs.push(Job { id, kind: kind.into(), item, text: text.into(), state: "queued".into(), attempt, notes: notes.into(), ..Default::default() });
+    id
+}
+
+fn transcript_path(root: &Path, job: u64) -> PathBuf {
+    root.join(".formal").join("jobs").join(format!("{job}.json"))
+}
+
+/// Everything the model and the tools said in one job, exactly as sent and received (thinking blocks included).
+fn load_transcript(root: &Path, job: u64) -> Option<Vec<Value>> {
+    std::fs::read_to_string(transcript_path(root, job)).ok().and_then(|t| serde_json::from_str(&t).ok())
+}
+
+fn save_transcript(root: &Path, job: u64, messages: &[Value]) {
+    let path = transcript_path(root, job);
+    let _ = std::fs::create_dir_all(path.parent().unwrap_or(root));
+    let tmp = path.with_extension("json.tmp");
+    if std::fs::write(&tmp, serde_json::to_string(messages).unwrap_or_default()).is_ok() {
+        let _ = std::fs::rename(&tmp, path);
+    }
+}
+
+/// The queue as the app sees it: jobs not done yet, oldest first, and the session's spend.
+#[tauri::command]
+pub fn swarm_queue(folder: String) -> Result<Value, String> {
+    if !local::read()?.folders.contains(&folder) {
+        return Err("Add the folder first".into());
+    }
+    let q = load_queue(Path::new(&folder));
+    let open: Vec<Value> = q.jobs.iter().filter(|j| j.state != "done").map(|j| json!({ "id": j.id, "kind": j.kind, "item": j.item, "state": j.state, "attempt": j.attempt })).collect();
+    Ok(json!({ "open": open, "spent": q.spent, "done": q.jobs.iter().filter(|j| j.state == "done").count() }))
+}
+
 // ---- roles ----
 
 fn system(role: &str, folder: &str, goal: &str) -> String {
@@ -252,6 +360,8 @@ struct Turn<'a> {
     req: &'a SwarmRequest,
     swarm: &'a Swarm,
     client: reqwest::Client,
+    /// The queue job the current agent turn is working on; its file writes are recorded as they happen.
+    job: Mutex<Option<u64>>,
 }
 
 impl Turn<'_> {
@@ -295,7 +405,27 @@ impl Turn<'_> {
         let root = PathBuf::from(&self.req.folder);
         let (key, base) = self.session(role, item).await?;
         let goal = self.req.goal.clone().unwrap_or_default();
-        let mut messages = vec![json!({ "role": "user", "content": task })];
+        // The whole conversation is kept on disk (.formal/jobs/<job>.json) after every step, so a job interrupted by a
+        // quit continues the same conversation instead of starting over.
+        let job = *self.job.lock().unwrap();
+        let saved = job.and_then(|j| load_transcript(&root, j));
+        let mut messages = match saved {
+            Some(mut m) if !m.is_empty() => {
+                // A reply whose tool calls never got results (the app quit mid-step) is dropped; the model redoes that step.
+                if m.last().map(|x| x["role"] == "assistant").unwrap_or(false) {
+                    m.pop();
+                }
+                m.push(json!({ "role": "user", "content": "The app quit and this job is being resumed. Carry on from where you were; don't redo finished work." }));
+                m
+            }
+            _ => vec![json!({ "role": "user", "content": task })],
+        };
+        let keep = |m: &Vec<Value>| {
+            if let Some(j) = job {
+                save_transcript(&root, j, m);
+            }
+        };
+        keep(&messages);
         let mut out = Outcome::default();
         self.emit("status", role, item, format!("{role} is working"));
         for _ in 0..MAX_STEPS {
@@ -305,6 +435,8 @@ impl Turn<'_> {
             let body = json!({
                 "model": model_of(self.req), "max_tokens": 16000, "system": system(role, &self.req.folder, &goal),
                 "messages": messages, "tools": tools(role),
+                // Automatic prompt caching: the stable prefix (system, tools, history) is read back cheaply each step.
+                "cache_control": { "type": "ephemeral" },
                 "output_config": { "effort": if role == "prover" { "high" } else { "medium" } },
             });
             let res = self
@@ -321,9 +453,15 @@ impl Turn<'_> {
             if !status.is_success() {
                 return Err(reply["error"]["message"].as_str().unwrap_or("The model call failed").to_string());
             }
-            *self.swarm.spent.lock().unwrap() += cost(model_of(self.req), &reply["usage"]);
+            let total = {
+                let mut spent = self.swarm.spent.lock().unwrap();
+                *spent += cost(model_of(self.req), &reply["usage"]);
+                *spent
+            };
+            with_queue(Path::new(&self.req.folder), |q| q.spent = total);
             let content = reply["content"].clone();
             messages.push(json!({ "role": "assistant", "content": content }));
+            keep(&messages);
             let mut results = vec![];
             for block in content.as_array().cloned().unwrap_or_default() {
                 match block["type"].as_str() {
@@ -358,7 +496,17 @@ impl Turn<'_> {
                                 if name == "write_file" {
                                     let path = input["path"].as_str().unwrap_or("").trim_start_matches("./").to_string();
                                     if !path.is_empty() && !path.starts_with(".formal/") && !out.files.contains(&path) {
-                                        out.files.push(path);
+                                        out.files.push(path.clone());
+                                        // Recorded now, so a quit mid-turn still knows what was written.
+                                        if let Some(job) = *self.job.lock().unwrap() {
+                                            with_queue(&root, |q| {
+                                                if let Some(j) = q.jobs.iter_mut().find(|j| j.id == job) {
+                                                    if !j.files.contains(&path) {
+                                                        j.files.push(path.clone());
+                                                    }
+                                                }
+                                            });
+                                        }
                                     }
                                 }
                                 self.emit("tool", role, item, format!("{name} {shown}"));
@@ -376,6 +524,7 @@ impl Turn<'_> {
                 return Ok(out);
             }
             messages.push(json!({ "role": "user", "content": results }));
+            keep(&messages);
         }
         Ok(out)
     }
@@ -450,101 +599,178 @@ fn inline_cited(root: &Path, text: &str) -> String {
     out
 }
 
-/// The loop: answer the maintainer first, plan if there's no plan, then prove and review one item at a time.
+/// The loop, driven by the queue: resume an interrupted job, answer the maintainer, then plan, prove and review one item
+/// at a time. Works continuously; only the budget (raisable while it runs) or Stop ends it.
 async fn run_swarm(turn: &Turn<'_>) -> String {
     let root = PathBuf::from(&turn.req.folder);
     let _ = std::fs::create_dir_all(root.join(".formal"));
-    let mut attempts: HashMap<usize, usize> = HashMap::new();
-    let mut notes: HashMap<usize, String> = HashMap::new();
-    let mut written: HashMap<usize, Vec<String>> = HashMap::new();
     loop {
         if turn.swarm.stop.load(Ordering::SeqCst) {
-            return "stopped".into();
+            return "paused: resume anytime, the queue carries on".into();
         }
         let spent = *turn.swarm.spent.lock().unwrap();
         let budget = *turn.swarm.budget.lock().unwrap();
         if spent >= budget {
-            return format!("budget reached (${spent:.2})");
+            return format!("budget reached (${spent:.2} of ${budget}); raise it and resume to carry on");
         }
-        let said: Vec<String> = std::mem::take(&mut *turn.swarm.inbox.lock().unwrap());
-        if !said.is_empty() {
-            let task = format!("The maintainer says:\n\n{}", said.join("\n\n"));
-            if let Err(e) = turn.agent("assistant", "you", task).await {
-                return format!("failed: {e}");
-            }
-            continue;
-        }
-        let plan = read_plan(&root);
-        // Continuous: an empty plan gets written, a finished one gets extended; only the budget or Stop ends the run.
-        let Some(item) = plan.iter().find(|i| i.mark == " ").cloned() else {
-            let before = plan.len();
-            let task = if plan.is_empty() { "Write the plan.".to_string() } else { format!("All {before} plan items are proven or blocked. Extend the plan with new properties to check.") };
-            if let Err(e) = turn.agent("planner", "plan", task).await {
-                return format!("failed: {e}");
-            }
-            let after = read_plan(&root);
-            let added = after.len().saturating_sub(before);
-            turn.emit("plan", "planner", "plan", if before == 0 { format!("{} items", after.len()) } else { format!("{added} new items") });
-            if added == 0 && after.iter().all(|i| i.mark != " ") {
-                return if after.is_empty() { "failed: the planner wrote no checklist".into() } else { format!("done: the planner found nothing more to check ({} items)", after.len()) };
-            }
-            continue;
+
+        // Next job: an interrupted one first, then your messages, then the rest in order; derive one if the queue is empty.
+        let next = with_queue(&root, |q| {
+            let pick = q.jobs.iter().position(|j| j.state == "running")
+                .or_else(|| q.jobs.iter().position(|j| j.state == "queued" && j.kind == "answer"))
+                .or_else(|| q.jobs.iter().position(|j| j.state == "queued"));
+            let idx = match pick {
+                Some(i) => i,
+                None => {
+                    let plan = read_plan(&root);
+                    match plan.iter().find(|i| i.mark == " ") {
+                        Some(item) => {
+                            let tries = q.jobs.iter().filter(|j| j.kind == "prove" && j.item == item.index).count();
+                            enqueue(q, "prove", item.index, &item.text, tries + 1, "");
+                        }
+                        None => {
+                            enqueue(q, "plan", 0, "", 1, "");
+                        }
+                    }
+                    q.jobs.len() - 1
+                }
+            };
+            let resumed = q.jobs[idx].state == "running";
+            q.jobs[idx].state = "running".into();
+            (q.jobs[idx].clone(), resumed)
+        });
+        let (job, resumed) = next;
+        *turn.job.lock().unwrap() = Some(job.id);
+        let id = job.item.to_string();
+        let resume_note = if resumed {
+            format!(
+                "\n\nThis job was interrupted (the app quit) and is being resumed. {}Continue from where it stopped; don't redo work that is already there.",
+                if job.files.is_empty() { String::new() } else { format!("Files already written for it: {}. ", job.files.join(", ")) }
+            )
+        } else {
+            String::new()
         };
-        let id = item.index.to_string();
-        let tries = attempts.entry(item.index).or_insert(0);
-        *tries += 1;
-        if *tries > MAX_ATTEMPTS {
-            set_mark(&root, item.index, '!');
-            turn.emit("plan", "reviewer", &id, format!("item {id} blocked after {MAX_ATTEMPTS} attempts"));
-            continue;
-        }
-        let mut task = format!("Plan item {id}: {}", item.text);
-        if let Some(n) = notes.get(&item.index) {
-            task.push_str(&format!("\n\nThe reviewer asked for changes:\n{n}"));
-        }
-        let proved = match turn.agent("prover", &id, task).await {
+
+        let outcome = match job.kind.as_str() {
+            "answer" => turn.agent("assistant", "you", format!("The maintainer says:\n\n{}{resume_note}", job.text)).await,
+            "plan" => {
+                let before = read_plan(&root).len();
+                let task = if before == 0 { "Write the plan.".to_string() } else { format!("All {before} plan items are proven or blocked. Extend the plan with new properties to check.") };
+                let r = turn.agent("planner", "plan", format!("{task}{resume_note}")).await;
+                let after = read_plan(&root);
+                if r.is_ok() {
+                    let added = after.len().saturating_sub(before);
+                    turn.emit("plan", "planner", "plan", if before == 0 { format!("{} items", after.len()) } else { format!("{added} new items") });
+                    if added == 0 && after.iter().all(|i| i.mark != " ") {
+                        with_queue(&root, |q| if let Some(j) = q.jobs.iter_mut().find(|j| j.id == job.id) { j.state = "done".into(); });
+                        return if after.is_empty() { "failed: the planner wrote no checklist".into() } else { format!("done: the planner found nothing more to check ({} items)", after.len()) };
+                    }
+                }
+                r
+            }
+            "prove" => {
+                let mut task = format!("Plan item {id}: {}", job.text);
+                if !job.notes.is_empty() {
+                    task.push_str(&format!("\n\nThe reviewer asked for changes:\n{}", job.notes));
+                }
+                turn.agent("prover", &id, format!("{task}{resume_note}")).await
+            }
+            _ => {
+                let files = if job.files.is_empty() { String::new() } else { format!("\nFiles: {}", job.files.join(", ")) };
+                turn.agent("reviewer", &id, format!("Plan item {id}: {}\n\nThe prover says:\n{}{files}{resume_note}", job.text, job.notes)).await
+            }
+        };
+        *turn.job.lock().unwrap() = None;
+        let out = match outcome {
             Ok(o) => o,
-            Err(e) => return format!("failed: {e}"),
+            // The job stays running in the queue, so the next start picks it up.
+            Err(e) => return format!("paused: {e}"),
         };
-        let files = written.entry(item.index).or_default();
-        for f in &proved.files {
-            if !files.contains(f) {
-                files.push(f.clone());
-            }
+        if turn.swarm.stop.load(Ordering::SeqCst) && out.summary.is_empty() {
+            return "paused: resume anytime, the queue carries on".into();
         }
-        if proved.bug.is_some() {
-            // The property is false: the bug is filed; mark the item and keep going.
-            set_mark(&root, item.index, '!');
-            turn.emit("plan", "prover", &id, format!("item {id}: bug reported, moving on"));
-            continue;
-        }
-        if turn.swarm.stop.load(Ordering::SeqCst) {
-            return "stopped".into();
-        }
-        let review = format!("Plan item {id}: {}\n\nThe prover says:\n{}", item.text, proved.summary);
-        let reviewed = match turn.agent("reviewer", &id, review).await {
-            Ok(o) => o,
-            Err(e) => return format!("failed: {e}"),
-        };
-        if reviewed.bug.is_some() {
-            set_mark(&root, item.index, '!');
-            turn.emit("plan", "reviewer", &id, format!("item {id}: bug reported, moving on"));
-            continue;
-        }
-        match reviewed.verdict {
-            Some((true, _)) => {
-                set_mark(&root, item.index, 'x');
-                record_proof(&root, item.index, &item.text, written.get(&item.index).cloned().unwrap_or_default(), &proved.summary);
-                turn.emit("plan", "reviewer", &id, format!("item {id} proven"));
+
+        // Finish the job and queue what follows from it.
+        with_queue(&root, |q| {
+            let Some(j) = q.jobs.iter_mut().find(|j| j.id == job.id) else { return };
+            j.state = "done".into();
+            j.summary = out.summary.clone();
+            for f in &out.files {
+                if !j.files.contains(f) {
+                    j.files.push(f.clone());
+                }
             }
-            Some((false, n)) => {
-                notes.insert(item.index, n);
+            let files = j.files.clone();
+            match job.kind.as_str() {
+                "prove" if out.bug.is_some() => {
+                    j.result = "bug".into();
+                    set_mark(&root, job.item, '!');
+                }
+                "prove" => {
+                    let id = enqueue(q, "review", job.item, &job.text, job.attempt, &out.summary);
+                    if let Some(r) = q.jobs.iter_mut().find(|r| r.id == id) {
+                        r.files = files;
+                    }
+                }
+                "review" => match (&out.bug, &out.verdict) {
+                    (Some(_), _) => {
+                        set_mark(&root, job.item, '!');
+                    }
+                    (None, Some((true, _))) => {
+                        set_mark(&root, job.item, 'x');
+                        record_proof(&root, job.item, &job.text, files, &job.notes);
+                    }
+                    (None, verdict) => {
+                        let notes = verdict.as_ref().map(|v| v.1.clone()).unwrap_or_else(|| "The reviewer gave no verdict; make the proof's statement and check obvious.".into());
+                        if job.attempt >= MAX_ATTEMPTS {
+                            set_mark(&root, job.item, '!');
+                        } else {
+                            enqueue(q, "prove", job.item, &job.text, job.attempt + 1, &notes);
+                        }
+                    }
+                },
+                _ => {}
             }
-            None => {
-                notes.insert(item.index, "The reviewer gave no verdict; make the proof's statement and check obvious.".into());
-            }
+        });
+        match (job.kind.as_str(), &out.bug, &out.verdict) {
+            ("prove" | "review", Some(_), _) => turn.emit("plan", &job.kind, &id, format!("item {id}: bug reported, moving on")),
+            ("review", None, Some((true, _))) => turn.emit("plan", "reviewer", &id, format!("item {id} proven")),
+            ("review", None, _) if job.attempt >= MAX_ATTEMPTS => turn.emit("plan", "reviewer", &id, format!("item {id} blocked after {MAX_ATTEMPTS} attempts")),
+            _ => {}
         }
     }
+}
+
+/// Earlier versions kept one log per start (runs/local-*.jsonl). Join them, oldest first, into the single session, move
+/// the originals to runs/archive/, and carry their spend into the queue's total.
+fn merge_old_sessions(root: &Path) {
+    let dir = runs_dir(&root.to_string_lossy());
+    let mut old: Vec<PathBuf> = std::fs::read_dir(&dir)
+        .map(|it| it.flatten().map(|e| e.path()).filter(|p| p.file_name().map(|n| n.to_string_lossy().starts_with("local-") && n.to_string_lossy().ends_with(".jsonl")).unwrap_or(false)).collect())
+        .unwrap_or_default();
+    if old.is_empty() {
+        return;
+    }
+    old.sort();
+    let mut merged = std::fs::read_to_string(dir.join("swarm.jsonl")).unwrap_or_default();
+    let mut carried = 0.0;
+    let archive = dir.join("archive");
+    let _ = std::fs::create_dir_all(&archive);
+    for p in &old {
+        let text = std::fs::read_to_string(p).unwrap_or_default();
+        carried += text.lines().last().and_then(|l| serde_json::from_str::<Value>(l).ok()).and_then(|v| v["spent"].as_f64()).unwrap_or(0.0);
+        // Re-stamp each line as the one session.
+        for line in text.lines() {
+            if let Ok(mut v) = serde_json::from_str::<Value>(line) {
+                v["run"] = json!("swarm");
+                merged.push_str(&v.to_string());
+                merged.push('\n');
+            }
+        }
+        let _ = std::fs::rename(p, archive.join(p.file_name().unwrap_or_default()));
+    }
+    let _ = std::fs::write(dir.join("swarm.jsonl"), merged);
+    with_queue(root, |q| q.spent += carried);
 }
 
 #[tauri::command]
@@ -560,16 +786,19 @@ pub fn swarm_start(app: AppHandle, swarms: State<'_, Swarms>, request: SwarmRequ
     if swarms.0.lock().unwrap().values().len() > 0 {
         return Err("A swarm is already running; stop it first".into());
     }
-    let run = format!("local-{:x}", now_ms());
-    let swarm = Arc::new(Swarm { stop: AtomicBool::new(false), inbox: Mutex::new(vec![]), folder: request.folder.clone(), spent: Mutex::new(0.0), budget: Mutex::new(request.budget_usd) });
+    // One continuous session per folder: every start appends to .formal/runs/swarm.jsonl and the queue carries on.
+    let run = "swarm".to_string();
+    merge_old_sessions(Path::new(&request.folder));
+    let spent = load_queue(Path::new(&request.folder)).spent;
+    let swarm = Arc::new(Swarm { stop: AtomicBool::new(false), folder: request.folder.clone(), spent: Mutex::new(spent), budget: Mutex::new(request.budget_usd.max(spent)) });
     swarms.0.lock().unwrap().insert(run.clone(), swarm.clone());
     let id = run.clone();
     tauri::async_runtime::spawn(async move {
         let client = reqwest::Client::builder().timeout(Duration::from_secs(600)).build().unwrap_or_default();
-        let turn = Turn { app: &app, run: &id, req: &request, swarm: &swarm, client };
-        // The session's title: the focus it was given.
+        let turn = Turn { app: &app, run: &id, req: &request, swarm: &swarm, client, job: Mutex::new(None) };
+        // The session's title: the focus it was given (the latest start's focus wins).
         turn.emit("start", "swarm", "", request.goal.clone().unwrap_or_default());
-        turn.emit("status", "swarm", "", "starting".into());
+        turn.emit("status", "swarm", "", "resuming".into());
         let outcome = run_swarm(&turn).await;
         turn.emit("done", "swarm", "", outcome);
         app.state::<Swarms>().0.lock().unwrap().remove(&id);
@@ -584,12 +813,16 @@ pub fn swarm_stop(swarms: State<'_, Swarms>, run: String) {
     }
 }
 
-/// A message to the swarm: the assistant answers it before the next turn.
+/// A message to the swarm: queued as an "answer" job (on disk, so a quit can't lose it), answered before the next turn.
 #[tauri::command]
 pub fn swarm_say(swarms: State<'_, Swarms>, run: String, text: String) -> Result<(), String> {
-    let map = swarms.0.lock().unwrap();
-    let s = map.get(&run).ok_or("The swarm isn't running")?;
-    s.inbox.lock().unwrap().push(text);
+    let folder = {
+        let map = swarms.0.lock().unwrap();
+        map.get(&run).ok_or("The swarm isn't running")?.folder.clone()
+    };
+    with_queue(Path::new(&folder), |q| {
+        enqueue(q, "answer", 0, &text, 1, "");
+    });
     Ok(())
 }
 
@@ -677,6 +910,40 @@ pub fn swarm_running(swarms: State<'_, Swarms>) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn queue_and_transcripts_survive_a_restart() {
+        let root = std::env::temp_dir().join(format!("fm-queue-{}", std::process::id()));
+        std::fs::create_dir_all(root.join(".formal")).unwrap();
+        let id = with_queue(&root, |q| {
+            let id = enqueue(q, "prove", 3, "item three", 1, "");
+            q.jobs[0].state = "running".into();
+            q.spent = 1.25;
+            id
+        });
+        // Reloaded from disk, as after a quit: the job is still running and the spend kept.
+        let q = load_queue(&root);
+        assert_eq!((q.jobs[0].state.as_str(), q.jobs[0].id, q.spent), ("running", id, 1.25));
+        save_transcript(&root, id, &[json!({"role": "user", "content": "go"}), json!({"role": "assistant", "content": [{"type": "tool_use"}]})]);
+        assert_eq!(load_transcript(&root, id).unwrap().len(), 2);
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn old_sessions_merge_into_one() {
+        let root = std::env::temp_dir().join(format!("fm-merge-{}", std::process::id()));
+        let runs = root.join(".formal").join("runs");
+        std::fs::create_dir_all(&runs).unwrap();
+        std::fs::write(runs.join("local-1.jsonl"), "{\"run\":\"local-1\",\"kind\":\"say\",\"spent\":1.0}\n").unwrap();
+        std::fs::write(runs.join("local-2.jsonl"), "{\"run\":\"local-2\",\"kind\":\"say\",\"spent\":2.5}\n").unwrap();
+        merge_old_sessions(&root);
+        let merged = std::fs::read_to_string(runs.join("swarm.jsonl")).unwrap();
+        assert_eq!(merged.lines().count(), 2);
+        assert!(merged.lines().all(|l| l.contains("\"run\":\"swarm\"")));
+        assert!(runs.join("archive").join("local-1.jsonl").exists());
+        assert_eq!(load_queue(&root).spent, 3.5);
+        std::fs::remove_dir_all(root).unwrap();
+    }
 
     #[test]
     fn plan_round_trip() {

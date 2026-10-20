@@ -90,7 +90,8 @@ pub fn run() {
             swarm::swarm_history,
             swarm::swarm_proofs,
             swarm::folder_read,
-            swarm::swarm_set_budget
+            swarm::swarm_set_budget,
+            swarm::swarm_queue
         ])
         // Closing the window hides it: a running swarm keeps working, and the Dock icon brings the window back.
         .on_window_event(|window, event| {
