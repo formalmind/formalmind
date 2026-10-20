@@ -23,6 +23,7 @@ import * as project from "@/server/routes/project/route";
 import * as projects from "@/server/routes/projects/route";
 import * as assistant from "@/server/routes/assistant/route";
 import * as projectsInit from "@/server/routes/projects/init/route";
+import * as projectsSwarm from "@/server/routes/projects/swarm/route";
 import * as swarmAgent from "@/server/routes/swarm/agent/route";
 import * as swarmChat from "@/server/routes/swarm/chat/route";
 import * as swarmState from "@/server/routes/swarm/state/route";
@@ -65,6 +66,7 @@ const ROUTES: Record<string, { module: RouteModule; open?: boolean; scope?: Scop
 	"/api/project": { module: project },
 	"/api/projects": { module: projects, scope: "swarm:read" },
 	"/api/projects/init": { module: projectsInit, scope: "swarm:write" },
+	"/api/projects/swarm": { module: projectsSwarm, scope: "swarm:write" },
 	"/api/swarm/agent": { module: swarmAgent },
 	"/api/swarm/chat": { module: swarmChat },
 	"/api/stats": { module: stats, open: true },

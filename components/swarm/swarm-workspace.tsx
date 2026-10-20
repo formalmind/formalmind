@@ -1,11 +1,13 @@
 "use client";
+import { SettingsMenu, SwarmContextMenu } from "@/components/projects/swarm-control";
+import { useProjects } from "@/components/projects/use-projects";
 
 import { useEffect, useState } from "react";
 import { ROLE_COLORS } from "@/lib/swarm-roles";
 import type { SwarmRole } from "@/lib/swarm";
 import { AgentChat } from "./agent-chat";
 import { SwarmChat } from "./swarm-chat";
-import { X } from "lucide-react";
+import { X, RefreshCw } from "lucide-react";
 import type { SwarmState } from "@/lib/swarm";
 import { ChatComposer } from "@/components/chat-composer";
 import type { OpenAIModel } from "@/lib/models";
@@ -34,6 +36,8 @@ function onlyProject(state: SwarmState, repo: string): SwarmState {
 
 /** The swarm's board; with `only` (a project's repository), just that project's agents and work. */
 export function SwarmWorkspace({ repo, only }: { repo: string; only?: string }) {
+	const projects = useProjects();
+	const swarmRepos = (projects ?? []).filter((p) => p.proofsRepo && (!only || p.repo === only)).map((p) => p.repo);
 	// The chat open beside the canvas: an agent (a click on its name) or the whole swarm ("Ask the swarm").
 	const [talkTo, setTalkTo] = useState<SwarmRole | "swarm" | null>(null);
 	// What was typed into the canvas's composer, handed to the swarm chat in the panel.
@@ -42,7 +46,7 @@ export function SwarmWorkspace({ repo, only }: { repo: string; only?: string }) 
 	const [model, setModel] = useState<OpenAIModel>("gpt-6-luna");
 	const [state, setState] = useState<SwarmState | null>(null);
 	const [error, setError] = useState<string | null>(null);
-	const [, setLoading] = useState(false);
+	const [loading, setLoading] = useState(false);
 	const [, setSyncedAt] = useState<number | null>(null);
 
 	useEffect(() => {
@@ -117,6 +121,7 @@ export function SwarmWorkspace({ repo, only }: { repo: string; only?: string }) 
 	return (
 		<div className="relative flex min-h-0 flex-1">
 			<div className="relative flex min-w-0 flex-1 flex-col">
+			<SwarmContextMenu repos={swarmRepos}>
 			<SwarmCanvas
 				state={state && only ? onlyProject(state, only) : state}
 				repo={repo}
@@ -155,10 +160,21 @@ export function SwarmWorkspace({ repo, only }: { repo: string; only?: string }) 
 				}
 				actions={
 					<>
+						<button
+							type="button"
+							onClick={() => void load()}
+							className={`${pill} size-8 justify-center text-muted-foreground transition-colors hover:text-foreground`}
+							aria-label="Refresh"
+							title="Refresh (the board also re-reads GitHub every 10 seconds)"
+						>
+							<RefreshCw className={`size-3.5 ${loading ? "animate-spin" : ""}`} />
+						</button>
+						<SettingsMenu repos={swarmRepos} className={`${pill} size-8 justify-center text-muted-foreground transition-colors hover:text-foreground`} />
 						<NotificationCenter />
 					</>
 				}
 			/>
+			</SwarmContextMenu>
 			{/* One composer at a time: while the side panel holds a chat (the swarm's or an agent's), it has its own. */}
 			{talkTo === null ? (
 				<div className="pointer-events-none absolute inset-x-0 bottom-0 z-20 flex justify-center px-4 pb-4">

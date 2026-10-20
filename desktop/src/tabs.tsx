@@ -42,7 +42,8 @@ function load(): { tabs: Tab[]; active: string } {
 export function TabBar() {
 	const location = useLocation();
 	const navigate = useNavigate();
-	const onLocal = location.pathname === "/local";
+	// Canvas pages carry refresh, settings and the bell themselves, top right.
+	const onLocal = location.pathname === "/local" || location.pathname === "/" || /^\/projects\/[^/]+\/[^/]+$/.test(location.pathname);
 	const { toggleSidebar } = useSidebar();
 	const [state, setState] = useState(load);
 	const here = location.pathname + location.search;

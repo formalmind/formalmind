@@ -20,7 +20,7 @@ export class InitError extends Error {
 
 const statusOf = (error: unknown) => (error as { status?: number }).status;
 
-async function installationFor(owner: string, repo: string): Promise<Octokit> {
+export async function installationFor(owner: string, repo: string): Promise<Octokit> {
 	try {
 		const { data } = await getAppOctokit().request("GET /repos/{owner}/{repo}/installation", { owner, repo });
 		return getInstallationOctokit(data.id);

@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { Link, useLocation, useNavigate } from "react-router";
 import { BookOpen, Folder, FolderOpen, ChevronRight, GanttChart, Network, Plus } from "lucide-react"
+import { SwarmMenu } from "@/components/projects/swarm-control"
 import {
 	Sidebar,
 	SidebarContent,
@@ -112,6 +113,7 @@ function ProjectFolder({ project, open, onOpenChange, pathname, collapsed, onExp
 					>
 						<Plus className="size-3.5" />
 					</Link>
+					{project.proofsRepo ? <SwarmMenu repo={project.repo} /> : null}
 				</div>
 				<CollapsibleContent className="group-data-[collapsible=icon]:hidden">
 					<ul className="flex flex-col gap-0.5 pb-2 pl-6">

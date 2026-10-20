@@ -4,7 +4,6 @@ import { type ReactNode, useEffect, useLayoutEffect, useMemo, useRef, useState }
 import { Hand, MousePointer2, Maximize, Minus, Pause, Play, Plus, X } from "lucide-react";
 import { Link } from "react-router";
 import * as DialogPrimitive from "@radix-ui/react-dialog";
-import { TextSwap } from "@/components/motion/text-swap";
 import { useIsMobile } from "@/hooks/use-mobile";
 import type { SwarmItem, SwarmProject, SwarmRole, SwarmRun, SwarmState } from "@/lib/swarm";
 import { ROLE_COLORS } from "@/lib/swarm-roles";
@@ -1182,13 +1181,6 @@ export function SwarmCanvas({ state, fill = false, contain = false, title, actio
 			{hover ? (
 				<ItemHoverCard {...hover} onEnter={keepHover} onLeave={hideHover} />
 			) : null}
-			{fill && !local ? (
-				<div className="pointer-events-none absolute inset-x-3 top-14 flex">
-					<div className="pointer-events-auto flex min-w-0 max-w-full">
-						<NowChip job={shown.job} turn={shown.turn} />
-					</div>
-				</div>
-			) : null}
 			{title ? <div className="absolute left-3 top-3 flex min-w-0 max-w-[calc(100%-14rem)] items-center gap-2">{title}</div> : null}
 			<div className="absolute right-3 top-3 flex items-center gap-2">
 			{actions}
@@ -1572,46 +1564,6 @@ function TurnChip({ turn }: { turn: SwarmRole | null }) {
 	);
 }
 
-/**
- * Pinned above the full-page board: the dispatcher's job and whose turn it is, in one line.
- * The full pick order is on hover.
- */
-function NowChip({ job, turn }: { job: string | null; turn: SwarmRole | null }) {
-	return (
-		<div
-			className="flex min-w-0 items-center gap-2 whitespace-nowrap rounded-full border bg-background px-3 py-1.5 text-[12px] shadow-sm"
-			title={`Every 10 min the dispatcher picks one job, in this order: ${JOBS.join(" › ")}`}
-		>
-			<span className="font-medium" style={{ color: ROLE_COLORS.dispatcher }}>dispatcher</span>
-			<SmoothWidth>
-				<TextSwap value={job}>
-					{(j) => (j ? <span className="rounded bg-foreground px-1.5 py-px text-background">{j}</span> : <span className="text-muted-foreground">sweeps every 10 min</span>)}
-				</TextSwap>
-			</SmoothWidth>
-			{/* On the dispatcher's own turn nothing follows its job. */}
-			<SmoothWidth>
-				<TextSwap value={turn}>
-					{(t) =>
-						t === "dispatcher" ? null : (
-							<span className="inline-flex items-center gap-2">
-								<span className="text-muted-foreground/50">›</span>
-								{t ? (
-									<span className="inline-flex items-center gap-1.5 font-medium">
-										<span className="size-2 rounded-full" style={{ backgroundColor: ROLE_COLORS[t] }} />
-										{t}
-									</span>
-								) : (
-									<span className="text-muted-foreground">between turns</span>
-								)}
-							</span>
-						)
-					}
-				</TextSwap>
-			</SmoothWidth>
-		</div>
-	);
-}
-
 /** The job list with one pill that slides to the job in hand (transitions.dev tabs sliding). */
 function DispatcherChip({ job }: { job: string | null }) {
 	const items = useRef(new Map<string, HTMLSpanElement>());
@@ -1653,27 +1605,6 @@ function DispatcherChip({ job }: { job: string | null }) {
 				</span>
 			))}
 		</div>
-	);
-}
-
-/** Eases its width to whatever its content measures, so swapped text doesn't make the row snap. */
-function SmoothWidth({ children }: { children: ReactNode }) {
-	const inner = useRef<HTMLSpanElement>(null);
-	const [width, setWidth] = useState<number | null>(null);
-	useLayoutEffect(() => {
-		const el = inner.current;
-		if (!el) return;
-		const observer = new ResizeObserver(() => setWidth(el.offsetWidth));
-		observer.observe(el);
-		return () => observer.disconnect();
-	}, []);
-	return (
-		<span
-			className="inline-flex shrink-0 overflow-hidden motion-reduce:transition-none"
-			style={{ width: width ?? undefined, transition: "width var(--tabs-dur) var(--tabs-ease)" }}
-		>
-			<span ref={inner} className="inline-flex shrink-0 items-center">{children}</span>
-		</span>
 	);
 }
 
