@@ -602,7 +602,7 @@ function CoverageView({ data, scripts, onOpenFile }: { data: Formal; scripts: Sc
 									current.theorems.map((i) => {
 										const t = data.theorems[i];
 										return (
-											<div key={i} className={`mx-2 mb-2 mt-1 overflow-hidden rounded-lg border border-l-2 ${t.sorry ? "border-l-sky-500 bg-sky-500/[0.06]" : "border-emerald-500/30 border-l-emerald-500 bg-emerald-500/10"}`}>
+											<div key={i} className={`mx-2 mb-2 mt-1 overflow-hidden rounded-lg border ${t.sorry ? "border-sky-500/30 bg-sky-500/[0.06]" : "border-emerald-500/30 bg-emerald-500/10"}`}>
 												<div className={`flex items-center gap-2 border-b px-2.5 py-1 text-[11px] ${t.sorry ? "border-sky-500/20" : "border-emerald-500/20"}`}>
 													<span className={`size-1.5 rounded-full ${t.sorry ? "bg-sky-500" : "bg-emerald-500"}`} />
 													<span className="font-mono font-medium">{t.name}</span>
