@@ -131,6 +131,8 @@ export interface SwarmState {
 	/** Every cost line in the ledger issue, oldest first. */
 	costs: SwarmCost[];
 	spentToday: number;
+	/** The spending cap the ledger measures against; $5 a day when unset. */
+	budgetUsd?: number;
 	chief: SwarmComment | null;
 	/** The assistant's latest comment on the maintainer's thread. */
 	assistant: SwarmComment | null;

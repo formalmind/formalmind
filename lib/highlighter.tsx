@@ -14,6 +14,9 @@ const languages = {
   html: () => import("shiki/langs/html.mjs"),
   javascript: () => import("shiki/langs/javascript.mjs"),
   json: () => import("shiki/langs/json.mjs"),
+  lean: () => import("shiki/langs/lean4.mjs"),
+  solidity: () => import("shiki/langs/solidity.mjs"),
+  toml: () => import("shiki/langs/toml.mjs"),
   jsx: () => import("shiki/langs/jsx.mjs"),
   markdown: () => import("shiki/langs/markdown.mjs"),
   python: () => import("shiki/langs/python.mjs"),
@@ -25,6 +28,8 @@ const languages = {
 
 const aliases: Record<string, keyof typeof languages> = {
   js: "javascript",
+  lean4: "lean",
+  sol: "solidity",
   md: "markdown",
   py: "python",
   sh: "bash",
@@ -104,7 +109,7 @@ export async function loadHighlighter(language: string) {
             <span
               key={index}
               style={token.htmlStyle as React.CSSProperties}
-              className="text-(--shiki-light) dark:text-(--shiki-dark)"
+              className="shiki-token"
             >
               {token.content}
             </span>

@@ -5,6 +5,7 @@ import { ChatComposer } from "@/components/chat-composer";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuLabel, DropdownMenuRadioGroup, DropdownMenuRadioItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { ChatMarkdown } from "@/components/chat-markdown";
 import { CodeBlock, CodeBlockContent } from "@/components/ui/code-block";
+import { useHighlightedCode } from "@/hooks/use-highlighted-code";
 import { Message, MessageContent, MessageHeader } from "@/components/ui/message";
 import { Trace, TraceCollapsible, TraceCollapsibleContent, TraceCollapsibleTrigger, TraceIcon, TraceLine, TraceTitle } from "@/components/ui/trace";
 import { SwarmCanvas } from "@/components/swarm/swarm-canvas";
@@ -94,15 +95,41 @@ function Steps({ steps, running }: { steps: { call: Ev; result?: Ev }[]; running
 						<div key={i} className="space-y-1">
 							<p className="truncate font-mono text-[11px] text-foreground/80">› {s.call.text}</p>
 							{s.result?.text.trim() ? (
-								<CodeBlock size="sm" className="text-[11px]">
-									<CodeBlockContent className="max-h-40" wrap>{s.result.text.split("\n").slice(0, 30).join("\n")}</CodeBlockContent>
-								</CodeBlock>
+								<ToolOutput call={s.call.text} text={s.result.text} />
 							) : null}
 						</div>
 					))}
 				</TraceCollapsibleContent>
 			</TraceCollapsible>
 		</Trace>
+	);
+}
+
+const EXT: Record<string, string> = { sol: "solidity", lean: "lean", ts: "typescript", tsx: "tsx", js: "javascript", json: "json", md: "markdown", toml: "toml", sh: "bash", py: "python", yml: "yaml", yaml: "yaml" };
+
+/** A tool's output, highlighted by the file it read (or as shell for a run); read_file's line numbers sit in a gutter. */
+function ToolOutput({ call, text }: { call: string; text: string }) {
+	const [tool, path = ""] = call.split(" ");
+	const language = tool === "run" ? "bash" : (EXT[path.split(".").pop() ?? ""] ?? "text");
+	const all = text.split("\n").slice(0, 40);
+	const numbered = all.map((l) => /^\s*(\d+) {2}(.*)$/.exec(l));
+	const first = numbered.findIndex(Boolean);
+	const head = first < 0 ? (tool === "read_file" ? all : []) : all.slice(0, first);
+	const body = first < 0 ? (tool === "read_file" ? [] : all) : all.slice(first);
+	const code = body.map((l, i) => numbered[first + i]?.[2] ?? l).join("\n");
+	const lines = useHighlightedCode(code, language);
+	return (
+		<CodeBlock size="sm" className="text-[11px]">
+			<CodeBlockContent className="max-h-48">
+				{head.map((l, i) => <span key={`h${i}`} className="block text-muted-foreground">{l}</span>)}
+				{lines.map((line, i) => (
+					<span key={i} className="block whitespace-pre">
+						{first >= 0 ? <span className="mr-3 inline-block w-8 select-none text-right text-muted-foreground/60">{numbered[first + i]?.[1]}</span> : null}
+						{line}
+					</span>
+				))}
+			</CodeBlockContent>
+		</CodeBlock>
 	);
 }
 
@@ -163,7 +190,9 @@ export function SwarmPanel({ folder, name, scan, bridge, session, actions }: { f
 	const [plan, setPlan] = useState<Item[]>([]);
 	const [bugs, setBugs] = useState<Bug[]>([]);
 	const [goal, setGoal] = useState("");
-	const [budget, setBudget] = useState(5);
+	// The cap is kept per folder, so the chat header, the canvas ledger and the next start all agree after a reload.
+	const budgetKey = `fm:budget:${folder}`;
+	const [budget, setBudget] = useState(() => Number(store.get(budgetKey)) || 5);
 	const [say, setSay] = useState("");
 	const [error, setError] = useState<string | null>(null);
 	const [openBug, setOpenBug] = useState<string | null>(null);
@@ -314,7 +343,7 @@ export function SwarmPanel({ folder, name, scan, bridge, session, actions }: { f
 			{/* The canvas, as on the Swarm page, with the plan, files and bugs floating over it as one accordion. */}
 			<div className="absolute inset-0 flex flex-col overflow-hidden">
 				<SwarmCanvas
-					state={localBoard(folder, plan, events, Boolean(run))}
+					state={localBoard(folder, plan, events, Boolean(run), budget)}
 					fill
 					local
 					repo={folder}
@@ -413,6 +442,7 @@ export function SwarmPanel({ folder, name, scan, bridge, session, actions }: { f
 								value={String(budget)}
 								onValueChange={(v) => {
 									setBudget(Number(v));
+									store.set(budgetKey, v);
 									if (run) void invoke("swarm_set_budget", { run, usd: Number(v) });
 								}}
 							>

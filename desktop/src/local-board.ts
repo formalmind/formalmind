@@ -9,7 +9,7 @@ const ROLES: SwarmRole[] = ["planner", "prover", "reviewer", "assistant"];
  * The local swarm as the board's state: plan items are the cards (todo, in progress while the prover has them, review
  * while the reviewer does, done once approved, blocked after three tries), and the working agent sits on its card.
  */
-export function localBoard(folder: string, plan: Item[], events: Ev[], running: boolean): SwarmState {
+export function localBoard(folder: string, plan: Item[], events: Ev[], running: boolean, budgetUsd?: number): SwarmState {
 	const repo = `local/${folder.split(/[\\/]/).filter(Boolean).pop() ?? "folder"}`;
 	const now = new Date().toISOString();
 	const status = running ? [...events].reverse().find((e) => e.kind === "status" && ROLES.includes(e.role as SwarmRole)) : undefined;
@@ -32,7 +32,7 @@ export function localBoard(folder: string, plan: Item[], events: Ev[], running: 
 		projects: [{ repo, proofsRepo: repo, inSwarm: true }],
 		work, merged: merged.reverse(),
 		costs: spent ? [{ repo, role: "local", ref: "", usd: spent, runId: null, createdAt: now }] : [],
-		spentToday: spent, chief: null, assistant: null, cycle: null, notebook: [], ledger: [],
+		spentToday: spent, budgetUsd, chief: null, assistant: null, cycle: null, notebook: [], ledger: [],
 		runs: [{ id: 1, status: running ? "in_progress" : "completed", conclusion: running ? null : "success", phase: running ? "working" : "done", startedAt: now, updatedAt: now, url: "", note: null, usd: spent }],
 		active: status ? [{ repo, role: status.role as SwarmRole, ref: at, task: null, phase: "working", startedAt: now }] : [],
 	};

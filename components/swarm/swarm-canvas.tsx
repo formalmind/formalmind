@@ -1117,7 +1117,7 @@ export function SwarmCanvas({ state, fill = false, contain = false, title, actio
 						);
 					})}
 
-					<LedgerPanel spend={shown.spend} costs={shown.costs} repo={state?.repo ?? repo} top={geo.panelTop} onMeasure={measurePanel(0)} />
+					<LedgerPanel spend={shown.spend} budget={state?.budgetUsd} costs={shown.costs} repo={state?.repo ?? repo} top={geo.panelTop} onMeasure={measurePanel(0)} />
 					<NotebookPanel notes={shown.notes} repo={state?.repo ?? repo} top={geo.panelTop} onMeasure={measurePanel(1)} />
 					<ChiefPanel headline={shown.chief} repo={state?.repo ?? repo} top={geo.panelTop} onMeasure={measurePanel(2)} />
 
@@ -1648,15 +1648,15 @@ function Panel({ index, title, repo, top = ONE.panelTop, onMeasure, children }: 
 	);
 }
 
-function LedgerPanel({ spend, costs, ...mode }: PanelMode & { spend: number; costs: LedgerRow[] }) {
+function LedgerPanel({ spend, budget = 5, costs, ...mode }: PanelMode & { spend: number; budget?: number; costs: LedgerRow[] }) {
 	return (
 		<Panel index={0} title="#38 Ledger notebook" {...mode}>
 			<div className="flex items-baseline justify-between text-[12px]">
 				<span className="text-[13px] text-foreground">Spent today</span>
-				<span className="font-mono tabular-nums text-foreground">${spend.toFixed(2)} / $5.00</span>
+				<span className="font-mono tabular-nums text-foreground">${spend.toFixed(2)} / ${budget.toFixed(2)}</span>
 			</div>
 			<div className="mt-1.5 h-1.5 overflow-hidden rounded-full bg-muted">
-				<div className="h-full rounded-full bg-foreground/70 transition-[width] duration-700" style={{ width: `${Math.min(100, (spend / 5) * 100)}%` }} />
+				<div className="h-full rounded-full bg-foreground/70 transition-[width] duration-700" style={{ width: `${Math.min(100, (spend / budget) * 100)}%` }} />
 			</div>
 			<ul className="mt-2 space-y-0.5 font-mono text-[12px] text-muted-foreground">
 				{costs.map((cost, i) => (

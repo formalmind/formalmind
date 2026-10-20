@@ -409,3 +409,7 @@ button:is(:hover, :focus-visible) > .fm-bell, .fm-bell-ring { animation: fm-bell
 @media (prefers-reduced-motion: reduce) {
 	.fm-bell { animation: none !important; }
 }
+
+/* Shiki tokens (lib/highlighter.tsx) carry both themes' colors; pick by the app's theme. */
+.shiki-token { color: var(--shiki-light); }
+.dark .shiki-token { color: var(--shiki-dark); }

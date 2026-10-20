@@ -67,7 +67,7 @@ const EVENTS = [
 	ev("status", "prover", "1", "prover is working", 0.18),
 	ev("tool", "prover", "1", "search function deposit src", 0.2),
 	ev("tool", "prover", "1", "read_file src/Vault.sol 120 210", 0.22),
-	ev("result", "prover", "1", "120 | function deposit(uint256 assets, address to) external returns (uint256 shares) {\n121 |     shares = previewDeposit(assets);\n122 |     require(shares != 0, \"zero shares\");\n123 |     asset.safeTransferFrom(msg.sender, address(this), assets);", 0.22),
+	ev("result", "prover", "1", "lines 120-123 of 260\n  120  function deposit(uint256 assets, address to) external returns (uint256 shares) {\n  121      shares = previewDeposit(assets);\n  122      require(shares != 0, \"zero shares\");\n  123      asset.safeTransferFrom(msg.sender, address(this), assets);", 0.22),
 	ev("tool", "prover", "1", "write_file formal/Formal/Vault.lean", 0.41),
 	ev("tool", "prover", "1", "run lake build", 0.44),
 	ev("say", "prover", "1", "Modelled deposit with floor rounding and proved shares·price ≤ assets for every input. lake build is clean, no sorry.", 0.52),
