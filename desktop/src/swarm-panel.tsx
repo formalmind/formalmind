@@ -365,12 +365,13 @@ function findingsOfDoc(doc: AuditDoc, path: string): AuditFinding[] {
 	}));
 }
 
-const STATUS: Record<AuditFinding["status"], { label: string; dot: string; chip: string }> = {
-	fixed: { label: "Fixed", dot: "bg-emerald-500", chip: "border-emerald-500/30 bg-emerald-500/10 text-emerald-700 dark:text-emerald-400" },
-	works: { label: "Works as expected", dot: "bg-sky-500", chip: "border-sky-500/30 bg-sky-500/10 text-sky-700 dark:text-sky-400" },
-	acknowledged: { label: "Acknowledged", dot: "bg-amber-500", chip: "border-amber-500/30 bg-amber-500/10 text-amber-700 dark:text-amber-400" },
-	rejected: { label: "Rejected", dot: "bg-muted-foreground/50", chip: "border-border bg-muted text-muted-foreground" },
-	open: { label: "Open", dot: "bg-red-500", chip: "border-red-500/30 bg-red-500/10 text-red-700 dark:text-red-400" },
+// `text` colours a finding's ID in the list by its status (the list has no dots).
+const STATUS: Record<AuditFinding["status"], { label: string; dot: string; chip: string; text: string }> = {
+	fixed: { label: "Fixed", dot: "bg-emerald-500", text: "text-emerald-600 dark:text-emerald-400", chip: "border-emerald-500/30 bg-emerald-500/10 text-emerald-700 dark:text-emerald-400" },
+	works: { label: "Works as expected", dot: "bg-sky-500", text: "text-sky-600 dark:text-sky-400", chip: "border-sky-500/30 bg-sky-500/10 text-sky-700 dark:text-sky-400" },
+	acknowledged: { label: "Acknowledged", dot: "bg-amber-500", text: "text-amber-600 dark:text-amber-400", chip: "border-amber-500/30 bg-amber-500/10 text-amber-700 dark:text-amber-400" },
+	rejected: { label: "Rejected", dot: "bg-muted-foreground/50", text: "text-muted-foreground", chip: "border-border bg-muted text-muted-foreground" },
+	open: { label: "Open", dot: "bg-red-500", text: "text-red-600 dark:text-red-400", chip: "border-red-500/30 bg-red-500/10 text-red-700 dark:text-red-400" },
 };
 
 /** Every finding in an audit index (audit/README.md and the like), with its status and the tests its evidence names. */
@@ -607,7 +608,6 @@ function BugsView({ folder, files, invoke, bugs, openBug, setOpenBug, withPoc, o
 										}
 										className={`inline-flex items-center gap-1 rounded-md border px-1.5 py-0.5 text-[11px] transition-opacity ${STATUS[k].chip} ${only.size && !on ? "opacity-45 hover:opacity-80" : ""} ${on ? "ring-1 ring-current" : ""}`}
 									>
-										<span className={`size-1.5 rounded-full ${STATUS[k].dot}`} />
 										{counts[k]} {STATUS[k].label.toLowerCase()}
 									</button>
 								);
@@ -627,8 +627,7 @@ function BugsView({ folder, files, invoke, bugs, openBug, setOpenBug, withPoc, o
 										return (
 											<li key={k}>
 												<button type="button" onClick={() => setOpenBug(k)} title={`${f.id} · ${STATUS[f.status].label}`} className={`flex w-full items-start gap-2 rounded-lg px-2 py-1.5 text-left transition-colors ${picked && findingKey(picked) === k ? "bg-muted" : "hover:bg-muted/60"}`}>
-													<span className={`mt-1.5 size-2 shrink-0 rounded-full ${STATUS[f.status].dot}`} />
-													<span className="w-9 shrink-0 font-mono text-[11px] leading-5 text-muted-foreground">{f.id}</span>
+													<span className={`w-9 shrink-0 font-mono text-[11px] font-medium leading-5 ${STATUS[f.status].text}`}>{f.id}</span>
 													<span className="min-w-0 flex-1 text-[12.5px] leading-5">{f.title.replace(/`/g, "")}</span>
 												</button>
 											</li>
@@ -665,7 +664,6 @@ function BugsView({ folder, files, invoke, bugs, openBug, setOpenBug, withPoc, o
 					<h2 className="text-[17px] font-semibold leading-snug">{picked.title.replace(/`/g, "")}</h2>
 					<div className="mt-3 flex flex-wrap items-center gap-2 text-[12px]">
 						<span className={`inline-flex h-7 items-center gap-1.5 rounded-lg border px-2.5 font-medium ${STATUS[picked.status].chip}`}>
-							<span className={`size-2 rounded-full ${STATUS[picked.status].dot}`} />
 							{picked.statusText || STATUS[picked.status].label}
 						</span>
 						{picked.severity !== "—" ? <span className={`inline-flex h-7 items-center rounded-lg border px-2.5 font-medium ${SEVERITY[picked.severity.toLowerCase()] ?? "border-border"}`}>{picked.severity}</span> : null}
