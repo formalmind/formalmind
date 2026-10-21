@@ -66,9 +66,24 @@ export function CoverageCard({ contract, theorems, proved, notYet, opaque, class
 }
 
 /** A function as a card: its name, where it stands, its kind, its theorems, and the first lines of its Solidity. */
+/** A card's glimpse of code: its first lines (`full`: all of it, wrapped), dedented and coloured as the code viewer colours them. */
+function CodePeek({ code, language, full = false }: { code: string; language: string; full?: boolean }) {
+	const shown = full ? code.trimEnd().split("\n") : code.split("\n").slice(0, 4);
+	const indent = Math.min(...shown.filter((l) => l.trim()).map((l) => l.match(/^\s*/)![0].length));
+	const lines = useHighlightedCode(shown.map((l) => l.slice(Number.isFinite(indent) ? indent : 0)).join("\n"), language);
+	return (
+		<pre className={`mt-3 overflow-hidden rounded-lg bg-muted/60 px-2 py-1.5 font-mono text-[10.5px] leading-[1.45] text-muted-foreground ${full ? "whitespace-pre-wrap break-words" : "h-[60px]"}`}>
+			{lines.map((line, i) => (
+				<span key={i} className="block">
+					{line}
+				</span>
+			))}
+		</pre>
+	);
+}
+
 /** A theorem: checked or not, where it lives, and its first lines (`full`: all of it, wrapped). */
 export function TheoremCard({ t, onOpen, full = false, codeOnly = false, className = "w-[78%] max-w-[300px] shrink-0 snap-start" }: { t: FormalTheorem; onOpen?: () => void; full?: boolean; /** Skeletons in place of the status, name and file: only the Lean shows. */ codeOnly?: boolean; className?: string }) {
-	// Lean, coloured as the code viewer colours it.
 	const lines = useHighlightedCode(full ? t.text.trimEnd() : t.text.split("\n").slice(0, 4).join("\n"), "lean");
 	return (
 		<button type="button" onClick={onOpen} className={`flex flex-col rounded-2xl border bg-card p-3.5 text-left shadow-card active:bg-muted/40 ${className}`}>
@@ -85,13 +100,7 @@ export function TheoremCard({ t, onOpen, full = false, codeOnly = false, classNa
 					<span className="truncate font-mono text-[11px] text-muted-foreground">{t.file.split("/").pop()}:{t.line}</span>
 				</>
 			)}
-			<pre className={`mt-3 overflow-hidden rounded-lg bg-muted/60 px-2 py-1.5 font-mono text-[10.5px] leading-[1.45] text-muted-foreground ${full ? "whitespace-pre-wrap break-words" : "h-[60px]"}`}>
-				{lines.map((line, i) => (
-					<span key={i} className="block">
-						{line}
-					</span>
-				))}
-			</pre>
+			<CodePeek code={t.text} language="lean" full={full} />
 		</button>
 	);
 }
@@ -105,7 +114,7 @@ export function FnCard({ f, theorems, onOpen, className = "w-[78%] max-w-[300px]
 			<span className="truncate text-[12px] text-muted-foreground">
 				{[f.name.split(".").slice(0, -1).join("."), f.mutability || f.kind].filter(Boolean).join(" · ")}
 			</span>
-			<pre className="mt-3 h-[60px] overflow-hidden rounded-lg bg-muted/60 px-2 py-1.5 font-mono text-[10.5px] leading-[1.45] text-muted-foreground">{f.solidity.split("\n").slice(0, 4).join("\n")}</pre>
+			<CodePeek code={f.solidity} language="solidity" />
 			<span className="mt-2.5 text-[12px] text-muted-foreground">{f.theorems.length ? `${f.theorems.length} theorem${f.theorems.length === 1 ? "" : "s"}` : f.why ? "Kept opaque" : "No theorem yet"}</span>
 		</button>
 	);
