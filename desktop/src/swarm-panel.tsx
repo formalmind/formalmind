@@ -348,6 +348,125 @@ function useReportDirs(folder: string) {
 	return [dirs, save] as const;
 }
 
+/** A finding from an audit index: a row of a "| ID | Severity | Finding | Status | Evidence |" table under its report's heading. */
+type AuditFinding = { report: string; id: string; severity: string; title: string; status: "fixed" | "works" | "acknowledged" | "rejected" | "open"; statusText: string; evidence: string; tests: string[]; index: string };
+
+const STATUS: Record<AuditFinding["status"], { label: string; dot: string; chip: string }> = {
+	fixed: { label: "Fixed", dot: "bg-emerald-500", chip: "border-emerald-500/30 bg-emerald-500/10 text-emerald-700 dark:text-emerald-400" },
+	works: { label: "Works as expected", dot: "bg-sky-500", chip: "border-sky-500/30 bg-sky-500/10 text-sky-700 dark:text-sky-400" },
+	acknowledged: { label: "Acknowledged", dot: "bg-amber-500", chip: "border-amber-500/30 bg-amber-500/10 text-amber-700 dark:text-amber-400" },
+	rejected: { label: "Rejected", dot: "bg-muted-foreground/50", chip: "border-border bg-muted text-muted-foreground" },
+	open: { label: "Open", dot: "bg-red-500", chip: "border-red-500/30 bg-red-500/10 text-red-700 dark:text-red-400" },
+};
+
+/** Every finding in an audit index (audit/README.md and the like), with its status and the tests its evidence names. */
+function parseAuditIndex(text: string, index: string): AuditFinding[] {
+	const out: AuditFinding[] = [];
+	let report = "";
+	let cols: string[] | null = null;
+	const cells = (line: string) => line.trim().replace(/^\||\|$/g, "").split("|").map((c) => c.trim());
+	for (const line of text.split("\n")) {
+		const h = line.match(/^#{2,3}\s+(.+)$/);
+		if (h) {
+			report = h[1].replace(/\[([^\]]+)\]\([^)]*\)/g, "$1").replace(/`/g, "").trim();
+			cols = null;
+			continue;
+		}
+		if (!line.trim().startsWith("|")) {
+			cols = null;
+			continue;
+		}
+		const row = cells(line);
+		if (!cols) {
+			const lower = row.map((c) => c.toLowerCase());
+			if (lower.includes("status") && (lower.includes("id") || lower.includes("finding"))) cols = lower;
+			continue;
+		}
+		if (row.every((c) => /^:?-{2,}:?$/.test(c))) continue;
+		const get = (name: string) => row[cols!.indexOf(name)] ?? "";
+		const statusText = get("status");
+		const st = statusText.toLowerCase();
+		const status: AuditFinding["status"] = /fixed|✅/.test(st) ? "fixed" : /works|🟢/.test(st) ? "works" : /acknowledged|📝/.test(st) ? "acknowledged" : /rejected|❌/.test(st) ? "rejected" : "open";
+		const evidence = get("evidence");
+		out.push({
+			report,
+			id: get("id") || "—",
+			severity: get("severity") || "—",
+			title: get("finding") || get("title"),
+			status,
+			statusText: statusText.replace(/[✅🟢📝❌⏳]\s*/gu, ""),
+			evidence,
+			tests: [...new Set(evidence.match(/test\/[\w/.-]+\.t\.sol/g) ?? [])],
+			index,
+		});
+	}
+	return out;
+}
+
+/** A finding's own section of its report: from its `### [ID] …` heading (or one naming its title) to the next heading at that level or above. */
+function findingSection(report: string, id: string, title: string): string | null {
+	const lines = report.split("\n");
+	const clean = (t: string) => t.replace(/[`*_]/g, "").toLowerCase();
+	const words = clean(title).split(/\W+/).filter((w) => w.length > 3).slice(0, 4);
+	const at = lines.findIndex((l) => /^#{2,4}\s/.test(l) && (l.includes(`[${id}]`) || new RegExp(`^#{2,4}\\s+${id.replace(/[-]/g, "\\-")}\\b`).test(l) || (id === "—" && words.length > 0 && words.every((w) => clean(l).includes(w)))));
+	if (at < 0) return null;
+	const level = lines[at].match(/^#+/)![0].length;
+	let end = lines.findIndex((l, i) => i > at && /^#+\s/.test(l) && l.match(/^#+/)![0].length <= level);
+	if (end < 0) end = lines.length;
+	return lines.slice(at + 1, end).join("\n").trim();
+}
+
+/** A Solidity function's lines (by name) in a file: its signature to its closing brace, with the line it starts on. */
+function functionLines(text: string, name: string): { code: string; line: number } | null {
+	const lines = text.split("\n");
+	const at = lines.findIndex((l) => new RegExp(`\\bfunction\\s+${name}\\s*\\(`).test(l));
+	if (at < 0) return null;
+	let depth = 0;
+	let seen = false;
+	for (let i = at; i < lines.length; i++) {
+		for (const c of lines[i]) {
+			if (c === "{") {
+				depth++;
+				seen = true;
+			} else if (c === "}") depth--;
+		}
+		if (seen && depth <= 0) return { code: lines.slice(at, i + 1).join("\n"), line: at + 1 };
+	}
+	return { code: lines.slice(at).join("\n"), line: at + 1 };
+}
+
+/** A finding's proof of concept: the test function the evidence names, else the whole test file. */
+function PocView({ folder, invoke, path, fns, onOpenFile }: { folder: string; invoke: Bridge["invoke"]; path: string; fns: string[]; onOpenFile: (path: string) => void }) {
+	const [text, setText] = useState<string | null>(null);
+	useEffect(() => {
+		setText(null);
+		void invoke<string>("folder_read", { folder, path }).then(setText, (e) => setText(`// Couldn't read ${path}: ${e}`));
+	}, [folder, path, invoke]);
+	const parts = text ? fns.map((f) => functionLines(text, f)).filter((x): x is { code: string; line: number } => Boolean(x)) : [];
+	return (
+		<div className="mt-2 overflow-hidden rounded-xl border">
+			<div className="flex items-center gap-2 border-b bg-muted/40 px-3 py-1.5">
+				<Bug className="size-3.5 text-muted-foreground" />
+				<span className="font-mono text-[12px]">{path}</span>
+				{parts.length ? <span className="text-[11px] text-muted-foreground">· {fns.filter((f) => text && functionLines(text, f)).join(", ")}</span> : null}
+				<button type="button" onClick={() => onOpenFile(path)} className="ml-auto inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-[11px] text-muted-foreground hover:bg-background hover:text-foreground">
+					<Code2 className="size-3" />
+					Open
+				</button>
+			</div>
+			<div className="max-h-[28rem] overflow-auto bg-card">
+				{text === null ? (
+					<p className="p-3 text-[12px] text-muted-foreground">Reading…</p>
+				) : parts.length ? (
+					parts.map((p) => <FileView key={p.line} path={path} text={p.code} start={p.line} />)
+				) : (
+					<FileView path={path} text={text} />
+				)}
+			</div>
+		</div>
+	);
+}
+
 /**
  * Bugs: the folder's audit reports (Markdown in its report folders, which the gear sets) and the swarm's findings,
  * each opened on the right.
@@ -355,12 +474,41 @@ function useReportDirs(folder: string) {
 function BugsView({ folder, files, invoke, bugs, openBug, setOpenBug, withPoc, onOpenFile }: { folder: string; files: string[]; invoke: Bridge["invoke"]; bugs: Bug[]; openBug: string | null; setOpenBug: (f: string | null) => void; withPoc: (body: string) => Promise<string>; onOpenFile: (path: string) => void }) {
 	const [dirs, setDirs] = useReportDirs(folder);
 	const [editing, setEditing] = useState<string | null>(null);
-	const reports = files.filter((f) => /\.(md|markdown|txt)$/i.test(f) && dirs.some((d) => f.startsWith(`${d.replace(/\/+$/, "")}/`))).sort();
+	const inDirs = files.filter((f) => /\.(md|markdown|txt)$/i.test(f) && dirs.some((d) => f.startsWith(`${d.replace(/\/+$/, "")}/`))).sort();
+	// An index (README.md / INDEX.md in a report folder) lists every finding with its status; the rest are reports.
+	const indexes = inDirs.filter((f) => /(^|\/)(readme|index)\.md$/i.test(f));
+	const reports = inDirs.filter((f) => !indexes.includes(f));
+	const [findings, setFindings] = useState<AuditFinding[]>([]);
+	useEffect(() => {
+		let gone = false;
+		void Promise.all(indexes.map((f) => invoke<string>("folder_read", { folder, path: f }).then((t) => parseAuditIndex(t, f), () => [] as AuditFinding[]))).then((all) => !gone && setFindings(all.flat()));
+		return () => {
+			gone = true;
+		};
+		// eslint-disable-next-line react-hooks/exhaustive-deps
+	}, [folder, indexes.join("|"), invoke]);
+	const findingKey = (f: AuditFinding) => `audit:${f.report}#${f.id}#${f.title}`;
+	// With nothing picked, the first finding opens.
+	const picked = openBug?.startsWith("audit:") ? (findings.find((f) => findingKey(f) === openBug) ?? null) : !openBug && findings.length ? findings[0] : null;
+	// The picked finding's report, for its section.
+	const pickedReport = picked ? (reports.find((r) => r.split("/").pop() === picked.report) ?? null) : null;
+	const [section, setSection] = useState<{ key: string; text: string | null } | null>(null);
+	useEffect(() => {
+		if (!picked || !pickedReport) return setSection(null);
+		const key = `${picked.report}#${picked.id}#${picked.title}`;
+		void invoke<string>("folder_read", { folder, path: pickedReport }).then(
+			(t) => setSection({ key, text: findingSection(t, picked.id, picked.title) }),
+			() => setSection({ key, text: null }),
+		);
+		// eslint-disable-next-line react-hooks/exhaustive-deps
+	}, [folder, pickedReport, picked?.id, picked?.title, invoke]);
+	const counts = findings.reduce<Record<string, number>>((m, f) => ({ ...m, [f.status]: (m[f.status] ?? 0) + 1 }), {});
+	const byReport = [...new Set(findings.map((f) => f.report))].map((r) => ({ report: r, items: findings.filter((f) => f.report === r) }));
 	const reportPath = openBug?.startsWith("report:") ? openBug.slice(7) : null;
 	const [report, setReport] = useState<{ path: string; text: string } | null>(null);
 	// What's open: a picked report or finding; with nothing picked, the first report, else the first finding.
-	const selected = reportPath ? null : (bugs.find((b) => b.file === openBug) ?? (reports.length ? null : bugs[0]));
-	const showing = reportPath ?? (selected ? null : reports[0] ? `report:${reports[0]}` : null);
+	const selected = reportPath || picked ? null : (bugs.find((b) => b.file === openBug) ?? (reports.length || findings.length ? null : bugs[0]));
+	const showing = picked ? null : reportPath ? `report:${reportPath}` : selected ? null : reports[0] && !findings.length ? `report:${reports[0]}` : null;
 	const showingPath = showing?.slice(7) ?? null;
 	useEffect(() => {
 		if (!showingPath) return;
@@ -413,7 +561,39 @@ function BugsView({ folder, files, invoke, bugs, openBug, setOpenBug, withPoc, o
 					))}
 					{reports.length === 0 ? <li className="px-2 py-1 text-[12px] text-muted-foreground">No reports in {dirs.map((d) => `${d}/`).join(", ")}.</li> : null}
 				</ul>
-				<p className={`${head} mt-3`}>Findings · {bugs.length}</p>
+				{findings.length ? (
+					<>
+						<p className={`${head} mt-3`}>Audit findings · {findings.length}</p>
+						<div className="flex flex-wrap gap-1 px-2 pb-2">
+							{(Object.keys(STATUS) as AuditFinding["status"][]).filter((k) => counts[k]).map((k) => (
+								<span key={k} className={`inline-flex items-center gap-1 rounded-md border px-1.5 py-0.5 text-[11px] ${STATUS[k].chip}`}>
+									<span className={`size-1.5 rounded-full ${STATUS[k].dot}`} />
+									{counts[k]} {STATUS[k].label.toLowerCase()}
+								</span>
+							))}
+						</div>
+						{byReport.map((g) => (
+							<div key={g.report} className="mb-2">
+								<p className="truncate px-2 pb-0.5 font-mono text-[10px] text-muted-foreground" title={g.report}>{g.report}</p>
+								<ul className="space-y-0.5">
+									{g.items.map((f) => {
+										const k = findingKey(f);
+										return (
+											<li key={k}>
+												<button type="button" onClick={() => setOpenBug(k)} title={`${f.id} · ${STATUS[f.status].label}`} className={`flex w-full items-start gap-2 rounded-lg px-2 py-1.5 text-left transition-colors ${picked && findingKey(picked) === k ? "bg-muted" : "hover:bg-muted/60"}`}>
+													<span className={`mt-1.5 size-2 shrink-0 rounded-full ${STATUS[f.status].dot}`} />
+													<span className="w-9 shrink-0 font-mono text-[11px] leading-5 text-muted-foreground">{f.id}</span>
+													<span className="min-w-0 flex-1 text-[12.5px] leading-5">{f.title.replace(/`/g, "")}</span>
+												</button>
+											</li>
+										);
+									})}
+								</ul>
+							</div>
+						))}
+					</>
+				) : null}
+				<p className={`${head} mt-3`}>Swarm findings · {bugs.length}</p>
 				<ul className="space-y-1">
 					{bugs.map((b) => {
 						const f = bugFacts(b.body);
@@ -433,7 +613,64 @@ function BugsView({ folder, files, invoke, bugs, openBug, setOpenBug, withPoc, o
 					{bugs.length === 0 ? <li className="px-2 py-1 text-[12px] text-muted-foreground">None yet. The swarm files them here, each with a proof of concept.</li> : null}
 				</ul>
 			</div>
-			{showing ? (
+			{picked ? (
+				<article className="min-h-0 overflow-y-auto rounded-2xl border bg-card px-6 py-5 shadow-card">
+					<p className="font-mono text-[12px] text-muted-foreground">
+						{picked.report} · {picked.id}
+					</p>
+					<h2 className="mt-1 text-[17px] font-semibold leading-snug">{picked.title.replace(/`/g, "")}</h2>
+					<div className="mt-3 flex flex-wrap items-center gap-2 text-[12px]">
+						<span className={`inline-flex h-7 items-center gap-1.5 rounded-lg border px-2.5 font-medium ${STATUS[picked.status].chip}`}>
+							<span className={`size-2 rounded-full ${STATUS[picked.status].dot}`} />
+							{picked.statusText || STATUS[picked.status].label}
+						</span>
+						{picked.severity !== "—" ? <span className={`inline-flex h-7 items-center rounded-lg border px-2.5 font-medium ${SEVERITY[picked.severity.toLowerCase()] ?? "border-border"}`}>{picked.severity}</span> : null}
+						{reports.find((r) => r.endsWith(`/${picked.report}`) || r.split("/").pop() === picked.report) ? (
+							<button type="button" onClick={() => setOpenBug(`report:${reports.find((r) => r.split("/").pop() === picked.report)}`)} className="inline-flex h-7 items-center gap-1.5 rounded-lg border bg-background px-2.5 font-mono hover:bg-muted" title="Open the report">
+								<FileCode2 className="size-3.5 text-muted-foreground" />
+								{picked.report}
+							</button>
+						) : null}
+					</div>
+					{picked.evidence ? (
+						<div className="prose prose-sm mt-4 max-w-none dark:prose-invert">
+							<p className="font-mono text-[10px] uppercase tracking-wider text-muted-foreground">Status evidence</p>
+							<ChatMarkdown>{picked.evidence}</ChatMarkdown>
+						</div>
+					) : null}
+					<div className="mt-5">
+						<p className="font-mono text-[10px] uppercase tracking-wider text-muted-foreground">Proof of concept · {picked.tests.length}</p>
+						{picked.tests.length ? (
+							picked.tests.map((t) =>
+								files.includes(t) ? (
+									<PocView key={t} folder={folder} invoke={invoke} path={t} fns={(picked.evidence.match(/test\w*/g) ?? []).filter((f) => /^test_|^test[A-Z]/.test(f))} onOpenFile={onOpenFile} />
+								) : (
+									<p key={t} className="mt-1 font-mono text-[12px] text-red-700 dark:text-red-400">{t} · not in this folder</p>
+								),
+							)
+						) : (
+							<p className="mt-1 text-[12px] text-muted-foreground">No test named in the evidence.</p>
+						)}
+					</div>
+					<div className="mt-6 border-t pt-4">
+						<p className="font-mono text-[10px] uppercase tracking-wider text-muted-foreground">In the report{pickedReport ? ` · ${pickedReport}` : ""}</p>
+						{!pickedReport ? (
+							<p className="mt-1 text-[12px] text-muted-foreground">The report isn't in the report folders.</p>
+						) : section && section.key === `${picked.report}#${picked.id}#${picked.title}` ? (
+							section.text ? (
+								<div className="prose prose-sm mt-2 max-w-none dark:prose-invert">
+									<ChatMarkdown>{section.text}</ChatMarkdown>
+								</div>
+							) : (
+								<p className="mt-1 text-[12px] text-muted-foreground">No section for {picked.id} in the report.</p>
+							)
+						) : (
+							<p className="mt-1 text-[12px] text-muted-foreground">Reading…</p>
+						)}
+					</div>
+					<p className="mt-5 text-[11px] text-muted-foreground">From {picked.index}</p>
+				</article>
+			) : showing ? (
 				<article className="min-h-0 overflow-y-auto rounded-2xl border bg-card px-6 py-5 shadow-card">
 					<div className="flex items-start gap-3">
 						<h2 className="flex-1 font-mono text-[13px] text-muted-foreground">{showing.slice(7)}</h2>

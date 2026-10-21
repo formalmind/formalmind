@@ -8,6 +8,26 @@ import rehypeRaw from "rehype-raw";
 import rehypeSanitize, { defaultSchema } from "rehype-sanitize";
 import type { Schema } from "hast-util-sanitize";
 import { MermaidDiagram } from "@/components/mermaid-diagram";
+import { useHighlightedCode } from "@/hooks/use-highlighted-code";
+
+/** Languages highlight.js lacks: their blocks go through the app's code highlighter (the one the editor uses). */
+const OWN: Record<string, string> = { solidity: "solidity", sol: "solidity", lean: "lean", lean4: "lean" };
+
+function OwnHighlight({ code, language }: { code: string; language: string }) {
+	const lines = useHighlightedCode(code, language);
+	return (
+		<pre>
+			<code>
+				{lines.map((line, i) => (
+					<span key={i} className="block">
+						{line}
+						{"\n"}
+					</span>
+				))}
+			</code>
+		</pre>
+	);
+}
 
 const schema: Schema = {
 	...defaultSchema,
@@ -32,7 +52,7 @@ export function ChatMarkdown({ children, className = "", image }: { children: st
 		<div className={`${PROSE} ${className}`}>
 			<ReactMarkdown
 				remarkPlugins={[remarkGfm, remarkMath]}
-				rehypePlugins={[rehypeRaw, [rehypeSanitize, schema], [rehypeHighlight, { plainText: ["mermaid"] }], rehypeKatex]}
+				rehypePlugins={[rehypeRaw, [rehypeSanitize, schema], [rehypeHighlight, { plainText: ["mermaid", ...Object.keys(OWN)] }], rehypeKatex]}
 				components={{
 					a: ({ node, ...props }) => {
 						void node;
@@ -46,9 +66,12 @@ export function ChatMarkdown({ children, className = "", image }: { children: st
 					pre({ children: content, ...props }) {
 						const child = Children.toArray(content).find(isValidElement);
 						const code = child?.props as { className?: string; children?: React.ReactNode } | undefined;
-						if (code?.className?.split(/\s+/).includes("language-mermaid")) {
-							return <MermaidDiagram chart={String(code.children ?? "").replace(/\n$/, "")} />;
+						const classes = code?.className?.split(/\s+/) ?? [];
+						if (classes.includes("language-mermaid")) {
+							return <MermaidDiagram chart={String(code?.children ?? "").replace(/\n$/, "")} />;
 						}
+						const own = classes.map((c) => OWN[c.replace(/^language-/, "")]).find(Boolean);
+						if (own) return <OwnHighlight code={String(code?.children ?? "").replace(/\n$/, "")} language={own} />;
 						return <pre {...props}>{content}</pre>;
 					},
 				}}
