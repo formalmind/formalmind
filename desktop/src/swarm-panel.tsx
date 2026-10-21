@@ -840,7 +840,7 @@ type Formal = { contract: string; namespace: string; modelLines: number; transla
 
 /** Where a function stands: proved by a finished theorem, modeled in Lean, or left opaque (and why). */
 function fnStatus(f: FormalFn, theorems: FormalTheorem[]) {
-	if (f.why) return { key: "opaque", label: "Opaque", dot: "bg-amber-500", text: "text-amber-700 dark:text-amber-400" } as const;
+	if (f.why) return { key: "opaque", label: "Not modeled", dot: "bg-amber-500", text: "text-amber-700 dark:text-amber-400" } as const;
 	const by = f.theorems.map((i) => theorems[i]);
 	if (by.some((t) => !t.sorry)) return { key: "proved", label: "Proved", dot: "bg-emerald-500", text: "text-emerald-700 dark:text-emerald-400" } as const;
 	if (by.length) return { key: "sorry", label: "Has sorry", dot: "bg-sky-500", text: "text-sky-700 dark:text-sky-400" } as const;
@@ -851,7 +851,7 @@ const COVERAGE_FILTERS = [
 	{ id: "all", label: "All" },
 	{ id: "proved", label: "Proved" },
 	{ id: "modeled", label: "Not proved" },
-	{ id: "opaque", label: "Opaque" },
+	{ id: "opaque", label: "Not modeled" },
 ] as const;
 
 /**
@@ -887,7 +887,7 @@ function CoverageView({ data, scripts, onOpenFile }: { data: Formal; scripts: Sc
 			<div className="flex shrink-0 flex-wrap items-center gap-x-4 gap-y-1 rounded-xl border bg-card px-3 py-2 text-[12px]">
 				<span><span className="font-mono font-medium">{inLean}</span><span className="text-muted-foreground">/{own.length} functions in Lean</span></span>
 				<span><span className="font-mono font-medium text-emerald-700 dark:text-emerald-400">{proved}</span><span className="text-muted-foreground"> proved</span></span>
-				<span><span className="font-mono font-medium text-amber-700 dark:text-amber-400">{own.length - inLean}</span><span className="text-muted-foreground"> opaque</span></span>
+				<span><span className="font-mono font-medium text-amber-700 dark:text-amber-400">{own.length - inLean}</span><span className="text-muted-foreground"> not modeled</span></span>
 				<span className="text-muted-foreground"><span className="font-mono">{data.theorems.length}</span> theorems{data.theorems.some((t) => t.sorry) ? ` · ${data.theorems.filter((t) => t.sorry).length} with sorry` : ""}</span>
 				{/* How much is proved: the share of every listed function (libraries included) with a finished proof. */}
 				<span className="ml-auto inline-flex items-center gap-2 text-[11px] text-muted-foreground" title={`${proved} of ${own.length} functions proved`}>
