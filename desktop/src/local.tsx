@@ -4,7 +4,8 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useLocation, useNavigate, useSearchParams } from "react-router";
 import { invoke } from "@tauri-apps/api/core";
 import { open } from "@tauri-apps/plugin-dialog";
-import { Archive, ArchiveRestore, Plus, X } from "lucide-react";
+import { Archive, ArchiveRestore, FolderSearch, Plus, X } from "lucide-react";
+import { AuditFoldersDialog } from "@/components/audit-folders";
 import { useArchived } from "@/components/folder-menu";
 import { listen } from "@tauri-apps/api/event";
 import { apiBase } from "./api";
@@ -124,6 +125,7 @@ function FolderItem({ path, current, file, archived, onArchive, onRemove }: { pa
 		navigate(`/local?${next.toString()}`);
 	};
 	const [params] = useSearchParams();
+	const [audits, setAudits] = useState(false);
 	return (
 		<TreeFolder
 			name={name(path)}
@@ -132,6 +134,8 @@ function FolderItem({ path, current, file, archived, onArchive, onRemove }: { pa
 			current={current}
 			dim={archived}
 			menu={[
+				{ label: "Audit folders…", icon: FolderSearch, onSelect: () => setAudits(true) },
+				"separator",
 				{ label: archived ? "Unarchive" : "Archive", icon: archived ? ArchiveRestore : Archive, onSelect: () => onArchive(!archived) },
 				"separator",
 				// Only the sidebar forgets it; the folder stays on disk.
@@ -173,6 +177,7 @@ function FolderItem({ path, current, file, archived, onArchive, onRemove }: { pa
 					}}
 				/>
 			) : null}
+			{audits ? <AuditFoldersDialog folder={path} label={name(path)} onClose={() => setAudits(false)} /> : null}
 		</TreeFolder>
 	);
 }

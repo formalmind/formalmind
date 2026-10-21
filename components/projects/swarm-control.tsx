@@ -1,7 +1,8 @@
 import { useState } from "react";
 import { Link } from "react-router";
 import { setVimMode, useVimMode } from "@/components/vim-mode";
-import { Archive, ArchiveRestore, Gauge, Play, Settings, Square, Wallet } from "lucide-react";
+import { Archive, ArchiveRestore, FolderSearch, Gauge, Play, Settings, Square, Wallet } from "lucide-react";
+import { AuditFoldersDialog } from "@/components/audit-folders";
 import { inDesktop, openOnWeb } from "@/lib/open-web";
 import { FolderMenu, type FolderMenuItem } from "@/components/folder-menu";
 import { DropdownMenu, DropdownMenuCheckboxItem, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
@@ -45,7 +46,8 @@ function SwarmItems({ repo, control, label }: { repo: string; control: ReturnTyp
 }
 
 /** A project's ⋯ and right-click menu in the sidebar: stop or resume its swarm, and archive it (or bring it back). */
-export function ProjectContextMenu({ repo, swarm, archived, onArchive, children }: { repo: string; swarm: boolean; archived: boolean; onArchive: (archived: boolean) => void; children: (dots: React.ReactNode) => React.ReactNode }) {
+export function ProjectContextMenu({ repo, swarm, archived, onArchive, auditKey, children }: { repo: string; swarm: boolean; archived: boolean; onArchive: (archived: boolean) => void; auditKey?: string; children: (dots: React.ReactNode) => React.ReactNode }) {
+	const [audits, setAudits] = useState(false);
 	const control = useSwarmControl(repo);
 	const { paused, busy, set } = control;
 	const items: FolderMenuItem[] = [
@@ -57,12 +59,18 @@ export function ProjectContextMenu({ repo, swarm, archived, onArchive, children 
 					"separator" as const,
 				]
 			: []),
+		{ label: "Audit folders…", icon: FolderSearch, onSelect: () => setAudits(true) },
+		"separator",
 		{ label: archived ? "Unarchive" : "Archive", icon: archived ? ArchiveRestore : Archive, onSelect: () => onArchive(!archived) },
 	];
 	return (
-		<FolderMenu items={items} onOpen={swarm ? () => void control.load() : undefined}>
-			{children}
-		</FolderMenu>
+		<>
+			<FolderMenu items={items} onOpen={swarm ? () => void control.load() : undefined}>
+				{children}
+			</FolderMenu>
+			{/* The audit folders are kept by the folder the Bugs tab reads: the repository on the web, its clone in the Mac app. */}
+			{audits ? <AuditFoldersDialog folder={auditKey ?? repo} label={repo} onClose={() => setAudits(false)} /> : null}
+		</>
 	);
 }
 
