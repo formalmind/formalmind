@@ -4,6 +4,10 @@ version = "0.1.0"
 edition = "2021"
 description = "Reads a Solidity protocol through solc's AST: the contract graph, its scope, units of work and slices for agents"
 license = "MIT"
+repository = "https://github.com/formalmind/formalmind"
+homepage = "https://formal.team"
+keywords = ["solidity", "solc", "ast", "audit"]
+categories = ["development-tools"]
 
 [dependencies]
 anyhow = "1"

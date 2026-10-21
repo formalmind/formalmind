@@ -4,13 +4,18 @@ version = "0.1.0"
 edition = "2021"
 description = "A local Solidity debugger: solc source maps to every opcode, revm to run it, storage decoded by the storage layout"
 license = "MIT"
+repository = "https://github.com/formalmind/formalmind"
+homepage = "https://formal.team"
+readme = "README.md"
+keywords = ["solidity", "debugger", "evm", "revm", "tui"]
+categories = ["development-tools::debugging", "command-line-utilities"]
 
 [dependencies]
 alloy-dyn-abi = "1"
 anyhow = "1"
 clap = { version = "4", features = ["derive"] }
 k256 = { version = "0.13", features = ["ecdsa"] }
-formal-ast = { path = "../formal-ast" }
+formal-ast = { version = "0.1.0", path = "../formal-ast" }
 ratatui = "0.30"
 revm = { version = "43", default-features = false, features = ["std"] }
 opaline = { version = "0.4.1", default-features = false, features = ["builtin-themes"] }
