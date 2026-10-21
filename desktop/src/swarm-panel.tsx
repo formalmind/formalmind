@@ -575,8 +575,9 @@ function BugsView({ folder, files, invoke, bugs, openBug, setOpenBug, withPoc, o
 				<ul className="space-y-1">
 					{reports.map((r) => (
 						<li key={r}>
-							<button type="button" onClick={() => setOpenBug(`report:${r}`)} title={r} className={`flex w-full items-center gap-2 rounded-xl border px-3 py-2 text-left transition-colors ${showing === `report:${r}` ? "bg-muted" : "border-transparent hover:bg-muted/60"}`}>
-								<FileCode2 className="size-3.5 shrink-0 text-muted-foreground" />
+							<button type="button" onClick={() => setOpenBug(`report:${r}`)} title={r} className={`flex w-full items-start gap-2 rounded-xl border px-3 py-2 text-left transition-colors ${showing === `report:${r}` ? "bg-muted" : "border-transparent hover:bg-muted/60"}`}>
+								{/* Level with the title line, not centred on the two lines. */}
+								<FileCode2 className="mt-[3px] size-3.5 shrink-0 text-muted-foreground" />
 								<span className="min-w-0">
 									<span className="block truncate text-[13px] font-medium">{r.split("/").pop()?.replace(/\.(md|markdown|txt|pdf)$/i, "").replace(/[_-]+/g, " ")}</span>
 									<span className="block truncate font-mono text-[10px] text-muted-foreground">{r}</span>
