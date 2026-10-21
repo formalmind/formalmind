@@ -97,7 +97,7 @@ export function SessionScreen() {
 	const session = folderState?.sessions.find((s) => s.run === run);
 	return (
 		<div className="flex h-dvh flex-col bg-background">
-			<FloatingBar back="/mac" title={folderState?.name ?? folder.split("/").pop()} right={<ChatButtons />} />
+			<FloatingBar back="/mac" right={<ChatButtons />} />
 			<SessionChat folder={folder} run={run} fullScreen header={session?.title || (run === "swarm" ? "Swarm" : run)} />
 		</div>
 	);

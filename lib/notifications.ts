@@ -103,6 +103,14 @@ export function markNotificationRead(id: string | number) {
 	emit();
 }
 
+/** Back to unread (the bell counts it again). */
+export function markNotificationUnread(id: string | number) {
+	const idx = items.findIndex((n) => n.id === id);
+	if (idx === -1 || !items[idx].read) return;
+	items[idx] = { ...items[idx], read: false };
+	emit();
+}
+
 export function useNotifications(): StoreNotification[] {
 	return useSyncExternalStore(
 		(cb) => {

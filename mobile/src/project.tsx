@@ -154,7 +154,7 @@ export function ProjectScreen() {
 	return (
 		<div className="relative flex h-dvh flex-col bg-background">
 			{/* Chat is full screen, its controls floating over it; the other tabs keep the bar. */}
-			{tab === "chat" ? <FloatingBar back="/" title={name} right={<ChatButtons />} /> : <TopBar back={atRoot ? "/" : true} title={name} sub={owner} right={<BellLink />} />}
+			{tab === "chat" ? <FloatingBar back="/" right={<ChatButtons />} /> : <TopBar back={atRoot ? "/" : true} title={name} sub={owner} right={<BellLink />} />}
 			{error ? <p className="m-4 rounded-xl border border-red-500/30 bg-red-500/5 p-3 text-sm text-red-700 dark:text-red-400">Couldn&apos;t clone {repo}: {error}</p> : null}
 			<main className="flex min-h-0 flex-1 flex-col">
 				{tab === "code" ? <CodeTab files={files} bridge={bridge} dir={dir} file={file} open={(n) => go(n)} /> : null}

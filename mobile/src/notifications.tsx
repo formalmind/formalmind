@@ -1,6 +1,7 @@
 import { useNavigate } from "react-router";
 import { Bell } from "lucide-react";
-import { dismissNotification, markNotificationRead, useNotifications, type StoreNotification } from "@/lib/notifications";
+import { useState } from "react";
+import { dismissNotification, markNotificationRead, markNotificationUnread, useNotifications, type StoreNotification } from "@/lib/notifications";
 import { TopBar } from "./bar";
 
 /** A notice's link: its action event is "fm:go:<path>" (./relay.ts), the screen it is about. */
@@ -33,80 +34,112 @@ export function BellLink() {
 	);
 }
 
+type Filter = "unread" | "read" | "all";
+const FILTERS: { id: Filter; label: string }[] = [
+	{ id: "unread", label: "Unread" },
+	{ id: "read", label: "Read" },
+	{ id: "all", label: "History" },
+];
+
+const day = (ms: number) => {
+	const d = new Date(ms);
+	const today = new Date();
+	const yesterday = new Date(Date.now() - 86_400_000);
+	if (d.toDateString() === today.toDateString()) return "Today";
+	if (d.toDateString() === yesterday.toDateString()) return "Yesterday";
+	return d.toLocaleDateString(undefined, { weekday: "long", month: "short", day: "numeric" });
+};
+
+/** One notice: unread ones in their colour and bold with an Unread tag; read ones quiet. Tap opens it; the button flips it. */
 function Row({ n }: { n: StoreNotification }) {
 	const navigate = useNavigate();
 	const path = pathOf(n);
 	return (
-		<li>
-			<button
-				type="button"
-				onClick={() => {
-					markNotificationRead(n.id);
-					if (path) navigate(path);
-				}}
-				className="flex w-full items-start gap-3 px-3 py-3 text-left active:bg-muted"
-			>
-				<span className="min-w-0 flex-1">
-					<span className={`block text-[15px] font-medium ${n.read ? "text-foreground/80" : TONE[n.variant]}`}>{n.title}</span>
-					{n.description ? <span className="mt-0.5 line-clamp-2 block text-[13px] text-muted-foreground">{n.description}</span> : null}
+		<li className={n.read ? "" : "bg-foreground/[0.035]"}>
+			<div className="flex items-start gap-3 px-3 py-3">
+				<button
+					type="button"
+					onClick={() => {
+						markNotificationRead(n.id);
+						if (path) navigate(path);
+					}}
+					className="min-w-0 flex-1 text-left active:opacity-60"
+				>
+					<span className={`block text-[15px] ${n.read ? "text-muted-foreground" : `font-semibold ${TONE[n.variant]}`}`}>{n.title}</span>
+					{n.description ? <span className={`mt-0.5 line-clamp-2 block text-[13px] ${n.read ? "text-muted-foreground/70" : "text-muted-foreground"}`}>{n.description}</span> : null}
+				</button>
+				<span className="flex shrink-0 flex-col items-end gap-1.5">
+					<span className="text-[12px] text-muted-foreground">{ago(n.createdAt)}</span>
+					<button
+						type="button"
+						onClick={() => (n.read ? markNotificationUnread(n.id) : markNotificationRead(n.id))}
+						className={`rounded-full px-2 py-0.5 text-[11px] font-medium ${n.read ? "text-muted-foreground active:bg-muted" : "bg-foreground text-background"}`}
+					>
+						{n.read ? "Mark unread" : "Unread"}
+					</button>
 				</span>
-				<span className="shrink-0 text-[12px] text-muted-foreground">{ago(n.createdAt)}</span>
-			</button>
+			</div>
 		</li>
 	);
 }
 
-function Frame({ label, aside, children }: { label: string; aside?: React.ReactNode; children: React.ReactNode }) {
-	return (
-		<section className="rounded-2xl border bg-muted/60 p-1.5">
-			<header className="flex h-8 items-center px-2.5">
-				<h2 className="font-mono text-[11px] font-medium uppercase tracking-wider text-muted-foreground">{label}</h2>
-				{aside ? <span className="ml-auto">{aside}</span> : null}
-			</header>
-			<ul className="shadow-card divide-y overflow-hidden rounded-xl border bg-card">{children}</ul>
-		</section>
-	);
-}
-
-/** Notifications: the unread ones, then the earlier ones; one opens what it's about and counts as read. */
+/** Notifications: Unread, Read, or the whole History by day (the floating filter); one opens what it's about. */
 export function NotificationsScreen() {
 	const all = useNotifications();
-	const unread = all.filter((n) => !n.read);
-	const earlier = all.filter((n) => n.read);
+	const unreadCount = all.filter((n) => !n.read).length;
+	const [filter, setFilter] = useState<Filter>(() => (unreadCount ? "unread" : "all"));
+	const shown = all.filter((n) => (filter === "unread" ? !n.read : filter === "read" ? n.read : true));
+	const days = shown.reduce<{ day: string; items: StoreNotification[] }[]>((out, n) => {
+		const d = day(n.createdAt);
+		if (out.at(-1)?.day === d) out.at(-1)!.items.push(n);
+		else out.push({ day: d, items: [n] });
+		return out;
+	}, []);
+	const empty = { unread: "No unread notifications.", read: "Nothing read yet.", all: "Nothing yet. A proof done, a bug filed or a budget reached shows here." }[filter];
 	return (
 		<div className="min-h-dvh bg-background">
-			<TopBar back={true} title="Notifications" sub={unread.length ? `${unread.length} unread` : "All read"} />
-			<main className="fm-safe-bottom space-y-5 px-4 py-4">
-				{all.length === 0 ? <p className="pt-10 text-center text-[15px] text-muted-foreground">Nothing yet. A proof done, a bug filed or a budget reached shows here.</p> : null}
-				{unread.length ? (
-					<Frame
-						label="Unread"
-						aside={
-							<button type="button" onClick={() => unread.forEach((n) => markNotificationRead(n.id))} className="text-[13px] text-muted-foreground active:text-foreground">
-								Mark all read
-							</button>
-						}
-					>
-						{unread.map((n) => (
-							<Row key={n.id} n={n} />
-						))}
-					</Frame>
-				) : null}
-				{earlier.length ? (
-					<Frame
-						label="Earlier"
-						aside={
-							<button type="button" onClick={() => earlier.forEach((n) => dismissNotification(n.id))} className="text-[13px] text-muted-foreground active:text-foreground">
-								Clear
-							</button>
-						}
-					>
-						{earlier.map((n) => (
-							<Row key={n.id} n={n} />
-						))}
-					</Frame>
-				) : null}
+			<TopBar
+				back={true}
+				title="Notifications"
+				sub={unreadCount ? `${unreadCount} unread` : "All read"}
+				right={
+					filter === "unread" && unreadCount ? (
+						<button type="button" onClick={() => all.forEach((n) => !n.read && markNotificationRead(n.id))} className="px-2 text-[14px] font-medium text-sky-600 dark:text-sky-400">
+							Mark all read
+						</button>
+					) : filter !== "unread" && shown.length ? (
+						<button type="button" onClick={() => shown.filter((n) => n.read).forEach((n) => dismissNotification(n.id))} className="px-2 text-[14px] text-muted-foreground">
+							Clear read
+						</button>
+					) : null
+				}
+			/>
+			<main className="fm-under-tabs space-y-5 px-4 py-4">
+				{shown.length === 0 ? <p className="pt-10 text-center text-[15px] text-muted-foreground">{empty}</p> : null}
+				{days.map((g) => (
+					<section key={g.day} className="rounded-2xl border bg-muted/60 p-1.5">
+						<header className="flex h-8 items-center px-2.5">
+							<h2 className="font-mono text-[11px] font-medium uppercase tracking-wider text-muted-foreground">{g.day}</h2>
+							<span className="ml-auto text-[12px] text-muted-foreground">{g.items.length}</span>
+						</header>
+						<ul className="shadow-card divide-y overflow-hidden rounded-xl border bg-card">
+							{g.items.map((n) => (
+								<Row key={n.id} n={n} />
+							))}
+						</ul>
+					</section>
+				))}
 			</main>
+			<nav aria-label="Show" className="fm-safe-bottom pointer-events-none fixed inset-x-0 bottom-0 z-30 flex justify-center">
+				<div className="fm-glass pointer-events-auto mb-1 flex items-center rounded-full p-1">
+					{FILTERS.map((f) => (
+						<button key={f.id} type="button" onClick={() => setFilter(f.id)} aria-pressed={filter === f.id} className={`h-11 rounded-full px-5 text-[14px] font-medium ${filter === f.id ? "bg-foreground/[0.08] text-foreground" : "text-muted-foreground"}`}>
+							{f.label}
+							{f.id === "unread" && unreadCount ? <span className="ml-1.5 rounded-full bg-red-600 px-1.5 py-px text-[11px] font-semibold text-white">{unreadCount}</span> : null}
+						</button>
+					))}
+				</div>
+			</nav>
 		</div>
 	);
 }
