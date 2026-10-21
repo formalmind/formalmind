@@ -8,7 +8,7 @@ import { LogoMark } from "@/components/logo";
 import { BellLink } from "./notifications";
 import { projectPath, useProjects } from "@/components/projects/use-projects";
 import type { SessionData } from "@/lib/session";
-import { TopBar } from "./bar";
+import { Skeleton, TopBar } from "./bar";
 import { macOnline, useMac } from "./relay";
 import { lastProject, TabBar } from "./tabs";
 
@@ -38,7 +38,7 @@ function MacCard() {
 				<span className="min-w-0 flex-1">
 					<span className="block font-medium">{running ? `${running} session${running === 1 ? "" : "s"} running` : "Nothing running"}</span>
 					<span className="block truncate text-[13px] text-muted-foreground">
-						{!m.loaded ? "Connecting…" : online ? "Follow and steer it from here" : m.state ? "Open Formal Mind on your Mac" : "Sign in to the Mac app to connect it"}
+						{!m.loaded ? <Skeleton className="mt-1 h-3 w-40" /> : online ? "Follow and steer it from here" : m.state ? "Open Formal Mind on your Mac" : "Sign in to the Mac app to connect it"}
 					</span>
 				</span>
 				<ChevronRight className="size-4 text-muted-foreground" />

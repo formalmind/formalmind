@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
-import { ChevronLeft, FileCode2, Loader2 } from "lucide-react";
+import { ChevronLeft, FileCode2 } from "lucide-react";
+import { ShelvesSkeleton } from "./bar";
 import { readEntryPoints, setMainEntryPoint } from "@/lib/entry-points";
 import { FileView, fnStatus, type Bridge, type Formal, type FormalFn, type FormalTheorem } from "@/desktop/src/swarm-panel";
 
@@ -177,8 +178,7 @@ export function ProofsExplorer({ repo, sources, invoke, onOpenFile }: { repo: st
 				))}
 			</div>
 
-			{!sources ? <p className="flex items-center gap-2 px-4 text-[14px] text-muted-foreground"><Loader2 className="size-4 animate-spin" /> Cloning the repository…</p> : null}
-			{sources && !data && !error ? <p className="flex items-center gap-2 px-4 text-[14px] text-muted-foreground"><Loader2 className="size-4 animate-spin" /> Building the Lean model from the AST…</p> : null}
+			{!data && !error ? <ShelvesSkeleton /> : null}
 			{error ? <p className="mx-4 whitespace-pre-wrap rounded-2xl border bg-card p-3 font-mono text-[12px] text-red-600">{error}</p> : null}
 
 			{data ? (

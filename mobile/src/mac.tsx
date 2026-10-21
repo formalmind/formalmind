@@ -1,11 +1,11 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router";
 import { useNotifications } from "@/lib/notifications";
-import { ArrowUp, Bell, ChevronRight, Folder, Laptop, Loader2, Play, Settings, Square } from "lucide-react";
+import { ArrowUp, Bell, ChevronRight, Folder, Laptop, Play, Settings, Square } from "lucide-react";
 import { BellLink } from "./notifications";
 import { Message, MessageContent } from "@/components/ui/message";
 import { AgentMessage, blocks, Steps, type Ev } from "@/desktop/src/swarm-panel";
-import { CenterState, FloatingBar, GlassDivider, GlassSegment, TopBar } from "./bar";
+import { CenterState, FloatingBar, GlassDivider, GlassSegment, Skeleton, TopBar } from "./bar";
 import { hasHistory, macOnline, send, startBudget, useMac, useSession } from "./relay";
 
 const sessionHref = (folder: string, run: string) => `/mac/session?${new URLSearchParams({ folder, run })}`;
@@ -34,10 +34,27 @@ export function ChatButtons() {
 
 /** Why there's nothing from your Mac, centered: still connecting, never connected, offline, or no folders. Null when
  * there is something to show. */
+/** A conversation's shape while it loads: agent lines on the left, one of yours on the right. */
+function ChatSkeleton() {
+	return (
+		<div aria-label="Loading" className="w-full space-y-6 pt-2">
+			{[0, 1, 2].map((i) => (
+				<div key={i} className="space-y-2.5">
+					<Skeleton className="h-3 w-20" />
+					<Skeleton className="h-4 w-11/12" />
+					<Skeleton className="h-4 w-4/5" />
+					<Skeleton className="h-4 w-2/3" />
+					{i === 1 ? <Skeleton className="ml-auto mt-5 h-12 w-3/5 rounded-2xl" /> : null}
+				</div>
+			))}
+		</div>
+	);
+}
+
 export function MacState() {
 	const m = useMac();
 	const icon = <Laptop className="size-7" strokeWidth={1.6} />;
-	if (!m.loaded) return <CenterState icon={icon} muted="Reaching your Mac." strong="One moment." />;
+	if (!m.loaded) return <ChatSkeleton />;
 	if (!m.state)
 		return (
 			<CenterState
@@ -198,7 +215,7 @@ export function SessionChat({ folder, run, aboveTabs, header, fullScreen }: { fo
 			>
 				{/* In the scroll, so floating controls never cover it. */}
 				<Offline flush />
-				{chat.length === 0 ? (
+				{chat.length === 0 && online && asked.current && !hasHistory(folder, run) && resumable ? <ChatSkeleton /> : chat.length === 0 ? (
 					<div className="flex min-h-[55dvh] flex-col">
 						{online ? (
 							<CenterState icon={<Laptop className="size-7" strokeWidth={1.6} />} muted={resumable ? "This session is paused." : "A new session."} strong={resumable ? "Resume it below." : "Tell it what to focus on."} body="It runs on your Mac; what its agents say shows here as they work." />
@@ -226,9 +243,7 @@ export function SessionChat({ folder, run, aboveTabs, header, fullScreen }: { fo
 					</div>
 				))}
 				{working ? (
-					<p className="flex items-center gap-2 text-[14px] text-muted-foreground">
-						<Loader2 className="size-3.5 animate-spin" /> {working.text}
-					</p>
+					<p className="fm-shimmer-text text-[14px]">{working.text}</p>
 				) : null}
 				{error ? <p className="rounded-2xl bg-red-500/10 p-3 text-[14px] text-red-700 dark:text-red-400">{error}</p> : null}
 			</div>
@@ -259,9 +274,7 @@ export function SessionChat({ folder, run, aboveTabs, header, fullScreen }: { fo
 							aria-label={action === "send" ? "Send" : action === "stop" ? "Stop the swarm" : resumable ? "Resume the swarm" : "Start the swarm"}
 							className={`inline-flex h-8 shrink-0 items-center justify-center gap-1.5 rounded-full bg-foreground text-[13px] font-medium text-background disabled:opacity-40 ${action === "start" ? "px-3.5" : "w-8"}`}
 						>
-							{busy ? (
-								<Loader2 className="size-4 animate-spin" />
-							) : action === "send" ? (
+							{action === "send" ? (
 								<ArrowUp className="size-4" />
 							) : action === "stop" ? (
 								<Square className="size-3 fill-current" />

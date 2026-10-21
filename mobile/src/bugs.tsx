@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { Check, ChevronLeft, Copy, FileCode2, FileText } from "lucide-react";
 import { ChatMarkdown } from "@/components/chat-markdown";
+import { ShelvesSkeleton } from "./bar";
 import { useReportDirs } from "@/lib/report-dirs";
 import { findingSection, SEVERITY, STATUS, useAuditFindings, type AuditFinding, type Bridge } from "@/desktop/src/swarm-panel";
 
@@ -170,7 +171,7 @@ export function BugsExplorer({ repo, files, invoke, onOpenFile }: { repo: string
 						</button>
 					))}
 			</div>
-			{!files ? <p className="px-4 text-[14px] text-muted-foreground">Cloning the repository…</p> : null}
+			{!files ? <ShelvesSkeleton /> : null}
 			{files && !findings.length && !reports.length ? <p className="px-4 text-[15px] text-muted-foreground">No audit reports or findings in this repository yet. The swarm files them here, each with a proof of concept.</p> : null}
 			{groups.map((g) => (
 				<Shelf key={g.report} label={reportName(g.report)} aside={g.items.length}>

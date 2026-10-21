@@ -69,3 +69,65 @@ export function CenterState({ icon, muted, strong, body, children }: { icon: Rea
 		</div>
 	);
 }
+
+/** A placeholder in the shape of what's coming, instead of a spinner or "Loading…". */
+export function Skeleton({ className = "" }: { className?: string }) {
+	return <span aria-hidden className={`fm-skeleton block rounded-lg ${className}`} />;
+}
+
+/** Rows of a list while it loads (Code's folders and files). */
+export function ListSkeleton({ rows = 8 }: { rows?: number }) {
+	return (
+		<ul aria-label="Loading" className="divide-y">
+			{Array.from({ length: rows }, (_, i) => (
+				<li key={i} className="flex items-center gap-3 px-4 py-3.5">
+					<Skeleton className="size-4 shrink-0" />
+					<Skeleton className={`h-3.5 ${["w-1/3", "w-1/2", "w-2/5", "w-3/5", "w-1/4"][i % 5]}`} />
+				</li>
+			))}
+		</ul>
+	);
+}
+
+/** Lines of code while a file loads. */
+export function CodeSkeleton({ lines = 14 }: { lines?: number }) {
+	const widths = ["w-1/3", "w-3/4", "w-1/2", "w-5/6", "w-2/3", "w-1/4", "w-3/5"];
+	return (
+		<div aria-label="Loading" className="space-y-2.5 p-4">
+			{Array.from({ length: lines }, (_, i) => (
+				<Skeleton key={i} className={`h-3 ${widths[i % widths.length]}`} />
+			))}
+		</div>
+	);
+}
+
+/** A summary card and shelves of cards while Proofs or Bugs builds. */
+export function ShelvesSkeleton() {
+	return (
+		<div aria-label="Loading" className="space-y-6">
+			<div className="mx-4 rounded-2xl border bg-muted/60 p-1.5">
+				<Skeleton className="m-2.5 h-3 w-24" />
+				<div className="rounded-xl border bg-card p-4">
+					<Skeleton className="h-10 w-24" />
+					<Skeleton className="mt-4 h-2 w-full" />
+					<Skeleton className="mt-4 h-6 w-2/3" />
+				</div>
+			</div>
+			{[0, 1].map((s) => (
+				<div key={s} className="space-y-2">
+					<Skeleton className="mx-4 h-5 w-40" />
+					<div className="flex gap-3 overflow-hidden px-4">
+						{[0, 1].map((c) => (
+							<div key={c} className="h-[168px] w-[78%] max-w-[300px] shrink-0 rounded-2xl border bg-card p-3.5">
+								<Skeleton className="h-3 w-16" />
+								<Skeleton className="mt-3 h-4 w-3/4" />
+								<Skeleton className="mt-2 h-4 w-1/2" />
+								<Skeleton className="mt-6 h-12 w-full" />
+							</div>
+						))}
+					</div>
+				</div>
+			))}
+		</div>
+	);
+}

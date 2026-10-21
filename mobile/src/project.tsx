@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState, useSyncExternalStore } from "react";
 import { createPortal } from "react-dom";
 import { useNavigate, useParams, useSearchParams } from "react-router";
-import { Check, ChevronDown, ChevronRight, FileCode2, Folder, History, Laptop, Loader2, Plus, Settings } from "lucide-react";
+import { Check, ChevronDown, ChevronRight, FileCode2, Folder, History, Laptop, Plus, Settings } from "lucide-react";
 import { useAuth } from "@/components/auth-context";
 import { MarkGithubIcon } from "@primer/octicons-react";
 import { makeGitBridge } from "@/components/projects/git-bridge";
@@ -12,7 +12,7 @@ import { cachedTree, syncRepo } from "@/lib/browser-git";
 import { FileView } from "@/desktop/src/swarm-panel";
 import { ProofsExplorer } from "./proofs";
 import { BugsExplorer } from "./bugs";
-import { FloatingBar, TopBar } from "./bar";
+import { CodeSkeleton, FloatingBar, ListSkeleton, TopBar } from "./bar";
 import { SlideDrawer } from "./drawer";
 import { ChatButtons, MacState, SessionChat } from "./mac";
 import { macOnline, useMac } from "./relay";
@@ -62,7 +62,7 @@ function CodeTab({ files, bridge, dir, file, open }: { files: string[] | null; b
 					<span className="truncate font-mono text-[12px]">{file}</span>
 				</div>
 				{!text ? (
-					<p className="flex items-center gap-2 p-4 text-sm text-muted-foreground"><Loader2 className="size-4 animate-spin" /> Reading…</p>
+					<CodeSkeleton />
 				) : "error" in text ? (
 					<p className="p-4 text-sm text-red-600">{text.error}</p>
 				) : /\.(md|markdown)$/i.test(file) ? (
@@ -73,7 +73,7 @@ function CodeTab({ files, bridge, dir, file, open }: { files: string[] | null; b
 			</div>
 		);
 	}
-	if (!files) return <p className="flex items-center gap-2 p-4 text-sm text-muted-foreground"><Loader2 className="size-4 animate-spin" /> Cloning the repository…</p>;
+	if (!files) return <ListSkeleton />;
 	const { dirs, files: here } = entries(files, dir);
 	const name = (p: string) => p.split("/").pop();
 	return (
@@ -161,7 +161,7 @@ export function ProjectScreen() {
 			{tab === "chat" ? (
 				<FloatingBar back="/" left={<History className="size-[22px]" />} onLeft={() => setHistory(true)} leftLabel="Chat history" right={<ChatButtons />} />
 			) : (
-				<TopBar back={atRoot ? "/" : true} title={<ProjectSwitcher repo={repo} tab={tab} />} sub={owner} right={<BellLink />} />
+				<TopBar back={atRoot ? "/" : true} title={<ProjectSwitcher repo={repo} tab={tab} />} right={<BellLink />} />
 			)}
 			{error ? <p className="m-4 rounded-xl border border-red-500/30 bg-red-500/5 p-3 text-sm text-red-700 dark:text-red-400">Couldn&apos;t clone {repo}: {error}</p> : null}
 			<main className="flex min-h-0 flex-1 flex-col">
@@ -367,7 +367,10 @@ function ProjectSwitcher({ repo, tab }: { repo: string; tab: Tab }) {
 	return (
 		<>
 			<button type="button" onClick={() => setOpen((o) => !o)} aria-expanded={open} className="inline-flex max-w-full items-center gap-1 active:opacity-60">
-				<span className="truncate">{repo.split("/")[1]}</span>
+				<span className="truncate">
+					<span className="font-light text-muted-foreground">{repo.split("/")[0]}/</span>
+					<span className="font-semibold text-foreground">{repo.split("/")[1]}</span>
+				</span>
 				<ChevronDown className={`size-4 shrink-0 text-muted-foreground transition-transform ${open ? "rotate-180" : ""}`} />
 			</button>
 			{/* On the page itself: the bar's blur would otherwise hold the fixed menu inside it. */}
@@ -388,9 +391,9 @@ function ProjectSwitcher({ repo, tab }: { repo: string; tab: Tab }) {
 										className="flex w-full items-center gap-3 px-3 py-3 text-left text-[15px] font-normal active:bg-muted"
 									>
 										<MarkGithubIcon size={16} className="shrink-0 text-muted-foreground" />
-										<span className="min-w-0 flex-1">
-											<span className="block truncate font-medium">{p.repo.split("/")[1]}</span>
-											<span className="block truncate text-[12px] text-muted-foreground">{p.repo.split("/")[0]}</span>
+										<span className="min-w-0 flex-1 truncate">
+											<span className="font-light text-muted-foreground">{p.repo.split("/")[0]}/</span>
+											<span className="font-semibold text-foreground">{p.repo.split("/")[1]}</span>
 										</span>
 										{p.repo === repo ? <Check className="size-4 text-foreground" /> : null}
 									</button>
