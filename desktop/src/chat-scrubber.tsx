@@ -1,17 +1,22 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 
 export type ScrubItem = { label: string; text: string };
 
+/** The tallest the rail gets, and the closest its ticks sit (a longer chat shares a tick between messages). */
+const MAX_HEIGHT = 320;
+const MIN_STEP = 3;
+
 /**
- * A rail of ticks along the chat's left edge, one per message: the one in view is lit, ticks near the pointer grow,
+ * A rail of ticks along the chat's left edge: the one for the message in view is lit, ticks near the pointer grow,
  * hovering shows a preview of that message and a click scrolls to it. The messages are the scroller's children
- * marked `data-msg`, in order.
+ * marked `data-msg`, in order. The rail sits centred on the message list, at most MAX_HEIGHT tall; when the chat has
+ * more messages than fit there, each tick stands for a run of them (its first is the one previewed and jumped to).
  */
 export function ChatScrubber({ scroller, items }: { scroller: React.RefObject<HTMLDivElement | null>; items: ScrubItem[] }) {
-	const rail = useRef<HTMLDivElement>(null);
 	const [active, setActive] = useState(0);
 	const [hover, setHover] = useState<number | null>(null);
-	const [height, setHeight] = useState(0);
+	// Where the message list is, relative to the rail's positioned parent.
+	const [area, setArea] = useState({ top: 0, height: 0 });
 
 	const nodes = () => [...(scroller.current?.querySelectorAll<HTMLElement>(":scope > [data-msg]") ?? [])];
 
@@ -35,54 +40,62 @@ export function ChatScrubber({ scroller, items }: { scroller: React.RefObject<HT
 		// eslint-disable-next-line react-hooks/exhaustive-deps
 	}, [scroller, items.length]);
 
-	// The rail's height, measured once it is on the page (it isn't while there are fewer than two messages).
+	// The message list's box, measured once it is on the page (the rail isn't while there are fewer than two messages).
 	const on = items.length >= 2;
 	useEffect(() => {
-		const r = rail.current;
-		if (!r) return;
-		setHeight(r.clientHeight);
-		const ro = new ResizeObserver(() => setHeight(r.clientHeight));
-		ro.observe(r);
-		return () => ro.disconnect();
-	}, [on]);
-
-	if (!on) return null;
-	// Tightly spaced and centred on the chat's height; a very long chat packs them closer (never under 3px apart).
-	const step = Math.min(6, Math.max(3, (height - 32) / (items.length - 1)));
-	const start = Math.max(16, (height - step * (items.length - 1)) / 2);
-	const at = (y: number) => Math.min(items.length - 1, Math.max(0, Math.round((y - start) / step)));
-	const go = (i: number) => {
-		const n = nodes()[i];
 		const el = scroller.current;
-		if (n && el) el.scrollTo({ top: n.offsetTop - 8, behavior: "smooth" });
+		const parent = el?.offsetParent as HTMLElement | null;
+		if (!el || !parent) return;
+		const measure = () => setArea({ top: el.getBoundingClientRect().top - parent.getBoundingClientRect().top, height: el.clientHeight });
+		measure();
+		const ro = new ResizeObserver(measure);
+		ro.observe(el);
+		ro.observe(parent);
+		return () => ro.disconnect();
+	}, [scroller, on]);
+
+	if (!on || area.height <= 0) return null;
+	const n = items.length;
+	const band = Math.max(0, Math.min(MAX_HEIGHT, area.height - 32));
+	const ticks = Math.max(2, Math.min(n, Math.floor(band / MIN_STEP) + 1));
+	const step = Math.min(6, band / (ticks - 1));
+	const height = step * (ticks - 1);
+	const top = area.top + (area.height - height) / 2;
+	// Tick k stands for messages first(k)…first(k + 1) - 1.
+	const first = (k: number) => Math.floor((k * n) / ticks);
+	const tickOf = (i: number) => Math.min(ticks - 1, Math.floor((i * ticks) / n));
+	const at = (y: number) => Math.min(ticks - 1, Math.max(0, Math.round(y / step)));
+	const go = (k: number) => {
+		const node = nodes()[first(k)];
+		const el = scroller.current;
+		if (node && el) el.scrollTo({ top: node.offsetTop - 8, behavior: "smooth" });
 	};
-	const shown = hover !== null ? items[hover] : null;
+	const lit = tickOf(active);
+	const shown = hover !== null ? items[first(hover)] : null;
 
 	return (
 		<div
-			ref={rail}
-			className="absolute inset-y-0 left-0 z-10 w-5 cursor-pointer"
-			onMouseMove={(e) => setHover(at(e.clientY - e.currentTarget.getBoundingClientRect().top))}
+			className="absolute left-0 z-10 w-5 cursor-pointer"
+			// A few pixels of slack above and below the ticks, so the end ones are easy to reach.
+			style={{ top: top - 6, height: height + 12 }}
+			onMouseMove={(e) => setHover(at(e.clientY - e.currentTarget.getBoundingClientRect().top - 6))}
 			onMouseLeave={() => setHover(null)}
-			onClick={(e) => go(at(e.clientY - e.currentTarget.getBoundingClientRect().top))}
+			onClick={(e) => go(at(e.clientY - e.currentTarget.getBoundingClientRect().top - 6))}
 			aria-hidden
 		>
-			{items.map((_, i) => {
-				const near = hover === null ? 99 : Math.abs(hover - i);
-				const width = i === active ? 14 : 6 + Math.max(0, 3 - near) * 3;
+			{Array.from({ length: ticks }, (_, k) => {
+				const near = hover === null ? 99 : Math.abs(hover - k);
+				const width = k === lit ? 14 : 6 + Math.max(0, 3 - near) * 3;
 				return (
 					<span
-						key={i}
-						className={`absolute left-1 h-px rounded-full transition-[width,background-color] duration-150 ${i === active ? "bg-foreground" : near === 0 ? "bg-foreground/70" : "bg-muted-foreground/40"}`}
-						style={{ top: start + i * step, width }}
+						key={k}
+						className={`absolute left-1 h-px rounded-full transition-[width,background-color] duration-150 ${k === lit ? "bg-foreground" : near === 0 ? "bg-foreground/70" : "bg-muted-foreground/40"}`}
+						style={{ top: 6 + k * step, width }}
 					/>
 				);
 			})}
 			{shown && hover !== null ? (
-				<div
-					className="pointer-events-none absolute left-6 z-20 w-64 -translate-y-1/2 rounded-xl border bg-popover p-2.5 text-[12px] shadow-pop"
-					style={{ top: Math.min(Math.max(start + hover * step, 40), height - 40) }}
-				>
+				<div className="pointer-events-none absolute left-6 z-20 w-64 -translate-y-1/2 rounded-xl border bg-popover p-2.5 text-[12px] shadow-pop" style={{ top: Math.min(Math.max(6 + hover * step, area.top + 40 - (top - 6)), area.top + area.height - 40 - (top - 6)) }}>
 					<p className="mb-1 truncate text-[11px] font-medium text-muted-foreground">{shown.label}</p>
 					<p className="line-clamp-3 text-popover-foreground">{shown.text}</p>
 				</div>
