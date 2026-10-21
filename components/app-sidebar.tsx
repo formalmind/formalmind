@@ -16,7 +16,6 @@ import {
 	SidebarMenu,
 	SidebarMenuButton,
 	SidebarMenuItem,
-	SidebarTrigger,
 	useSidebar,
 } from "@/components/ui/sidebar"
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible"
@@ -278,7 +277,6 @@ export function AppSidebar({ extra, repoSource, ...props }: React.ComponentProps
 	const location = useLocation()
 	const navigate = useNavigate()
 	const pathname = location.pathname
-	const inApp = typeof window !== "undefined" && "__TAURI_INTERNALS__" in window
 	// On localhost, the demo folder: a real repository's files when its data has been built.
 	const [demos, setDemos] = useState<DemoData[]>([])
 	const [addHelp, setAddHelp] = useState(false)
@@ -305,8 +303,7 @@ export function AppSidebar({ extra, repoSource, ...props }: React.ComponentProps
 						Formal Mind.
 					</span>
 				</Link>
-				{/* The sidebar's own toggle, in the same place on every page (the Mac app keeps it in its tab bar). */}
-				{inApp ? null : <SidebarTrigger className="ml-auto size-7 text-muted-foreground hover:text-foreground group-data-[collapsible=icon]:ml-0" />}
+				{/* The toggle lives on the sidebar's edge (SidebarResizer); the Mac app also keeps one in its tab bar. */}
 			</SidebarHeader>
 			<SidebarContent>
 				{extra}

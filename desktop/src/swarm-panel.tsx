@@ -370,12 +370,13 @@ function findingsOfDoc(doc: AuditDoc, path: string): AuditFinding[] {
 	}));
 }
 
-const STATUS: Record<AuditFinding["status"], { label: string; dot: string; chip: string }> = {
-	fixed: { label: "Fixed", dot: "bg-emerald-500", chip: "border-emerald-500/30 bg-emerald-500/10 text-emerald-700 dark:text-emerald-400" },
-	works: { label: "Works as expected", dot: "bg-sky-500", chip: "border-sky-500/30 bg-sky-500/10 text-sky-700 dark:text-sky-400" },
-	acknowledged: { label: "Acknowledged", dot: "bg-amber-500", chip: "border-amber-500/30 bg-amber-500/10 text-amber-700 dark:text-amber-400" },
-	rejected: { label: "Rejected", dot: "bg-muted-foreground/50", chip: "border-border bg-muted text-muted-foreground" },
-	open: { label: "Open", dot: "bg-red-500", chip: "border-red-500/30 bg-red-500/10 text-red-700 dark:text-red-400" },
+// `text` colours a finding's ID in the list by its status (the list has no dots).
+const STATUS: Record<AuditFinding["status"], { label: string; dot: string; chip: string; text: string }> = {
+	fixed: { label: "Fixed", dot: "bg-emerald-500", text: "text-emerald-600 dark:text-emerald-400", chip: "border-emerald-500/30 bg-emerald-500/10 text-emerald-700 dark:text-emerald-400" },
+	works: { label: "Works as expected", dot: "bg-sky-500", text: "text-sky-600 dark:text-sky-400", chip: "border-sky-500/30 bg-sky-500/10 text-sky-700 dark:text-sky-400" },
+	acknowledged: { label: "Acknowledged", dot: "bg-amber-500", text: "text-amber-600 dark:text-amber-400", chip: "border-amber-500/30 bg-amber-500/10 text-amber-700 dark:text-amber-400" },
+	rejected: { label: "Rejected", dot: "bg-muted-foreground/50", text: "text-muted-foreground", chip: "border-border bg-muted text-muted-foreground" },
+	open: { label: "Open", dot: "bg-red-500", text: "text-red-600 dark:text-red-400", chip: "border-red-500/30 bg-red-500/10 text-red-700 dark:text-red-400" },
 };
 
 /** Every finding in an audit index (audit/README.md and the like), with its status and the tests its evidence names. */
@@ -598,8 +599,9 @@ function BugsView({ folder, files, invoke, bugs, openBug, setOpenBug, withPoc, o
 	const head = "px-2 pb-1 pt-2 font-mono text-[10px] uppercase tracking-wider text-muted-foreground";
 	const reportItem = (r: string) => (
 		<li key={r}>
-			<button type="button" onClick={() => setOpenBug(`report:${r}`)} title={r} className={`flex w-full items-center gap-2 rounded-xl border px-3 py-2 text-left transition-colors ${showing === `report:${r}` ? "bg-muted" : "border-transparent hover:bg-muted/60"}`}>
-				<FileCode2 className="size-3.5 shrink-0 text-muted-foreground" />
+			<button type="button" onClick={() => setOpenBug(`report:${r}`)} title={r} className={`flex w-full items-start gap-2 rounded-xl border px-3 py-2 text-left transition-colors ${showing === `report:${r}` ? "bg-muted" : "border-transparent hover:bg-muted/60"}`}>
+				{/* Level with the title line, not centred on the two lines. */}
+				<FileCode2 className="mt-[3px] size-3.5 shrink-0 text-muted-foreground" />
 				<span className="min-w-0">
 					<span className="block truncate text-[13px] font-medium">{r.split("/").pop()?.replace(/\.(md|markdown|txt|pdf)$/i, "").replace(/[_-]+/g, " ")}</span>
 					<span className="block truncate font-mono text-[10px] text-muted-foreground">{r}</span>
@@ -616,8 +618,7 @@ function BugsView({ folder, files, invoke, bugs, openBug, setOpenBug, withPoc, o
 					return (
 						<li key={k}>
 							<button type="button" onClick={() => setOpenBug(k)} title={`${f.id} · ${STATUS[f.status].label}`} className={`flex w-full items-start gap-2 rounded-lg px-2 py-1.5 text-left transition-colors ${picked && findingKey(picked) === k ? "bg-muted" : "hover:bg-muted/60"}`}>
-								<span className={`mt-1.5 size-2 shrink-0 rounded-full ${STATUS[f.status].dot}`} />
-								<span className="w-9 shrink-0 font-mono text-[11px] leading-5 text-muted-foreground">{f.id}</span>
+								<span className={`w-9 shrink-0 font-mono text-[11px] font-medium leading-5 ${STATUS[f.status].text}`}>{f.id}</span>
 								<span className="min-w-0 flex-1 text-[12.5px] leading-5">{f.title.replace(/`/g, "")}</span>
 							</button>
 						</li>
@@ -673,7 +674,6 @@ function BugsView({ folder, files, invoke, bugs, openBug, setOpenBug, withPoc, o
 										}
 										className={`inline-flex items-center gap-1 rounded-md border px-1.5 py-0.5 text-[11px] transition-opacity ${STATUS[k].chip} ${only.size && !on ? "opacity-45 hover:opacity-80" : ""} ${on ? "ring-1 ring-current" : ""}`}
 									>
-										<span className={`size-1.5 rounded-full ${STATUS[k].dot}`} />
 										{counts[k]} {STATUS[k].label.toLowerCase()}
 									</button>
 								);
@@ -723,7 +723,6 @@ function BugsView({ folder, files, invoke, bugs, openBug, setOpenBug, withPoc, o
 					<h2 className="text-[17px] font-semibold leading-snug">{picked.title.replace(/`/g, "")}</h2>
 					<div className="mt-3 flex flex-wrap items-center gap-2 text-[12px]">
 						<span className={`inline-flex h-7 items-center gap-1.5 rounded-lg border px-2.5 font-medium ${STATUS[picked.status].chip}`}>
-							<span className={`size-2 rounded-full ${STATUS[picked.status].dot}`} />
 							{picked.statusText || STATUS[picked.status].label}
 						</span>
 						{picked.severity !== "—" ? <span className={`inline-flex h-7 items-center rounded-lg border px-2.5 font-medium ${SEVERITY[picked.severity.toLowerCase()] ?? "border-border"}`}>{picked.severity}</span> : null}
@@ -1069,7 +1068,6 @@ function CoverageView({ data, scripts, onOpenFile }: { data: Formal; scripts: Sc
 				<span><span className="font-mono font-medium">{inLean}</span><span className="text-muted-foreground">/{own.length} functions in Lean</span></span>
 				<span><span className="font-mono font-medium text-emerald-700 dark:text-emerald-400">{proved}</span><span className="text-muted-foreground"> proved</span></span>
 				<span><span className="font-mono font-medium text-amber-700 dark:text-amber-400">{own.length - inLean}</span><span className="text-muted-foreground"> not modeled</span></span>
-				<span className="text-muted-foreground"><span className="font-mono">{data.theorems.length}</span> theorems{data.theorems.some((t) => t.sorry) ? ` · ${data.theorems.filter((t) => t.sorry).length} with sorry` : ""}</span>
 				{/* How much is proved: the share of every listed function (libraries included) with a finished proof. */}
 				<span className="ml-auto inline-flex items-center gap-2 text-[11px] text-muted-foreground" title={`${proved} of ${own.length} functions proved`}>
 					<span className="h-1.5 w-24 overflow-hidden rounded-full bg-muted">
@@ -1117,9 +1115,10 @@ function CoverageView({ data, scripts, onOpenFile }: { data: Formal; scripts: Sc
 					</div>
 				</nav>
 				{current && status ? (
-					<section className="flex min-w-0 flex-1 flex-col overflow-hidden rounded-xl border bg-card">
+					<section className="flex min-w-0 flex-1 flex-col overflow-hidden rounded-xl border bg-card" style={{ containerType: "inline-size" }}>
 						<header className="flex shrink-0 flex-wrap items-center gap-2 border-b px-3 py-2">
-							<span className="font-mono text-[13px] font-medium">{current.name}</span>
+							{/* A narrow pane keeps the status and the place; the name is already picked in the list. */}
+							<span className="font-mono text-[13px] font-medium [@container(max-width:560px)]:hidden">{current.name}</span>
 							<span className={`inline-flex items-center gap-1.5 rounded-full bg-muted px-2 py-0.5 text-[11px] ${status.text}`}>
 								<span className={`size-1.5 rounded-full ${status.dot}`} />
 								{status.label}
@@ -1263,7 +1262,13 @@ function AuditView({ folder, scan, invoke, onOpenFile, reload = 0 }: { folder: s
 						</DropdownMenuRadioGroup>
 					</DropdownMenuContent>
 				</DropdownMenu>
-				{ready ? <span className="ml-auto shrink-0 text-[11px] text-muted-foreground">{ready.contract} · {ready.ms} ms</span> : null}
+				{/* The contract and how many theorems it has (the summary row below keeps the coverage). */}
+				{ready ? (
+					<span className="ml-auto shrink-0 text-[11px] text-muted-foreground">
+						{ready.contract} · <span className="font-mono">{ready.theorems.length}</span> theorems
+						{ready.theorems.some((t) => t.sorry) ? ` · ${ready.theorems.filter((t) => t.sorry).length} with sorry` : ""}
+					</span>
+				) : null}
 			</div>
 			{error ? <p className="whitespace-pre-wrap rounded-xl border bg-card p-3 font-mono text-[11px] text-red-600">{error}</p> : null}
 			{!ready && !error ? <p className="p-3 text-[13px] text-muted-foreground">{entry ? "Building the Lean model from the AST…" : "No Solidity sources in this folder."}</p> : null}

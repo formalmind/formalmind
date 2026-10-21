@@ -1,3 +1,4 @@
+import { PanelLeftClose, PanelLeftOpen } from "lucide-react"
 import { useSidebar } from "@/components/ui/sidebar"
 
 /** Dragged this far left of its narrowest, the sidebar closes. */
@@ -5,7 +6,7 @@ const CLOSE_BELOW = 140
 
 /**
  * The sidebar's right edge: drag it to resize the sidebar (the width is kept), far left to close it, and right from
- * the collapsed rail to open it again. Hidden on mobile.
+ * the collapsed rail to open it again. The tab at its top collapses or expands it with a click. Hidden on mobile.
  */
 export function SidebarResizer() {
 	const { open, isMobile, setOpen, width, setWidth, setResizing } = useSidebar()
@@ -51,6 +52,17 @@ export function SidebarResizer() {
 			className="group/edge absolute inset-y-0 -right-1.5 z-20 w-3 cursor-col-resize"
 		>
 			<span className="absolute inset-y-3 left-1/2 w-px -translate-x-1/2 bg-transparent transition-colors group-hover/edge:bg-border/60" />
+			{/* The collapse control lives on the edge itself: a small tab hanging off its top, just outside the line. */}
+			<button
+				type="button"
+				onPointerDown={(e) => e.stopPropagation()}
+				onClick={() => setOpen(!open)}
+				aria-label={open ? "Collapse sidebar" : "Expand sidebar"}
+				title={open ? "Collapse sidebar" : "Expand sidebar"}
+				className="absolute left-1/2 top-3 grid h-7 w-5 cursor-pointer place-items-center rounded-r-md border border-l-0 bg-background text-muted-foreground shadow-sm transition-colors hover:text-foreground"
+			>
+				{open ? <PanelLeftClose className="size-3" /> : <PanelLeftOpen className="size-3" />}
+			</button>
 		</div>
 	)
 }
