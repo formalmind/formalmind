@@ -98,13 +98,15 @@ and what they deploy), `audit_json` units are the functions, and `all_slices` is
    Its tools are `functions` and `function` (the AST's list and slices), `read_file` (Lean and test files), `search`
    (the Lean project only), `write_file`, `run` (lake/forge) and `report_bug`. It writes
    `formal/Refinement/Swarm/<Contract><Fn>.lean`, with theorems naming the def fully qualified, and checks it with
-   `lake build` (lake runs in the folder's Lake project, the folder or `formal/`).
+   `lake build` (lake runs in the folder's Lake project, the folder or `formal/`). When it checks, the prover calls
+   `record_property` with the notes Formal Mind's report shows for it: what the proof establishes (third person,
+   what holds), its assumptions and the theorems' names.
 3. **The swarm's check** before review: no `sorry`/`admit`/`axiom`/`native_decide`, `lake build` passes, and the
    Proofs page's coverage now counts the def as proved. A failure goes back to the prover with the output (three
    tries, then `- [!]`).
-4. **Reviewer** gets the same brief and gives a verdict: approve marks the item `- [x]`, records the files in
-   `.formal/proofs.json`, and writes the property into `audit/formal-mind.audit.json` as `P-<item>` in the report's
-   words (`statement`: what holds; `assumptions`; `theorems`); changes sends it back to the prover.
+4. **Reviewer** gets the same brief and the prover's notes, and checks both against the Solidity: approve marks the
+   item `- [x]`, records the files in `.formal/proofs.json`, and writes the notes (with any corrections it gives in
+   the verdict) into `audit/formal-mind.audit.json` as the property `P-<item>`; changes sends it back to the prover.
 5. **report_bug** (prover, assistant) needs a Foundry PoC under `test/` (by convention `test/formal/`). The swarm runs
    it with `forge test --match-path`, adds the finding to `audit/formal-mind-swarm.md` and a row
    `| FM-NN | Severity | Finding | ⏳ Open | PoC … |` under that report in the audit index (`audit/README.md`), and the

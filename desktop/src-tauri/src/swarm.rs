@@ -321,6 +321,9 @@ struct Job {
     /// "approve" | "changes" | "bug" | ""
     #[serde(default)]
     result: String,
+    /// A review's property notes for the report, as the prover wrote them (statement, assumptions, theorems).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    property: Option<Value>,
 }
 
 #[derive(Serialize, Deserialize, Default)]
@@ -422,9 +425,9 @@ Be brief; end with one short paragraph saying what you did and what's next.{}",
         if goal.is_empty() { String::new() } else { format!("\n\nThe maintainer's focus: {goal}") }
     );
     let job = match role {
-        "prover" => "Take the plan item you're given and prove it against the generated def named in your task: read the def in the model and the function's slice (call `function` for any callee you need), state the property as a theorem that names the def fully qualified, prove it, and check with `lake build <Module>`. Reuse the project's existing lemmas (search the Lake project for simp lemmas about the monad). If the property is false, that's a bug: show it with a Foundry PoC and call report_bug, with its scenario, impact and recommendation written as an audit report states them. Address the reviewer's notes if there are any.",
+        "prover" => "Take the plan item you're given and prove it against the generated def named in your task: read the def in the model and the function's slice (call `function` for any callee you need), state the property as a theorem that names the def fully qualified, prove it, and check with `lake build <Module>`. When it checks, call record_property with the notes for Formal Mind's report: what the proof establishes (third person, what holds), its assumptions and the theorems' names. Reuse the project's existing lemmas (search the Lake project for simp lemmas about the monad). If the property is false, that's a bug: show it with a Foundry PoC and call report_bug, with its scenario, impact and recommendation written as an audit report states them. Address the reviewer's notes if there are any.",
         "auditor" => "You are turning an audit report (attached, or in your task) into the standard audit format (formalmind.audit/v1) that the app shows on its Bugs page. First call record_report once with the report's facts: its title, the auditing firm, the authors, the date (YYYY-MM-DD), the commit and repository it reviewed, the files in scope, and a two-sentence summary. Then call record_finding once per finding, in the report's order, for every finding it lists including informational and gas ones: the report's own ID (H-01, M-2, L-03…; number them F-01, F-02… when it has none), the title, the severity as the report rates it, the full description (the report's words, cleaned of page headers and footers), its impact, its recommendation, the team's response if the report gives one, the locations (repository paths like src/PoolManager.sol with the line when given), the page it starts on, and the status the report gave (reportStatus). Then check the current code for each finding and set `status`: fixed (the issue is gone; say what changed in evidence and name the test that covers it), works as expected (intended, or invalid for this code; say why), acknowledged (accepted, as the report or code says), or open (still there). Use `functions`, `function`, read_file and `forge test --match-path …` for that. Don't fix code or write tests. End with one line: how many findings, and how many of each status.",
-        "reviewer" => "Review the prover's work on the plan item: does the Lean statement really say what the Solidity does (read the def in the generated model and the function's slice, in your task), is it about the generated def rather than a restatement, does it check, is there any sorry/admit/axiom? Then call verdict exactly once: approve, or changes with concrete notes. When you approve, give `statement` (what the proof establishes, written for the audit report: third person, what holds, never \"no bug found\"), `assumptions` and `theorems`; they go into Formal Mind's audit file as the property. Do not edit proofs yourself. If you spot a real bug in the contract, say so in your notes; the prover writes the PoC.",
+        "reviewer" => "Review the prover's work on the plan item: does the Lean statement really say what the Solidity does (read the def in the generated model and the function's slice, in your task), is it about the generated def rather than a restatement, does it check, is there any sorry/admit/axiom? Then call verdict exactly once: approve, or changes with concrete notes. Check the prover's notes for the report too (in your task): does the statement say exactly what the theorems prove about the Solidity, no more, are the assumptions complete, and is it written as a report states a property (third person, what holds, never \"no bug found\")? When you approve, they go into Formal Mind's audit file; pass `statement`, `assumptions` or `theorems` only to correct them, or to write them if the prover gave none. Do not edit proofs yourself. If you spot a real bug in the contract, say so in your notes; the prover writes the PoC.",
         _ => "The maintainer wrote to the swarm. Answer them directly and briefly, using the tools to look things up. If they ask for a change of focus or a new property, update .formal/plan.md accordingly.",
     };
     format!("{common}\n\n{job}")
@@ -469,11 +472,17 @@ fn tools(role: &str) -> Value {
             "evidence": { "type": "string", "description": "Anything else: the Lean counterexample, the property it breaks" } }), vec!["title", "severity", "location", "scenario", "poc"]) }));
         t.push(json!({ "name": "write_file", "description": "Create or overwrite a file in the folder.", "input_schema": s(json!({ "path": { "type": "string" }, "content": { "type": "string" } }), vec!["path", "content"]) }));
     }
+    if role == "prover" {
+        t.push(json!({ "name": "record_property", "description": "Once your proof checks, write the notes that go into Formal Mind's report for this property (audit/formal-mind.audit.json). The reviewer checks them against the Solidity and your proof before they count. Call it again to replace them.", "input_schema": s(json!({
+            "statement": { "type": "string", "description": "What the proof establishes about the function, as an audit report states a verified property: third person, present tense, what holds (e.g. \"`Router.swap` reverts unless the caller owns the order; on success it writes only …\"). Markdown; a bulleted list of what each theorem says is fine. No first person, no build, plan or next-step talk, and never a statement of what wasn't found." },
+            "assumptions": { "type": "string", "description": "What the proof takes as given (e.g. black-box helpers that don't change storage), stated plainly; empty if none" },
+            "theorems": { "type": "array", "items": { "type": "string" }, "description": "The names of the theorems that prove it" } }), vec!["statement", "theorems"]) }));
+    }
     if role == "reviewer" {
-        t.push(json!({ "name": "verdict", "description": "Your decision on the plan item. Approving records the property in Formal Mind's audit file (audit/formal-mind.audit.json), which its report is generated from, so approve with statement, assumptions and theorems.", "input_schema": s(json!({
+        t.push(json!({ "name": "verdict", "description": "Your decision on the plan item. Approving records the prover's property notes in Formal Mind's audit file (audit/formal-mind.audit.json), which its report is generated from. Pass statement, assumptions or theorems only to correct them (or to write them if the prover gave none).", "input_schema": s(json!({
             "decision": { "type": "string", "enum": ["approve", "changes"] },
             "notes": { "type": "string" },
-            "statement": { "type": "string", "description": "Approve only: what the proof establishes about the function, as a report states a verified property: third person, present tense, what holds (e.g. \"`Router.swap` reverts unless the caller owns the order; on success it writes only …\"). Markdown; a bulleted list of the theorems' meanings is fine. No first person, no build or plan talk, and never a statement of what wasn't found." },
+            "statement": { "type": "string", "description": "Approve only, to correct or supply the prover's notes: what the proof establishes about the function, as a report states a verified property: third person, present tense, what holds (e.g. \"`Router.swap` reverts unless the caller owns the order; on success it writes only …\"). Markdown; a bulleted list of the theorems' meanings is fine. No first person, no build or plan talk, and never a statement of what wasn't found." },
             "assumptions": { "type": "string", "description": "Approve only: what the proof takes as given (e.g. black-box helpers that don't change storage), stated plainly; empty if none" },
             "theorems": { "type": "array", "items": { "type": "string" }, "description": "Approve only: the names of the theorems that prove it" } }), vec!["decision"]) }));
     }
@@ -778,16 +787,21 @@ impl Turn<'_> {
                         let input = &block["input"];
                         let shown = input.as_object().map(|o| o.values().filter_map(Value::as_str).map(|v| v.chars().take(90).collect::<String>()).collect::<Vec<_>>().join(" ")).unwrap_or_default();
                         let result = match name {
+                            "record_property" => {
+                                if input["statement"].as_str().is_none_or(|t| t.trim().is_empty()) {
+                                    "error: statement is required: what the proof establishes, as the report states it".to_string()
+                                } else {
+                                    out.property = Some(input.clone());
+                                    self.emit("tool", role, item, "record_property".into());
+                                    "recorded; the reviewer checks it against the Solidity and your proof".to_string()
+                                }
+                            }
                             "verdict" => {
                                 let ok = input["decision"].as_str() == Some("approve");
-                                if ok && input["statement"].as_str().is_none_or(|t| t.trim().is_empty()) {
-                                    "error: approving needs `statement` (what the proof establishes, as the report states it), `assumptions` and `theorems`".to_string()
-                                } else {
-                                    out.verdict = Some((ok, input["notes"].as_str().unwrap_or("").to_string()));
-                                    out.property = ok.then(|| input.clone());
-                                    self.emit("tool", role, item, format!("verdict {}", if ok { "approve" } else { "changes" }));
-                                    "recorded".to_string()
-                                }
+                                out.verdict = Some((ok, input["notes"].as_str().unwrap_or("").to_string()));
+                                out.property = ok.then(|| input.clone());
+                                self.emit("tool", role, item, format!("verdict {}", if ok { "approve" } else { "changes" }));
+                                "recorded".to_string()
                             }
                             // The Solidity comes from formal-ast, not from the files.
                             "functions" | "function" => {
@@ -874,6 +888,18 @@ impl Turn<'_> {
         }
         Ok(out)
     }
+}
+
+/// The property notes that go into the report: the prover's, with each field the reviewer gave replacing it.
+fn merge_property(prover: Option<&Value>, reviewer: Option<&Value>) -> Option<Value> {
+    let mut p = prover.cloned().unwrap_or_else(|| json!({}));
+    for k in ["statement", "assumptions", "theorems"] {
+        let given = reviewer.map(|r| &r[k]).filter(|v| v.as_str().is_some_and(|s| !s.trim().is_empty()) || v.as_array().is_some_and(|a| !a.is_empty()));
+        if let Some(v) = given {
+            p[k] = v.clone();
+        }
+    }
+    p["statement"].as_str().is_some_and(|s| !s.trim().is_empty()).then_some(p)
 }
 
 /// .formal/proofs.json: for each proven plan item, the files that prove it and the prover's summary.
@@ -1115,7 +1141,16 @@ async fn run_swarm(turn: &Turn<'_>) -> String {
             _ => {
                 let files = if job.files.is_empty() { String::new() } else { format!("\nFiles: {}", job.files.join(", ")) };
                 let brief = turn.context(false).await.brief(&job.text, crate::swarm_ctx::lake_dir(&root).as_deref(), &root);
-                turn.agent("reviewer", &id, format!("Plan item {id}: {}\n\nThe prover says:\n{}{files}\n\n{brief}{resume_note}", job.text, job.notes)).await
+                let notes = match &job.property {
+                    Some(p) => format!(
+                        "\n\nThe prover's notes for the report (check them; correct them in your verdict if they're wrong):\nStatement: {}\nAssumptions: {}\nTheorems: {}",
+                        p["statement"].as_str().unwrap_or(""),
+                        p["assumptions"].as_str().filter(|a| !a.is_empty()).unwrap_or("none"),
+                        p["theorems"].as_array().map(|t| t.iter().filter_map(|x| x.as_str()).collect::<Vec<_>>().join(", ")).unwrap_or_default()
+                    ),
+                    None => "\n\nThe prover wrote no notes for the report: if you approve, give statement, assumptions and theorems.".into(),
+                };
+                turn.agent("reviewer", &id, format!("Plan item {id}: {}\n\nThe prover says:\n{}{notes}{files}\n\n{brief}{resume_note}", job.text, job.notes)).await
             }
         };
         *turn.job.lock().unwrap() = None;
@@ -1175,6 +1210,7 @@ async fn run_swarm(turn: &Turn<'_>) -> String {
                     let id = enqueue(q, "review", job.item, &job.text, job.attempt, &summary);
                     if let Some(r) = q.jobs.iter_mut().find(|r| r.id == id) {
                         r.files = files;
+                        r.property = out.property.clone();
                     }
                 }
                 "review" => match (&out.bug, &out.verdict) {
@@ -1183,8 +1219,9 @@ async fn run_swarm(turn: &Turn<'_>) -> String {
                     }
                     (None, Some((true, _))) => {
                         set_mark(&root, job.item, 'x');
-                        if let Some(p) = &out.property {
-                            if let Err(e) = crate::swarm_ctx::record_property(&root, job.item, &job.text, &files, p) {
+                        // The prover's notes, with what the reviewer corrected.
+                        if let Some(p) = merge_property(job.property.as_ref(), out.property.as_ref()) {
+                            if let Err(e) = crate::swarm_ctx::record_property(&root, job.item, &job.text, &files, &p) {
                                 eprintln!("record_property: {e}");
                             }
                         }
@@ -1592,4 +1629,21 @@ pub async fn swarm_suggest(folder: String, api_base: String, provider: Option<St
         return Err(reply["error"]["message"].as_str().unwrap_or("The model call failed").to_string());
     }
     Ok(reply["content"].as_array().into_iter().flatten().filter_map(|b| b["text"].as_str()).collect::<Vec<_>>().join("").trim().to_string())
+}
+
+#[cfg(test)]
+mod property_tests {
+    use super::merge_property;
+    use serde_json::json;
+
+    #[test]
+    fn the_reviewer_corrects_the_provers_notes() {
+        let prover = json!({ "statement": "It reverts unless the owner calls.", "assumptions": "none", "theorems": ["a", "b"] });
+        let reviewer = json!({ "decision": "approve", "statement": "It reverts unless the order's owner calls.", "assumptions": "", "theorems": [] });
+        let p = merge_property(Some(&prover), Some(&reviewer)).unwrap();
+        assert_eq!(p["statement"], "It reverts unless the order's owner calls.");
+        assert_eq!(p["theorems"], json!(["a", "b"]));
+        assert_eq!(merge_property(Some(&prover), None).unwrap()["statement"], "It reverts unless the owner calls.");
+        assert!(merge_property(None, Some(&json!({ "decision": "approve" }))).is_none());
+    }
 }
