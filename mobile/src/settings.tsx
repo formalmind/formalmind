@@ -2,7 +2,7 @@ import { useState } from "react";
 import { useNavigate } from "react-router";
 import { useTheme } from "next-themes";
 import { openUrl } from "@tauri-apps/plugin-opener";
-import { ChevronRight, LogOut } from "lucide-react";
+import { BadgeCheck, Bell, Bug, ChevronRight, ChevronsUpDown, CreditCard, FileText, Info, Laptop, LogOut, RotateCcw, Server, Shield, Sparkles, SunMoon, Wallet } from "lucide-react";
 import { apiBase, DEFAULT_API, setApiBase } from "@/desktop/src/api";
 import { BUILD } from "@/lib/build-info";
 import type { SessionData } from "@/lib/session";
@@ -12,30 +12,70 @@ import { setSetUpDone } from "./setup";
 import { macOnline, NOTICES, noticeOn, setNotice, useMac } from "./relay";
 import { lastProject, TabBar } from "./tabs";
 
-/** A group of rows, iOS style: a caption over a rounded card, an optional note under it. */
-function Group({ title, note, children }: { title: string; note?: React.ReactNode; children: React.ReactNode }) {
+/** A group of rows as iOS draws Settings (the askmike app's): a caption over a rounded card, a note under it. */
+function Group({ title, note, children }: { title?: string; note?: React.ReactNode; children: React.ReactNode }) {
 	return (
 		<section>
-			<h2 className="mb-1.5 px-4 font-mono text-[11px] font-medium uppercase tracking-wider text-muted-foreground">{title}</h2>
-			<div className="divide-y overflow-hidden rounded-2xl border bg-card shadow-card">{children}</div>
-			{note ? <p className="mt-1.5 px-4 text-[12px] leading-5 text-muted-foreground">{note}</p> : null}
+			{title ? <h2 className="mb-1.5 px-5 text-[13px] uppercase text-muted-foreground">{title}</h2> : null}
+			<div className="overflow-hidden rounded-[22px] bg-card shadow-card [&>*+*]:relative [&>*+*]:before:absolute [&>*+*]:before:left-[60px] [&>*+*]:before:right-0 [&>*+*]:before:top-0 [&>*+*]:before:h-px [&>*+*]:before:bg-border">
+				{children}
+			</div>
+			{note ? <p className="mt-1.5 px-5 text-[13px] leading-[18px] text-muted-foreground">{note}</p> : null}
 		</section>
 	);
 }
 
-const row = "flex min-h-12 w-full items-center gap-3 px-4 py-2.5 text-left text-[15px]";
+/** The coloured tile beside a row's label, a white glyph on it. */
+function Tile({ icon: Icon, color }: { icon: React.ComponentType<{ className?: string; strokeWidth?: number }>; color: string }) {
+	return (
+		<span className={`grid size-[29px] shrink-0 place-items-center rounded-[7px] text-white ${color}`}>
+			<Icon className="size-[17px]" strokeWidth={2.2} />
+		</span>
+	);
+}
 
-function Toggle({ label, sub, on, onChange }: { label: string; sub?: string; on: boolean; onChange: (on: boolean) => void }) {
+const row = "flex min-h-[52px] w-full items-center gap-3 px-4 py-2 text-left text-[17px]";
+
+/** A row: tile, label (and a line under it), a value, and a chevron when it opens something. */
+function Row({ icon, color, label, sub, value, onClick, chevron = !!onClick, className = "" }: { icon: React.ComponentType<{ className?: string; strokeWidth?: number }>; color: string; label: React.ReactNode; sub?: React.ReactNode; value?: React.ReactNode; onClick?: () => void; chevron?: boolean; className?: string }) {
+	const body = (
+		<>
+			<Tile icon={icon} color={color} />
+			<span className="min-w-0 flex-1">
+				<span className="block truncate">{label}</span>
+				{sub ? <span className="block truncate text-[13px] text-muted-foreground">{sub}</span> : null}
+			</span>
+			{value != null ? <span className="shrink-0 text-[17px] text-muted-foreground">{value}</span> : null}
+			{chevron ? <ChevronRight className="size-[18px] shrink-0 text-muted-foreground/60" strokeWidth={2.4} /> : null}
+		</>
+	);
+	return onClick ? (
+		<button type="button" onClick={onClick} className={`${row} active:bg-muted ${className}`}>
+			{body}
+		</button>
+	) : (
+		<div className={`${row} ${className}`}>{body}</div>
+	);
+}
+
+function Toggle({ icon, color, label, sub, on, onChange }: { icon: React.ComponentType<{ className?: string; strokeWidth?: number }>; color: string; label: string; sub?: string; on: boolean; onChange: (on: boolean) => void }) {
 	return (
 		<label className={row}>
+			<Tile icon={icon} color={color} />
 			<span className="min-w-0 flex-1">
 				<span className="block">{label}</span>
-				{sub ? <span className="block text-[12px] text-muted-foreground">{sub}</span> : null}
+				{sub ? <span className="block text-[13px] text-muted-foreground">{sub}</span> : null}
 			</span>
 			<input type="checkbox" role="switch" checked={on} onChange={(e) => onChange(e.target.checked)} className="fm-switch" />
 		</label>
 	);
 }
+
+const NOTICE_TILE: Record<string, [React.ComponentType<{ className?: string; strokeWidth?: number }>, string]> = {
+	proof: [BadgeCheck, "bg-emerald-500"],
+	bug: [Bug, "bg-red-500"],
+	budget: [Wallet, "bg-orange-500"],
+};
 
 /** Settings: your account, your Mac, notifications, appearance, the server, and the introduction again. */
 export function SettingsScreen({ user, onSignOut }: { user: SessionData["user"]; onSignOut: () => void }) {
@@ -48,68 +88,74 @@ export function SettingsScreen({ user, onSignOut }: { user: SessionData["user"];
 	const [saved, setSaved] = useState(false);
 	const folders = m.state?.folders.length ?? 0;
 	return (
-		<div className="min-h-dvh bg-muted/40">
+		<div className="min-h-dvh bg-muted/50">
 			<TopBar back="/" title="Settings" />
-			<main className="fm-under-tabs space-y-6 px-4 py-5">
-				<Group title="Account">
-					<div className={row}>
-						<span className="grid size-10 shrink-0 place-items-center overflow-hidden rounded-full border bg-muted font-medium">
+			<main className="fm-under-tabs space-y-7 px-4 py-5">
+				<Group>
+					<div className="flex w-full items-center gap-3.5 px-4 py-3.5">
+						<span className="grid size-14 shrink-0 place-items-center overflow-hidden rounded-full bg-muted text-[22px] font-medium">
 							{user.picture ? <img src={user.picture} alt="" className="size-full object-cover" /> : (user.name ?? user.nickname ?? "?").slice(0, 1).toUpperCase()}
 						</span>
 						<span className="min-w-0 flex-1">
-							<span className="block truncate font-medium">{user.name ?? user.nickname}</span>
-							<span className="block truncate text-[12px] text-muted-foreground">{user.email ?? (user.nickname ? `@${user.nickname}` : "")}</span>
+							<span className="block truncate text-[20px] font-semibold">{user.name ?? user.nickname}</span>
+							<span className="block truncate text-[15px] text-muted-foreground">{user.email ?? (user.nickname ? `@${user.nickname}` : "")}</span>
 						</span>
 					</div>
-					<button type="button" onClick={() => void openUrl(`${apiBase()}/billing`)} className={`${row} active:bg-muted`}>
-						<span className="flex-1">Billing and credits</span>
-						<ChevronRight className="size-4 text-muted-foreground" />
-					</button>
-					<button type="button" onClick={onSignOut} className={`${row} text-red-600 active:bg-muted dark:text-red-400`}>
-						<LogOut className="size-4" /> Sign out
-					</button>
+				</Group>
+
+				<Group title="Account">
+					<Row icon={CreditCard} color="bg-blue-500" label="Billing and credits" onClick={() => void openUrl(`${apiBase()}/billing`)} />
 				</Group>
 
 				<Group
 					title="Your Mac"
 					note="The swarm runs in Formal Mind on your Mac. Sign in there with the same account and keep Settings → Phone on; the phone then follows its sessions and sends your messages, Start and Stop to it."
 				>
-					<button type="button" onClick={() => navigate("/mac")} className={`${row} active:bg-muted`}>
-						<span className={`size-2 shrink-0 rounded-full ${online ? "bg-emerald-500" : "bg-muted-foreground/40"}`} />
-						<span className="min-w-0 flex-1">
-							<span className="block">{!m.loaded ? "Connecting…" : online ? "Online" : m.state ? "Offline" : "Not connected yet"}</span>
-							<span className="block text-[12px] text-muted-foreground">{m.state ? `${folders} folder${folders === 1 ? "" : "s"}` : "No Mac has signed in"}</span>
-						</span>
-						<ChevronRight className="size-4 text-muted-foreground" />
-					</button>
+					<Row
+						icon={Laptop}
+						color={online ? "bg-emerald-500" : "bg-neutral-400 dark:bg-neutral-600"}
+						label="Your Mac"
+						sub={m.state ? `${folders} folder${folders === 1 ? "" : "s"}` : "No Mac has signed in"}
+						value={!m.loaded ? "Connecting…" : online ? "Online" : m.state ? "Offline" : "Not connected"}
+						onClick={() => navigate("/mac")}
+					/>
 				</Group>
 
 				<Group title="Notifications" note="Shown in the app and in the bell while Formal Mind is open.">
-					{NOTICES.map((n) => (
-						<Toggle
-							key={n.id}
-							label={n.label}
-							sub={n.sub}
-							on={notices[n.id]}
-							onChange={(on) => {
-								setNotice(n.id, on);
-								setNotices((all) => ({ ...all, [n.id]: on }));
-							}}
-						/>
-					))}
+					{NOTICES.map((n) => {
+						const [icon, color] = NOTICE_TILE[n.id] ?? [Bell, "bg-red-500"];
+						return (
+							<Toggle
+								key={n.id}
+								icon={icon}
+								color={color}
+								label={n.label}
+								sub={n.sub}
+								on={notices[n.id]}
+								onChange={(on) => {
+									setNotice(n.id, on);
+									setNotices((all) => ({ ...all, [n.id]: on }));
+								}}
+							/>
+						);
+					})}
 				</Group>
 
-				<Group title="Appearance">
-					<div className="grid grid-cols-3 gap-1 p-1.5">
-						{(["system", "light", "dark"] as const).map((t) => (
-							<button key={t} type="button" onClick={() => setTheme(t)} className={`h-9 rounded-xl text-[14px] capitalize ${(theme ?? "system") === t ? "bg-muted font-medium" : "text-muted-foreground"}`}>
-								{t}
-							</button>
-						))}
-					</div>
-				</Group>
-
-				<Group title="Server" note="Change only for development, e.g. http://localhost:8787. Sign in again after changing it.">
+				<Group title="General" note="Change the server only for development (e.g. http://localhost:8787), then sign in again.">
+					{/* A picker row, as iOS shows one: the choice on the right, the menu over the row. */}
+					<label className={`${row} relative`}>
+						<Tile icon={SunMoon} color="bg-indigo-500" />
+						<span className="flex-1">Appearance</span>
+						<span className="flex items-center gap-1 text-muted-foreground capitalize">
+							{theme ?? "system"}
+							<ChevronsUpDown className="size-4" />
+						</span>
+						<select value={theme ?? "system"} onChange={(e) => setTheme(e.target.value)} className="absolute inset-0 opacity-0" aria-label="Appearance">
+							<option value="system">System</option>
+							<option value="light">Light</option>
+							<option value="dark">Dark</option>
+						</select>
+					</label>
 					<form
 						className={row}
 						onSubmit={(e) => {
@@ -118,46 +164,40 @@ export function SettingsScreen({ user, onSignOut }: { user: SessionData["user"];
 							setSaved(true);
 						}}
 					>
-						<input value={base} onChange={(e) => (setBase(e.target.value), setSaved(false))} placeholder={DEFAULT_API} autoCapitalize="off" autoCorrect="off" inputMode="url" className="min-w-0 flex-1 bg-transparent outline-none" />
-						<button type="submit" className="text-[14px] font-medium text-sky-600">{saved ? "Saved" : "Save"}</button>
+						<Tile icon={Server} color="bg-neutral-500" />
+						<input value={base} onChange={(e) => (setBase(e.target.value), setSaved(false))} placeholder={DEFAULT_API} autoCapitalize="off" autoCorrect="off" inputMode="url" className="min-w-0 flex-1 bg-transparent outline-none" aria-label="Server" />
+						<button type="submit" className="text-[17px] text-sky-600">{saved ? "Saved" : "Save"}</button>
 					</form>
 				</Group>
 
 				<Group title="About">
-					<button
-						type="button"
+					<Row
+						icon={Sparkles}
+						color="bg-violet-500"
+						label="Show the introduction"
 						onClick={() => {
 							setIntroduced(false);
 							window.location.reload();
 						}}
-						className={`${row} active:bg-muted`}
-					>
-						<span className="flex-1">Show the introduction</span>
-						<ChevronRight className="size-4 text-muted-foreground" />
-					</button>
-					<button
-						type="button"
+					/>
+					<Row
+						icon={RotateCcw}
+						color="bg-sky-500"
+						label="Run setup again"
 						onClick={() => {
 							setSetUpDone(false);
 							window.location.reload();
 						}}
-						className={`${row} active:bg-muted`}
-					>
-						<span className="flex-1">Run setup again</span>
-						<ChevronRight className="size-4 text-muted-foreground" />
+					/>
+					<Row icon={FileText} color="bg-neutral-500" label="Terms of Service" onClick={() => void openUrl(`${DEFAULT_API}/terms`)} />
+					<Row icon={Shield} color="bg-neutral-500" label="Privacy Policy" onClick={() => void openUrl(`${DEFAULT_API}/privacy`)} />
+					<Row icon={Info} color="bg-neutral-500" label="Version" value={<span className="font-mono text-[15px]">{BUILD || "dev"}</span>} />
+				</Group>
+
+				<Group>
+					<button type="button" onClick={onSignOut} className={`${row} justify-center text-red-600 active:bg-muted dark:text-red-400`}>
+						<LogOut className="size-[18px]" /> Sign out
 					</button>
-					<button type="button" onClick={() => void openUrl(`${DEFAULT_API}/terms`)} className={`${row} active:bg-muted`}>
-						<span className="flex-1">Terms of Service</span>
-						<ChevronRight className="size-4 text-muted-foreground" />
-					</button>
-					<button type="button" onClick={() => void openUrl(`${DEFAULT_API}/privacy`)} className={`${row} active:bg-muted`}>
-						<span className="flex-1">Privacy Policy</span>
-						<ChevronRight className="size-4 text-muted-foreground" />
-					</button>
-					<div className={`${row} text-muted-foreground`}>
-						<span className="flex-1">Version</span>
-						<span className="font-mono text-[13px]">{BUILD || "dev"}</span>
-					</div>
 				</Group>
 			</main>
 			<TabBar active="home" repo={lastProject()} />
