@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { AuditFolders } from "@/components/audit-folders";
+import { useProjects } from "@/components/projects/use-projects";
 import { setVimMode, useVimMode } from "@/components/vim-mode";
 import { loadDemoRepos, type DemoData } from "@/components/demo/load";
 
@@ -13,6 +14,7 @@ const Section = ({ title, children }: { title: string; children: React.ReactNode
 /** The website's settings: where each folder's audit reports live, and the editor. The Mac app has its own page. */
 export function SettingsPage() {
 	const vim = useVimMode();
+	const projects = useProjects();
 	const [demos, setDemos] = useState<DemoData[]>([]);
 	useEffect(() => {
 		if (window.location.hostname === "localhost") void loadDemoRepos().then(setDemos);
@@ -21,12 +23,15 @@ export function SettingsPage() {
 		<div className="flex min-h-0 flex-1 flex-col overflow-y-auto">
 			<main className="mx-auto w-full max-w-3xl space-y-3 px-6 pb-10 pt-2">
 				<Section title="Audit folders">
-					<p className="text-[11px] text-muted-foreground">Where each folder's audit reports are read from for Bugs, relative to the folder. Separate several with commas.</p>
-					{demos.length ? (
-						demos.map((d) => <AuditFolders key={d.path} folder={d.path} label={d.name} />)
-					) : (
-						<p className="text-[11px] text-muted-foreground">Bugs reads folders on your computer: open one in the Mac app, and set its audit folders there.</p>
-					)}
+					<p className="text-[11px] text-muted-foreground">Where each repository's audit reports are read from for Bugs, relative to its root. Separate several with commas.</p>
+					{/* Imported repositories (their Bugs tab reads the browser's git copy), then the local demo's folders. */}
+					{(projects ?? []).map((p) => (
+						<AuditFolders key={p.repo} folder={p.repo} label={p.repo} />
+					))}
+					{demos.map((d) => (
+						<AuditFolders key={d.path} folder={d.path} label={d.name} />
+					))}
+					{!projects?.length && !demos.length ? <p className="text-[11px] text-muted-foreground">Import a repository first.</p> : null}
 				</Section>
 				<Section title="Editor">
 					<label className="flex items-center justify-between gap-4">
