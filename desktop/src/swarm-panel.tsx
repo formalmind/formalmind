@@ -864,7 +864,12 @@ function CoverageView({ data, scripts, onOpenFile }: { data: Formal; scripts: Sc
 	const fnName = (f: FormalFn) => f.name.split(".").pop() ?? f.name;
 	const calledBy = (f: FormalFn) => (scripts?.entryPoints ?? []).filter((e) => e.function === fnName(f) && (e.contract === contractOf(f) || e.contract === data.contract)).flatMap((e) => e.scripts);
 	const [filter, setFilter] = useState<(typeof COVERAGE_FILTERS)[number]["id"]>("all");
-	const [deps, setDeps] = useState(false);
+	// Library functions are listed by default; unticking is remembered.
+	const [deps, setDepsState] = useState(() => store.get("fm:audit-libraries") !== "0");
+	const setDeps = (on: boolean) => {
+		setDepsState(on);
+		store.set("fm:audit-libraries", on ? "1" : "0");
+	};
 	const shown = data.functions.filter((f) => (deps || !f.dependency) && (filter === "all" || (filter === "modeled" ? ["modeled", "sorry"].includes(fnStatus(f, data.theorems).key) : fnStatus(f, data.theorems).key === filter)));
 	const groups = [
 		{ title: "Called by scripts", fns: shown.filter((f) => f.entry && calledBy(f).length) },
