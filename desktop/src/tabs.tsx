@@ -25,7 +25,8 @@ function describe(path: string): { title: string; icon: LucideIcon } {
 		return { title: file ? `Debug ${file.split("/").pop()}` : "Debug", icon: Bug };
 	}
 	if (pathname.startsWith("/projects/")) return { title: pathname.split("/")[3] ?? "Project", icon: Network };
-	return { title: "Swarm", icon: Network };
+	if (pathname === "/swarm") return { title: "Swarm", icon: Network };
+	return { title: "Home", icon: HardDrive };
 }
 
 function load(): { tabs: Tab[]; active: string } {

@@ -186,7 +186,7 @@ export function SwarmChatPage() {
 		<div className="flex min-h-0 flex-1 flex-col">
 			<div className="flex items-center gap-3 p-4 pb-0 sm:px-6 sm:pt-6">
 				<h1 className="text-sm">Ask the swarm</h1>
-				<Link to="/" className="text-sm text-muted-foreground hover:text-foreground">Back to the swarm</Link>
+				<Link to="/swarm" className="text-sm text-muted-foreground hover:text-foreground">Back to the swarm</Link>
 			</div>
 			<div className="mx-auto flex min-h-0 w-full max-w-3xl flex-1 flex-col">
 				<SwarmChat

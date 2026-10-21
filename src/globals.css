@@ -413,3 +413,24 @@ button:is(:hover, :focus-visible) > .fm-bell, .fm-bell-ring { animation: fm-bell
 /* Shiki tokens (lib/highlighter.tsx) carry both themes' colors; pick by the app's theme. */
 .shiki-token { color: var(--shiki-light); }
 .dark .shiki-token { color: var(--shiki-dark); }
+
+/* The onboarding's headline face and entrance (the Mac app's onboarding and both apps' home). */
+.font-display {
+	font-family: "Instrument Serif", ui-serif, Georgia, serif;
+	letter-spacing: -0.01em;
+}
+@keyframes fm-rise {
+	from {
+		opacity: 0;
+		transform: translateY(8px);
+		filter: blur(4px);
+	}
+}
+.fm-rise {
+	animation: fm-rise 600ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+@media (prefers-reduced-motion: reduce) {
+	.fm-rise {
+		animation: none;
+	}
+}

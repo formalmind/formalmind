@@ -1,3 +1,4 @@
+import { DesktopHome } from "./home";
 import { lazy, Suspense, useCallback, useEffect, useState } from "react";
 import { Navigate, Route, Routes } from "react-router";
 import { getCurrent, onOpenUrl } from "@tauri-apps/plugin-deep-link";
@@ -50,7 +51,9 @@ function Shell({ user }: { user: User }) {
 					<WorkspaceContent>
 						<Suspense fallback={null}>
 							<Routes>
-								<Route path="/" element={<SwarmWorkspace repo={SWARM_REPO} />} />
+								{/* Home is an empty screen with the next step; the swarm canvas lives at /swarm. */}
+								<Route path="/" element={<DesktopHome />} />
+								<Route path="/swarm" element={<SwarmWorkspace repo={SWARM_REPO} />} />
 								<Route path="/swarm/chat" element={<SwarmChatPage />} />
 								<Route path="/roadmap" element={<FirstProject page="roadmap" />} />
 								<Route path="/usage" element={<UsagePage />} />

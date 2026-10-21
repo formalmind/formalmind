@@ -1,5 +1,6 @@
+import { HomeEmpty } from "@/components/home-empty";
 import { lazy, Suspense, useEffect, useState } from "react";
-import { Navigate, Outlet, Route, Routes, useLocation, useParams } from "react-router";
+import { Link, Navigate, Outlet, Route, Routes, useLocation, useParams } from "react-router";
 import { AppSidebar } from "@/components/app-sidebar";
 import { AuthProvider } from "@/components/auth-context";
 import { ChatConversationsProvider } from "@/components/chat-conversations";
@@ -112,7 +113,9 @@ export function App() {
 				<Route element={<RequireUser user={user} />}>
 					{user ? (
 						<Route element={<SignedInLayout user={user} />}>
-							<Route path="/" element={<Title text="Swarm · Formal Mind"><SwarmWorkspace repo={SWARM_REPO} /></Title>} />
+							{/* Home is an empty screen with the next step; the swarm canvas lives at /swarm. */}
+							<Route path="/" element={<Title text="Formal Mind"><HomeEmpty muted="Bugs, proofs and code." strong="Pick a project to start." hint={<>Choose one in the sidebar, or <Link to="/onboarding?new=1" className="underline underline-offset-2">add one</Link>. The Mac app also opens folders on your computer.</>} /></Title>} />
+							<Route path="/swarm" element={<Title text="Swarm · Formal Mind"><SwarmWorkspace repo={SWARM_REPO} /></Title>} />
 							<Route path="/swarm/chat" element={<Title text="Ask the swarm · Formal Mind"><SwarmChatPage /></Title>} />
 							<Route path="/roadmap" element={<Title text="Roadmap · Formal Mind"><FirstProject page="roadmap" /></Title>} />
 							<Route path="/billing" element={<Title text="Billing · Formal Mind"><BillingPage /></Title>} />
@@ -133,7 +136,6 @@ export function App() {
 				</Route>
 				<Route path="/kanban" element={<Navigate to="/roadmap" replace />} />
 				<Route path="/project" element={<Navigate to="/roadmap" replace />} />
-				<Route path="/swarm" element={<Navigate to="/" replace />} />
 				<Route path="*" element={<Navigate to="/" replace />} />
 			</Routes>
 		</ThemeProvider>
