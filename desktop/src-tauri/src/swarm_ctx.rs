@@ -51,20 +51,17 @@ pub fn lake_dir(root: &Path) -> Option<PathBuf> {
     [root.to_path_buf(), root.join("formal")].into_iter().find(|d| d.join("lakefile.toml").exists() || d.join("lakefile.lean").exists())
 }
 
-/// Reads the folder through formal-ast: the scripts' entry points, then each entry contract's coverage, units and
-/// slices. Writes the generated model into the Lake project when it has none for a contract yet.
-pub fn context(root: &Path) -> Context {
-    let mut ctx = Context::default();
+/// The contracts in scope that are deployed (by a script or by another in-scope contract) or called, as (file, name),
+/// with `script_entries`' output: each is an entry analyzed on its own; its bases come with it, so a contract in scope
+/// only as a base isn't analyzed again.
+pub fn in_scope(root: &Path, problems: &mut Vec<String>) -> (Vec<(String, String)>, Value) {
     let scripts = match script_entries(root) {
         Ok(v) => v,
         Err(e) => {
-            ctx.problems.push(format!("script entry points: {e:#}"));
+            problems.push(format!("script entry points: {e:#}"));
             json!({})
         }
     };
-    let entry_points: Vec<Value> = scripts["entryPoints"].as_array().cloned().unwrap_or_default();
-    // The contracts in scope that are deployed (by a script or by another in-scope contract) or called: each is an
-    // entry analyzed on its own; its bases come with it, so a contract in scope only as a base isn't analyzed again.
     let mut files: Vec<(String, String)> = vec![];
     for c in scripts["contracts"].as_array().into_iter().flatten() {
         let base_only = c["via"].as_str().is_some_and(|v| v.starts_with("a base of"));
@@ -75,8 +72,17 @@ pub fn context(root: &Path) -> Context {
         }
     }
     if files.is_empty() {
-        ctx.problems.push("no contract under src/ is deployed or called by a script under script/".into());
+        problems.push("no contract under src/ is deployed or called by a script under script/".into());
     }
+    (files, scripts)
+}
+
+/// Reads the folder through formal-ast: the scripts' entry points, then each entry contract's coverage, units and
+/// slices. Writes the generated model into the Lake project when it has none for a contract yet.
+pub fn context(root: &Path) -> Context {
+    let mut ctx = Context::default();
+    let (files, scripts) = in_scope(root, &mut ctx.problems);
+    let entry_points: Vec<Value> = scripts["entryPoints"].as_array().cloned().unwrap_or_default();
     let lake = lake_dir(root);
     for (file, contract) in files {
         let (a, output) = match analyze_full(root, &file, Some(&contract)) {
@@ -334,7 +340,7 @@ pub fn cheats(text: &str) -> Option<&'static str> {
 pub const REPORT: &str = "formal-mind-swarm.md";
 
 /// The folder's report folder: the first of audit/, audits/, reports/ that exists, else audit/.
-fn report_dir(root: &Path) -> PathBuf {
+pub fn report_dir(root: &Path) -> PathBuf {
     ["audit", "audits", "reports"].iter().map(|d| root.join(d)).find(|d| d.is_dir()).unwrap_or_else(|| root.join("audit"))
 }
 
@@ -424,7 +430,7 @@ pub fn file_finding(root: &Path, input: &Value, poc: &str, forge: &str) -> Resul
 }
 
 /// Today as YYYY-MM-DD (UTC), without a date crate.
-fn chrono_today() -> String {
+pub fn chrono_today() -> String {
     let days = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs() / 86_400).unwrap_or(0) as i64;
     // Civil from days (Howard Hinnant).
     let z = days + 719_468;

@@ -133,3 +133,20 @@ lists the current turn's steps, the ledger has a line per turn, and the Proofs p
 or a finding filed. In dev builds `FM_SWARM_AUTOSTART=<added folder>` starts that folder's swarm at launch (with
 `FM_SWARM_BUDGET`, `FM_SWARM_PROVIDER=anthropic`, `FM_SWARM_MODEL`, `FM_SWARM_GOAL`), for driving a run without clicking.
 
+
+## Audit report
+
+Bugs → **Generate report** (`report_generate`, `src-tauri/src/report.rs`) writes the folder's audit report in the layout
+of [mmsaki/audit-report-generator](https://github.com/mmsaki/audit-report-generator): `<audit folder>/report/README.adoc`
+with intro, methodology, lines-of-code, findings-critical/-high/-med/-low, manual-review (informational), revisions,
+glossary and references, each finding a `tag::N[]` block, and that generator's PDF theme (`report-template/`). Nothing is
+read from PDFs. The findings come from the audit index (the `| ID | Severity | Finding | Status | Evidence |` tables
+under each `## <report>`), each with its report's own Markdown section, the code at its `**Location**` and the
+regression tests its evidence names (both `include::`d from the folder at render time), plus `.formal/bugs/`. The
+methodology has the Proofs page's coverage (formal-ast's `formal_json` for each contract the scripts deploy or call),
+lines of code covers those contracts' files, and the revision is `git rev-parse HEAD`.
+
+With asciidoctor-pdf installed (`brew install asciidoctor`, which brings Ruby, asciidoctor-pdf and Pygments' Ruby
+bridge; Solidity highlighting uses python3), the PDF lands at `<audit folder>/formal-mind-report.pdf` and opens in
+Bugs. Without it, only the AsciiDoc is written and Bugs says how to install it. Try it on a folder with
+`FM_FOLDER=… cargo test -- --ignored report_of_a_folder --nocapture`.

@@ -4,7 +4,7 @@ import { createPortal } from "react-dom";
 import { NvimTerminal } from "./nvim-terminal";
 import { reportError } from "@/lib/report-error";
 import { JsonTree } from "./json-tree";
-import { Bug, Check, ChevronDown, Code2, Copy, FileCode2, Network, Play, Plus, ScanSearch, Square, WandSparkles, Wrench } from "lucide-react";
+import { Bug, Check, ChevronDown, Code2, Copy, FileCode2, FileDown, Network, Play, Plus, ScanSearch, Square, WandSparkles, Wrench } from "lucide-react";
 
 // The project roadmap (GitHub Projects-style), the same view the web app had on its own page.
 import { motion as vimMotion, search as vimSearch, setVimMode, useVimMode, type Cursor } from "@/components/vim-mode";
@@ -462,12 +462,33 @@ function PocView({ folder, invoke, path, fns, onOpenFile }: { folder: string; in
 	);
 }
 
+/** What `report_generate` wrote: the AsciiDoc folder, the PDF when asciidoctor-pdf made one, and why not otherwise. */
+type GeneratedReport = { adoc: string; pdf: string | null; note: string | null; findings: number; warnings: string[] };
+
 /**
  * Bugs: the folder's audit reports (Markdown in its report folders, which the gear sets) and the swarm's findings,
  * each opened on the right.
  */
-function BugsView({ folder, files, invoke, bugs, openBug, setOpenBug, withPoc, onOpenFile, reload = 0, onTriage }: { folder: string; files: string[]; invoke: Bridge["invoke"]; bugs: Bug[]; openBug: string | null; setOpenBug: (f: string | null) => void; withPoc: (body: string) => Promise<string>; onOpenFile: (path: string) => void; reload?: number; onTriage?: (path: string) => Promise<void> }) {
+function BugsView({ folder, files, invoke, bugs, openBug, setOpenBug, withPoc, onOpenFile, reload = 0, onTriage, onFilesChanged }: { folder: string; files: string[]; invoke: Bridge["invoke"]; bugs: Bug[]; openBug: string | null; setOpenBug: (f: string | null) => void; withPoc: (body: string) => Promise<string>; onOpenFile: (path: string) => void; reload?: number; onTriage?: (path: string) => Promise<void>; onFilesChanged?: () => void }) {
 	const dirs = useReportDirs(folder);
+	// Generate report: the findings, Proofs coverage and in-scope code as an AsciiDoc report (and its PDF) in the audit
+	// folder; `generated` ticks so a PDF already open is read again.
+	const [generating, setGenerating] = useState<{ busy: boolean; note?: string } | null>(null);
+	const [generated, setGenerated] = useState(0);
+	const generate = async () => {
+		setGenerating({ busy: true });
+		try {
+			const g = await invoke<GeneratedReport>("report_generate", { folder, dirs });
+			onFilesChanged?.();
+			setGenerated((n) => n + 1);
+			if (g.pdf) {
+				setOpenBug(`report:${g.pdf}`);
+				setGenerating(null);
+			} else setGenerating({ busy: false, note: `Wrote ${g.adoc}/ (${g.findings} findings). ${g.note ?? ""}` });
+		} catch (e) {
+			setGenerating({ busy: false, note: `Couldn't generate the report: ${e}` });
+		}
+	};
 	const inDirs = files.filter((f) => /\.(md|markdown|txt|pdf)$/i.test(f) && dirs.some((d) => f.startsWith(`${d.replace(/\/+$/, "")}/`))).sort();
 	// An index (README.md / INDEX.md in a report folder) lists every finding with its status; the rest are reports.
 	const indexes = inDirs.filter((f) => /(^|\/)(readme|index)\.md$/i.test(f));
@@ -524,7 +545,7 @@ function BugsView({ folder, files, invoke, bugs, openBug, setOpenBug, withPoc, o
 			(text) => setReport({ path: showingPath, text }),
 			(e) => setReport({ path: showingPath, text: `Couldn't read ${showingPath}: ${e}` }),
 		);
-	}, [folder, showingPath, invoke]);
+	}, [folder, showingPath, invoke, generated]);
 	const facts = selected ? bugFacts(selected.body) : null;
 	const head = "px-2 pb-1 pt-2 font-mono text-[10px] uppercase tracking-wider text-muted-foreground";
 	return (
@@ -533,7 +554,25 @@ function BugsView({ folder, files, invoke, bugs, openBug, setOpenBug, withPoc, o
 			<div className="flex h-8 shrink-0 items-center gap-2 px-1.5">
 				<span className="pl-1 font-mono text-[11px] font-medium uppercase tracking-wider text-muted-foreground">Bugs</span>
 				<span className="ml-auto text-[11px] text-muted-foreground">{reports.length} report{reports.length === 1 ? "" : "s"} · {findings.length} finding{findings.length === 1 ? "" : "s"}</span>
+				<button
+					type="button"
+					disabled={generating?.busy}
+					onClick={() => void generate()}
+					title="Write an audit report (AsciiDoc, and a PDF with asciidoctor-pdf) from these findings, the Proofs coverage and the code in scope, into the audit folder"
+					className="inline-flex h-7 items-center gap-1.5 rounded-lg px-2 text-[12px] text-muted-foreground hover:bg-background hover:text-foreground disabled:opacity-60"
+				>
+					<FileDown className="size-3.5" />
+					{generating?.busy ? "Generating…" : "Generate report"}
+				</button>
 			</div>
+			{generating?.note ? (
+				<div className="mx-1 mb-1 flex items-start gap-2 rounded-xl border bg-card px-3 py-2 text-[12px]">
+					<p className="min-w-0 flex-1 whitespace-pre-wrap">{generating.note}</p>
+					<button type="button" onClick={() => setGenerating(null)} className="shrink-0 rounded-md px-1.5 text-muted-foreground hover:bg-muted hover:text-foreground">
+						Dismiss
+					</button>
+				</div>
+			) : null}
 			<div className="flex min-h-0 flex-1 gap-1">
 			<nav className="flex w-80 shrink-0 flex-col overflow-y-auto rounded-xl border bg-card p-1.5">
 				<div className="flex items-center">
@@ -2028,6 +2067,7 @@ export function SwarmPanel({ folder, name, scan, bridge, session, file: openPath
 						withPoc={withPoc}
 						onOpenFile={view}
 						reload={reload}
+						onFilesChanged={() => void invoke<{ files: string[] }>("folder_tree", { path: folder }).then((t) => setTree(t.files), () => {})}
 						// Queued for the swarm's auditor; a stopped swarm starts just for it (and stops after).
 						onTriage={async (path) => {
 							await invoke("swarm_triage", { folder, path, session: viewing && viewing !== "new" ? viewing : "swarm" });

@@ -11,6 +11,7 @@ mod swarm;
 mod swarm_ctx;
 mod local;
 mod lsp;
+mod report;
 mod term;
 
 use keyring::Entry;
@@ -107,6 +108,7 @@ pub fn run() {
             ast::ast_slice,
             ast::ast_formal,
             ast::ast_scripts,
+            report::report_generate,
             lsp::lsp_definition,
             lsp::lsp_hover,
             local::log_error,

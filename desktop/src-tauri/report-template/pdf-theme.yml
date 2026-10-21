@@ -1,0 +1,17 @@
+# From mmsaki/audit-report-generator (report/themes/pdf-theme.yml), unchanged.
+extends: default
+pages:
+  layout: portrait
+  size: Letter
+link:
+  font-color: #0265dc
+base:
+  font-family: Helvetica
+code:
+  font-family: Courier
+codespan:
+  font-family: $code-font-family
+kbd:
+  font-family: $code-font-family
+button:
+  font-family: $base-font-family
