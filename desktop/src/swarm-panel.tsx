@@ -324,6 +324,20 @@ const SEVERITY: Record<string, string> = {
 	low: "border-sky-500/40 bg-sky-500/10 text-sky-700 dark:text-sky-400",
 };
 
+/** A report or finding on the Bugs page: the file it comes from on the card's header row, as on the Proofs page. */
+function DetailCard({ label, action, children }: { label: string; action?: React.ReactNode; children: React.ReactNode }) {
+	return (
+		<section className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-xl border bg-card">
+			<header className="flex h-10 shrink-0 items-center gap-2 border-b pl-4 pr-2">
+				<FileCode2 className="size-3.5 shrink-0 text-muted-foreground" />
+				<span className="min-w-0 flex-1 truncate font-mono text-[12px] text-muted-foreground" title={label}>{label}</span>
+				{action}
+			</header>
+			<article className="min-h-0 flex-1 overflow-y-auto px-6 py-5">{children}</article>
+		</section>
+	);
+}
+
 /** Bug reports: a list on the left, the selected report on the right with its facts as chips. */
 /** A finding from an audit index: a row of a "| ID | Severity | Finding | Status | Evidence |" table under its report's heading. */
 type AuditFinding = { report: string; id: string; severity: string; title: string; status: "fixed" | "works" | "acknowledged" | "rejected" | "open"; statusText: string; evidence: string; tests: string[]; index: string };
@@ -501,8 +515,14 @@ function BugsView({ folder, files, invoke, bugs, openBug, setOpenBug, withPoc, o
 	const facts = selected ? bugFacts(selected.body) : null;
 	const head = "px-2 pb-1 pt-2 font-mono text-[10px] uppercase tracking-wider text-muted-foreground";
 	return (
-		<div className="absolute inset-x-0 bottom-0 top-[var(--fm-top)] z-10 grid grid-cols-[minmax(0,20rem)_minmax(0,1fr)] gap-3 px-3 pb-3">
-			<div className="min-h-0 overflow-y-auto">
+		// Laid out like Proofs: one gray frame with its label on top, the list and the selected report on white cards.
+		<div className="pointer-events-auto absolute bottom-3 left-3 right-3 top-[var(--fm-top)] z-10 flex min-h-0 flex-col overflow-hidden rounded-2xl border bg-muted/60 p-1">
+			<div className="flex h-8 shrink-0 items-center gap-2 px-1.5">
+				<span className="pl-1 font-mono text-[11px] font-medium uppercase tracking-wider text-muted-foreground">Bugs</span>
+				<span className="ml-auto text-[11px] text-muted-foreground">{reports.length} report{reports.length === 1 ? "" : "s"} · {findings.length} finding{findings.length === 1 ? "" : "s"}{bugs.length ? ` · ${bugs.length} from the swarm` : ""}</span>
+			</div>
+			<div className="flex min-h-0 flex-1 gap-1">
+			<nav className="flex w-80 shrink-0 flex-col overflow-y-auto rounded-xl border bg-card p-1.5">
 				<div className="flex items-center">
 					<p className={head}>Reports · {reports.length}</p>
 				</div>
@@ -593,13 +613,11 @@ function BugsView({ folder, files, invoke, bugs, openBug, setOpenBug, withPoc, o
 					})}
 					{bugs.length === 0 ? <li className="px-2 py-1 text-[12px] text-muted-foreground">None yet. The swarm files them here, each with a proof of concept.</li> : null}
 				</ul>
-			</div>
+			</nav>
+			<div className="flex min-w-0 flex-1 flex-col">
 			{picked ? (
-				<article className="min-h-0 overflow-y-auto rounded-2xl border bg-card px-6 py-5 shadow-card">
-					<p className="font-mono text-[12px] text-muted-foreground">
-						{picked.report} · {picked.id}
-					</p>
-					<h2 className="mt-1 text-[17px] font-semibold leading-snug">{picked.title.replace(/`/g, "")}</h2>
+				<DetailCard label={`${picked.report} · ${picked.id}`}>
+					<h2 className="text-[17px] font-semibold leading-snug">{picked.title.replace(/`/g, "")}</h2>
 					<div className="mt-3 flex flex-wrap items-center gap-2 text-[12px]">
 						<span className={`inline-flex h-7 items-center gap-1.5 rounded-lg border px-2.5 font-medium ${STATUS[picked.status].chip}`}>
 							<span className={`size-2 rounded-full ${STATUS[picked.status].dot}`} />
@@ -650,25 +668,25 @@ function BugsView({ folder, files, invoke, bugs, openBug, setOpenBug, withPoc, o
 						)}
 					</div>
 					<p className="mt-5 text-[11px] text-muted-foreground">From {picked.index}</p>
-				</article>
+				</DetailCard>
 			) : showing ? (
-				<article className="min-h-0 overflow-y-auto rounded-2xl border bg-card px-6 py-5 shadow-card">
-					<div className="flex items-start gap-3">
-						<h2 className="flex-1 font-mono text-[13px] text-muted-foreground">{showing.slice(7)}</h2>
-						{report ? <CopyButton text={report.text} label="Copy the report as Markdown" /> : null}
-						<button type="button" onClick={() => onOpenFile(showing.slice(7))} title="Open in Code" className="inline-flex h-7 items-center gap-1.5 rounded-lg border bg-background px-2.5 text-[12px] hover:bg-muted">
-							<Code2 className="size-3.5 text-muted-foreground" />
-							Code
-						</button>
-					</div>
-					<div className="prose prose-sm mt-4 max-w-none dark:prose-invert">{report && report.path === showing.slice(7) ? <ChatMarkdown>{report.text}</ChatMarkdown> : <p className="text-muted-foreground">Opening…</p>}</div>
-				</article>
+				<DetailCard
+					label={showing.slice(7)}
+					action={
+						<>
+							{report ? <CopyButton text={report.text} label="Copy the report as Markdown" /> : null}
+							<button type="button" onClick={() => onOpenFile(showing.slice(7))} title="Open in Code" className="inline-flex h-7 items-center gap-1.5 rounded-lg px-2 text-[12px] text-muted-foreground hover:bg-background hover:text-foreground">
+								<Code2 className="size-3.5" />
+								Code
+							</button>
+						</>
+					}
+				>
+					<div className="prose prose-sm max-w-none dark:prose-invert">{report && report.path === showing.slice(7) ? <ChatMarkdown>{report.text}</ChatMarkdown> : <p className="text-muted-foreground">Opening…</p>}</div>
+				</DetailCard>
 			) : selected && facts ? (
-				<article className="min-h-0 overflow-y-auto rounded-2xl border bg-card px-6 py-5 shadow-card">
-					<div className="flex items-start gap-3">
-						<h2 className="flex-1 text-[17px] font-semibold leading-snug">{selected.title}</h2>
-						<CopyButton get={() => withPoc(selected.body)} label="Copy the report as Markdown, PoC included" />
-					</div>
+				<DetailCard label={selected.file} action={<CopyButton get={() => withPoc(selected.body)} label="Copy the report as Markdown, PoC included" />}>
+					<h2 className="text-[17px] font-semibold leading-snug">{selected.title}</h2>
 					<div className="mt-3 flex flex-wrap items-center gap-2 text-[12px]">
 						{facts.severity ? <span className={`inline-flex h-7 items-center rounded-lg border px-2.5 font-medium capitalize ${SEVERITY[facts.severity] ?? ""}`}>{facts.severity}</span> : null}
 						{facts.file ? (
@@ -687,10 +705,12 @@ function BugsView({ folder, files, invoke, bugs, openBug, setOpenBug, withPoc, o
 					<div className="prose prose-sm mt-4 max-w-none dark:prose-invert">
 						<ChatMarkdown>{facts.rest}</ChatMarkdown>
 					</div>
-				</article>
+				</DetailCard>
 			) : (
-				<p className="self-center text-center text-sm text-muted-foreground">Nothing to show yet: no reports in the report folders and no findings.</p>
+				<p className="m-auto text-center text-[13px] text-muted-foreground">Nothing to show yet: no reports in the audit folders and no findings.</p>
 			)}
+			</div>
+			</div>
 		</div>
 	);
 }
