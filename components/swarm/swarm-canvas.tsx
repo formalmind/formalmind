@@ -605,6 +605,17 @@ function layout(cards: Card[], heights: Map<string, number>) {
 	return positions;
 }
 
+/** The scene without its GitHub links (cards' and the agents' "where"). */
+function unlinked(scene: Scene): Scene {
+	const next = cloneScene(scene);
+	next.cards = next.cards.map((c) => ({ ...c, href: undefined }));
+	for (const role of ROLES) {
+		const where = next.cursors[role].where;
+		if (where) next.cursors[role] = { ...next.cursors[role], where: { ...where, href: "" } };
+	}
+	return next;
+}
+
 function cloneScene(scene: Scene): Scene {
 	return {
 		...scene,
@@ -938,7 +949,9 @@ export function SwarmCanvas({ state, fill = false, contain = false, title, actio
 		// eslint-disable-next-line react-hooks/exhaustive-deps
 	}, [arrival?.at]);
 
-	const shown = arrival && live ? welcome(live, arrival.repo, arrival.group) : live ?? scene;
+	const board = arrival && live ? welcome(live, arrival.repo, arrival.group) : live ?? scene;
+	// A local swarm's state is the folder's .formal/, not GitHub: its board links nowhere outside the app.
+	const shown = local ? unlinked(board) : board;
 	const [carry, setCarry] = useState<{ role: SwarmRole; card: string; say: string }[]>([]);
 	const lanesSeen = useRef<Map<string, { lane: Lane; id: string }> | null>(null);
 	// The dispatcher's errands: label changes it carries out, one card at a time.
@@ -1184,9 +1197,9 @@ export function SwarmCanvas({ state, fill = false, contain = false, title, actio
 						);
 					})}
 
-					<LedgerPanel spend={shown.spend} budget={state?.budgetUsd} costs={shown.costs} repo={state?.repo ?? repo} top={geo.panelTop} onMeasure={measurePanel(0)} />
-					<NotebookPanel notes={shown.notes} repo={state?.repo ?? repo} top={geo.panelTop} onMeasure={measurePanel(1)} />
-					<ChiefPanel headline={shown.chief} repo={state?.repo ?? repo} top={geo.panelTop} onMeasure={measurePanel(2)} />
+					<LedgerPanel spend={shown.spend} budget={state?.budgetUsd} costs={shown.costs} repo={local ? undefined : (state?.repo ?? repo)} top={geo.panelTop} onMeasure={measurePanel(0)} />
+					<NotebookPanel notes={shown.notes} repo={local ? undefined : (state?.repo ?? repo)} top={geo.panelTop} onMeasure={measurePanel(1)} />
+					<ChiefPanel headline={shown.chief} repo={local ? undefined : (state?.repo ?? repo)} top={geo.panelTop} onMeasure={measurePanel(2)} />
 
 					{ROLES.map((role, i) => (
 						<SwarmCursor
@@ -1372,6 +1385,8 @@ function CardDetails({ card, item, inDialog }: { card: Card; item?: SwarmItem; i
 }
 
 function OpenOnGitHub({ href, inDialog }: { href: string; inDialog: boolean }) {
+	// Local items (a folder's plan) have no page on GitHub.
+	if (!href) return null;
 	return (
 		<a
 			href={href}
@@ -1472,7 +1487,7 @@ export function SwarmCursor({ role, x, y, say, turn, thinking, where, onWhereEnt
 							<>
 								{" · "}
 								<a
-									href={where.href}
+									href={where.href || undefined}
 									target="_blank"
 									rel="noreferrer"
 									className="font-mono underline-offset-2 hover:underline"
@@ -1587,11 +1602,12 @@ export function ItemPreview({ item, repo, full = false }: { item: SwarmItem; rep
 	return (
 		<div>
 			<p className="flex items-center gap-1.5 text-xs text-muted-foreground">
-				<span className={`font-medium ${stateColor}`}>{`${state[0].toUpperCase()}${state.slice(1)} ${item.kind === "pr" ? "PR" : "issue"}`}</span>
+				{/* A local swarm's items are its plan's (no URL): proven or open, not issues and PRs. */}
+				<span className={`font-medium ${stateColor}`}>{item.url ? `${state[0].toUpperCase()}${state.slice(1)} ${item.kind === "pr" ? "PR" : "issue"}` : item.merged ? "Proven" : "Plan item"}</span>
 				<span>· {item.repo ?? repo}</span>
 				<span>· {timeAgo(item.createdAt)}</span>
 			</p>
-			<a href={item.url} target="_blank" rel="noreferrer" className="mt-1.5 block text-sm font-semibold leading-snug hover:underline">
+			<a href={item.url || undefined} target="_blank" rel="noreferrer" className="mt-1.5 block text-sm font-semibold leading-snug hover:underline">
 				{item.title} <span className="font-normal text-muted-foreground">#{item.number}</span>
 			</a>
 			{item.excerpt ? <p className={`mt-2 text-xs leading-5 text-muted-foreground ${full ? "whitespace-pre-line" : "line-clamp-3"}`}>{item.excerpt}</p> : null}

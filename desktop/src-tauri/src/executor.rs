@@ -1,137 +1,13 @@
-//! The local executor: runs one agent turn on a folder on this machine. The model is called with the user's own
-//! key (kept in the keychain); the agent reads and edits files only inside the folder and runs only `lake` and
-//! `forge` there. Nothing from the folder is sent to formal.team.
-//!
-//! Turns are local for now. The protocol's claim / renew / report (docs/protocol.md, section 5) plugs in around
-//! `run_turn`: claim a Grant instead of taking the task from the UI, renew while the loop runs, report the outcome.
+//! The local swarm's hands on a folder: its file tools, kept inside the folder, and the commands it may run there
+//! (only `lake` and `forge`). The model calls themselves are the swarm's (swarm.rs), through formal.team credits or
+//! your own Anthropic key, and nowhere else.
 
-use crate::local;
-use keyring::Entry;
-use serde::{Deserialize, Serialize};
-use serde_json::{json, Value};
-use std::collections::HashMap;
+use serde_json::Value;
 use std::path::{Component, Path, PathBuf};
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex};
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
-use tauri::{AppHandle, Emitter, Manager, State};
+use std::time::Duration;
 
-const MAX_STEPS: usize = 60;
 const OUTPUT_LIMIT: usize = 12_000;
 const COMMAND_TIMEOUT: Duration = Duration::from_secs(15 * 60);
-
-#[derive(Default)]
-pub struct Runs(Mutex<HashMap<String, Arc<AtomicBool>>>);
-
-fn key_entry() -> Result<Entry, String> {
-    Entry::new("team.formal.desktop", "openai").map_err(|e| e.to_string())
-}
-
-/// Saves the user's OpenAI key in the keychain (empty clears it).
-#[tauri::command]
-pub fn model_key_set(key: String) -> Result<(), String> {
-    let entry = key_entry()?;
-    if key.trim().is_empty() {
-        return match entry.delete_credential() {
-            Ok(()) | Err(keyring::Error::NoEntry) => Ok(()),
-            Err(e) => Err(e.to_string()),
-        };
-    }
-    entry.set_password(key.trim()).map_err(|e| e.to_string())
-}
-
-#[tauri::command]
-pub fn model_key_status() -> bool {
-    key_entry().and_then(|e| e.get_password().map_err(|e| e.to_string())).is_ok()
-}
-
-#[derive(Deserialize)]
-pub struct TurnRequest {
-    pub folder: String,
-    pub role: String,
-    pub task: String,
-    pub model: Option<String>,
-    /// Stop once the turn has used this many tokens (input + output).
-    pub max_tokens: Option<u64>,
-}
-
-#[derive(Serialize, Clone)]
-struct TurnEvent {
-    run: String,
-    /// "text" | "tool" | "result" | "done"
-    kind: &'static str,
-    text: String,
-    tokens: u64,
-}
-
-/// A run id: time first so they sort.
-fn run_id() -> String {
-    let nanos = SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_nanos();
-    format!("local-{:x}", nanos)
-}
-
-#[tauri::command]
-pub fn turn_start(app: AppHandle, runs: State<'_, Runs>, request: TurnRequest) -> Result<String, String> {
-    if !local::read()?.folders.contains(&request.folder) {
-        return Err("Add the folder first".into());
-    }
-    let key = key_entry()?.get_password().map_err(|_| "Add your OpenAI key first".to_string())?;
-    let run = run_id();
-    let stop = Arc::new(AtomicBool::new(false));
-    runs.0.lock().unwrap().insert(run.clone(), stop.clone());
-    let id = run.clone();
-    tauri::async_runtime::spawn(async move {
-        let emit = |kind: &'static str, text: String, tokens: u64| {
-            let _ = app.emit("turn", TurnEvent { run: id.clone(), kind, text, tokens });
-        };
-        let (outcome, tokens) = match run_turn(&request, &key, &stop, &emit).await {
-            Ok(t) => t,
-            Err(e) => (format!("failed: {e}"), 0),
-        };
-        emit("done", outcome, tokens);
-        let state = app.state::<Runs>();
-        state.0.lock().unwrap().remove(&id);
-    });
-    Ok(run)
-}
-
-#[tauri::command]
-pub fn turn_stop(runs: State<'_, Runs>, run: String) {
-    if let Some(stop) = runs.0.lock().unwrap().get(&run) {
-        stop.store(true, Ordering::SeqCst);
-    }
-}
-
-
-fn instructions(role: &str, folder: &str) -> String {
-    let common = format!(
-        "You are the formalmind {role}, working in a local folder ({folder}) that holds a Solidity project and its Lean 4 proofs. \
-Paths are relative to that folder. Tools: list_files, read_file, run (only `lake …` or `forge …`, no shell){}. \
-Be concrete and brief. Finish with a short summary: what you did, what `lake build` says, and what's left.",
-        if role == "prover" { ", write_file" } else { "" }
-    );
-    let job = match role {
-        "reviewer" => "Review the proofs for the task: check that the Lean statements say what the Solidity does, that `lake build` passes and that there is no `sorry`, `admit` or new axiom. Do not edit files. End with a verdict: approve, changes (list them) or blocked.",
-        _ => "Prove the task in Lean 4: model the Solidity faithfully, state the property, prove it, and check with `lake build`. Never leave `sorry`, `admit` or new axioms; if a proof won't close, say exactly where it's stuck.",
-    };
-    format!("{common}\n\n{job}")
-}
-
-fn tools(role: &str) -> Value {
-    let mut tools = vec![
-        json!({"type": "function", "name": "list_files", "description": "List files under a directory of the folder (recursive, skips .git, node_modules, lib, dependencies, out, cache, target, .lake).",
-            "parameters": {"type": "object", "properties": {"dir": {"type": "string"}}, "required": ["dir"], "additionalProperties": false}}),
-        json!({"type": "function", "name": "read_file", "description": "Read a text file in the folder.",
-            "parameters": {"type": "object", "properties": {"path": {"type": "string"}}, "required": ["path"], "additionalProperties": false}}),
-        json!({"type": "function", "name": "run", "description": "Run `lake build [target]`, `lake env lean <file>`, `forge build` or `forge test [args]` in the folder. Returns exit code and output.",
-            "parameters": {"type": "object", "properties": {"command": {"type": "string"}}, "required": ["command"], "additionalProperties": false}}),
-    ];
-    if role == "prover" {
-        tools.push(json!({"type": "function", "name": "write_file", "description": "Create or overwrite a file in the folder with the given content.",
-            "parameters": {"type": "object", "properties": {"path": {"type": "string"}, "content": {"type": "string"}}, "required": ["path", "content"], "additionalProperties": false}}));
-    }
-    Value::Array(tools)
-}
 
 /// A path inside the folder, or an error: relative, no `..`, and (when it exists) not a symlink out of it.
 pub(crate) fn inside(root: &Path, rel: &str) -> Result<PathBuf, String> {
@@ -242,10 +118,15 @@ pub(crate) fn list_files(root: &Path, dir: &str) -> Result<String, String> {
 
 /// Lines matching a regex in the folder's text files (Solidity, Lean, Markdown, TOML), as path:line: text.
 fn search(root: &Path, pattern: &str, dir: &str) -> Result<String, String> {
+    search_in(root, pattern, dir, &[".sol", ".lean", ".md", ".toml"])
+}
+
+/// Lines matching a regex in the files under `dir` with one of `exts`, as path:line: text.
+pub(crate) fn search_in(root: &Path, pattern: &str, dir: &str, exts: &[&str]) -> Result<String, String> {
     let re = regex::Regex::new(pattern).map_err(|e| format!("bad pattern: {e}"))?;
     let files = list_files(root, if dir.is_empty() { "." } else { dir })?;
     let mut hits = vec![];
-    for f in files.lines().filter(|f| [".sol", ".lean", ".md", ".toml"].iter().any(|x| f.ends_with(x))) {
+    for f in files.lines().filter(|f| exts.iter().any(|x| f.ends_with(x))) {
         let Ok(text) = std::fs::read_to_string(root.join(f)) else { continue };
         for (i, line) in text.lines().enumerate() {
             if re.is_match(line) {
@@ -312,65 +193,6 @@ pub(crate) async fn call_tool(root: &Path, name: &str, args: &Value) -> String {
     result.unwrap_or_else(|e| format!("error: {e}"))
 }
 
-/// The agent loop over the OpenAI Responses API. Returns the outcome and tokens used.
-async fn run_turn(request: &TurnRequest, key: &str, stop: &AtomicBool, emit: &impl Fn(&'static str, String, u64)) -> Result<(String, u64), String> {
-    let root = PathBuf::from(&request.folder);
-    let model = request.model.clone().unwrap_or_else(|| "gpt-6-luna".into());
-    let budget = request.max_tokens.unwrap_or(400_000);
-    let client = reqwest::Client::new();
-    let mut tokens = 0u64;
-    let mut previous: Option<String> = None;
-    let mut input = json!([{ "role": "user", "content": request.task }]);
-
-    for _ in 0..MAX_STEPS {
-        if stop.load(Ordering::SeqCst) {
-            return Ok(("stopped".into(), tokens));
-        }
-        let mut body = json!({ "model": model, "instructions": instructions(&request.role, &request.folder), "input": input, "tools": tools(&request.role) });
-        if let Some(id) = &previous {
-            body["previous_response_id"] = json!(id);
-        }
-        let res = client.post("https://api.openai.com/v1/responses").bearer_auth(key).json(&body).send().await.map_err(|e| e.to_string())?;
-        let status = res.status();
-        let reply: Value = res.json().await.map_err(|e| e.to_string())?;
-        if !status.is_success() {
-            let message = reply["error"]["message"].as_str().unwrap_or("model request failed");
-            return Err(format!("{status}: {message}"));
-        }
-        tokens += reply["usage"]["total_tokens"].as_u64().unwrap_or(0);
-        previous = reply["id"].as_str().map(String::from);
-
-        let mut outputs = vec![];
-        for item in reply["output"].as_array().cloned().unwrap_or_default() {
-            match item["type"].as_str() {
-                Some("message") => {
-                    let text: String = item["content"].as_array().into_iter().flatten().filter_map(|c| c["text"].as_str()).collect();
-                    if !text.is_empty() {
-                        emit("text", text, tokens);
-                    }
-                }
-                Some("function_call") => {
-                    let name = item["name"].as_str().unwrap_or("");
-                    let args: Value = serde_json::from_str(item["arguments"].as_str().unwrap_or("{}")).unwrap_or(json!({}));
-                    emit("tool", format!("{name} {}", args.as_object().map(|o| o.values().filter_map(Value::as_str).map(|v| v.chars().take(80).collect::<String>()).collect::<Vec<_>>().join(" ")).unwrap_or_default()), tokens);
-                    let output = call_tool(&root, name, &args).await;
-                    emit("result", output.chars().take(600).collect(), tokens);
-                    outputs.push(json!({ "type": "function_call_output", "call_id": item["call_id"], "output": output }));
-                }
-                _ => {}
-            }
-        }
-        if outputs.is_empty() {
-            return Ok(("done".into(), tokens));
-        }
-        if tokens >= budget {
-            return Ok((format!("capped at {tokens} tokens"), tokens));
-        }
-        input = Value::Array(outputs);
-    }
-    Ok((format!("stopped after {MAX_STEPS} steps"), tokens))
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -391,27 +213,5 @@ mod tests {
         assert!(run_command(&root, "rm -rf /").await.is_err());
         assert!(run_command(&root, "lake env lean ../x.lean").await.is_err());
         assert!(run_command(&root, "forge script X").await.is_err());
-    }
-}
-
-/// A real turn against the model: `FM_OPENAI_KEY=… FM_FOLDER=… cargo test -- --ignored live_turn --nocapture`.
-#[cfg(test)]
-mod live {
-    use super::*;
-
-    #[tokio::test(flavor = "current_thread")]
-    #[ignore]
-    async fn live_turn() {
-        let request = TurnRequest {
-            folder: std::env::var("FM_FOLDER").unwrap(),
-            role: std::env::var("FM_ROLE").unwrap_or("prover".into()),
-            task: std::env::var("FM_TASK").unwrap(),
-            model: None,
-            max_tokens: None,
-        };
-        let stop = AtomicBool::new(false);
-        let emit = |kind: &'static str, text: String, tokens: u64| println!("[{kind} {tokens}] {}", text.chars().take(300).collect::<String>());
-        let (outcome, tokens) = run_turn(&request, &std::env::var("FM_OPENAI_KEY").unwrap(), &stop, &emit).await.unwrap();
-        println!("outcome={outcome} tokens={tokens}");
     }
 }

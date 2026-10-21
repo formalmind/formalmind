@@ -1,7 +1,7 @@
 //! A swarm that runs on this machine, on one local folder, until the plan is proven, the budget runs out, or you stop
 //! it. Planner → prover → reviewer, one item at a time, with the state in the folder's `.formal/` (plan.md, queue.json,
-//! runs/). The plan comes from formal-ast (the scripts' entry points, the units, what Audit doesn't show as proved);
-//! proofs go into the folder's Lake project against the generated model and must pass `lake build` and Audit's
+//! runs/). The plan comes from formal-ast (the scripts' entry points, the units, what the Proofs page doesn't show as proved);
+//! proofs go into the folder's Lake project against the generated model and must pass `lake build` and the Proofs page's
 //! coverage before review; findings land in the audit index Bugs reads (see swarm_ctx). Files, `lake` and `forge` stay
 //! here; only the model calls leave: through
 //! formal.team's metered Claude proxy (charged to your credits as `local/<folder>` with the agent and item), or straight
@@ -327,7 +327,7 @@ fn system(role: &str, folder: &str, goal: &str) -> String {
     };
     let common = format!(
         "You are the formalmind {role}, one agent of a small swarm verifying the Ethereum smart contracts in a local folder ({folder}). \
-Paths are relative to that folder. Tools run here, on the maintainer's machine: list_files, search, read_file (numbered line ranges), write_file, run (only lake/forge, no shell), report_bug. Proofs must be pure Lean: no #eval or IO. \
+Paths are relative to that folder. Tools run here, on the maintainer's machine. What you know about the Solidity comes from formal-ast, which reads solc's AST: `functions` lists every function in scope (the contracts the Foundry scripts deploy or call, with their bases), each with its Lean def, place and status on the Proofs page; `function` gives one function's slice (its guards, the storage it reads and writes, the state it touches, its code and its callees' code). Don't list or grep the Solidity sources. The other tools: read_file (numbered line ranges; for Lean files and the test setup a PoC needs), search (regex over the Lean project's .lean files, for lemmas), write_file, run (only lake/forge, no shell), report_bug. Proofs must be pure Lean: no #eval or IO. \
 The shared state is .formal/: plan.md is the checklist (`- [ ]` todo, `- [x]` proven, `- [!]` blocked or a bug). {lean} \
 Never leave `sorry`, `admit`, `native_decide` or new axioms. \
 If you find a real bug (a reachable violation of an intended property, loss of funds, broken accounting, access control), first write a Foundry PoC test under test/formal/ (e.g. test/formal/RouterMatchBook.t.sol, reusing the repo's test setup under test/) whose test passes by demonstrating the exploit, run it with `forge test --match-path <file>`, then call report_bug with that path: it is filed in audit/README.md as an open finding. \
@@ -335,9 +335,8 @@ Be brief; end with one short paragraph saying what you did and what's next.{}",
         if goal.is_empty() { String::new() } else { format!("\n\nThe maintainer's focus: {goal}") }
     );
     let job = match role {
-        "planner" => "Plan from what formal-ast read (it's in your task): the entry points the Foundry scripts call first, then the other external functions, then internal ones they rely on. Each item is one property of one function's generated def, phrased as a claim and naming the def in backticks exactly as listed, e.g. `- [ ] `Router.matchBook` reverts unless the caller ... (src/Router.sol)`. Prefer functions marked NOT PROVED; skip ones that are opaque in the model (they can't be proved against it), but you may add one item to hunt for bugs in an opaque entry point. Keep items small enough for one prover turn (a revert condition, what a call forwards, which storage it writes). If .formal/plan.md has a checklist whose items are all checked or blocked, append 3 to 8 new `- [ ]` items for functions still not proved, keeping the existing lines; otherwise write .formal/plan.md: a title line, then 5 to 12 items, most important first. Do not prove anything yourself.",
-        "prover" => "Take the plan item you're given and prove it against the generated def named in your task: read the def in the model and the Solidity, state the property as a theorem that names the def fully qualified, prove it, and check with `lake build <Module>`. Reuse the project's existing lemmas (search the Lake project for simp lemmas about the monad). If the property is false, that's a bug: show it with a Foundry PoC and call report_bug. Address the reviewer's notes if there are any.",
-        "reviewer" => "Review the prover's work on the plan item: does the Lean statement really say what the Solidity does (read the def in the generated model and the Solidity), is it about the generated def rather than a restatement, does it check, is there any sorry/admit/axiom? Then call verdict exactly once: approve, or changes with concrete notes. Do not edit proofs yourself. If you spot a real bug in the contract, say so in your notes; the prover writes the PoC.",
+        "prover" => "Take the plan item you're given and prove it against the generated def named in your task: read the def in the model and the function's slice (call `function` for any callee you need), state the property as a theorem that names the def fully qualified, prove it, and check with `lake build <Module>`. Reuse the project's existing lemmas (search the Lake project for simp lemmas about the monad). If the property is false, that's a bug: show it with a Foundry PoC and call report_bug. Address the reviewer's notes if there are any.",
+        "reviewer" => "Review the prover's work on the plan item: does the Lean statement really say what the Solidity does (read the def in the generated model and the function's slice, in your task), is it about the generated def rather than a restatement, does it check, is there any sorry/admit/axiom? Then call verdict exactly once: approve, or changes with concrete notes. Do not edit proofs yourself. If you spot a real bug in the contract, say so in your notes; the prover writes the PoC.",
         _ => "The maintainer wrote to the swarm. Answer them directly and briefly, using the tools to look things up. If they ask for a change of focus or a new property, update .formal/plan.md accordingly.",
     };
     format!("{common}\n\n{job}")
@@ -346,9 +345,10 @@ Be brief; end with one short paragraph saying what you did and what's next.{}",
 fn tools(role: &str) -> Value {
     let s = |props: Value, req: Vec<&str>| json!({ "type": "object", "properties": props, "required": req, "additionalProperties": false });
     let mut t = vec![
-        json!({ "name": "list_files", "description": "List files under a directory of the folder (skips .git, node_modules, lib, dependencies, out, cache, target, .lake).", "input_schema": s(json!({ "dir": { "type": "string" } }), vec!["dir"]) }),
-        json!({ "name": "read_file", "description": "Read a text file in the folder. Long files come back in numbered slices: pass start_line and end_line (up to 300 lines at a time).", "input_schema": s(json!({ "path": { "type": "string" }, "start_line": { "type": "integer" }, "end_line": { "type": "integer" } }), vec!["path"]) }),
-        json!({ "name": "search", "description": "Find lines matching a regex in the folder's .sol, .lean, .md and .toml files (path:line: text). Use it to locate functions before reading them.", "input_schema": s(json!({ "pattern": { "type": "string" }, "dir": { "type": "string", "description": "Subdirectory, e.g. src; empty for all" } }), vec!["pattern"]) }),
+        json!({ "name": "functions", "description": "Every function in scope, from formal-ast (solc's AST): the contracts the Foundry scripts deploy or call and their bases, each function with its Lean def, place, footprint and status on the Proofs page.", "input_schema": s(json!({}), vec![]) }),
+        json!({ "name": "function", "description": "One function's slice from formal-ast: its guards, the storage it reads and writes, the state declarations it touches, its code and its callees' code. By name (`Contract.fn`) or Lean def.", "input_schema": s(json!({ "name": { "type": "string" } }), vec!["name"]) }),
+        json!({ "name": "read_file", "description": "Read a text file in the folder (Lean files, the generated model, the test setup a PoC needs). Long files come back in numbered slices: pass start_line and end_line (up to 300 lines at a time).", "input_schema": s(json!({ "path": { "type": "string" }, "start_line": { "type": "integer" }, "end_line": { "type": "integer" } }), vec!["path"]) }),
+        json!({ "name": "search", "description": "Find lines matching a regex in the Lean project's .lean files (path:line: text), e.g. simp lemmas about the monad.", "input_schema": s(json!({ "pattern": { "type": "string" } }), vec!["pattern"]) }),
         json!({ "name": "run", "description": "Run `lake build`, `lake env lean <file>`, `lake exe cache get`, `lake init|new <Name>`, `forge build` or `forge test [args]` in the folder. Returns exit code and output.", "input_schema": s(json!({ "command": { "type": "string" } }), vec!["command"]) }),
     ];
     if role != "reviewer" {
@@ -385,9 +385,23 @@ struct Turn<'a> {
     job: Mutex<Option<u64>>,
     /// This session's queue file.
     queue: PathBuf,
+    /// formal-ast's view of the folder for the current job (read again at each job, and after a proof).
+    ctx: Mutex<Option<Arc<crate::swarm_ctx::Context>>>,
 }
 
 impl Turn<'_> {
+    /// The folder through formal-ast; `fresh` reads it again (theorems change as provers write).
+    async fn context(&self, fresh: bool) -> Arc<crate::swarm_ctx::Context> {
+        if !fresh {
+            if let Some(c) = self.ctx.lock().unwrap().clone() {
+                return c;
+            }
+        }
+        let c = Arc::new(read_context(Path::new(&self.req.folder)).await);
+        *self.ctx.lock().unwrap() = Some(c.clone());
+        c
+    }
+
     fn emit(&self, kind: &'static str, role: &str, item: &str, text: String) {
         let spent = *self.swarm.spent.lock().unwrap();
         let ev = SwarmEvent { run: self.run.into(), kind, role: role.into(), item: item.into(), text, spent };
@@ -537,6 +551,26 @@ impl Turn<'_> {
                                 self.emit("tool", role, item, format!("verdict {}", if ok { "approve" } else { "changes" }));
                                 "recorded".to_string()
                             }
+                            // The Solidity comes from formal-ast, not from the files.
+                            "functions" | "function" => {
+                                self.emit("tool", role, item, format!("{name} {shown}"));
+                                let ctx = self.context(false).await;
+                                let r = if name == "functions" {
+                                    ctx.functions()
+                                } else {
+                                    let n = input["name"].as_str().unwrap_or("");
+                                    ctx.slice(n).unwrap_or_else(|| format!("error: no function {n} in scope; `functions` lists them"))
+                                };
+                                self.emit("result", role, item, r.chars().take(500).collect());
+                                r
+                            }
+                            "search" => {
+                                self.emit("tool", role, item, format!("search {shown}"));
+                                let lake = crate::swarm_ctx::lake_dir(&root).map(|d| d.strip_prefix(&root).map(|p| p.to_string_lossy().to_string()).unwrap_or_default()).unwrap_or_default();
+                                let r = crate::executor::search_in(&root, input["pattern"].as_str().unwrap_or(""), &lake, &[".lean"]).unwrap_or_else(|e| format!("error: {e}"));
+                                self.emit("result", role, item, r.chars().take(500).collect());
+                                r
+                            }
                             "report_bug" => {
                                 self.emit("tool", role, item, format!("report_bug {shown}"));
                                 let r = self.report_bug(&root, input, role, item).await;
@@ -546,9 +580,6 @@ impl Turn<'_> {
                                 let r = r.map(|(id, file)| format!("filed as {id} in audit/README.md (open) and {file}; the swarm marks this item and moves on")).unwrap_or_else(|e| format!("error: {e}"));
                                 self.emit("result", role, item, r.clone());
                                 r
-                            }
-                            "write_file" if role == "planner" && !input["path"].as_str().unwrap_or("").trim_start_matches("./").starts_with(".formal/") => {
-                                "error: the planner only writes under .formal/".to_string()
                             }
                             // The swarm keeps .formal/ (it ticks plan items only after the check and the review).
                             "write_file" if role == "prover" && input["path"].as_str().unwrap_or("").trim_start_matches("./").starts_with(".formal") => {
@@ -665,8 +696,38 @@ async fn read_context(root: &Path) -> crate::swarm_ctx::Context {
     tauri::async_runtime::spawn_blocking(move || crate::swarm_ctx::context(&root)).await.unwrap_or_default()
 }
 
+/// Writes the AST's plan items that .formal/plan.md doesn't have yet (one per function in scope; ones the Proofs page
+/// already shows as proved come checked). The planner's turn, without a model: returns how many were added.
+async fn sync_plan(turn: &Turn<'_>, root: &Path) -> usize {
+    turn.emit("status", "planner", "plan", "planner is working".into());
+    turn.emit("status", "planner", "plan", "reading the contracts' AST (formal-ast)".into());
+    let ctx = turn.context(true).await;
+    let path = plan_path(root);
+    let text = std::fs::read_to_string(&path).unwrap_or_default();
+    let missing = ctx.missing_items(&text);
+    turn.emit("tool", "planner", "plan", format!("functions: {} in scope across {}", ctx.units().len(), ctx.contracts.iter().map(|c| c.name.as_str()).collect::<Vec<_>>().join(", ")));
+    if !missing.is_empty() {
+        let mut out = if text.trim().is_empty() {
+            "# Plan\n\nOne item per function in scope, from formal-ast: the contracts the Foundry scripts deploy or call, with their bases; the scripts' calls first. `- [x]` is proved on the Proofs page, `- [!]` blocked or a finding.\n\n".to_string()
+        } else {
+            text.trim_end().to_string() + "\n"
+        };
+        for l in &missing {
+            out.push_str(l);
+            out.push('\n');
+        }
+        let _ = std::fs::create_dir_all(path.parent().unwrap_or(root));
+        let _ = std::fs::write(&path, out);
+    }
+    for p in &ctx.problems {
+        turn.emit("result", "planner", "plan", format!("couldn't read {p}"));
+    }
+    turn.emit("plan", "planner", "plan", if missing.is_empty() { "the plan has every function in scope".into() } else { format!("{} items from the AST", missing.len()) });
+    missing.len()
+}
+
 /// The swarm's own check of a prover's work: the Lean files it wrote don't cheat, `lake build` passes, and (when the
-/// item names a def of the model) Audit's coverage counts that def as proved. Returns the theorems that prove it.
+/// item names a def of the model) the Proofs page's coverage counts that def as proved. Returns the theorems that prove it.
 async fn check_proof(turn: &Turn<'_>, root: &Path, id: &str, text: &str, files: &[String]) -> Result<Vec<String>, String> {
     let lean: Vec<&String> = files.iter().filter(|f| f.ends_with(".lean")).collect();
     if lean.is_empty() {
@@ -688,16 +749,18 @@ async fn check_proof(turn: &Turn<'_>, root: &Path, id: &str, text: &str, files: 
         let errors: Vec<&str> = build.lines().filter(|l| l.contains("error")).take(40).collect();
         return Err(format!("`lake build` failed:\n{}", if errors.is_empty() { clip(build.clone()) } else { errors.join("\n") }));
     }
-    let ctx = read_context(root).await;
-    let Some((_, f)) = ctx.target(text) else {
+    let ctx = turn.context(true).await;
+    let Some(u) = ctx.target(text) else {
         return Ok(vec![]);
     };
-    turn.emit("status", "prover", id, format!("checking: Audit's coverage of {}", f.lean));
-    if f.proved {
-        turn.emit("result", "prover", id, format!("{} is proved on Audit: {}", f.lean, f.theorems.join("; ")));
-        Ok(f.theorems.clone())
-    } else {
-        Err(format!("`lake build` passes, but no theorem without sorry names `{}`, so Audit still shows {} as not proved. State the theorem about `{}` itself, spelled fully qualified.", f.lean, f.name, f.lean))
+    let lean = u.lean().to_string();
+    turn.emit("status", "prover", id, format!("checking: the Proofs page's coverage of {lean}"));
+    match u.func {
+        Some(f) if f.proved => {
+            turn.emit("result", "prover", id, format!("{lean} is proved on the Proofs page: {}", f.theorems.join("; ")));
+            Ok(f.theorems.clone())
+        }
+        _ => Err(format!("`lake build` passes, but no theorem without sorry names `{lean}`, so the Proofs page still shows {} as not proved. State the theorem about `{lean}` itself, spelled fully qualified.", u.name())),
     }
 }
 
@@ -706,6 +769,8 @@ async fn check_proof(turn: &Turn<'_>, root: &Path, id: &str, text: &str, files: 
 async fn run_swarm(turn: &Turn<'_>) -> String {
     let root = PathBuf::from(&turn.req.folder);
     let _ = std::fs::create_dir_all(root.join(".formal"));
+    // The plan follows the AST: every function in scope that it doesn't list yet is added at each start.
+    sync_plan(turn, &root).await;
     loop {
         if turn.swarm.stop.load(Ordering::SeqCst) {
             return "paused: resume anytime, the queue carries on".into();
@@ -756,25 +821,18 @@ async fn run_swarm(turn: &Turn<'_>) -> String {
         let outcome = match job.kind.as_str() {
             "answer" => turn.agent("assistant", "you", format!("The maintainer says:\n\n{}{resume_note}", job.text)).await,
             "plan" => {
-                let before = read_plan(&root).len();
-                let task = if before == 0 { "Write the plan.".to_string() } else { format!("All {before} plan items are proven or blocked. Extend the plan with new properties to check.") };
-                turn.emit("status", "planner", "plan", "reading the contracts' AST (formal-ast)".into());
-                let digest = read_context(&root).await.digest();
-                let r = turn.agent("planner", "plan", format!("{task}\n\n{digest}{resume_note}")).await;
+                let _ = &resume_note;
+                let added = sync_plan(turn, &root).await;
                 let after = read_plan(&root);
-                if r.is_ok() {
-                    let added = after.len().saturating_sub(before);
-                    turn.emit("plan", "planner", "plan", if before == 0 { format!("{} items", after.len()) } else { format!("{added} new items") });
-                    if added == 0 && after.iter().all(|i| i.mark != " ") {
-                        with_queue(&turn.queue, |q| if let Some(j) = q.jobs.iter_mut().find(|j| j.id == job.id) { j.state = "done".into(); });
-                        return if after.is_empty() { "failed: the planner wrote no checklist".into() } else { format!("done: the planner found nothing more to check ({} items)", after.len()) };
-                    }
+                if added == 0 && after.iter().all(|i| i.mark != " ") {
+                    with_queue(&turn.queue, |q| if let Some(j) = q.jobs.iter_mut().find(|j| j.id == job.id) { j.state = "done".into(); });
+                    return if after.is_empty() { "failed: formal-ast found no function in scope (no script under script/ deploys or calls the contracts)".into() } else { format!("done: every function in scope is proved or blocked ({} items)", after.len()) };
                 }
-                r
+                Ok(Outcome { summary: format!("{added} items from the AST"), ..Default::default() })
             }
             "prove" => {
                 turn.emit("status", "prover", &id, "reading the item's def and slice (formal-ast)".into());
-                let brief = read_context(&root).await.brief(&job.text, crate::swarm_ctx::lake_dir(&root).as_deref(), &root);
+                let brief = turn.context(true).await.brief(&job.text, crate::swarm_ctx::lake_dir(&root).as_deref(), &root);
                 let mut task = format!("Plan item {id}: {}\n\n{brief}", job.text);
                 if !job.notes.is_empty() {
                     task.push_str(&format!("\n\nThe last attempt was sent back:\n{}", job.notes));
@@ -783,7 +841,8 @@ async fn run_swarm(turn: &Turn<'_>) -> String {
             }
             _ => {
                 let files = if job.files.is_empty() { String::new() } else { format!("\nFiles: {}", job.files.join(", ")) };
-                turn.agent("reviewer", &id, format!("Plan item {id}: {}\n\nThe prover says:\n{}{files}{resume_note}", job.text, job.notes)).await
+                let brief = turn.context(false).await.brief(&job.text, crate::swarm_ctx::lake_dir(&root).as_deref(), &root);
+                turn.agent("reviewer", &id, format!("Plan item {id}: {}\n\nThe prover says:\n{}{files}\n\n{brief}{resume_note}", job.text, job.notes)).await
             }
         };
         *turn.job.lock().unwrap() = None;
@@ -796,7 +855,7 @@ async fn run_swarm(turn: &Turn<'_>) -> String {
             return "paused: resume anytime, the queue carries on".into();
         }
 
-        // A proof goes to review only once it checks: no cheats, `lake build` passes, and Audit's coverage shows the
+        // A proof goes to review only once it checks: no cheats, `lake build` passes, and the Proofs page's coverage shows the
         // item's def as proved. Otherwise the prover gets the output back (or the item is blocked after the last try).
         let mut gate: Option<String> = None;
         let mut proved_by: Vec<String> = vec![];
@@ -839,7 +898,7 @@ async fn run_swarm(turn: &Turn<'_>) -> String {
                     }
                 }
                 "prove" => {
-                    let summary = if proved_by.is_empty() { out.summary.clone() } else { format!("{}\n\nChecked by the swarm: `lake build` passes; Audit counts it as proved by {}.", out.summary, proved_by.join("; ")) };
+                    let summary = if proved_by.is_empty() { out.summary.clone() } else { format!("{}\n\nChecked by the swarm: `lake build` passes; the Proofs page counts it as proved by {}.", out.summary, proved_by.join("; ")) };
                     let id = enqueue(q, "review", job.item, &job.text, job.attempt, &summary);
                     if let Some(r) = q.jobs.iter_mut().find(|r| r.id == id) {
                         r.files = files;
@@ -932,7 +991,7 @@ pub fn swarm_start(app: AppHandle, swarms: State<'_, Swarms>, request: SwarmRequ
     let id = run.clone();
     tauri::async_runtime::spawn(async move {
         let client = reqwest::Client::builder().timeout(Duration::from_secs(600)).build().unwrap_or_default();
-        let turn = Turn { app: &app, run: &id, req: &request, swarm: &swarm, client, job: Mutex::new(None), queue: swarm.queue.clone() };
+        let turn = Turn { app: &app, run: &id, req: &request, swarm: &swarm, client, job: Mutex::new(None), queue: swarm.queue.clone(), ctx: Mutex::new(None) };
         // The session's title: the focus it was given (the latest start's focus wins).
         turn.emit("start", "swarm", "", request.goal.clone().unwrap_or_default());
         turn.emit("status", "swarm", "", "resuming".into());

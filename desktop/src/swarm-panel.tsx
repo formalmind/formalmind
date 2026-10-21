@@ -1,5 +1,5 @@
 import { MarkGithubIcon } from "@primer/octicons-react";
-import { Suspense, lazy, useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { NvimTerminal } from "./nvim-terminal";
 import { reportError } from "@/lib/report-error";
@@ -8,7 +8,6 @@ import { Bug, Check, ChevronDown, Code2, Copy, FileCode2, Network, Play, Plus, S
 
 // The project roadmap (GitHub Projects-style), the same view the web app had on its own page.
 import { motion as vimMotion, search as vimSearch, setVimMode, useVimMode, type Cursor } from "@/components/vim-mode";
-const ProjectView = lazy(() => import("@/components/project/project-view").then((m) => ({ default: m.ProjectView })));
 import { useSearchParams } from "react-router";
 import { ChatComposer } from "@/components/chat-composer";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuRadioGroup, DropdownMenuRadioItem, DropdownMenuSeparator, DropdownMenuSub, DropdownMenuSubContent, DropdownMenuSubTrigger, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
@@ -485,8 +484,8 @@ function BugsView({ folder, files, invoke, bugs, openBug, setOpenBug, withPoc, o
 		return () => {
 			gone = true;
 		};
-		// eslint-disable-next-line react-hooks/exhaustive-deps
 		// `reload` ticks when the swarm files a finding in the index.
+		// eslint-disable-next-line react-hooks/exhaustive-deps
 	}, [folder, indexes.join("|"), invoke, reload]);
 	const findingKey = (f: AuditFinding) => `audit:${f.report}#${f.id}#${f.title}`;
 	// With nothing picked, the first finding opens.
@@ -1550,14 +1549,11 @@ export function SwarmPanel({ folder, name, scan, bridge, session, file: openPath
 						local
 						repo={folder}
 						actions={actions}
+						// The roadmap is the folder's own plan (.formal/plan.md, one item per AST function), nothing from GitHub.
 						below={{
 							title: "Roadmap",
 							height: 640,
-							node: (
-								<Suspense fallback={null}>
-									<ProjectView repo={name} />
-								</Suspense>
-							),
+							node: <div className="min-h-0 flex-1 overflow-y-auto">{planList}{entryList}</div>,
 						}}
 					/>
 				) : (

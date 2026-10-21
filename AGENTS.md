@@ -34,4 +34,4 @@ The push only goes through if the release succeeds.
 - Installed apps check for updates on launch and every 6 hours. A new version lands in the notification bell with
   an Update button (`desktop/src/update.tsx`).
 
-More on the desktop app (sign-in, local folders, the local executor): `desktop/README.md`.
+More on the desktop app (sign-in, local folders, the local swarm): `desktop/README.md`.

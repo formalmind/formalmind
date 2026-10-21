@@ -1,13 +1,15 @@
-//! What the local swarm reads from formal-ast and where its results land, so its work shows on the app's other pages:
-//! the plan comes from the Foundry scripts' entry points, the units and the functions Audit doesn't show as proved yet;
-//! proofs are checked by `lake build` in the folder's Lake project and count once Audit's coverage sees a theorem
+//! What the local swarm reads from formal-ast and where its results land, so its work shows on the app's other pages.
+//! The AST organizes everything: `script_entries` says which contracts are in scope (deployed or called by script/,
+//! with their bases and what they deploy), `audit_json` units are the functions (one plan item each, as on the Proofs
+//! page), and `all_slices` is what an agent reads about a function — no listing or grepping of files;
+//! proofs are checked by `lake build` in the folder's Lake project and count once the Proofs page's coverage sees a theorem
 //! naming the def; findings go into the audit index (audit/README.md) that Bugs reads, with their PoC test.
 
 use formal_ast::{all_slices, analyze_full, audit_json, formal_json, lean, script_entries};
 use serde_json::{json, Value};
 use std::path::{Path, PathBuf};
 
-/// One function of an entry contract, as Audit's Lean coverage sees it.
+/// One function of an entry contract, as the Proofs page's Lean coverage sees it.
 #[derive(Clone)]
 pub struct Func {
     /// `Contract.name`
@@ -17,8 +19,6 @@ pub struct Func {
     pub def: Option<String>,
     /// Why it is opaque in the model, if it is.
     pub why: Option<String>,
-    pub entry: bool,
-    pub dependency: bool,
     /// Named by a theorem without `sorry`.
     pub proved: bool,
     /// The theorems naming it (file:line name).
@@ -63,23 +63,23 @@ pub fn context(root: &Path) -> Context {
         }
     };
     let entry_points: Vec<Value> = scripts["entryPoints"].as_array().cloned().unwrap_or_default();
-    let mut files: Vec<String> = vec![];
-    for e in &entry_points {
-        if let Some(f) = e["file"].as_str() {
-            if !files.iter().any(|x| x == f) {
-                files.push(f.to_string());
+    // The contracts in scope that are deployed (by a script or by another in-scope contract) or called: each is an
+    // entry analyzed on its own; its bases come with it, so a contract in scope only as a base isn't analyzed again.
+    let mut files: Vec<(String, String)> = vec![];
+    for c in scripts["contracts"].as_array().into_iter().flatten() {
+        let base_only = c["via"].as_str().is_some_and(|v| v.starts_with("a base of"));
+        if c["inScope"] == true && c["kind"] == "contract" && !base_only {
+            if let (Some(name), Some(file)) = (c["name"].as_str(), c["file"].as_str()) {
+                files.push((file.to_string(), name.to_string()));
             }
         }
     }
     if files.is_empty() {
-        // No scripts: the first contract under src/.
-        let mut src: Vec<String> = crate::executor::list_files(root, "src").unwrap_or_default().lines().filter(|f| f.ends_with(".sol") && !f.ends_with(".t.sol") && !f.ends_with(".s.sol")).map(String::from).collect();
-        src.sort();
-        files.extend(src.into_iter().take(1));
+        ctx.problems.push("no contract under src/ is deployed or called by a script under script/".into());
     }
     let lake = lake_dir(root);
-    for file in files {
-        let (a, output) = match analyze_full(root, &file, None) {
+    for (file, contract) in files {
+        let (a, output) = match analyze_full(root, &file, Some(&contract)) {
             Ok(x) => x,
             Err(e) => {
                 ctx.problems.push(format!("{file}: {e:#}"));
@@ -101,8 +101,6 @@ pub fn context(root: &Path) -> Context {
                     lean: x["lean"].as_str().unwrap_or("").to_string(),
                     def: x["def"].as_str().map(String::from),
                     why: x["why"].as_str().map(String::from),
-                    entry: x["entry"].as_bool().unwrap_or(false),
-                    dependency: x["dependency"].as_bool().unwrap_or(false),
                     proved: by.iter().any(|t| t["sorry"] == false),
                     theorems: by.iter().map(|t| format!("{}:{} {}", t["file"].as_str().unwrap_or(""), t["line"], t["name"].as_str().unwrap_or(""))).collect(),
                     scripts: entry_points.iter().filter(|e| e["contract"] == name.as_str() && e["function"] == short.as_str()).flat_map(|e| e["scripts"].as_array().cloned().unwrap_or_default()).filter_map(|s| s.as_str().map(String::from)).collect(),
@@ -127,81 +125,175 @@ pub fn context(root: &Path) -> Context {
     ctx
 }
 
+/// One plan item: an external function of an in-scope contract (an `audit_json` unit), with where it stands on the
+/// Proofs page.
+pub struct Unit<'a> {
+    pub contract: &'a Contract,
+    pub unit: &'a Value,
+    /// Its function in the Lean coverage (None when the model didn't reach it).
+    pub func: Option<&'a Func>,
+}
+
+impl Unit<'_> {
+    pub fn name(&self) -> &str {
+        self.unit["name"].as_str().unwrap_or("")
+    }
+
+    /// What a theorem has to name: the Lean def, or the unit's name when the model has none.
+    pub fn lean(&self) -> &str {
+        self.func.map(|f| f.lean.as_str()).filter(|l| !l.is_empty()).unwrap_or_else(|| self.name())
+    }
+
+    /// Where it is in the Solidity, from its slice's header (`src/X.sol:12`).
+    pub fn at(&self) -> String {
+        let re = regex::Regex::new(r"[\w./-]+\.sol:\d+").expect("valid regex");
+        self.contract.slices.get(self.name()).and_then(|s| re.find(s).map(|m| m.as_str().to_string())).unwrap_or_else(|| self.contract.file.clone())
+    }
+
+    fn list(&self, k: &str) -> String {
+        self.unit[k].as_array().into_iter().flatten().filter_map(Value::as_str).collect::<Vec<_>>().join(", ")
+    }
+
+    /// The plan line: `- [ ] `Lean.def` — Contract (src/X.sol:12): writes [a, b] · guards 2 · external calls 1`.
+    pub fn line(&self) -> String {
+        let mark = if self.func.is_some_and(|f| f.proved) { 'x' } else { ' ' };
+        let u = self.unit;
+        let scripts = self.func.map(|f| f.scripts.clone()).unwrap_or_default();
+        format!(
+            "- [{mark}] `{}` — {} ({}): {} · writes [{}] · guards {} · external calls {}{}",
+            self.lean(),
+            self.contract.name,
+            self.at(),
+            u["mutability"].as_str().unwrap_or(""),
+            self.list("writes"),
+            u["guards"],
+            u["external"],
+            if scripts.is_empty() { String::new() } else { format!(" · called by {}", scripts.join(", ")) }
+        )
+    }
+}
+
 impl Context {
-    /// The project's own functions (not libraries), entry points first.
-    fn own(&self) -> impl Iterator<Item = (&Contract, &Func)> {
-        self.contracts.iter().flat_map(|c| c.functions.iter().filter(|f| !f.dependency).map(move |f| (c, f)))
-    }
-
-    /// The plan item's function: the first `Contract.fn` in backticks that names one of ours.
-    pub fn target(&self, text: &str) -> Option<(&Contract, &Func)> {
-        let re = regex::Regex::new(r"`([^`]+)`").expect("valid regex");
-        let names: Vec<String> = re.captures_iter(text).map(|c| c[1].trim().to_string()).collect();
-        names.iter().find_map(|t| self.contracts.iter().flat_map(|k| k.functions.iter().map(move |f| (k, f))).find(|(_, f)| &f.lean == t || &f.name == t))
-    }
-
-    /// What the planner reads: entry points, coverage and the units' footprints.
-    pub fn digest(&self) -> String {
-        let mut s = String::from("## What formal-ast reads from solc's AST\n\n");
-        for p in &self.problems {
-            s.push_str(&format!("(couldn't read {p})\n"));
-        }
-        let called: Vec<(&Contract, &Func)> = self.own().filter(|(_, f)| !f.scripts.is_empty()).collect();
-        s.push_str("### Entry points the Foundry scripts call (what production runs)\n\n");
-        if called.is_empty() {
-            s.push_str("(no script under script/ calls the project's contracts)\n");
-        }
-        for (c, f) in &called {
-            s.push_str(&format!("- `{}` ({}) — {}; called by {}\n", f.lean, c.file, status(f), f.scripts.join(", ")));
-        }
+    /// Every plan item, as the Proofs page lists the functions: the in-scope contracts' units, the ones the Foundry
+    /// scripts call first, then the ones that write storage, then the rest, each group simplest first (by the
+    /// arithmetic, external calls and guards in its footprint); units the model left opaque are skipped
+    /// (nothing can be proved about them against it).
+    pub fn units(&self) -> Vec<Unit<'_>> {
+        let mut out: Vec<Unit> = vec![];
         for c in &self.contracts {
-            s.push_str(&format!(
-                "\n### {} ({}) — Lean model {}\n\n",
-                c.name,
-                c.file,
-                c.model.as_deref().map(|m| format!("`{m}` (namespace `{}`)", lean::ident(&c.name))).unwrap_or_else(|| "not generated (no Lake project)".into())
-            ));
-            for f in c.functions.iter().filter(|f| !f.dependency && f.scripts.is_empty()) {
-                s.push_str(&format!("- `{}`{} — {}\n", f.lean, if f.entry { " (external)" } else { "" }, status(f)));
-            }
-            if !c.units.is_empty() {
-                s.push_str("\nUnits (one per external function): writes · external calls · guards · arithmetic\n");
-                for u in &c.units {
-                    let writes: Vec<&str> = u["writes"].as_array().into_iter().flatten().filter_map(Value::as_str).collect();
-                    s.push_str(&format!("- {} — writes [{}] · ext {} · guards {} · arith {}\n", u["name"].as_str().unwrap_or(""), writes.join(", "), u["external"], u["guards"], u["arith"]));
+            for u in &c.units {
+                let name = u["name"].as_str().unwrap_or("");
+                let func = c.functions.iter().find(|f| f.name == name);
+                if func.is_some_and(|f| f.why.is_some()) {
+                    continue;
+                }
+                let unit = Unit { contract: c, unit: u, func };
+                // The same inherited function in two contracts' models is one item per contract.
+                if !out.iter().any(|x| x.lean() == unit.lean() && x.contract.name == c.name) {
+                    out.push(unit);
                 }
             }
+        }
+        let rank = |u: &Unit| {
+            let called = u.func.is_some_and(|f| !f.scripts.is_empty());
+            let writes = u.unit["writes"].as_array().is_some_and(|w| !w.is_empty()) || u.unit["external"].as_u64().unwrap_or(0) > 0;
+            let n = |k: &str| u.unit[k].as_u64().unwrap_or(0);
+            (if called { 0 } else if writes { 1 } else { 2 }, n("arith") + 2 * n("external") + n("guards"))
+        };
+        out.sort_by_key(|u| rank(u));
+        out
+    }
+
+    /// The plan item a line names: its backticked def, in the contract the line names after the dash.
+    pub fn target(&self, text: &str) -> Option<Unit<'_>> {
+        let re = regex::Regex::new(r"`([^`]+)`").expect("valid regex");
+        let names: Vec<String> = re.captures_iter(text).map(|c| c[1].trim().to_string()).collect();
+        let units = self.units();
+        let pick = |n: &String| {
+            let hits: Vec<usize> = units.iter().enumerate().filter(|(_, u)| u.lean() == n || u.name() == n).map(|(i, _)| i).collect();
+            hits.iter().copied().find(|&i| text.contains(&format!("— {} (", units[i].contract.name))).or(hits.first().copied())
+        };
+        let i = names.iter().find_map(pick)?;
+        units.into_iter().nth(i)
+    }
+
+    /// Lines for the AST's plan items that `plan` doesn't have yet (matched by def and contract).
+    pub fn missing_items(&self, plan: &str) -> Vec<String> {
+        let lines: Vec<&str> = plan.lines().filter(|l| l.trim_start().starts_with("- [")).collect();
+        self.units()
+            .iter()
+            .filter(|u| !lines.iter().any(|l| l.contains(&format!("`{}`", u.lean())) && (l.contains(&format!("— {} (", u.contract.name)) || !l.contains(" — "))))
+            .map(|u| u.line())
+            .collect()
+    }
+
+    /// The `functions` tool: every plan item's function, with its place and status.
+    pub fn functions(&self) -> String {
+        let mut s = String::new();
+        for c in &self.contracts {
+            s.push_str(&format!("## {} ({}) — Lean model {}\n", c.name, c.file, c.model.as_deref().unwrap_or("(none)")));
+            for u in self.units().iter().filter(|u| std::ptr::eq(u.contract, c)) {
+                s.push_str(&format!("- {} — {}\n", u.line().trim_start_matches("- "), u.func.map(status).unwrap_or_else(|| "not in the model".into())));
+            }
+            s.push('\n');
+        }
+        for p in &self.problems {
+            s.push_str(&format!("(couldn't read {p})\n"));
         }
         s
     }
 
-    /// What the prover gets for its item: the def it has to prove something about, the model, the Solidity slice.
+    /// The `function` tool: a function's slice from the AST (its guards, footprint, state and code), by name or def.
+    pub fn slice(&self, name: &str) -> Option<String> {
+        let short = name.rsplit('.').next().unwrap_or(name);
+        for c in &self.contracts {
+            if let Some(s) = c.slices.get(name) {
+                return Some(s.clone());
+            }
+            if let Some(f) = c.functions.iter().find(|f| f.lean == name) {
+                if let Some(s) = c.slices.get(&f.name) {
+                    return Some(s.clone());
+                }
+            }
+            if let Some((_, s)) = c.slices.iter().find(|(k, _)| k.rsplit('.').next() == Some(short) && name.starts_with(&c.name)) {
+                return Some(s.clone());
+            }
+        }
+        None
+    }
+
+    /// What the prover and the reviewer get for an item: the def, the generated model, the slice.
     pub fn brief(&self, text: &str, lake: Option<&Path>, root: &Path) -> String {
-        let Some((c, f)) = self.target(text) else {
-            return "This item names no function of the generated model; prove it in the Lake project and say which file holds it.".into();
+        let Some(u) = self.target(text) else {
+            return "This item names no function in scope; prove it in the Lake project and say which file holds it.".into();
         };
+        let c = u.contract;
+        let lean = u.lean();
         let lib = lake.map(|d| d.strip_prefix(root).unwrap_or(d).to_string_lossy().to_string()).filter(|d| !d.is_empty()).unwrap_or_else(|| ".".into());
-        let short = f.name.rsplit('.').next().unwrap_or("").trim_start_matches('_');
+        let short = u.name().rsplit('.').next().unwrap_or("").trim_start_matches('_');
         let module = format!("{}{}", c.name, capitalize(short));
         let mut s = format!(
-            "## The target\n\n`{}` in {} — Lean def `{}` in the generated model `{}`.\n{}\n\
+            "## The target\n\n`{}` in {} ({}) — Lean def `{lean}` in the generated model `{}`.\n{}\n\
+Prove what its slice says: the conditions under which it reverts (its guards), and on success the storage it writes \
+(its footprint) and what it returns or hands to its external calls. \
 Write the proof as `{lib}/Refinement/Swarm/{module}.lean` (module `Refinement.Swarm.{module}`), starting with `import Generated.{}` (and `import Refinement.Monad` for its simp lemmas when the project has it). \
-Every theorem about the def must spell it fully qualified as `{}` in its statement — Audit's coverage counts the function as proved only when a theorem without `sorry` names exactly that. \
+Every theorem about the def must spell it fully qualified as `{lean}` in its statement — the Proofs page counts the function as proved only when a theorem without `sorry` names exactly that. \
 Check it with `lake build Refinement.Swarm.{module}` (lake runs in {lib}/). The swarm itself re-runs `lake build` and the coverage before your work goes to review.\n",
-            f.name,
-            c.file,
-            f.lean,
-            c.model.as_deref().unwrap_or("(none)"),
-            if f.theorems.is_empty() { "No theorem names it yet.".to_string() } else { format!("Already named by: {}.", f.theorems.join("; ")) },
+            u.name(),
             c.name,
-            f.lean
+            u.at(),
+            c.model.as_deref().unwrap_or("(none)"),
+            match u.func {
+                Some(f) if !f.theorems.is_empty() => format!("Already named by: {}.", f.theorems.join("; ")),
+                _ => "No theorem names it yet.".to_string(),
+            },
+            c.name,
         );
-        if let Some(d) = &f.def {
+        if let Some(d) = u.func.and_then(|f| f.def.as_ref()) {
             s.push_str(&format!("\n### Its generated def\n\n```lean\n{}\n```\n", d.trim_end()));
         }
-        let unit = c.slices.get(&f.name).or_else(|| c.slices.iter().find(|(k, _)| k.rsplit('.').next() == f.name.rsplit('.').next()).map(|(_, v)| v));
-        if let Some(sl) = unit {
-            s.push_str(&format!("\n### Its slice of the Solidity (from the AST)\n\n{}\n", crate::executor::clip(sl.clone())));
+        if let Some(sl) = c.slices.get(u.name()) {
+            s.push_str(&format!("\n### Its slice (from the AST)\n\n{}\n", crate::executor::clip(sl.clone())));
         }
         s
     }
@@ -367,8 +459,11 @@ mod tests {
     fn digest_of_a_folder() {
         let root = PathBuf::from(std::env::var("FM_FOLDER").unwrap());
         let ctx = context(&root);
-        println!("{}", ctx.digest());
-        let item = std::env::var("FM_ITEM").unwrap_or("- [ ] `Router.matchBook` forwards the pool key".into());
+        println!("{}", ctx.functions());
+        for l in ctx.missing_items("") {
+            println!("{l}");
+        }
+        let item = std::env::var("FM_ITEM").unwrap_or("- [ ] `Router.matchBook` — Router (src/Router.sol)".into());
         println!("---\n{}", ctx.brief(&item, lake_dir(&root).as_deref(), &root));
     }
 

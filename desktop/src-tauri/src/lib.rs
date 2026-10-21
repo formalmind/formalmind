@@ -64,7 +64,6 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_process::init())
-        .manage(executor::Runs::default())
         .manage(swarm::Swarms::default())
         .manage(debug::Debuggers::default())
         .setup(|app| {
@@ -117,10 +116,6 @@ pub fn run() {
             term::term_write,
             term::term_resize,
             term::term_kill,
-            executor::model_key_set,
-            executor::model_key_status,
-            executor::turn_start,
-            executor::turn_stop,
             swarm::swarm_start,
             swarm::swarm_stop,
             swarm::swarm_say,
