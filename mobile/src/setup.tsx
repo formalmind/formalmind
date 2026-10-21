@@ -13,7 +13,7 @@ import { rememberProject } from "./tabs";
 import { SwarmShowcase } from "./showcase";
 import { Skeleton } from "./bar";
 import { useSwipe } from "./swipe";
-import { CoverageCard, TheoremCard } from "./proofs";
+import { TheoremCard } from "./proofs";
 import formal from "./fixtures/formal-asyncswap.json";
 
 const KEY = "fm:mobile-setup";
@@ -107,35 +107,6 @@ function Headline({ muted, strong, body }: { muted: string; strong: string; body
 	);
 }
 
-/** A count from 0 to 100 that runs once (the coverage a finished swarm reaches). */
-function useCount(run: boolean, ms = 2400) {
-	const [n, setN] = useState(0);
-	useEffect(() => {
-		if (!run) return;
-		let raf = 0;
-		const t0 = performance.now();
-		const tick = (t: number) => {
-			const p = Math.min(1, (t - t0) / ms);
-			setN(Math.round(100 * (1 - (1 - p) ** 3)));
-			if (p < 1) raf = requestAnimationFrame(tick);
-		};
-		raf = requestAnimationFrame(tick);
-		return () => cancelAnimationFrame(raf);
-	}, [run, ms]);
-	return n;
-}
-
-/** The app's coverage card (the Proofs explorer's), at `value`% of AsyncSwap's 143 functions proved. */
-function Coverage({ value }: { value: number }) {
-	const total = 143;
-	const proved = Math.round((value / 100) * total);
-	return (
-		<div className="dark text-foreground">
-			<CoverageCard contract="AsyncSwap" theorems={Math.round((value / 100) * 876)} proved={proved} notYet={total - proved} opaque={0} />
-		</div>
-	);
-}
-
 const BUDGETS = [2, 5, 10, 20, 50];
 
 /**
@@ -145,7 +116,6 @@ const BUDGETS = [2, 5, 10, 20, 50];
 export function Setup({ user, onDone }: { user: SessionData["user"]; onDone: () => void }) {
 	const [step, setStep] = useState(0);
 	const [budget, setBudget] = useState(() => startBudget() ?? 5);
-	const [verifying, setVerifying] = useState(false);
 	const [adding, setAdding] = useState(false);
 	const projects = useProjects();
 	const navigate = useNavigate();
@@ -162,7 +132,6 @@ export function Setup({ user, onDone }: { user: SessionData["user"]; onDone: () 
 	};
 	// Each step starts in place, whatever the last one scrolled.
 	useEffect(() => window.scrollTo(0, 0), [step]);
-	const toHundred = useCount(verifying, 3000);
 	const handle = user.nickname ?? user.name ?? "there";
 
 	return (
@@ -248,19 +217,17 @@ export function Setup({ user, onDone }: { user: SessionData["user"]; onDone: () 
 								</p>
 							</div>
 						</section>
-						{verifying ? <Coverage value={toHundred} /> : null}
 					</div>
 					<Headline muted="Set a budget." strong="Start verifying." body="The swarm stops when it reaches the cap; raise it and resume to carry on. Credits come from your formal.team balance, or your own Anthropic key on the Mac." />
 					<button
 						type="button"
 						onClick={() => {
 							setStartBudget(budget);
-							if (!verifying) setVerifying(true);
-							else next();
+							next();
 						}}
 						className={`${primary} mt-10`}
 					>
-						{!verifying ? `Start verifying with $${budget}` : toHundred < 100 ? `Verifying… ${toHundred}%` : "Continue"}
+						Start verifying with ${budget}
 					</button>
 				</>
 			) : null}
