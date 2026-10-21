@@ -1435,7 +1435,7 @@ export function SwarmPanel({ folder, name, scan, bridge, session, file: openPath
 
 	// The plan as a list with each item's proof, on the Swarm canvas.
 	const planList = (
-						<ul className="space-y-0.5 p-2 text-[13px]">
+						<ul className="space-y-0.5 p-1.5 text-[12px] leading-[18px]">
 							{plan.length === 0 ? <li className="p-2 text-muted-foreground">The planner writes .formal/plan.md on the first run.</li> : null}
 							{plan.map((i) => {
 								const proof = proofs[String(i.index)];
@@ -1443,7 +1443,7 @@ export function SwarmPanel({ folder, name, scan, bridge, session, file: openPath
 								return (
 									<li key={i.index} className={`rounded-md ${working && working.item === String(i.index) ? "bg-muted" : ""}`}>
 										<button type="button" disabled={!proof} onClick={() => setOpenItem(expanded ? null : i.index)} className="flex w-full gap-2 px-2 py-1 text-left enabled:hover:bg-muted/60 rounded-md">
-											<span className={`mt-0.5 grid size-4 shrink-0 place-items-center rounded border text-[10px] ${i.mark === "x" ? "border-emerald-500 bg-emerald-500 text-white" : i.mark === "!" ? "border-amber-500 text-amber-600" : ""}`}>{i.mark === "x" ? "✓" : i.mark === "!" ? "!" : ""}</span>
+											<span className={`mt-px grid size-3.5 shrink-0 place-items-center rounded border text-[9px] ${i.mark === "x" ? "border-emerald-500 bg-emerald-500 text-white" : i.mark === "!" ? "border-amber-500 text-amber-600" : ""}`}>{i.mark === "x" ? "✓" : i.mark === "!" ? "!" : ""}</span>
 											<span className="min-w-0 flex-1">
 												<span className={i.mark === "x" ? "text-muted-foreground" : ""}>{i.text}</span>
 												{working && working.item === String(i.index) && activity ? (
