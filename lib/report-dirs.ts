@@ -5,7 +5,7 @@ export const DEFAULT_REPORT_DIRS = ["audit", "audits", "reports"];
 
 const keyOf = (folder: string) => `fm:report-dirs:${folder}`;
 
-/** The folders a project's audit reports are read from (set in Settings → Audit folders). */
+/** The folders a project's audit reports are read from (set in Settings → Audit reports). */
 export function readReportDirs(folder: string): string[] {
 	try {
 		const saved = JSON.parse(localStorage.getItem(keyOf(folder)) ?? "null");

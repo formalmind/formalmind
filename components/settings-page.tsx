@@ -22,8 +22,8 @@ export function SettingsPage() {
 	return (
 		<div className="flex min-h-0 flex-1 flex-col overflow-y-auto">
 			<main className="mx-auto w-full max-w-3xl space-y-3 px-6 pb-10 pt-2">
-				<Section title="Audit folders">
-					<p className="text-[11px] text-muted-foreground">Where each repository's audit reports are read from for Bugs, relative to its root. Separate several with commas.</p>
+				<Section title="Audit reports">
+					<p className="text-[11px] text-muted-foreground">Where each repository's audit reports are read from for Bugs, relative to its root. </p>
 					{/* Imported repositories (their Bugs tab reads the browser's git copy), then the local demo's folders. */}
 					{(projects ?? []).map((p) => (
 						<AuditFolders key={p.repo} folder={p.repo} label={p.repo} />
@@ -34,7 +34,7 @@ export function SettingsPage() {
 					{!projects?.length && !demos.length ? <p className="text-[11px] text-muted-foreground">Import a repository first.</p> : null}
 				</Section>
 				<Section title="Entry points">
-					<p className="text-[11px] text-muted-foreground">The contracts Proofs models for each repository, comma-separated; the first opens by default.</p>
+					<p className="text-[11px] text-muted-foreground">The contracts Proofs models for each repository; the first opens by default.</p>
 					{(projects ?? []).map((p) => (
 						<EntryPoints key={p.repo} folder={p.repo} label={p.repo} />
 					))}

@@ -30,7 +30,7 @@ const SECTIONS = [
 	{ id: "editor", title: "Editor", icon: SquareCode, group: "This computer" },
 	{ id: "server", title: "Server", icon: Server, group: "This computer" },
 	{ id: "entry-points", title: "Entry points", icon: Crosshair, group: "Projects" },
-	{ id: "audit-folders", title: "Audit folders", icon: FolderSearch, group: "Projects" },
+	{ id: "audit-reports", title: "Audit reports", icon: FolderSearch, group: "Projects" },
 ] as const satisfies readonly { id: string; title: string; icon: LucideIcon; group: string }[];
 const GROUPS = [...new Set(SECTIONS.map((s) => s.group))];
 type SectionId = (typeof SECTIONS)[number]["id"];
@@ -134,7 +134,7 @@ export function SettingsPage() {
 						</div>
 					</Section> : null}
 					{section === "entry-points" ? <Section title="Entry points">
-						<p className="text-xs text-muted-foreground">The contracts Proofs models for each folder, comma-separated; the first opens by default. Picking a contract on the Proofs page makes it the first.</p>
+						<p className="text-xs text-muted-foreground">The contracts Proofs models for each folder; the first opens by default. Picking a contract on the Proofs page makes it the first.</p>
 						{folders.map((f) => (
 							<EntryPoints key={f} folder={f} />
 						))}
@@ -153,8 +153,8 @@ export function SettingsPage() {
 							<input type="checkbox" checked={vim} onChange={(e) => setVimMode(e.target.checked)} className="size-4" />
 						</label>
 					</Section> : null}
-					{section === "audit-folders" ? <Section title="Audit folders">
-						<p className="text-xs text-muted-foreground">Where each project's audit reports are read from for Bugs, relative to the project. Separate several with commas.</p>
+					{section === "audit-reports" ? <Section title="Audit reports">
+						<p className="text-xs text-muted-foreground">Where each project's audit reports are read from for Bugs, relative to the project.</p>
 						{folders.length + Object.keys(repos).length === 0 ? <p className="text-xs text-muted-foreground">Add a folder or import a repository in the sidebar first.</p> : null}
 						{folders.map((f) => (
 							<AuditFolders key={f} folder={f} />

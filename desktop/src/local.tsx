@@ -134,7 +134,7 @@ function FolderItem({ path, current, file, archived, onArchive, onRemove }: { pa
 			current={current}
 			dim={archived}
 			menu={[
-				{ label: "Audit folders…", icon: FolderSearch, onSelect: () => setAudits(true) },
+				{ label: "Audit reports…", icon: FolderSearch, onSelect: () => setAudits(true) },
 				"separator",
 				{ label: archived ? "Unarchive" : "Archive", icon: archived ? ArchiveRestore : Archive, onSelect: () => onArchive(!archived) },
 				"separator",

@@ -59,7 +59,7 @@ export function ProjectContextMenu({ repo, swarm, archived, onArchive, auditKey,
 					"separator" as const,
 				]
 			: []),
-		{ label: "Audit folders…", icon: FolderSearch, onSelect: () => setAudits(true) },
+		{ label: "Audit reports…", icon: FolderSearch, onSelect: () => setAudits(true) },
 		"separator",
 		{ label: archived ? "Unarchive" : "Archive", icon: archived ? ArchiveRestore : Archive, onSelect: () => onArchive(!archived) },
 	];

@@ -24,5 +24,5 @@ type Story = StoryObj<typeof meta>;
 
 export const Models: Story = {};
 
-/** A link to `/settings?section=audit-folders` opens straight on that section. */
-export const AuditFolders: Story = { parameters: { route: "/settings?section=audit-folders" } };
+/** A link to `/settings?section=audit-reports` opens straight on that section. */
+export const AuditReports: Story = { parameters: { route: "/settings?section=audit-reports" } };
