@@ -749,7 +749,7 @@ const MODES: { id: Mode; label: string; icon: typeof Code2 }[] = [
 ];
 
 /**
- * The folder's name, Debug and the page's modes as one macOS-style segmented control. The Mac app shows it in its
+ * The page's modes, Debug and then the folder's name, as one macOS-style segmented control. The Mac app shows it in its
  * title bar; the web app centres it at the top of the page.
  */
 function NavGroup({ name, git, onDebug, mode, onMode, inBar, compact }: { name: string; git: boolean; onDebug?: () => void; mode: Mode; onMode: (m: Mode) => void; inBar?: boolean; compact?: boolean }) {
@@ -757,10 +757,12 @@ function NavGroup({ name, git, onDebug, mode, onMode, inBar, compact }: { name: 
 	const h = inBar ? "h-6" : "h-7";
 	return (
 		<div role="tablist" aria-label="Mode" className={`pointer-events-auto inline-flex min-w-0 items-center gap-0.5 rounded-lg border bg-muted/90 p-0.5 shadow-sm backdrop-blur ${inBar ? "h-7" : "absolute left-1/2 top-3 z-20 h-8 max-w-[calc(100%-1.5rem)] -translate-x-1/2"}`}>
-			<span className={`${seg} ${h} min-w-0 text-foreground`} title={name}>
-				{git ? <MarkGithubIcon className="size-3.5 shrink-0" /> : null}
-				<span className={`truncate ${compact ? "max-w-28" : "max-w-48"}`}>{name}</span>
-			</span>
+			{MODES.map(({ id, label, icon: Icon }) => (
+				<button key={id} type="button" role="tab" aria-selected={mode === id} aria-label={label} title={compact ? label : undefined} onClick={() => onMode(id)} className={`${seg} ${h} ${mode === id ? "bg-background text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"}`}>
+					<Icon className="size-3.5" />
+					{compact ? null : label}
+				</button>
+			))}
 			{onDebug ? (
 				<button type="button" role="tab" aria-selected={mode === "debug"} onClick={onDebug} title="Debug this folder's scripts and tests" className={`${seg} ${h} ${mode === "debug" ? "bg-background text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"}`}>
 					<Bug className="size-3.5" />
@@ -768,12 +770,10 @@ function NavGroup({ name, git, onDebug, mode, onMode, inBar, compact }: { name: 
 				</button>
 			) : null}
 			<span className="mx-0.5 h-4 w-px shrink-0 bg-border" />
-			{MODES.map(({ id, label, icon: Icon }) => (
-				<button key={id} type="button" role="tab" aria-selected={mode === id} aria-label={label} title={compact ? label : undefined} onClick={() => onMode(id)} className={`${seg} ${h} ${mode === id ? "bg-background text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"}`}>
-					<Icon className="size-3.5" />
-					{compact ? null : label}
-				</button>
-			))}
+			<span className={`${seg} ${h} min-w-0 text-foreground`} title={name}>
+				{git ? <MarkGithubIcon className="size-3.5 shrink-0" /> : null}
+				<span className={`truncate ${compact ? "max-w-28" : "max-w-48"}`}>{name}</span>
+			</span>
 		</div>
 	);
 }
