@@ -3,7 +3,7 @@
 import { MarkGithubIcon } from "@primer/octicons-react"
 import { useEffect, useState } from "react";
 import { Link, useLocation, useNavigate } from "react-router";
-import { Archive, ArchiveRestore, Folder, FolderOpen, ChevronRight, GitBranch, Plus } from "lucide-react"
+import { Archive, ArchiveRestore, ChevronRight, GitBranch, Plus } from "lucide-react"
 import { ProjectContextMenu } from "@/components/projects/swarm-control"
 import { useArchived } from "@/components/folder-menu"
 import { cachedTree, freshEnough, syncRepo, type RepoTree } from "@/lib/browser-git"
@@ -149,13 +149,8 @@ function ProjectFolder({ project, open, onOpenChange, pathname, collapsed, onExp
 						className={`flex h-8 min-w-0 flex-1 items-center gap-2 px-2 text-left text-sm font-normal outline-none ${pathname === home ? "font-medium text-sidebar-foreground" : "text-sidebar-foreground/90"} focus-visible:ring-2 focus-visible:ring-sidebar-ring`}
 						title={project.repo}
 					>
-						{/* An imported repository, not a folder on disk: the GitHub mark comes before its folder. */}
-						<MarkGithubIcon size={14} className="shrink-0 text-muted-foreground group-data-[collapsible=icon]:hidden" aria-hidden />
-						{/* Closed and open folders cross-fade; hovering lifts the lid a little. */}
-						<span className="fm-folder relative size-4 shrink-0" data-open={open && !collapsed ? "" : undefined} aria-hidden>
-							<Folder className="fm-folder-closed absolute inset-0 size-4" />
-							<FolderOpen className="fm-folder-open absolute inset-0 size-4" />
-						</span>
+						{/* An imported repository, not a folder on disk: the GitHub mark is its icon (also on the collapsed rail). */}
+						<MarkGithubIcon size={16} className="shrink-0 text-muted-foreground" aria-hidden />
 						<span className="truncate group-data-[collapsible=icon]:hidden">{name}</span>
 						<ChevronRight className={`size-3.5 shrink-0 text-muted-foreground transition-transform duration-150 group-data-[collapsible=icon]:hidden ${open ? "rotate-90" : ""}`} aria-hidden />
 					</CollapsibleTrigger>
