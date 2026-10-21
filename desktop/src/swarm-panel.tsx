@@ -4,7 +4,7 @@ import { createPortal } from "react-dom";
 import { NvimTerminal } from "./nvim-terminal";
 import { reportError } from "@/lib/report-error";
 import { JsonTree } from "./json-tree";
-import { Bug, Check, ChevronDown, Code2, Copy, FileCode2, Network, Play, Plus, ScanSearch, Settings, Square, WandSparkles, Wrench } from "lucide-react";
+import { Bug, Check, ChevronDown, Code2, Copy, FileCode2, MessageSquare, Network, Play, Plus, ScanSearch, Settings, Square, WandSparkles, Wrench } from "lucide-react";
 
 // The project roadmap (GitHub Projects-style), the same view the web app had on its own page.
 import { motion as vimMotion, search as vimSearch, setVimMode, useVimMode, type Cursor } from "@/components/vim-mode";
@@ -1088,6 +1088,11 @@ export function SwarmPanel({ folder, name, scan, bridge, session, file: openPath
 	const [openItem, setOpenItem] = useState<number | null>(null);
 	const [file, setFile] = useState<{ path: string; text: string } | null>(null);
 	const [planOpen, setPlanOpen] = useState(false);
+	const [chatOpen, setChatOpen] = useState(() => store.get("fm:chat-open") !== "0");
+	const toggleChat = (open: boolean) => {
+		setChatOpen(open);
+		store.set("fm:chat-open", open ? "1" : "0");
+	};
 	// Markdown files open rendered; the toggle shows their source (the choice is kept).
 	const [mdSource, setMdSource] = useState(() => store.get("fm:md-view") === "source");
 	// JSON files open as a collapsible tree; Raw shows the file as it is.
@@ -1535,6 +1540,125 @@ export function SwarmPanel({ folder, name, scan, bridge, session, file: openPath
 	}, []);
 	const compact = width < (slot ? 1100 : 820);
 	const nav = <NavGroup name={name} git={Boolean(scan?.git)} onDebug={debug ? () => setMode("debug") : undefined} mode={mode} onMode={setMode} inBar={Boolean(slot)} compact={compact} />;
+	// The conversation with the swarm: its sessions, budget and Stop on a gray bar, the messages and composer under it.
+	const chatPanel = (
+		<>
+				<div className="flex h-8 shrink-0 items-center gap-2 pl-2 pr-0.5">
+					<DropdownMenu>
+						<DropdownMenuTrigger className="flex min-w-0 flex-1 items-center gap-1 rounded-md text-left text-[13px] font-medium outline-none hover:text-foreground" title={`${title} — switch sessions`}>
+							<span className="truncate">{title}</span>
+							<ChevronDown className="size-3 shrink-0 text-muted-foreground" />
+						</DropdownMenuTrigger>
+						<DropdownMenuContent align="start" className="w-64">
+							<DropdownMenuLabel className="text-xs font-normal text-muted-foreground">Sessions in {name}</DropdownMenuLabel>
+							<DropdownMenuRadioGroup value={viewing ?? ""} onValueChange={pickSession}>
+								{sessions.map((x, i) => (
+									<DropdownMenuRadioItem key={x.run} value={x.run} className="text-[13px]">
+										<span className="truncate">{x.title || (x.run === "swarm" ? "Main session" : `Session ${sessions.length - i}`)}</span>
+										{x.run === run ? <span className="ml-auto size-1.5 shrink-0 animate-pulse rounded-full bg-emerald-500" aria-label="running" /> : null}
+									</DropdownMenuRadioItem>
+								))}
+							</DropdownMenuRadioGroup>
+							<DropdownMenuSeparator />
+							<DropdownMenuItem onSelect={() => pickSession("new")} className="text-[13px]">
+								<Plus className="size-3.5" /> New session
+							</DropdownMenuItem>
+						</DropdownMenuContent>
+					</DropdownMenu>
+					<DropdownMenu>
+						<DropdownMenuTrigger className="inline-flex h-7 shrink-0 items-center gap-1 rounded-md border bg-background px-2 text-[11px] tabular-nums text-muted-foreground outline-none hover:text-foreground" title="Spending cap">
+							{run || viewing ? `$${spent.toFixed(2)} / $${budget}` : `Budget $${budget}`}
+							<ChevronDown className="size-3" />
+						</DropdownMenuTrigger>
+						<DropdownMenuContent align="end">
+							<DropdownMenuLabel className="text-xs font-normal text-muted-foreground">Stop the swarm at</DropdownMenuLabel>
+							<DropdownMenuRadioGroup
+								value={String(budget)}
+								onValueChange={(v) => {
+									setBudget(Number(v));
+									store.set(budgetKey, v);
+									if (run) void invoke("swarm_set_budget", { run, usd: Number(v) });
+								}}
+							>
+								{BUDGETS.map((b) => (
+									<DropdownMenuRadioItem key={b} value={String(b)} disabled={Boolean(run) && b <= spent}>${b}</DropdownMenuRadioItem>
+								))}
+							</DropdownMenuRadioGroup>
+						</DropdownMenuContent>
+					</DropdownMenu>
+					{run ? (
+						<button type="button" onClick={() => void invoke("swarm_stop", { run })} title="Stop the swarm" className="inline-flex h-7 shrink-0 items-center gap-1 rounded-md border bg-background px-2 text-[11px] text-foreground hover:bg-muted">
+							<Square className="size-3" />Stop
+						</button>
+					) : null}
+					<button type="button" onClick={() => toggleChat(false)} title="Hide the chat" aria-label="Hide the chat" className="inline-flex size-7 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-background hover:text-foreground">
+						<ChevronDown className="size-3.5" />
+					</button>
+				</div>
+				<div className="mt-1 flex min-h-0 flex-1 flex-col overflow-hidden rounded-xl border bg-card">
+				<div ref={chat} className="min-h-0 flex-1 space-y-3 overflow-y-auto p-3 text-[13px]">
+					{shown.length === 0 && !run ? <p className="text-muted-foreground">Talk to the agents here. Before a run, what you write is the swarm's focus and ↑ starts it; while it runs, they read your messages before their next turn.</p> : null}
+					{blocks(shown).map((block, i) =>
+						"steps" in block ? (
+							<Steps key={i} steps={block.steps} running={Boolean(run) && i === blocks(shown).length - 1} />
+						) : block.e.kind === "you" ? (
+							<Message key={i} align="end">
+								<MessageContent>
+									<div className="ml-auto w-fit max-w-[85%] whitespace-pre-wrap rounded-2xl rounded-br-md bg-foreground px-3 py-2 text-background">{block.e.text}</div>
+								</MessageContent>
+							</Message>
+						) : (
+							<AgentMessage key={i} e={block.e} onBug={() => {
+								// Open the bugs card on this report.
+								const hit = bugs.find((b) => block.e.text.includes(b.file));
+								setMode("bugs");
+								if (hit) setOpenBug(hit.file);
+							}} />
+						),
+					)}
+					{finished ? <p className="rounded-lg border px-3 py-2 text-xs text-muted-foreground">Finished: {finished.text}</p> : null}
+				</div>
+
+				<div className="shrink-0 space-y-2 p-3">
+					{error ? <p className="text-xs text-red-600">{error}</p> : null}
+					{/* The Swarm page's composer: steer while it runs; before that, what you type is its focus and ↑ starts it. */}
+					<ChatComposer
+						value={run ? say : goal}
+						onChange={(e) => (run ? setSay(e.target.value) : setGoal(e.target.value))}
+						onSubmit={() => void (run ? send() : start())}
+						onStop={() => {}}
+						isLoading={false}
+						modelPicker={{
+							value: model,
+							options: MODELS,
+							disabled: Boolean(run),
+							onChange: (m) => {
+								setModel(m);
+								store.set("fm:model", m);
+							},
+						}}
+						placeholder={run ? "Talk to the agents: a question, a new focus, an idea to check…" : "What should the swarm focus on? (optional) ↑ starts it"}
+						context={
+							<span className="inline-flex h-8 items-center gap-1.5 rounded-full bg-secondary px-3 text-sm font-medium text-secondary-foreground">
+								{name} swarm
+							</span>
+						}
+						extra={run ? (
+							<button type="button" onClick={() => void draft()} disabled={drafting} title="Draft a reply for me" className="inline-flex h-8 shrink-0 items-center whitespace-nowrap gap-1.5 rounded-full px-2.5 text-sm text-muted-foreground hover:bg-muted hover:text-foreground disabled:opacity-50">
+								<WandSparkles className={`size-3.5 ${drafting ? "animate-pulse" : ""}`} />
+								{drafting ? "Drafting…" : "Draft reply"}
+							</button>
+						) : null}
+					/>
+					{run ? null : (
+						<div className="flex flex-wrap items-center gap-1.5 px-1 text-xs">
+							<button type="button" onClick={() => void start()} disabled={provider === "anthropic" && !hasKey} className="btn-dark ml-auto h-7 gap-1.5 px-3 disabled:opacity-50"><Play className="size-3" />{plan.some((i) => i.mark === " ") ? "Resume" : "Start"}</button>
+						</div>
+					)}
+				</div>
+				</div>
+		</>
+	);
 
 	return (
 		// In the Mac app the controls live in the title bar, so the page starts at the top.
@@ -1736,121 +1860,19 @@ export function SwarmPanel({ folder, name, scan, bridge, session, file: openPath
 			{/* The chat: start and steer the swarm, the plan, and the agents' messages. */}
 			{/* The chat floats over the canvas on the right: a gray title bar with the run's controls, the white chat inside.
 			    The strip above it stays free for the Live pill and the bell. */}
-			{mode === "chat" ? (
-			<aside className="absolute inset-x-0 bottom-0 top-[var(--fm-top)] z-20 mx-auto flex w-full max-w-3xl flex-col px-4 pb-3">
-				<div className="flex h-8 shrink-0 items-center gap-2 pl-2 pr-0.5">
-					<DropdownMenu>
-						<DropdownMenuTrigger className="flex min-w-0 flex-1 items-center gap-1 rounded-md text-left text-[13px] font-medium outline-none hover:text-foreground" title={`${title} — switch sessions`}>
-							<span className="truncate">{title}</span>
-							<ChevronDown className="size-3 shrink-0 text-muted-foreground" />
-						</DropdownMenuTrigger>
-						<DropdownMenuContent align="start" className="w-64">
-							<DropdownMenuLabel className="text-xs font-normal text-muted-foreground">Sessions in {name}</DropdownMenuLabel>
-							<DropdownMenuRadioGroup value={viewing ?? ""} onValueChange={pickSession}>
-								{sessions.map((x, i) => (
-									<DropdownMenuRadioItem key={x.run} value={x.run} className="text-[13px]">
-										<span className="truncate">{x.title || (x.run === "swarm" ? "Main session" : `Session ${sessions.length - i}`)}</span>
-										{x.run === run ? <span className="ml-auto size-1.5 shrink-0 animate-pulse rounded-full bg-emerald-500" aria-label="running" /> : null}
-									</DropdownMenuRadioItem>
-								))}
-							</DropdownMenuRadioGroup>
-							<DropdownMenuSeparator />
-							<DropdownMenuItem onSelect={() => pickSession("new")} className="text-[13px]">
-								<Plus className="size-3.5" /> New session
-							</DropdownMenuItem>
-						</DropdownMenuContent>
-					</DropdownMenu>
-					<DropdownMenu>
-						<DropdownMenuTrigger className="inline-flex h-7 shrink-0 items-center gap-1 rounded-md border bg-background px-2 text-[11px] tabular-nums text-muted-foreground outline-none hover:text-foreground" title="Spending cap">
-							{run || viewing ? `$${spent.toFixed(2)} / $${budget}` : `Budget $${budget}`}
-							<ChevronDown className="size-3" />
-						</DropdownMenuTrigger>
-						<DropdownMenuContent align="end">
-							<DropdownMenuLabel className="text-xs font-normal text-muted-foreground">Stop the swarm at</DropdownMenuLabel>
-							<DropdownMenuRadioGroup
-								value={String(budget)}
-								onValueChange={(v) => {
-									setBudget(Number(v));
-									store.set(budgetKey, v);
-									if (run) void invoke("swarm_set_budget", { run, usd: Number(v) });
-								}}
-							>
-								{BUDGETS.map((b) => (
-									<DropdownMenuRadioItem key={b} value={String(b)} disabled={Boolean(run) && b <= spent}>${b}</DropdownMenuRadioItem>
-								))}
-							</DropdownMenuRadioGroup>
-						</DropdownMenuContent>
-					</DropdownMenu>
-					{run ? (
-						<button type="button" onClick={() => void invoke("swarm_stop", { run })} title="Stop the swarm" className="inline-flex h-7 shrink-0 items-center gap-1 rounded-md border bg-background px-2 text-[11px] text-foreground hover:bg-muted">
-							<Square className="size-3" />Stop
-						</button>
-					) : null}
-				</div>
-				<div className="mt-1 flex min-h-0 flex-1 flex-col overflow-hidden">
-				<div ref={chat} className="min-h-0 flex-1 space-y-3 overflow-y-auto p-4 text-sm">
-					{shown.length === 0 && !run ? <p className="text-muted-foreground">Start the swarm and its agents talk here. Message them anytime to steer.</p> : null}
-					{blocks(shown).map((block, i) =>
-						"steps" in block ? (
-							<Steps key={i} steps={block.steps} running={Boolean(run) && i === blocks(shown).length - 1} />
-						) : block.e.kind === "you" ? (
-							<Message key={i} align="end">
-								<MessageContent>
-									<div className="ml-auto w-fit max-w-[85%] whitespace-pre-wrap rounded-2xl rounded-br-md bg-foreground px-3 py-2 text-background">{block.e.text}</div>
-								</MessageContent>
-							</Message>
-						) : (
-							<AgentMessage key={i} e={block.e} onBug={() => {
-								// Open the bugs card on this report.
-								const hit = bugs.find((b) => block.e.text.includes(b.file));
-								setMode("bugs");
-								if (hit) setOpenBug(hit.file);
-							}} />
-						),
-					)}
-					{finished ? <p className="rounded-lg border px-3 py-2 text-xs text-muted-foreground">Finished: {finished.text}</p> : null}
-				</div>
-
-				<div className="shrink-0 space-y-2 p-3">
-					{error ? <p className="text-xs text-red-600">{error}</p> : null}
-					{/* The Swarm page's composer: steer while it runs; before that, what you type is its focus and ↑ starts it. */}
-					<ChatComposer
-						value={run ? say : goal}
-						onChange={(e) => (run ? setSay(e.target.value) : setGoal(e.target.value))}
-						onSubmit={() => void (run ? send() : start())}
-						onStop={() => {}}
-						isLoading={false}
-						modelPicker={{
-							value: model,
-							options: MODELS,
-							disabled: Boolean(run),
-							onChange: (m) => {
-								setModel(m);
-								store.set("fm:model", m);
-							},
-						}}
-						placeholder={run ? "Steer the swarm: a question, a new focus, an idea to check…" : "What should the swarm focus on? (optional) ↑ starts it"}
-						context={
-							<span className="inline-flex h-8 items-center gap-1.5 rounded-full bg-secondary px-3 text-sm font-medium text-secondary-foreground">
-								{name} swarm
-							</span>
-						}
-						extra={run ? (
-							<button type="button" onClick={() => void draft()} disabled={drafting} title="Draft a reply for me" className="inline-flex h-8 shrink-0 items-center whitespace-nowrap gap-1.5 rounded-full px-2.5 text-sm text-muted-foreground hover:bg-muted hover:text-foreground disabled:opacity-50">
-								<WandSparkles className={`size-3.5 ${drafting ? "animate-pulse" : ""}`} />
-								{drafting ? "Drafting…" : "Draft reply"}
-							</button>
-						) : null}
-					/>
-					{run ? null : (
-						<div className="flex flex-wrap items-center gap-1.5 px-1 text-xs">
-							<button type="button" onClick={() => void start()} disabled={provider === "anthropic" && !hasKey} className="btn-dark ml-auto h-7 gap-1.5 px-3 disabled:opacity-50"><Play className="size-3" />{plan.some((i) => i.mark === " ") ? "Resume" : "Start"}</button>
-						</div>
-					)}
-				</div>
-				</div>
-				
-			</aside>
+			{/* Talk to the agents: floats on the right of the Swarm canvas, the Plan's counterpart on the left. */}
+			{mode === "swarm" ? (
+				chatOpen ? (
+					<aside className="pointer-events-auto absolute bottom-3 right-3 top-[calc(var(--fm-top)+0.75rem)] z-20 flex w-[min(26rem,calc(100%-1.5rem))] flex-col overflow-hidden rounded-2xl border bg-muted/80 p-1 shadow-pop backdrop-blur">
+						{chatPanel}
+					</aside>
+				) : (
+					<button type="button" onClick={() => toggleChat(true)} className="pointer-events-auto absolute bottom-3 right-3 z-20 inline-flex h-8 items-center gap-1.5 rounded-full border bg-background px-3 text-[12px] font-medium shadow-pop hover:bg-muted">
+						<MessageSquare className="size-3.5" />
+						Talk to the swarm
+						{run ? <span className="size-1.5 animate-pulse rounded-full bg-emerald-500" aria-label="running" /> : null}
+					</button>
+				)
 			) : null}
 		</div>
 	);
