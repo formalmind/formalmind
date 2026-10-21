@@ -15,7 +15,8 @@ mod report;
 mod term;
 
 use keyring::Entry;
-use tauri::Manager;
+use tauri::menu::{Menu, MenuItem, MenuItemKind, PredefinedMenuItem};
+use tauri::{AppHandle, Emitter, Manager};
 #[cfg(any(windows, target_os = "linux"))]
 use tauri_plugin_deep_link::DeepLinkExt;
 
@@ -49,17 +50,64 @@ fn token_clear() -> Result<(), String> {
     }
 }
 
+/// The window back on screen (the Dock icon, a second launch, or a deep link), and the app back in the Dock if ⌘Q had
+/// sent it to work in the background.
+fn show(app: &AppHandle) {
+    if swarm::QUIT_WHEN_DONE.swap(false, std::sync::atomic::Ordering::SeqCst) {
+        #[cfg(target_os = "macos")]
+        let _ = app.set_activation_policy(tauri::ActivationPolicy::Regular);
+    }
+    if let Some(window) = app.get_webview_window("main") {
+        let _ = window.unminimize();
+        let _ = window.show();
+        let _ = window.set_focus();
+    }
+}
+
+/// Quit (⌘Q): with agents working, the app leaves the screen and the Dock and quits once the last session finishes;
+/// otherwise it quits now.
+fn quit(app: &AppHandle) {
+    if !swarm::any_running(app) {
+        return app.exit(0);
+    }
+    swarm::QUIT_WHEN_DONE.store(true, std::sync::atomic::Ordering::SeqCst);
+    if let Some(window) = app.get_webview_window("main") {
+        let _ = window.hide();
+    }
+    #[cfg(target_os = "macos")]
+    let _ = app.set_activation_policy(tauri::ActivationPolicy::Accessory);
+}
+
+/// The standard menus, with Settings… (⌘,) in the app menu and our own Quit (⌘Q) in place of the system one.
+fn menu(app: &AppHandle) -> tauri::Result<Menu<tauri::Wry>> {
+    let menu = Menu::default(app)?;
+    if let Some(MenuItemKind::Submenu(app_menu)) = menu.items()?.into_iter().next() {
+        let settings = MenuItem::with_id(app, "settings", "Settings…", true, Some("CmdOrCtrl+,"))?;
+        app_menu.insert(&settings, 2)?;
+        app_menu.insert(&PredefinedMenuItem::separator(app)?, 3)?;
+        let n = app_menu.items()?.len();
+        if n > 0 {
+            app_menu.remove_at(n - 1)?;
+        }
+        app_menu.append(&MenuItem::with_id(app, "quit", "Quit Formal Mind", true, Some("CmdOrCtrl+Q"))?)?;
+    }
+    Ok(menu)
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
         // Opening the app again (or a deep link on Windows and Linux) hands off to the running copy: show its window.
-        .plugin(tauri_plugin_single_instance::init(|app, _argv, _cwd| {
-            if let Some(window) = app.get_webview_window("main") {
-                let _ = window.unminimize();
-                let _ = window.show();
-                let _ = window.set_focus();
+        .plugin(tauri_plugin_single_instance::init(|app, _argv, _cwd| show(app)))
+        .menu(menu)
+        .on_menu_event(|app, event| match event.id().as_ref() {
+            "settings" => {
+                show(app);
+                let _ = app.emit("fm:settings", ());
             }
-        }))
+            "quit" => quit(app),
+            _ => {}
+        })
         .plugin(tauri_plugin_deep_link::init())
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
@@ -160,12 +208,7 @@ pub fn run() {
         .expect("error while building the Formal Mind desktop app")
         .run(|app, event| match event {
             #[cfg(target_os = "macos")]
-            tauri::RunEvent::Reopen { .. } => {
-                if let Some(window) = app.get_webview_window("main") {
-                    let _ = window.show();
-                    let _ = window.set_focus();
-                }
-            }
+            tauri::RunEvent::Reopen { .. } => show(app),
             // Quitting (⌘Q) pauses any swarm cleanly; its plan and session stay in the folder for Resume.
             tauri::RunEvent::ExitRequested { .. } => swarm::pause_all(app),
             _ => {}

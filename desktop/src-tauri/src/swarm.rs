@@ -41,6 +41,14 @@ pub struct Swarm {
 #[derive(Default)]
 pub struct Swarms(Mutex<HashMap<String, Arc<Swarm>>>);
 
+/// Set by ⌘Q while agents are working: the window and Dock icon are gone, and the app quits when the last session ends.
+pub static QUIT_WHEN_DONE: AtomicBool = AtomicBool::new(false);
+
+/// Whether any session is running, in any folder.
+pub fn any_running(app: &AppHandle) -> bool {
+    !app.state::<Swarms>().0.lock().unwrap().is_empty()
+}
+
 /// A running session's key: the same session id ("swarm", the default) exists in every folder.
 fn key(folder: &str, run: &str) -> String {
     format!("{folder}\n{run}")
@@ -1359,7 +1367,16 @@ pub fn swarm_start(app: AppHandle, swarms: State<'_, Swarms>, request: SwarmRequ
         turn.emit("done", "swarm", "", outcome);
         let k = key(&request.folder, &id);
         release(&k);
-        app.state::<Swarms>().0.lock().unwrap().remove(&k);
+        let left = {
+            let swarms = app.state::<Swarms>();
+            let mut map = swarms.0.lock().unwrap();
+            map.remove(&k);
+            map.len()
+        };
+        // Quit (⌘Q) while this was working: the last session to finish closes the app.
+        if left == 0 && QUIT_WHEN_DONE.load(Ordering::SeqCst) {
+            app.exit(0);
+        }
     });
     Ok(run)
 }

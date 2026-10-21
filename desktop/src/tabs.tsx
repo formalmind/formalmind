@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { useLocation, useNavigate } from "react-router";
+import { listen } from "@tauri-apps/api/event";
 import { Bug, Gauge, GanttChart, HardDrive, MessageSquare, Network, PanelLeft, Plus, RefreshCw, Settings, X, type LucideIcon } from "lucide-react";
 import { NotificationCenter } from "@/components/notification-center";
 import { useSidebar } from "@/components/ui/sidebar";
@@ -100,6 +101,12 @@ export function TabBar() {
 			navigate(next.path);
 		} else setState((s) => ({ ...s, tabs: rest }));
 	};
+
+	// Settings… (⌘,) in the app menu.
+	useEffect(() => {
+		const off = listen("fm:settings", () => navigate("/settings"));
+		return () => void off.then((f) => f());
+	}, [navigate]);
 
 	// ⌘T new tab, ⌘W close the current one.
 	useEffect(() => {
