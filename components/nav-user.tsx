@@ -10,7 +10,6 @@ import {
 	LogOut,
 	Monitor,
 	Moon,
-	Sparkles,
 	Sun,
 } from "lucide-react"
 import { useTheme } from "next-themes"
@@ -95,13 +94,6 @@ export function NavUser() {
 								</div>
 							</div>
 						</DropdownMenuLabel>
-						<DropdownMenuSeparator />
-						<DropdownMenuGroup>
-							<DropdownMenuItem>
-								<Sparkles />
-								Upgrade to Pro
-							</DropdownMenuItem>
-						</DropdownMenuGroup>
 						<DropdownMenuSeparator />
 						<DropdownMenuGroup>
 							<DropdownMenuItem asChild>
