@@ -26,7 +26,29 @@ export type AuditFindingDoc = {
 	evidence?: string;
 	tests?: string[];
 	poc?: string;
+	/** The fix: its commit and pull request (`url` links whichever is known). */
+	fix?: { commit?: string; pr?: number; url?: string };
 	page?: number;
+};
+
+/** A function's standing in the Lean model, as the Proofs page shows it. */
+export type AuditCoverageRow = { function: string; status: "proved" | "sorry" | "modeled" | "not modeled"; theorems: string[]; why?: string };
+
+/** One contract's Proofs coverage (an internal audit's formal verification). */
+export type AuditCoverage = { contract: string; functions: number; inLean: number; proved: number; notModeled: number; theorems: number; sorry?: number; rows?: AuditCoverageRow[] };
+
+/** A property proved about the code (an internal audit's reviewed proofs). */
+export type AuditProperty = {
+	id: string;
+	title: string;
+	status: "verified" | "sorry" | "unproved";
+	locations?: AuditLocation[];
+	/** What was proved (Markdown). */
+	description: string;
+	/** The theorems that prove it, each where it is. */
+	theorems?: { name: string; file?: string; line?: number; sorry?: boolean }[];
+	/** The proof files, repository paths. */
+	files?: string[];
 };
 
 export type AuditDoc = {
@@ -43,6 +65,10 @@ export type AuditDoc = {
 	/** The report it was read from, folder-relative (absent for an internal audit written directly). */
 	source?: string;
 	findings: AuditFindingDoc[];
+	/** Internal audits: the Proofs coverage per contract in scope. */
+	coverage?: AuditCoverage[];
+	/** Internal audits: the properties proved and reviewed. */
+	properties?: AuditProperty[];
 };
 
 /** `docs/audits/Spearbit.pdf` → `docs/audits/Spearbit.audit.json`. */

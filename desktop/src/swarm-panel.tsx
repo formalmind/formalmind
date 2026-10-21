@@ -347,9 +347,14 @@ function DetailCard({ label, action, bare, children }: { label: string; action?:
 /** A finding from an audit index: a row of a "| ID | Severity | Finding | Status | Evidence |" table under its report's heading. */
 type AuditFinding = { report: string; id: string; severity: string; title: string; status: "fixed" | "works" | "acknowledged" | "rejected" | "open"; statusText: string; evidence: string; tests: string[]; index: string; detail?: AuditFindingDoc; doc?: AuditDoc };
 
+/** Formal Mind's own report and findings: its `formal-mind.audit.json` (and the PDF made from it), and the swarm's
+ * `formal-mind-swarm.md` rows in an index. Bugs lists them apart from the other audit reports. */
+const isFormalMind = (report: string) => /^formal-mind(-swarm)?\.(md|pdf|audit\.json)$/i.test(report.split("/").pop() ?? "");
+
 /** A report's findings in the standard format, as the Bugs list shows them. */
 function findingsOfDoc(doc: AuditDoc, path: string): AuditFinding[] {
-	const name = doc.source?.split("/").pop() ?? doc.title;
+	// Formal Mind's own file has no source: its findings go under the PDF made from it.
+	const name = doc.source?.split("/").pop() ?? (doc.kind === "internal" ? (path.split("/").pop() ?? path).replace(/\.audit\.json$/, ".pdf") : doc.title);
 	return doc.findings.map((f) => ({
 		report: name,
 		id: f.id,
@@ -481,8 +486,8 @@ function PocView({ folder, invoke, path, fns, onOpenFile }: { folder: string; in
 	);
 }
 
-/** What `report_generate` wrote: the AsciiDoc folder, the PDF when asciidoctor-pdf made one, and why not otherwise. */
-type GeneratedReport = { adoc: string; pdf: string | null; note: string | null; findings: number; warnings: string[] };
+/** What `report_generate` wrote: Formal Mind's audit file, its AsciiDoc, the PDF when asciidoctor-pdf made one, and why not otherwise. */
+type GeneratedReport = { json: string; adoc: string; pdf: string | null; note: string | null; findings: number; warnings: string[] };
 
 /**
  * Bugs: the folder's audit reports (Markdown in its report folders, which the gear sets) and the swarm's findings,
@@ -503,7 +508,7 @@ function BugsView({ folder, files, invoke, bugs, openBug, setOpenBug, withPoc, o
 			if (g.pdf) {
 				setOpenBug(`report:${g.pdf}`);
 				setGenerating(null);
-			} else setGenerating({ busy: false, note: `Wrote ${g.adoc}/ (${g.findings} findings). ${g.note ?? ""}` });
+			} else setGenerating({ busy: false, note: `Wrote ${g.json} (${g.findings} findings). ${g.note ?? ""}` });
 		} catch (e) {
 			setGenerating({ busy: false, note: `Couldn't generate the report: ${e}` });
 		}
@@ -528,7 +533,13 @@ function BugsView({ folder, files, invoke, bugs, openBug, setOpenBug, withPoc, o
 					() => [] as AuditFinding[],
 				),
 			),
-		]).then((all) => !gone && setFindings(all.flat()));
+		]).then((all) => {
+			if (gone) return;
+			// The swarm's index rows that Formal Mind's file already has are shown once, from the file.
+			const flat = all.flat();
+			const inDoc = new Set(flat.filter((f) => f.doc && isFormalMind(f.report)).map((f) => f.id));
+			setFindings(flat.filter((f) => f.doc || !isFormalMind(f.report) || !inDoc.has(f.id)));
+		});
 		return () => {
 			gone = true;
 		};
@@ -555,6 +566,11 @@ function BugsView({ folder, files, invoke, bugs, openBug, setOpenBug, withPoc, o
 	const [only, setOnly] = useState<Set<AuditFinding["status"]>>(new Set());
 	const shownFindings = only.size ? findings.filter((f) => only.has(f.status)) : findings;
 	const byReport = [...new Set(shownFindings.map((f) => f.report))].map((r) => ({ report: r, items: shownFindings.filter((f) => f.report === r) }));
+	// Formal Mind's report and findings first, then the other audit reports.
+	const fmReports = reports.filter(isFormalMind);
+	const otherReports = reports.filter((r) => !isFormalMind(r));
+	const fmGroups = byReport.filter((g) => isFormalMind(g.report));
+	const otherGroups = byReport.filter((g) => !isFormalMind(g.report));
 	const reportPath = openBug?.startsWith("report:") ? openBug.slice(7) : null;
 	const [report, setReport] = useState<{ path: string; text: string; url?: string } | null>(null);
 	// Reading a report into the index: the paths queued for the auditor this visit, and why one couldn't be.
@@ -580,6 +596,36 @@ function BugsView({ folder, files, invoke, bugs, openBug, setOpenBug, withPoc, o
 	}, [folder, showingPath, invoke, generated]);
 	const facts = selected ? bugFacts(selected.body) : null;
 	const head = "px-2 pb-1 pt-2 font-mono text-[10px] uppercase tracking-wider text-muted-foreground";
+	const reportItem = (r: string) => (
+		<li key={r}>
+			<button type="button" onClick={() => setOpenBug(`report:${r}`)} title={r} className={`flex w-full items-center gap-2 rounded-xl border px-3 py-2 text-left transition-colors ${showing === `report:${r}` ? "bg-muted" : "border-transparent hover:bg-muted/60"}`}>
+				<FileCode2 className="size-3.5 shrink-0 text-muted-foreground" />
+				<span className="min-w-0">
+					<span className="block truncate text-[13px] font-medium">{r.split("/").pop()?.replace(/\.(md|markdown|txt|pdf)$/i, "").replace(/[_-]+/g, " ")}</span>
+					<span className="block truncate font-mono text-[10px] text-muted-foreground">{r}</span>
+				</span>
+			</button>
+		</li>
+	);
+	const findingGroup = (g: { report: string; items: AuditFinding[] }) => (
+		<div key={g.report} className="mb-2 mt-1">
+			<p className="truncate px-2 pb-0.5 font-mono text-[10px] text-muted-foreground" title={g.report}>{g.report}</p>
+			<ul className="space-y-0.5">
+				{g.items.map((f) => {
+					const k = findingKey(f);
+					return (
+						<li key={k}>
+							<button type="button" onClick={() => setOpenBug(k)} title={`${f.id} · ${STATUS[f.status].label}`} className={`flex w-full items-start gap-2 rounded-lg px-2 py-1.5 text-left transition-colors ${picked && findingKey(picked) === k ? "bg-muted" : "hover:bg-muted/60"}`}>
+								<span className={`mt-1.5 size-2 shrink-0 rounded-full ${STATUS[f.status].dot}`} />
+								<span className="w-9 shrink-0 font-mono text-[11px] leading-5 text-muted-foreground">{f.id}</span>
+								<span className="min-w-0 flex-1 text-[12.5px] leading-5">{f.title.replace(/`/g, "")}</span>
+							</button>
+						</li>
+					);
+				})}
+			</ul>
+		</div>
+	);
 	return (
 		// Laid out like Proofs: one gray frame with its label on top, the list and the selected report on white cards.
 		<div className="pointer-events-auto absolute bottom-3 left-3 right-3 top-[var(--fm-top)] z-10 flex min-h-0 flex-col overflow-hidden rounded-2xl border bg-muted/60 p-1">
@@ -590,7 +636,7 @@ function BugsView({ folder, files, invoke, bugs, openBug, setOpenBug, withPoc, o
 					type="button"
 					disabled={generating?.busy}
 					onClick={() => void generate()}
-					title="Write an audit report (AsciiDoc, and a PDF with asciidoctor-pdf) from these findings, the Proofs coverage and the code in scope, into the audit folder"
+					title="Write Formal Mind's report of this folder (formal-mind.audit.json, and a PDF with asciidoctor-pdf) from the swarm's findings, the Proofs coverage and the reviewed proofs, into the audit folder"
 					className="inline-flex h-7 items-center gap-1.5 rounded-lg px-2 text-[12px] text-muted-foreground hover:bg-background hover:text-foreground disabled:opacity-60"
 				>
 					<FileDown className="size-3.5" />
@@ -606,28 +652,9 @@ function BugsView({ folder, files, invoke, bugs, openBug, setOpenBug, withPoc, o
 				</div>
 			) : null}
 			<div className="flex min-h-0 flex-1 gap-1">
-			<nav className="flex w-80 shrink-0 flex-col overflow-y-auto rounded-xl border bg-card p-1.5">
-				<div className="flex items-center">
-					<p className={head}>Reports · {reports.length}</p>
-				</div>
-				<ul className="space-y-1">
-					{reports.map((r) => (
-						<li key={r}>
-							<button type="button" onClick={() => setOpenBug(`report:${r}`)} title={r} className={`flex w-full items-center gap-2 rounded-xl border px-3 py-2 text-left transition-colors ${showing === `report:${r}` ? "bg-muted" : "border-transparent hover:bg-muted/60"}`}>
-								<FileCode2 className="size-3.5 shrink-0 text-muted-foreground" />
-								<span className="min-w-0">
-									<span className="block truncate text-[13px] font-medium">{r.split("/").pop()?.replace(/\.(md|markdown|txt|pdf)$/i, "").replace(/[_-]+/g, " ")}</span>
-									<span className="block truncate font-mono text-[10px] text-muted-foreground">{r}</span>
-								</span>
-							</button>
-						</li>
-					))}
-					{reports.length === 0 ? <li className="px-2 py-1 text-[12px] text-muted-foreground">No reports in {dirs.map((d) => `${d}/`).join(", ")}.</li> : null}
-				</ul>
-				{findings.length ? (
-					<>
-						<p className={`${head} mt-3`}>Audit findings · {only.size ? `${shownFindings.length} of ${findings.length}` : findings.length}</p>
-						<div className="flex flex-wrap gap-1 px-2 pb-2">
+				<nav className="flex w-80 shrink-0 flex-col overflow-y-auto rounded-xl border bg-card p-1.5">
+					{findings.length ? (
+						<div className="flex flex-wrap gap-1 px-2 pb-1 pt-2">
 							{(Object.keys(STATUS) as AuditFinding["status"][]).filter((k) => counts[k]).map((k) => {
 								const on = only.has(k);
 								return (
@@ -657,46 +684,38 @@ function BugsView({ folder, files, invoke, bugs, openBug, setOpenBug, withPoc, o
 								</button>
 							) : null}
 						</div>
-						{byReport.map((g) => (
-							<div key={g.report} className="mb-2">
-								<p className="truncate px-2 pb-0.5 font-mono text-[10px] text-muted-foreground" title={g.report}>{g.report}</p>
-								<ul className="space-y-0.5">
-									{g.items.map((f) => {
-										const k = findingKey(f);
-										return (
-											<li key={k}>
-												<button type="button" onClick={() => setOpenBug(k)} title={`${f.id} · ${STATUS[f.status].label}`} className={`flex w-full items-start gap-2 rounded-lg px-2 py-1.5 text-left transition-colors ${picked && findingKey(picked) === k ? "bg-muted" : "hover:bg-muted/60"}`}>
-													<span className={`mt-1.5 size-2 shrink-0 rounded-full ${STATUS[f.status].dot}`} />
-													<span className="w-9 shrink-0 font-mono text-[11px] leading-5 text-muted-foreground">{f.id}</span>
-													<span className="min-w-0 flex-1 text-[12.5px] leading-5">{f.title.replace(/`/g, "")}</span>
-												</button>
-											</li>
-										);
-									})}
-								</ul>
-							</div>
-						))}
-					</>
-				) : null}
-				<p className={`${head} mt-3`}>Swarm findings · {bugs.length}</p>
-				<ul className="space-y-1">
-					{bugs.map((b) => {
-						const f = bugFacts(b.body);
-						const on = selected && b.file === selected.file;
-						return (
-							<li key={b.file}>
-								<button type="button" onClick={() => setOpenBug(b.file)} className={`w-full rounded-xl border px-3 py-2.5 text-left transition-colors ${on ? "bg-muted" : "border-transparent hover:bg-muted/60"}`}>
-									<span className="flex items-center gap-2">
-										{f.severity ? <span className={`rounded-md border px-1.5 py-px text-[10px] font-medium uppercase tracking-wide ${SEVERITY[f.severity] ?? "border-border text-muted-foreground"}`}>{f.severity}</span> : null}
-										{f.file ? <span className="truncate font-mono text-[11px] text-muted-foreground">{f.file.split("/").pop()}{f.line ? `:${f.line}` : ""}</span> : null}
-									</span>
-									<span className="mt-1 block text-[13px] font-medium leading-snug">{b.title}</span>
-								</button>
-							</li>
-						);
-					})}
-					{bugs.length === 0 ? <li className="px-2 py-1 text-[12px] text-muted-foreground">None yet. The swarm files them here, each with a proof of concept.</li> : null}
-				</ul>
+					) : null}
+					<p className={head}>Formal Mind</p>
+					<ul className="space-y-1">
+						{fmReports.map(reportItem)}
+						{fmReports.length === 0 ? <li className="px-2 py-1 text-[12px] text-muted-foreground">No report yet. Generate report writes one from the swarm's findings and proofs.</li> : null}
+					</ul>
+					{fmGroups.map(findingGroup)}
+					<p className="px-2 pb-0.5 pt-2 font-mono text-[10px] text-muted-foreground">Swarm findings · {bugs.length}</p>
+					<ul className="space-y-1">
+						{bugs.map((b) => {
+							const f = bugFacts(b.body);
+							const on = selected && b.file === selected.file;
+							return (
+								<li key={b.file}>
+									<button type="button" onClick={() => setOpenBug(b.file)} className={`w-full rounded-xl border px-3 py-2.5 text-left transition-colors ${on ? "bg-muted" : "border-transparent hover:bg-muted/60"}`}>
+										<span className="flex items-center gap-2">
+											{f.severity ? <span className={`rounded-md border px-1.5 py-px text-[10px] font-medium uppercase tracking-wide ${SEVERITY[f.severity] ?? "border-border text-muted-foreground"}`}>{f.severity}</span> : null}
+											{f.file ? <span className="truncate font-mono text-[11px] text-muted-foreground">{f.file.split("/").pop()}{f.line ? `:${f.line}` : ""}</span> : null}
+										</span>
+										<span className="mt-1 block text-[13px] font-medium leading-snug">{b.title}</span>
+									</button>
+								</li>
+							);
+						})}
+						{bugs.length === 0 ? <li className="px-2 py-1 text-[12px] text-muted-foreground">None yet. The swarm files them here, each with a proof of concept.</li> : null}
+					</ul>
+					<p className={`${head} mt-3`}>Audit reports · {otherReports.length}</p>
+					<ul className="space-y-1">
+						{otherReports.map(reportItem)}
+						{otherReports.length === 0 ? <li className="px-2 py-1 text-[12px] text-muted-foreground">No reports in {dirs.map((d) => `${d}/`).join(", ")}.</li> : null}
+					</ul>
+					{otherGroups.map(findingGroup)}
 			</nav>
 			<div className="flex min-w-0 flex-1 flex-col">
 			{picked ? (

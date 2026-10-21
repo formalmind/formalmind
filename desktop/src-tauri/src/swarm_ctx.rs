@@ -535,7 +535,7 @@ pub fn record_finding_json(root: &Path, report: &str, input: &Value) -> Result<S
     let path = audit_json_path(root, report);
     let mut doc = load_audit(&path, report);
     let mut f = json!({});
-    for k in ["id", "title", "severity", "status", "reportStatus", "locations", "description", "impact", "recommendation", "response", "evidence", "tests", "poc", "page"] {
+    for k in ["id", "title", "severity", "status", "reportStatus", "locations", "description", "impact", "recommendation", "response", "evidence", "tests", "poc", "fix", "page"] {
         if !input[k].is_null() {
             f[k] = input[k].clone();
         }

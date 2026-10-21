@@ -30,6 +30,8 @@ Types: [`lib/audit-format.ts`](../lib/audit-format.ts). Writers: `record_report`
 | `summary` | string | two sentences |
 | `source` | string | the report file it was read from, folder-relative (absent for an internal audit) |
 | `findings` | Finding[] | in the report's order |
+| `coverage` | Coverage[] | internal audits: the Proofs coverage of each contract in scope |
+| `properties` | Property[] | internal audits: the properties proved and reviewed |
 
 ## Finding
 
@@ -47,7 +49,28 @@ Types: [`lib/audit-format.ts`](../lib/audit-format.ts). Writers: `record_report`
 | `evidence` | string (Markdown) | why this status: what changed (file:line) and the test that covers it |
 | `tests` | string[] | regression tests, e.g. `test/security/X.t.sol` |
 | `poc` | string | a proof-of-concept test |
+| `fix` | `{ commit?, pr?, url? }` | the fix: its commit, its pull request number, and a link to whichever is known |
 | `page` | number | where it starts in the source PDF |
+
+## Coverage
+
+| Field | Type | |
+|---|---|---|
+| `contract` | string | |
+| `functions`, `inLean`, `proved`, `notModeled`, `theorems`, `sorry` | number | counted as the Proofs page counts them (library functions included) |
+| `rows` | `{ function, status, theorems, why? }[]` | `status`: `proved` \| `sorry` \| `modeled` \| `not modeled`; `theorems`: the names naming it; `why`: why it isn't modeled |
+
+## Property
+
+| Field | Type | |
+|---|---|---|
+| `id` | string | `P-01`… |
+| `title` | string | the function or invariant |
+| `status` | `verified` \| `sorry` \| `unproved` | |
+| `locations` | `{ file, line? }[]` | |
+| `description` | string (Markdown) | what was proved, required |
+| `theorems` | `{ name, file?, line?, sorry? }[]` | the theorems that prove it, each where it is |
+| `files` | string[] | the proof files |
 
 ## Example
 

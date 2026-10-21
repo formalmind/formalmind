@@ -134,19 +134,21 @@ or a finding filed. In dev builds `FM_SWARM_AUTOSTART=<added folder>` starts tha
 `FM_SWARM_BUDGET`, `FM_SWARM_PROVIDER=anthropic`, `FM_SWARM_MODEL`, `FM_SWARM_GOAL`), for driving a run without clicking.
 
 
-## Audit report
+## Formal Mind's report
 
-Bugs → **Generate report** (`report_generate`, `src-tauri/src/report.rs`) writes the folder's audit report in the layout
-of [mmsaki/audit-report-generator](https://github.com/mmsaki/audit-report-generator): `<audit folder>/report/README.adoc`
-with intro, methodology, lines-of-code, findings-critical/-high/-med/-low, manual-review (informational), revisions,
-glossary and references, each finding a `tag::N[]` block, and that generator's PDF theme (`report-template/`). Nothing is
-read from PDFs. The findings come from the audit index (the `| ID | Severity | Finding | Status | Evidence |` tables
-under each `## <report>`), each with its report's own Markdown section, the code at its `**Location**` and the
-regression tests its evidence names (both `include::`d from the folder at render time), plus `.formal/bugs/`. The
-methodology has the Proofs page's coverage (formal-ast's `formal_json` for each contract the scripts deploy or call),
-lines of code covers those contracts' files, and the revision is `git rev-parse HEAD`.
+Bugs → **Generate report** (`report_generate`, `src-tauri/src/report.rs`) writes Formal Mind's assessment of the folder
+as `<audit folder>/formal-mind.audit.json` in the standard format (`formalmind.audit/v1`, docs/audit-format.md, with
+`kind: "internal"`): the swarm's findings (its `formal-mind-swarm.md` rows in the index, and `.formal/bugs/`) with
+locations, PoC, evidence and the fix (the commit that added the covering test, and the PR its message names), the
+Proofs coverage of each contract the scripts deploy or call, and the properties the reviewer approved
+(`.formal/proofs.json`) with the theorems that prove them. Fields edited by hand in that file are kept when it is
+generated again. Other audit reports are not part of it; Bugs lists Formal Mind's report and findings apart from them.
 
-With asciidoctor-pdf installed (`brew install asciidoctor`, which brings Ruby, asciidoctor-pdf and Pygments' Ruby
-bridge; Solidity highlighting uses python3), the PDF lands at `<audit folder>/formal-mind-report.pdf` and opens in
-Bugs. Without it, only the AsciiDoc is written and Bugs says how to install it. Try it on a folder with
+The JSON is rendered in Formal Mind's own style (learned from Spearbit and Certora: a black cover with the logo, a
+project scope table linking the repository and commit, colour-coded findings summary and severity matrix, a strip
+per finding, Context links at the audited commit, the fix's PR, and a Formal Verification chapter with assumptions, a
+notation legend, coverage and properties) to `.formal/report/formal-mind.adoc` with the theme and logos from
+`report-template/`, and to `<audit folder>/formal-mind.pdf` when asciidoctor-pdf is installed
+(`brew install asciidoctor`; Solidity highlighting uses Pygments, which needs python3). Without it, the JSON is still
+written and Bugs says how to install it. Try it with
 `FM_FOLDER=… cargo test -- --ignored report_of_a_folder --nocapture`.

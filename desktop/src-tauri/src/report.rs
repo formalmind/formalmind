@@ -1,20 +1,19 @@
-//! Audit report: the folder's findings, Proofs coverage and in-scope code written as an AsciiDoc report in the layout of
-//! mmsaki/audit-report-generator (report/README.adoc including intro, methodology, lines-of-code, findings-critical,
-//! -high, -med, -low, manual-review, revisions, glossary and references, each finding a `tag::N[]` block with its code
-//! `include::`d from the folder, and that generator's PDF theme), then rendered to PDF with asciidoctor-pdf when it is
-//! installed. Nothing is read out of PDFs: the findings come from the audit index (README.md in the audit folders, one
-//! table per report), each report's own Markdown section for the finding, and the swarm's bugs in .formal/bugs/.
+//! Formal Mind's internal audit: its own work on a folder (the swarm's findings with their PoCs, the Proofs coverage
+//! and the proofs its reviewer approved) written as a `formalmind.audit/v1` file (docs/audit-format.md) in the audit
+//! folder, `formal-mind.audit.json`, which Bugs reads like any other audit. That file is then rendered as Formal
+//! Mind's report: AsciiDoc in .formal/report/ in the house style (learned from Spearbit's and Certora's reports: a
+//! project scope table linking the repository and commit, colour-coded summaries, a header strip per finding, Context
+//! links at the audited commit, the fix's pull request, and a Formal Verification chapter of properties and the
+//! theorems that prove them), and a PDF beside the JSON when asciidoctor-pdf is installed. External audits are kept
+//! separate and are not part of it. Nothing is read out of PDFs.
 
 use crate::swarm_ctx::in_scope;
 use formal_ast::{analyze_full, formal_json};
 use serde::Serialize;
-use serde_json::Value;
+use serde_json::{json, Value};
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 
-const THEME: &str = include_str!("../report-template/pdf-theme.yml");
-/// What the PDF is called, in the audit folder.
-pub const PDF: &str = "formal-mind-report.pdf";
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct Finding {
@@ -226,20 +225,6 @@ fn function_lines(text: &str, name: &str, cap: usize) -> Option<(usize, usize)> 
     Some((start + 1, lines.len()))
 }
 
-/// The excerpt for a location: around a line, a line range, or a whole function.
-fn excerpt(root: &Path, file: &str, at: &str) -> Option<(String, usize, usize)> {
-    let path = resolve(root, file)?;
-    let text = std::fs::read_to_string(root.join(&path)).ok()?;
-    let n = text.lines().count();
-    let mut nums = at.split('-').filter_map(|x| x.parse::<usize>().ok());
-    let (a, b) = match (nums.next(), nums.next()) {
-        (Some(a), Some(b)) => (a.saturating_sub(2).max(1), (b + 2).min(a + 40)),
-        (Some(a), None) => (a.saturating_sub(3).max(1), a + 6),
-        _ => function_lines(&text, at, 60)?,
-    };
-    (a <= n).then(|| (path, a, b.min(n)))
-}
-
 // ---- Markdown to AsciiDoc ----
 
 /// Inline Markdown as AsciiDoc: code spans pass through literally, links become `url[text]` (or just the text for
@@ -328,9 +313,11 @@ pub fn md_to_adoc(md: &str) -> String {
             continue;
         }
         let hashes = t.chars().take_while(|c| *c == '#').count();
+        // Headings inside a finding become bold labels, as reports set them.
         if hashes > 0 && t[hashes..].starts_with(' ') {
             out.push(String::new());
-            out.push(format!("=== {}", inline(t[hashes..].trim())));
+            out.push(format!("*{}*", inline(t[hashes..].trim())));
+            out.push(String::new());
             continue;
         }
         if t == "---" || t == "***" {
@@ -356,288 +343,227 @@ pub fn md_to_adoc(md: &str) -> String {
     out.join("\n")
 }
 
-// ---- the report ----
+// ---- the internal audit, in the standard format ----
 
-#[derive(Default, Serialize)]
-pub struct Coverage {
-    pub contract: String,
-    pub functions: usize,
-    pub in_lean: usize,
-    pub proved: usize,
-    pub not_modeled: usize,
-    pub theorems: usize,
-    pub sorry: usize,
-    /// (function, status, theorems naming it)
-    pub rows: Vec<(String, String, usize)>,
+/// One line's first match of `re`, group 1, trimmed of backticks.
+fn field(body: &str, re: &str) -> Option<String> {
+    regex::Regex::new(re).unwrap().captures(body).map(|c| c[1].trim().trim_matches('`').trim().to_string()).filter(|s| !s.is_empty())
 }
 
-#[derive(Default)]
-pub struct Input {
-    pub project: String,
-    pub commit: Option<String>,
-    pub date: String,
-    pub repo_url: Option<String>,
-    pub findings: Vec<Finding>,
-    pub coverage: Vec<Coverage>,
-    /// In-scope Solidity files, folder-relative.
-    pub files: Vec<String>,
-    /// The reports the findings come from, folder-relative.
-    pub reports: Vec<String>,
-    pub problems: Vec<String>,
+/// The text under `#### <name>` (any heading level) up to the next heading.
+fn subsection(body: &str, name: &str) -> Option<String> {
+    let lines: Vec<&str> = body.lines().collect();
+    let start = lines.iter().position(|l| l.starts_with('#') && l.trim_start_matches('#').trim().eq_ignore_ascii_case(name))?;
+    let end = lines.iter().enumerate().skip(start + 1).find(|(_, l)| l.starts_with('#')).map(|(i, _)| i).unwrap_or(lines.len());
+    let text = lines[start + 1..end].join("\n").trim().to_string();
+    (!text.is_empty()).then_some(text)
 }
 
-/// Lines, blanks, comments and code of a Solidity file.
-fn count_lines(text: &str) -> (usize, usize, usize, usize) {
-    let (mut blank, mut comment, mut code) = (0, 0, 0);
-    let mut block = false;
-    for l in text.lines() {
-        let t = l.trim();
-        if block {
-            comment += 1;
-            if t.contains("*/") {
-                block = false;
+/// A location as `{ file, line }`, the file resolved in the folder and a function name turned into its line.
+fn location_json(root: &Path, file: &str, at: &str) -> Value {
+    let path = resolve(root, file).unwrap_or_else(|| file.to_string());
+    let line = at.split('-').next().and_then(|n| n.parse::<usize>().ok()).or_else(|| {
+        let text = std::fs::read_to_string(root.join(&path)).ok()?;
+        function_lines(&text, at, 60).map(|(a, _)| a)
+    });
+    match line {
+        Some(l) => json!({ "file": path, "line": l }),
+        None => json!({ "file": path }),
+    }
+}
+
+/// The test files a text names (`test/…/X.t.sol`).
+fn tests_in(text: &str) -> Vec<String> {
+    let mut out: Vec<String> = regex::Regex::new(r"([\w./-]+\.t\.sol)").unwrap().captures_iter(text).map(|c| c[1].to_string()).collect();
+    out.dedup();
+    out
+}
+
+/// The fix behind a finding: the commit that added the test covering it, and the pull request its message names.
+fn fix_of(root: &Path, repo: Option<&str>, tests: &[String]) -> Option<Value> {
+    let t = tests.iter().find(|t| root.join(t).is_file())?;
+    let log = git(root, &["log", "--follow", "--diff-filter=A", "--format=%H %s", "--", t])?;
+    let line = log.lines().last()?;
+    let (commit, subject) = line.split_once(' ').unwrap_or((line, ""));
+    let pr = regex::Regex::new(r"\(#(\d+)\)").unwrap().captures(subject).and_then(|c| c[1].parse::<u64>().ok());
+    let url = repo.map(|r| match pr {
+        Some(n) => format!("{r}/pull/{n}"),
+        None => format!("{r}/commit/{commit}"),
+    });
+    let mut v = json!({ "commit": commit });
+    if let Some(n) = pr {
+        v["pr"] = json!(n);
+    }
+    if let Some(u) = url {
+        v["url"] = json!(u);
+    }
+    Some(v)
+}
+
+/// The swarm's findings: its rows in an audit index (under `## formal-mind-swarm.md`), each with its section in that
+/// report, then the bugs in .formal/bugs/ not already among them.
+fn swarm_findings(root: &Path, dirs: &[String], repo: Option<&str>) -> Vec<Value> {
+    let mut out: Vec<Value> = vec![];
+    for d in dirs {
+        let Ok(index) = std::fs::read_to_string(root.join(d).join("README.md")) else { continue };
+        let report = std::fs::read_to_string(root.join(d).join(crate::swarm_ctx::REPORT)).unwrap_or_default();
+        for f in parse_index(&index).into_iter().filter(|f| f.report == crate::swarm_ctx::REPORT) {
+            let body = section(&report, &f.id).unwrap_or_default();
+            let sev = field(&body, r"(?i)\*\*Severity:?\*\*:?\s*([\w-]+)").unwrap_or_else(|| f.severity.clone());
+            let poc = field(&body, r"(?i)\*\*PoC:?\*\*:?\s*`([^`]+)`");
+            let mut tests = tests_in(&f.evidence);
+            if let Some(p) = &poc {
+                tests.retain(|t| t != p);
             }
-        } else if t.is_empty() {
-            blank += 1;
-        } else if t.starts_with("//") {
-            comment += 1;
-        } else if t.starts_with("/*") {
-            comment += 1;
-            block = !t.contains("*/");
+            let evidence = [Some(f.evidence.clone()).filter(|e| !e.is_empty()), subsection(&body, "Evidence")].into_iter().flatten().collect::<Vec<_>>().join("\n\n");
+            let description = subsection(&body, "Scenario").unwrap_or_else(|| if body.is_empty() { f.title.clone() } else { body.clone() });
+            let mut x = json!({
+                "id": f.id,
+                "title": f.title,
+                "severity": severity_of(&sev).to_ascii_lowercase(),
+                "status": f.status.to_ascii_lowercase(),
+                "description": description,
+                "evidence": evidence,
+                "tests": tests,
+            });
+            if let Some((file, at)) = location(&body) {
+                x["locations"] = json!([location_json(root, &file, &at)]);
+            }
+            if let Some(p) = poc {
+                x["poc"] = json!(p);
+            }
+            if f.status == "Fixed" {
+                let cover: Vec<String> = x["tests"].as_array().into_iter().flatten().filter_map(|t| t.as_str().map(String::from)).chain(x["poc"].as_str().map(String::from)).collect();
+                if let Some(fix) = fix_of(root, repo, &cover) {
+                    x["fix"] = fix;
+                }
+            }
+            out.push(x);
+        }
+    }
+    if let Ok(read) = std::fs::read_dir(root.join(".formal/bugs")) {
+        let mut bugs: Vec<_> = read.flatten().filter(|e| e.path().extension().is_some_and(|x| x == "md")).collect();
+        bugs.sort_by_key(|e| e.file_name());
+        for (i, e) in bugs.into_iter().enumerate() {
+            let Ok(text) = std::fs::read_to_string(e.path()) else { continue };
+            let b = swarm_bug(&e.file_name().to_string_lossy(), &text);
+            if out.iter().any(|x| x["title"] == b.title.as_str()) {
+                continue;
+            }
+            let body = b.body.unwrap_or_default();
+            let description = body.lines().filter(|l| !l.to_ascii_lowercase().starts_with("**severity") && !l.to_ascii_lowercase().starts_with("**location")).collect::<Vec<_>>().join("\n").trim().to_string();
+            let mut x = json!({
+                "id": format!("SB-{:02}", i + 1),
+                "title": b.title,
+                "severity": b.severity.to_ascii_lowercase(),
+                "status": "open",
+                "description": description,
+                "tests": tests_in(&body),
+            });
+            if let Some((file, at)) = location(&body) {
+                x["locations"] = json!([location_json(root, &file, &at)]);
+            }
+            if let Some(p) = tests_in(&body).first() {
+                x["poc"] = json!(p);
+            }
+            out.push(x);
+        }
+    }
+    out
+}
+
+/// A contract's coverage from `formal_json`, counted as the Proofs page counts it (library functions included).
+pub fn coverage(f: &Value) -> Value {
+    let theorems: Vec<Value> = f["theorems"].as_array().cloned().unwrap_or_default();
+    let (mut n, mut in_lean, mut proved, mut not_modeled) = (0, 0, 0, 0);
+    let mut rows = vec![];
+    for func in f["functions"].as_array().into_iter().flatten() {
+        let by: Vec<&Value> = func["theorems"].as_array().into_iter().flatten().filter_map(|i| theorems.get(i.as_u64()? as usize)).collect();
+        n += 1;
+        let status = if func["why"].is_string() {
+            not_modeled += 1;
+            "not modeled"
+        } else if by.iter().any(|t| t["sorry"] == false) {
+            in_lean += 1;
+            proved += 1;
+            "proved"
+        } else if !by.is_empty() {
+            in_lean += 1;
+            "sorry"
         } else {
-            code += 1;
-        }
-    }
-    (blank + comment + code, blank, comment, code)
-}
-
-/// The report's files, by name (README.adoc first).
-pub fn render(root: &Path, report_dir: &Path, input: &Input) -> Vec<(String, String)> {
-    let depth = report_dir.strip_prefix(root).map(|p| p.components().count()).unwrap_or(0);
-    let src_dir = "../".repeat(depth);
-    let short = input.commit.as_deref().map(|c| &c[..c.len().min(7)]).unwrap_or("working tree");
-    let mut files: Vec<(String, String)> = vec![];
-
-    let by_sev = |s: &str| input.findings.iter().filter(|f| f.severity == s).collect::<Vec<_>>();
-    let sections = [("Critical", "findings-critical.adoc"), ("High", "findings-high.adoc"), ("Medium", "findings-med.adoc"), ("Low", "findings-low.adoc"), ("Informational", "manual-review.adoc")];
-
-    // README.adoc: the generator's header and layout.
-    let mut readme = format!(
-        "= {project} Security Report\nFormal Mind\n:revnumber: {short}\n:revdate: {date}\n:revremark: Generated by Formal Mind\n:sectnums:\n:partnums:\n:toc: auto\n:doctype: book\n:!chapter-signifier:\n:appendix-caption: Exhibit\n:src-dir: {src_dir}\n",
-        project = input.project,
-        date = input.date
-    );
-    if let Some(url) = &input.repo_url {
-        readme.push_str(&format!(":url-repo: {url}\n"));
-        if let Some(c) = &input.commit {
-            readme.push_str(&format!(":commit-hash: {c}\n:url-commit: {url}/commit/\n:url-blob: {url}/blob/{c}/\n"));
-        }
-    }
-    readme.push_str(":source-highlighter: pygments\n:pygments-style: default\n:pygments-linenums-mode: inline\n:pdf-themesdir: {docdir}/themes\n:pdf-theme: report\n\n");
-    readme.push_str("[preface]\n= Introduction\n\ninclude::revisions.adoc[leveloffset=1, tags=version]\n\ninclude::intro.adoc[leveloffset=1, tags=intro]\n\ninclude::intro.adoc[leveloffset=1, tags=summary]\n\n");
-    readme.push_str("= Scope and Methodology\n\ninclude::methodology.adoc[tags=methodology]\n\ninclude::lines-of-code.adoc[tags=loc]\n\n");
-    for (sev, file) in sections {
-        let list = by_sev(sev);
-        readme.push_str(&format!("= {sev}\n\n"));
-        if list.is_empty() {
-            readme.push_str(&format!("No {} findings.\n\n", sev.to_lowercase()));
-        }
-        for n in 1..=list.len() {
-            readme.push_str(&format!("include::{file}[tags={n}]\n"));
-        }
-        readme.push('\n');
-    }
-    if !input.problems.is_empty() {
-        readme.push_str("[appendix]\n== What couldn't be read\n\n");
-        for p in &input.problems {
-            readme.push_str(&format!("* {}\n", inline(p)));
-        }
-        readme.push('\n');
-    }
-    if !input.coverage.is_empty() {
-        readme.push_str("[appendix]\n== Proofs coverage by function\n\ninclude::methodology.adoc[tags=functions]\n\n");
-    }
-    readme.push_str("[glossary]\n= Terminology\ninclude::glossary.adoc[tags=terminology]\n\n[bibliography]\n= References\ninclude::references.adoc[tags=refs]\n");
-    files.push(("README.adoc".into(), readme));
-
-    // revisions.adoc
-    let commit_cell = match (&input.commit, &input.repo_url) {
-        (Some(_), Some(_)) => format!("{{url-commit}}{{commit-hash}}[{short}]"),
-        _ => format!("`{short}`"),
-    };
-    files.push((
-        "revisions.adoc".into(),
-        format!("// tag::version[]\n== Document Revisions\n\n|===\n| Version | Description | Commit | Date\n| {short} | Generated by Formal Mind | {commit_cell} | {}\n|===\n// end::version[]\n", input.date),
-    ));
-
-    // intro.adoc: what was reviewed, and the findings by severity and status.
-    let statuses = ["Fixed", "Works as expected", "Acknowledged", "Rejected", "Open"];
-    let mut intro = format!("// tag::intro[]\n== Summary\n\nThis report covers {} at commit {commit_cell}. It collects {} finding{} from {} report{} in the repository's audit index and Formal Mind's swarm, with the status of each in the current code, and the formal verification of the in-scope contracts against a Lean model generated from the Solidity compiler's AST.\n\nGenerated by Formal Mind on {}.\n// end::intro[]\n\n", input.repo_url.as_ref().map(|u| format!("{u}[{}]", input.project)).unwrap_or_else(|| input.project.clone()), input.findings.len(), if input.findings.len() == 1 { "" } else { "s" }, input.reports.len().max(1), if input.reports.len() == 1 { "" } else { "s" }, input.date);
-    intro.push_str("// tag::summary[]\n== Findings\n\n[%header%footer,cols=\"7*\"]\n|===\n| Severity");
-    for s in statuses {
-        intro.push_str(&format!(" | {s}"));
-    }
-    intro.push_str(" | Total\n");
-    for (sev, _) in sections {
-        let list = by_sev(sev);
-        intro.push_str(&format!("| {sev}"));
-        for s in statuses {
-            intro.push_str(&format!(" | {}", list.iter().filter(|f| f.status == s).count()));
-        }
-        intro.push_str(&format!(" | {}\n", list.len()));
-    }
-    intro.push_str("| Total");
-    for s in statuses {
-        intro.push_str(&format!(" | {}", input.findings.iter().filter(|f| f.status == s).count()));
-    }
-    intro.push_str(&format!(" | {}\n|===\n// end::summary[]\n", input.findings.len()));
-    files.push(("intro.adoc".into(), intro));
-
-    // methodology.adoc: the formal verification and its coverage.
-    let total = |f: fn(&Coverage) -> usize| input.coverage.iter().map(f).sum::<usize>();
-    let mut m = String::from("// tag::methodology[]\n== Methodology\n\n=== Approach\n\nFindings come from the repository's audit index, where every report's findings are listed with their status and the evidence for it (most often a regression test), and from Formal Mind's swarm, which files each bug it finds with a Foundry proof of concept. Each finding below carries the report's own description and the code at its location in this commit.\n\n=== Formal verification\n\nThe contracts in scope are those the Foundry scripts under `script/` deploy or call. For each, formal-ast compiles the code with solc and translates the AST into a Lean 4 model: every function it can translate becomes a Lean definition, and the rest stay opaque (not modeled), so a theorem about the model holds for every behaviour of them. A function counts as proved when a theorem in the repository without `sorry` names its definition.\n\n");
-    if input.coverage.is_empty() {
-        m.push_str("No in-scope contract could be read, so there is no coverage to report.\n");
-    } else {
-        let pct = |p: usize, n: usize| if n == 0 { "0%".to_string() } else { format!("{:.1}%", p as f64 * 100.0 / n as f64) };
-        m.push_str(&format!(
-            "{} of {} functions are proved ({}); {} are in the Lean model and {} are not modeled. The repository has {} theorems{}.\n\n",
-            total(|c| c.proved),
-            total(|c| c.functions),
-            pct(total(|c| c.proved), total(|c| c.functions)),
-            total(|c| c.in_lean),
-            total(|c| c.not_modeled),
-            // Every contract sees the repository's theorems.
-            input.coverage.iter().map(|c| c.theorems).max().unwrap_or(0),
-            match input.coverage.iter().map(|c| c.sorry).max().unwrap_or(0) {
-                0 => String::new(),
-                n => format!(", {n} still with `sorry`"),
-            }
-        ));
-        m.push_str(".Proofs coverage by contract\n[%header%footer,cols=\"3,1,1,1,1,1\"]\n|===\n| Contract | Functions | In Lean | Proved | Not modeled | Proved %\n");
-        for c in &input.coverage {
-            m.push_str(&format!("| {} | {} | {} | {} | {} | {}\n", c.contract, c.functions, c.in_lean, c.proved, c.not_modeled, pct(c.proved, c.functions)));
-        }
-        m.push_str(&format!("| Total | {} | {} | {} | {} | {}\n|===\n\n", total(|c| c.functions), total(|c| c.in_lean), total(|c| c.proved), total(|c| c.not_modeled), pct(total(|c| c.proved), total(|c| c.functions))));
-        m.push_str("Every function's status and the theorems that name it are listed in the appendix.\n\n");
-    }
-    m.push_str("// end::methodology[]\n\n// tag::functions[]\n");
-    {
-        for c in &input.coverage {
-            m.push_str(&format!(".{} functions\n[%header,cols=\"4,2,1\"]\n|===\n| Function | Status | Theorems\n", c.contract));
-            for (f, s, t) in &c.rows {
-                m.push_str(&format!("| `+{f}+` | {s} | {t}\n"));
-            }
-            m.push_str("|===\n\n");
-        }
-    }
-    m.push_str("// end::functions[]\n");
-    files.push(("methodology.adoc".into(), m));
-
-    // lines-of-code.adoc
-    let mut loc = String::from("// tag::loc[]\n== Lines of Code\n\n.In-scope Solidity, by file\n[%header%footer,cols=\"5,1,1,1,1\"]\n|===\n| File | Lines | Blanks | Comments | Code\n");
-    let mut sum = (0, 0, 0, 0);
-    for f in &input.files {
-        let (l, b, c, k) = std::fs::read_to_string(root.join(f)).map(|t| count_lines(&t)).unwrap_or_default();
-        sum = (sum.0 + l, sum.1 + b, sum.2 + c, sum.3 + k);
-        loc.push_str(&format!("| `{f}` | {l} | {b} | {c} | {k}\n"));
-    }
-    loc.push_str(&format!("| Total ({} files) | {} | {} | {} | {}\n|===\n", input.files.len(), sum.0, sum.1, sum.2, sum.3));
-    if !input.files.is_empty() {
-        loc.push_str("\n=== Files\n\n[source,shell]\n----\n");
-        for f in &input.files {
-            loc.push_str(&format!("{f}\n"));
-        }
-        loc.push_str("----\n");
-    }
-    loc.push_str("// end::loc[]\n");
-    files.push(("lines-of-code.adoc".into(), loc));
-
-    // findings-*.adoc and manual-review.adoc: one tagged block per finding.
-    let tests = regex::Regex::new(r"\b(test[A-Z_]\w*)").unwrap();
-    let test_files = regex::Regex::new(r"([\w./-]+\.t\.sol)").unwrap();
-    for (sev, file) in sections {
-        let mut text = String::new();
-        for (n, f) in by_sev(sev).into_iter().enumerate() {
-            let n = n + 1;
-            let id = if f.id.is_empty() || f.id == "—" { String::new() } else { format!("{} ", f.id) };
-            text.push_str(&format!("// tag::{n}[]\n== {id}{}\n", inline(&f.title)));
-            text.push_str(&format!("Status: *{}*, Severity: {}, Report: `+{}+`\n\n", f.status, f.severity, f.report));
-            // The code at the finding's location.
-            if let Some((path, a, b)) = f.body.as_deref().and_then(location).and_then(|(file, at)| excerpt(root, &file, &at)) {
-                text.push_str(&code_block(&path, a, b, input.repo_url.is_some() && input.commit.is_some(), None));
-            }
-            if !f.evidence.is_empty() {
-                text.push_str(&format!("=== Status evidence\n\n{}\n\n", inline(&f.evidence)));
-                // The regression tests the evidence names, each function as it is in this commit.
-                let named: Vec<String> = test_files.captures_iter(&f.evidence).map(|c| c[1].to_string()).collect();
-                let fns: Vec<String> = tests.captures_iter(&f.evidence).map(|c| c[1].to_string()).collect();
-                let mut shown = 0;
-                for t in named.iter().filter_map(|t| resolve(root, t)) {
-                    let Ok(src) = std::fs::read_to_string(root.join(&t)) else { continue };
-                    for name in &fns {
-                        if let Some((a, b)) = function_lines(&src, name, 60) {
-                            text.push_str(&code_block(&t, a, b, input.repo_url.is_some() && input.commit.is_some(), Some("Regression test")));
-                            shown += 1;
-                        }
-                    }
-                }
-                // Only a file named: its first test.
-                if shown == 0 {
-                    if let Some(t) = named.iter().filter_map(|t| resolve(root, t)).next() {
-                        if let Ok(src) = std::fs::read_to_string(root.join(&t)) {
-                            if let Some(name) = regex::Regex::new(r"function\s+(test\w*)").unwrap().captures(&src).map(|c| c[1].to_string()) {
-                                if let Some((a, b)) = function_lines(&src, &name, 60) {
-                                    text.push_str(&code_block(&t, a, b, input.repo_url.is_some() && input.commit.is_some(), Some("Regression test")));
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-            match &f.body {
-                Some(body) => {
-                    let adoc = md_to_adoc(body);
-                    // The report's text under its own headings; what comes before the first one is the description.
-                    if !adoc.trim_start().starts_with("=== ") {
-                        text.push_str(if adoc.contains("\n=== Description") { "=== Summary\n\n" } else { "=== Description\n\n" });
-                    }
-                    text.push_str(&adoc);
-                    text.push('\n');
-                }
-                None => text.push_str("The report has no section for this finding; the index entry above is all there is.\n"),
-            }
-            text.push_str(&format!("\n// end::{n}[]\n\n"));
-        }
-        files.push((file.into(), text));
-    }
-
-    files.push((
-        "glossary.adoc".into(),
-        "// tag::terminology[]\nformal-ast:: Formal Mind's reader of the Solidity compiler's AST. It finds the contracts in scope from the deploy scripts and translates them into a Lean 4 model.\nLean model:: The Lean 4 definitions generated for a contract's functions, against which theorems are proved.\nNot modeled:: A function formal-ast could not translate; it stays opaque in the model, so a theorem holds for every behaviour of it.\nProved:: A function named by at least one theorem that has no `sorry`.\nPoC:: A Foundry test that reproduces a finding.\nRegression test:: A test that fails on the code before a fix and passes after it.\n// end::terminology[]\n".into(),
-    ));
-    let mut refs = String::from("// tag::refs[]\n");
-    for (i, r) in input.reports.iter().enumerate() {
-        let link = match (&input.repo_url, &input.commit) {
-            (Some(_), Some(_)) => format!("{{url-blob}}{r}[{r}]"),
-            _ => format!("`{r}`"),
+            in_lean += 1;
+            "modeled"
         };
-        refs.push_str(&format!("* [[[ref-{},{}]]] {link}\n", i + 1, i + 1));
+        let mut row = json!({ "function": func["name"], "status": status, "theorems": by.iter().map(|t| t["name"].clone()).collect::<Vec<_>>() });
+        if let Some(w) = func["why"].as_str() {
+            row["why"] = json!(w);
+        }
+        rows.push(row);
     }
-    refs.push_str("* [[[lean,Lean]]] https://lean-lang.org[Lean 4]\n* [[[generator,Generator]]] https://github.com/mmsaki/audit-report-generator[mmsaki/audit-report-generator], whose layout and theme this report uses\n// end::refs[]\n");
-    files.push(("references.adoc".into(), refs));
-    files.push(("themes/report-theme.yml".into(), THEME.to_string()));
-    files
+    json!({
+        "contract": f["contract"],
+        "functions": n,
+        "inLean": in_lean,
+        "proved": proved,
+        "notModeled": not_modeled,
+        "theorems": theorems.len(),
+        "sorry": theorems.iter().filter(|t| t["sorry"] == true).count(),
+        "rows": rows,
+    })
 }
 
-fn code_block(path: &str, a: usize, b: usize, linked: bool, what: Option<&str>) -> String {
-    let lang = if path.ends_with(".sol") { "solidity" } else { "text" };
-    let label = format!("{path}#L{a}-L{b}");
-    let title = if linked { format!("{{url-blob}}{label}[{label}]") } else { label };
-    format!(".{}{title}\n[source,{lang},linenums,start={a}]\n----\ninclude::{{src-dir}}{path}[lines={a}..{b}]\n----\n\n", what.map(|w| format!("{w} ")).unwrap_or_default())
+/// The properties the swarm proved and its reviewer approved (.formal/proofs.json), as P-01…, with each function's
+/// status and theorems from the coverage.
+fn properties(root: &Path, coverage: &[Value], theorems: &std::collections::BTreeMap<String, Value>) -> Vec<Value> {
+    let Some(proofs) = std::fs::read_to_string(root.join(".formal/proofs.json")).ok().and_then(|t| serde_json::from_str::<Value>(&t).ok()) else { return vec![] };
+    let Some(map) = proofs.as_object() else { return vec![] };
+    let mut items: Vec<(&String, &Value)> = map.iter().collect();
+    items.sort_by_key(|(k, _)| k.parse::<u64>().unwrap_or(u64::MAX));
+    let rows: Vec<&Value> = coverage.iter().flat_map(|c| c["rows"].as_array().into_iter().flatten()).collect();
+    let loc = regex::Regex::new(r"\(((?:src|contracts)/[^):\s]+):(\d+)\)").unwrap();
+    items
+        .into_iter()
+        .enumerate()
+        .map(|(i, (_, p))| {
+            let item = p["item"].as_str().unwrap_or("");
+            let name = item.split('`').nth(1).unwrap_or(item).to_string();
+            let row = rows.iter().find(|r| r["function"].as_str() == Some(name.as_str()));
+            let status = match row.and_then(|r| r["status"].as_str()) {
+                Some("proved") | None => "verified",
+                Some("sorry") => "sorry",
+                _ => "unproved",
+            };
+            let mut x = json!({
+                "id": format!("P-{:02}", i + 1),
+                "title": name,
+                "status": status,
+                "description": clean_summary(p["summary"].as_str().unwrap_or(item)),
+                "theorems": row.and_then(|r| r["theorems"].as_array()).into_iter().flatten().filter_map(|t| t.as_str()).map(|t| theorems.get(t).cloned().unwrap_or_else(|| json!({ "name": t }))).collect::<Vec<_>>(),
+                "files": p["files"].clone(),
+            });
+            if let Some(c) = loc.captures(item) {
+                x["locations"] = json!([{ "file": &c[1], "line": c[2].parse::<u64>().unwrap_or(0) }]);
+            }
+            x
+        })
+        .collect()
 }
 
-// ---- reading the folder ----
+/// A prover's summary as a report states a property: what was proved and under which assumptions, without the
+/// conversation around it (what it did, which build passed, the plan, what's next, answers to questions).
+fn clean_summary(md: &str) -> String {
+    const CHAT: [&str; 18] = ["i proved", "i didn't", "i did not", "i haven't", "i have not", "i'm leaving", "i left", "i reused", "i found", "what's next", "next is", "next,", "on your", "checked by the swarm", "the theorems are written", "every theorem names", "plan item", "item "];
+    let kept: Vec<&str> = md
+        .split("\n\n")
+        .map(str::trim)
+        .filter(|p| {
+            let l = p.to_ascii_lowercase();
+            let l = l.trim_start_matches(|c: char| !c.is_alphanumeric());
+            !p.is_empty() && !CHAT.iter().any(|c| l.starts_with(c)) && !l.contains("plan item") && !l.contains("proofs page") && !l.contains("lake build") && !l.contains("plan.md")
+        })
+        .collect();
+    if kept.is_empty() { md.split("\n\n").next().unwrap_or(md).trim().to_string() } else { kept.join("\n\n") }
+}
 
 fn git(root: &Path, args: &[&str]) -> Option<String> {
     let out = std::process::Command::new("git").arg("-C").arg(root).args(args).output().ok()?;
@@ -654,103 +580,474 @@ fn web_url(remote: &str) -> Option<String> {
     r.starts_with("https://").then(|| r.to_string())
 }
 
-/// Everything the report says, read from the folder.
-pub fn gather(root: &Path, dirs: &[String]) -> Input {
-    let mut input = Input { project: root.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default(), ..Default::default() };
-    input.commit = git(root, &["rev-parse", "HEAD"]);
-    input.repo_url = git(root, &["remote", "get-url", "origin"]).and_then(|r| web_url(&r));
-    if let Some(u) = &input.repo_url {
-        input.project = u.rsplit('/').next().unwrap_or(&input.project).to_string();
-    }
-    input.date = crate::swarm_ctx::chrono_today();
+/// Formal Mind's internal audit of the folder in `formalmind.audit/v1`: the swarm's findings, the Proofs coverage, the
+/// reviewed proofs and the external audits it doesn't restate. `previous` (the file as it was) keeps what was written
+/// by hand: fields this doesn't derive, and findings it doesn't know.
+pub fn internal_audit(root: &Path, dirs: &[String], previous: Option<&Value>) -> (Value, Vec<String>) {
+    let mut problems = vec![];
+    let commit = git(root, &["rev-parse", "HEAD"]);
+    let repo = git(root, &["remote", "get-url", "origin"]).and_then(|r| web_url(&r));
+    let project = repo.as_deref().and_then(|u| u.rsplit('/').next()).map(String::from).unwrap_or_else(|| root.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default());
 
-    // The findings: each audit folder's index, with the report's own section for each.
-    let mut reports = BTreeSet::new();
-    for d in dirs {
-        let dir = root.join(d);
-        for idx in ["README.md", "INDEX.md", "readme.md", "index.md"] {
-            let Ok(text) = std::fs::read_to_string(dir.join(idx)) else { continue };
-            for mut f in parse_index(&text) {
-                let report = dir.join(&f.report);
-                if let Ok(md) = std::fs::read_to_string(&report) {
-                    f.body = section(&md, &f.id);
-                    reports.insert(report.strip_prefix(root).unwrap_or(&report).to_string_lossy().replace('\\', "/"));
-                }
-                input.findings.push(f);
-            }
-            break;
-        }
-    }
-    // The swarm's bugs not already in an index.
-    if let Ok(read) = std::fs::read_dir(root.join(".formal/bugs")) {
-        let mut bugs: Vec<_> = read.flatten().filter(|e| e.path().extension().is_some_and(|x| x == "md")).collect();
-        bugs.sort_by_key(|e| e.file_name());
-        for e in bugs {
-            if let Ok(text) = std::fs::read_to_string(e.path()) {
-                let b = swarm_bug(&e.file_name().to_string_lossy(), &text);
-                if !input.findings.iter().any(|f| f.title == b.title) {
-                    input.findings.push(b);
-                }
-            }
-        }
-    }
-    input.reports = reports.into_iter().collect();
-
-    // Coverage and scope, as the Proofs page reads them.
-    let (contracts, _) = in_scope(root, &mut input.problems);
-    let mut files = BTreeSet::new();
+    let (contracts, _) = in_scope(root, &mut problems);
+    let mut cov = vec![];
+    let mut scope = BTreeSet::new();
+    // Every theorem by name, with where it is: the properties link each one.
+    let mut theorems = std::collections::BTreeMap::new();
     for (file, name) in contracts {
-        let (a, output) = match analyze_full(root, &file, Some(&name)) {
-            Ok(x) => x,
-            Err(e) => {
-                input.problems.push(format!("{file}: {e:#}"));
+        match analyze_full(root, &file, Some(&name)) {
+            Ok((a, output)) => {
+                let f = formal_json(&a, &output, 0);
+                cov.push(coverage(&f));
+                for t in f["theorems"].as_array().into_iter().flatten() {
+                    if let Some(n) = t["name"].as_str() {
+                        theorems.insert(n.to_string(), json!({ "name": n, "file": t["file"], "line": t["line"], "sorry": t["sorry"] }));
+                    }
+                }
+                scope.insert(file);
+                for func in f["functions"].as_array().into_iter().flatten() {
+                    if let (false, Some(p)) = (func["dependency"] == true, func["file"].as_str()) {
+                        scope.insert(p.to_string());
+                    }
+                }
+            }
+            Err(e) => problems.push(format!("{file}: {e:#}")),
+        }
+    }
+
+    let mut findings = swarm_findings(root, dirs, repo.as_deref());
+    // Hand edits survive: fields not derived here, a status set on a swarm bug, findings added by hand.
+    if let Some(prev) = previous.and_then(|p| p["findings"].as_array()) {
+        for old in prev {
+            match findings.iter_mut().find(|f| f["id"] == old["id"]) {
+                Some(f) => {
+                    for (k, v) in old.as_object().into_iter().flatten() {
+                        if f[k].is_null() || (k == "status" && f["id"].as_str().is_some_and(|i| i.starts_with("SB-"))) {
+                            f[k] = v.clone();
+                        }
+                    }
+                }
+                None => findings.push(old.clone()),
+            }
+        }
+    }
+    let props = properties(root, &cov, &theorems);
+    let total = |k: &str| cov.iter().map(|c| c[k].as_u64().unwrap_or(0)).sum::<u64>();
+    let summary = format!(
+        "Formal Mind's swarm verified {project} against a Lean 4 model generated from the Solidity compiler's AST: {} of {} functions in scope are proved, with {} reviewed properties. It filed {} finding{}, each with a proof-of-concept test.",
+        total("proved"),
+        total("functions"),
+        props.len(),
+        findings.len(),
+        if findings.len() == 1 { "" } else { "s" }
+    );
+    let mut doc = json!({
+        "schema": "formalmind.audit/v1",
+        "kind": "internal",
+        "title": format!("{project} Security Assessment & Formal Verification"),
+        "auditor": "Formal Mind",
+        "date": crate::swarm_ctx::chrono_today(),
+        "scope": scope.into_iter().collect::<Vec<_>>(),
+        "summary": summary,
+        "findings": findings,
+        "coverage": cov,
+        "properties": props,
+    });
+    if let Some(c) = commit {
+        doc["commit"] = json!(c);
+    }
+    if let Some(r) = repo {
+        doc["repository"] = json!(r);
+    }
+    if let Some(prev) = previous {
+        for k in ["authors", "summary", "title"] {
+            if prev[k].is_string() || prev[k].is_array() {
+                if k != "summary" || prev["summaryByHand"] == true {
+                    doc[k] = prev[k].clone();
+                }
+            }
+        }
+    }
+    (doc, problems)
+}
+
+// ---- rendering: Formal Mind's report ----
+
+const THEME: &str = include_str!("../report-template/formal-mind-theme.yml");
+/// The brand's lockups: light text for the black cover, dark text for the running header.
+const LOGO_LIGHT: &str = include_str!("../report-template/formal-mind-lockup-light.svg");
+const LOGO_DARK: &str = include_str!("../report-template/formal-mind-lockup-dark.svg");
+/// The internal audit's files in the audit folder: the standard file, and the PDF beside it.
+pub const JSON: &str = "formal-mind.audit.json";
+pub const PDF: &str = "formal-mind.pdf";
+
+// The report's colours: a block's colour says what it is, as in the legends (verification, severity, status).
+const GREEN: &str = "#B7E4C7";
+const WHITE: &str = "#FFFFFF";
+const HEAD: &str = "#F4F4F5";
+const BLUE: &str = "#C9DAF8";
+const GRAY: &str = "#EEEEEE";
+const AMBER: &str = "#FCE5CD";
+
+const SEVERITIES: [(&str, &str, &str); 6] = [
+    ("critical", "Critical", "#F4C7C3"),
+    ("high", "High", "#F9D9D6"),
+    ("medium", "Medium", "#FCE5CD"),
+    ("low", "Low", "#D9EAD3"),
+    ("informational", "Informational", "#D6E4F7"),
+    ("gas", "Gas", "#EEEEEE"),
+];
+
+fn status_label(s: &str) -> (&'static str, &'static str) {
+    match s {
+        "fixed" => ("Fixed", GREEN),
+        "acknowledged" => ("Acknowledged", "#FFF2CC"),
+        "works as expected" => ("Works as expected", "#D6E4F7"),
+        "rejected" => ("Rejected", "#EEEEEE"),
+        _ => ("Open", "#F4C7C3"),
+    }
+}
+
+/// A table cell with its own background (every cell of a coloured table sets or clears it, as the setting carries
+/// over to the next cell).
+fn cell(color: Option<&str>, text: &str) -> String {
+    // The space keeps the text's own formatting (bold, code) from touching the directive.
+    format!("|{{set:cellbgcolor:{}}} {text}", color.unwrap_or(WHITE))
+}
+
+/// A header cell of a coloured table.
+fn head(text: &str) -> String {
+    cell(Some(HEAD), &format!("**{text}**"))
+}
+
+fn s<'a>(v: &'a Value, k: &str) -> &'a str {
+    v[k].as_str().unwrap_or("")
+}
+
+/// The report (AsciiDoc) for an audit in the standard format, read from nothing but the JSON and, for code excerpts,
+/// the folder at `src_dir` (relative to where the AsciiDoc is written).
+pub fn render(root: &Path, doc: &Value, src_dir: &str) -> String {
+    let repo = doc["repository"].as_str();
+    let commit = doc["commit"].as_str();
+    let linked = repo.is_some() && commit.is_some();
+    let short = commit.map(|c| &c[..c.len().min(7)]).unwrap_or("working tree");
+    let project = repo.and_then(|r| r.rsplit('/').next()).unwrap_or_else(|| s(doc, "title").split(' ').next().unwrap_or(""));
+    // A repository path, linked at the audited commit.
+    let at = |file: &str, line: Option<u64>| {
+        let label = match line {
+            Some(l) => format!("{file}#L{l}"),
+            None => file.to_string(),
+        };
+        if linked { format!("{{url-blob}}{label}[{label}]") } else { format!("`{label}`") }
+    };
+    let findings: Vec<&Value> = doc["findings"].as_array().into_iter().flatten().collect();
+    let coverage: Vec<&Value> = doc["coverage"].as_array().into_iter().flatten().collect();
+    let props: Vec<&Value> = doc["properties"].as_array().into_iter().flatten().collect();
+    let total = |k: &str| coverage.iter().map(|c| c[k].as_u64().unwrap_or(0)).sum::<u64>();
+    let pct = |p: u64, n: u64| if n == 0 { "0%".to_string() } else { format!("{:.1}%", p as f64 * 100.0 / n as f64) };
+    let solc = std::fs::read_to_string(root.join("foundry.toml")).ok().and_then(|t| field(&t, r#"(?m)^\s*solc(?:_version)?\s*=\s*"([^"]+)""#));
+    let lean = crate::swarm_ctx::lake_dir(root).and_then(|d| std::fs::read_to_string(d.join("lean-toolchain")).ok()).map(|t| t.trim().rsplit(':').next().unwrap_or("").trim_start_matches('v').to_string());
+
+    let mut a = format!(
+        "= Security Assessment & Formal Verification: {project}\nFormal Mind\n:doctype: book\n:title-page:\n:toc:\n:toclevels: 3\n:sectnums:\n:sectnumlevels: 3\n:!chapter-signifier:\n:appendix-caption: Appendix\n:revnumber: {short}\n:revdate: {}\n:revremark: Security assessment\n:source-highlighter: pygments\n:pygments-style: default\n:pygments-linenums-mode: inline\n:pdf-themesdir: {{docdir}}\n:pdf-theme: formal-mind\n:title-logo-image: image:formal-mind-lockup-light.svg[pdfwidth=2.6in]\n:src-dir: {src_dir}\n",
+        s(doc, "date")
+    );
+    if let (Some(r), Some(c)) = (repo, commit) {
+        a.push_str(&format!(":url-repo: {r}\n:commit-hash: {c}\n:url-blob: {r}/blob/{c}/\n"));
+    }
+    a.push('\n');
+
+    // ---- Introduction ----
+    a.push_str(&format!(
+        "== Introduction\n\n=== About Formal Mind\n\nFormal Mind is a formal audit workspace for Solidity. A local swarm of agents reads the contracts through the Solidity compiler's AST, proves their functions against a Lean 4 model generated from it, and files every bug it finds with a Foundry proof of concept. Its reviewer checks each proof before it counts. Learn more at https://formal.team[formal.team].\n\n=== About This Report\n\nThis report presents Formal Mind's security assessment of {project} at commit {}: the bugs its swarm found, each with a proof of concept; the Lean proofs of the code and how much of the code they cover. Every code reference links to the audited commit, and every fix to the pull request or commit that made it.\n\nThe report is generated from `{}` (the `formalmind.audit/v1` format), which is the source of truth; edit that file and generate the report again to change it.\n\n=== Disclaimer\n\nThis assessment is a snapshot of the code at the commit above and does not guarantee against a hack. Proofs hold for the Lean model formal-ast generates, under the assumptions stated in <<_assumptions_and_simplifications>>. Code the model leaves opaque, the compiler, and contracts outside the scope are not verified. Any change to the code needs a new assessment.\n\n",
+        if linked { format!("{{url-repo}}/commit/{{commit-hash}}[{short}]") } else { format!("`{short}`") },
+        JSON
+    ));
+
+    // ---- Project summary ----
+    a.push_str("== Project Summary\n\n=== Project Scope\n\n[%header,cols=\"3,4,2,3\"]\n|===\n| Project | Repository | Commit | Platform\n");
+    let platform = format!("EVM / Solidity {}{}", solc.as_deref().unwrap_or(""), lean.as_deref().map(|l| format!(" +\nLean {l}")).unwrap_or_default());
+    a.push_str(&format!(
+        "| *{project}* | {} | {} | {platform}\n|===\n\n",
+        repo.map(|r| format!("{r}[{}]", r.trim_start_matches("https://github.com/"))).unwrap_or_else(|| "—".into()),
+        if linked { format!("{{url-repo}}/commit/{{commit-hash}}[{short}]") } else { format!("`{short}`") }
+    ));
+    a.push_str(&format!("=== Project Overview\n\n{}\n\nThe contracts in scope are the ones the repository's Foundry scripts under `script/` deploy or call, with the code they reach.\n\n", inline(s(doc, "summary"))));
+    let scope: Vec<&str> = doc["scope"].as_array().into_iter().flatten().filter_map(|x| x.as_str()).collect();
+    if !scope.is_empty() {
+        a.push_str("The following files are in scope:\n\n.Files in scope\n[%header%footer,cols=\"6,1,1\"]\n|===\n| File | Lines | Code\n");
+        let (mut l, mut c) = (0, 0);
+        for f in &scope {
+            let (lines, code) = std::fs::read_to_string(root.join(f)).map(|t| count_lines(&t)).unwrap_or_default();
+            l += lines;
+            c += code;
+            a.push_str(&format!("| {} | {lines} | {code}\n", at(f, None)));
+        }
+        a.push_str(&format!("| Total ({} files) | {l} | {c}\n|===\n\n", scope.len()));
+    }
+
+    a.push_str("=== Findings Summary\n\n[%header%footer,cols=\"3,2,2,2,2\"]\n|===\n");
+    a.push_str(&[head("Severity"), head("Found"), head("Fixed"), head("Acknowledged"), head("Open")].join(" "));
+    a.push('\n');
+    for (key, label, color) in SEVERITIES {
+        let of: Vec<&&Value> = findings.iter().filter(|f| s(f, "severity") == key).collect();
+        if key == "gas" && of.is_empty() {
+            continue;
+        }
+        let n = |st: &str| of.iter().filter(|f| s(f, "status") == st).count();
+        a.push_str(&[cell(Some(color), label), cell(None, &of.len().to_string()), cell(None, &n("fixed").to_string()), cell(None, &n("acknowledged").to_string()), cell(None, &n("open").to_string())].join(" "));
+        a.push('\n');
+    }
+    let n = |st: &str| findings.iter().filter(|f| s(f, "status") == st).count();
+    a.push_str(&[head("Total"), head(&findings.len().to_string()), head(&n("fixed").to_string()), head(&n("acknowledged").to_string()), head(&n("open").to_string())].join(" "));
+    a.push_str("\n|===\n\n");
+
+    a.push_str("=== Severity Matrix\n\nSeverity combines what a bug costs when exploited (impact) with how likely it is to be (likelihood).\n\n[cols=\"2,2,3,3,3\"]\n|===\n");
+    let sev = |k: &str| SEVERITIES.iter().find(|x| x.0 == k).map(|x| (x.1, x.2)).unwrap();
+    for (row, cols) in [("High", ["medium", "high", "critical"]), ("Medium", ["low", "medium", "high"]), ("Low", ["low", "low", "medium"])] {
+        a.push_str(&cell(None, if row == "High" { "*Impact*" } else { "" }));
+        a.push(' ');
+        a.push_str(&head(row));
+        for k in cols {
+            let (l, c) = sev(k);
+            a.push(' ');
+            a.push_str(&cell(Some(c), l));
+        }
+        a.push('\n');
+    }
+    a.push_str(&[cell(None, ""), cell(None, ""), head("Low"), head("Medium"), head("High")].join(" "));
+    a.push_str("\n|===\n_Likelihood runs left to right._\n\n");
+
+    // ---- Detailed findings ----
+    a.push_str("== Detailed Findings\n\n");
+    if findings.is_empty() {
+        a.push_str(&format!("Formal Mind's swarm has filed no findings at commit {short}. Its work on this code is the formal verification below.\n\n"));
+    } else {
+        a.push_str("[%header,cols=\"1,5,2,2\"]\n|===\n");
+        a.push_str(&[head("ID"), head("Title"), head("Severity"), head("Status")].join(" "));
+        a.push('\n');
+        for (key, label, color) in SEVERITIES {
+            for f in findings.iter().filter(|f| s(f, "severity") == key) {
+                let (st, sc) = status_label(s(f, "status"));
+                a.push_str(&[cell(None, &format!("<<{},{}>>", anchor(s(f, "id")), s(f, "id"))), cell(None, &inline(s(f, "title"))), cell(Some(color), label), cell(Some(sc), st)].join(" "));
+                a.push('\n');
+            }
+        }
+        a.push_str("|===\n\n");
+        for (key, label, color) in SEVERITIES {
+            let of: Vec<&&Value> = findings.iter().filter(|f| s(f, "severity") == key).collect();
+            if of.is_empty() {
                 continue;
             }
-        };
-        let f = formal_json(&a, &output, 0);
-        input.coverage.push(coverage(&f));
-        files.insert(file);
-        for func in f["functions"].as_array().into_iter().flatten() {
-            if func["dependency"] == false {
-                if let Some(p) = func["file"].as_str() {
-                    files.insert(p.to_string());
+            a.push_str(&format!("=== {label} Severity Issues\n\n"));
+            for f in of {
+                a.push_str(&finding(root, f, label, color, &at, linked));
+            }
+        }
+    }
+
+    // ---- Formal verification ----
+    a.push_str("== Formal Verification\n\n=== Assumptions and Simplifications\n\n");
+    a.push_str(&format!(
+        ". formal-ast compiles the contracts{} and translates solc's AST into a Lean {}model; the theorems are about that model.\n. Functions formal-ast can't translate stay opaque (not modeled): a theorem then holds for every behaviour of them, and says nothing about their own code.\n. External calls are parameters of the model, so a theorem holds whatever the called contract does unless it states otherwise.\n. A function counts as proved when a theorem without `sorry` names its Lean definition. The swarm's own proofs also pass `lake build` with no `sorry`, `admit`, `axiom` or `native_decide`, and are approved by its reviewer.\n\n",
+        solc.as_deref().map(|v| format!(" with solc {v}")).unwrap_or_default(),
+        lean.as_deref().map(|v| format!("{v} ")).unwrap_or_default()
+    ));
+    a.push_str("=== Verification Notations\n\n[cols=\"1,3\"]\n|===\n");
+    for (l, c, d) in [
+        ("Proved", GREEN, "Verified: a theorem without `sorry` names the function's Lean definition, so the property holds for every state and input of the model, under the assumptions above."),
+        ("Has sorry", BLUE, "Theorems name it, but each still has a `sorry`: the proof isn't finished."),
+        ("In Lean", GRAY, "Modeled in Lean, but no theorem about it yet."),
+        ("Not modeled", AMBER, "Left opaque by formal-ast: theorems hold for every behaviour of it (the reason is in the appendix)."),
+    ] {
+        a.push_str(&format!("{} {}\n", cell(Some(c), l), cell(None, d)));
+    }
+    a.push_str("|===\n\n=== Coverage\n\n");
+    if coverage.is_empty() {
+        a.push_str("No contract in scope could be read, so there is no coverage to report.\n\n");
+    } else {
+        a.push_str(&format!(
+            "*{}* of *{}* functions are proved ({}); {} are in the Lean model and {} are not modeled. The repository has {} theorems{}.\n\n",
+            total("proved"),
+            total("functions"),
+            pct(total("proved"), total("functions")),
+            total("inLean"),
+            total("notModeled"),
+            coverage.iter().map(|c| c["theorems"].as_u64().unwrap_or(0)).max().unwrap_or(0),
+            match coverage.iter().map(|c| c["sorry"].as_u64().unwrap_or(0)).max().unwrap_or(0) {
+                0 => String::new(),
+                n => format!(", {n} still with `sorry`"),
+            }
+        ));
+        a.push_str("[%header%footer,cols=\"3,1,1,1,1,1\"]\n|===\n| Contract | Functions | In Lean | Proved | Not modeled | Proved\n");
+        for c in &coverage {
+            a.push_str(&format!("| {} | {} | {} | {} | {} | {}\n", s(c, "contract"), c["functions"], c["inLean"], c["proved"], c["notModeled"], pct(c["proved"].as_u64().unwrap_or(0), c["functions"].as_u64().unwrap_or(0))));
+        }
+        a.push_str(&format!("| Total | {} | {} | {} | {} | {}\n|===\n\nEvery function's status is in <<function-coverage>>.\n\n", total("functions"), total("inLean"), total("proved"), total("notModeled"), pct(total("proved"), total("functions"))));
+    }
+    if !props.is_empty() {
+        a.push_str("=== Formal Verification Properties\n\nEach property is a function the swarm's prover proved against the model and its reviewer approved: what the proof establishes, in the prover's words, and the theorems that prove it, each linked where it is.\n\n");
+        // Grouped by contract, as the model is.
+        let mut groups: Vec<String> = vec![];
+        for p in &props {
+            let c = s(p, "title").split('.').next().unwrap_or("").to_string();
+            if !groups.contains(&c) {
+                groups.push(c);
+            }
+        }
+        for g in groups {
+            a.push_str(&format!("==== {g}\n\n"));
+            for p in props.iter().filter(|p| s(p, "title").split('.').next() == Some(g.as_str())) {
+                let (st, sc) = match s(p, "status") {
+                    "verified" => ("Verified", GREEN),
+                    "sorry" => ("Has sorry", BLUE),
+                    _ => ("Not proved", GRAY),
+                };
+                let loc = p["locations"].as_array().and_then(|l| l.first()).map(|l| at(s(l, "file"), l["line"].as_u64())).unwrap_or_else(|| "—".into());
+                let files: Vec<String> = p["files"].as_array().into_iter().flatten().filter_map(|f| f.as_str()).map(|f| at(f, None)).collect();
+                a.push_str(&format!("[[{}]]\n[cols=\"1,1,1\"]\n|===\n3+{}\n", anchor(s(p, "id")), cell(Some(HEAD), &format!("*{}. {}*", s(p, "id"), code_span(s(p, "title"))))));
+                a.push_str(&[cell(Some(sc), &format!("Status: *{st}*")), cell(Some(sc), &format!("Function: {loc}")), cell(Some(sc), &format!("Proof: {}", if files.is_empty() { "—".into() } else { files.join(", ") }))].join(" "));
+                a.push_str("\n|===\n\n");
+                a.push_str(&md_to_adoc(s(p, "description")));
+                a.push_str("\n\n");
+                let thms: Vec<&Value> = p["theorems"].as_array().into_iter().flatten().collect();
+                if !thms.is_empty() {
+                    a.push_str("[%header,cols=\"4,1,4\"]\n|===\n");
+                    a.push_str(&[head("Theorem"), head("Status"), head("Where")].join(" "));
+                    a.push('\n');
+                    for t in thms {
+                        let (ts, tc) = if t["sorry"] == true { ("Has sorry", BLUE) } else { ("Verified", GREEN) };
+                        let place = t["file"].as_str().map(|f| at(f, t["line"].as_u64())).unwrap_or_else(|| "—".into());
+                        a.push_str(&[cell(None, &code_span(s(t, "name"))), cell(Some(tc), ts), cell(None, &place)].join(" "));
+                        a.push('\n');
+                    }
+                    a.push_str("|===\n\n");
                 }
             }
         }
     }
-    input.files = files.into_iter().collect();
-    input
-}
 
-/// A contract's coverage from `formal_json`, counted as the Proofs page counts it (library functions included).
-pub fn coverage(f: &Value) -> Coverage {
-    let theorems: Vec<Value> = f["theorems"].as_array().cloned().unwrap_or_default();
-    let mut c = Coverage { contract: f["contract"].as_str().unwrap_or("").into(), theorems: theorems.len(), sorry: theorems.iter().filter(|t| t["sorry"] == true).count(), ..Default::default() };
-    for func in f["functions"].as_array().into_iter().flatten() {
-        let by: Vec<&Value> = func["theorems"].as_array().into_iter().flatten().filter_map(|i| theorems.get(i.as_u64()? as usize)).collect();
-        let status = if func["why"].is_string() {
-            c.not_modeled += 1;
-            "Not modeled"
-        } else if by.iter().any(|t| t["sorry"] == false) {
-            c.in_lean += 1;
-            c.proved += 1;
-            "Proved"
-        } else if !by.is_empty() {
-            c.in_lean += 1;
-            "Has sorry"
-        } else {
-            c.in_lean += 1;
-            "In Lean"
-        };
-        c.functions += 1;
-        c.rows.push((func["name"].as_str().unwrap_or("").into(), status.into(), by.len()));
+    if !coverage.is_empty() {
+        a.push_str("[appendix]\n[[function-coverage]]\n== Function Coverage\n\n");
+        for c in &coverage {
+            a.push_str(&format!(".{}\n[%header,cols=\"5,2,1\"]\n|===\n{} {} {}\n", s(c, "contract"), head("Function"), head("Status"), head("Theorems")));
+            for r in c["rows"].as_array().into_iter().flatten() {
+                let (l, col) = match s(r, "status") {
+                    "proved" => ("Proved", GREEN),
+                    "sorry" => ("Has sorry", BLUE),
+                    "not modeled" => ("Not modeled", AMBER),
+                    _ => ("In Lean", GRAY),
+                };
+                a.push_str(&format!("{} {} {}\n", cell(None, &code_span(s(r, "function"))), cell(Some(col), l), cell(None, &r["theorems"].as_array().map(|t| t.len()).unwrap_or(0).to_string())));
+            }
+            a.push_str("|===\n\n");
+        }
     }
-    c
+    a
 }
 
-// ---- asciidoctor-pdf ----
+/// Lines and code lines (not blank, not comments) of a Solidity file.
+fn count_lines(text: &str) -> (usize, usize) {
+    let (mut lines, mut code, mut block) = (0, 0, false);
+    for l in text.lines() {
+        lines += 1;
+        let t = l.trim();
+        if block {
+            block = !t.contains("*/");
+        } else if t.starts_with("/*") {
+            block = !t.contains("*/");
+        } else if !t.is_empty() && !t.starts_with("//") {
+            code += 1;
+        }
+    }
+    (lines, code)
+}
 
-/// asciidoctor-pdf: on PATH as a login shell sees it, or where Homebrew and RubyGems put it.
+fn anchor(id: &str) -> String {
+    format!("finding-{}", id.chars().map(|c| if c.is_ascii_alphanumeric() { c.to_ascii_lowercase() } else { '-' }).collect::<String>())
+}
+
+/// One finding: the header strip (severity, status, files), Context, Description with the code, Impact,
+/// Recommendation, Proof of concept, and Fix review with the fix's pull request or commit.
+fn finding(root: &Path, f: &Value, label: &str, color: &str, at: &dyn Fn(&str, Option<u64>) -> String, linked: bool) -> String {
+    let id = s(f, "id");
+    let (st, sc) = status_label(s(f, "status"));
+    let locs: Vec<&Value> = f["locations"].as_array().into_iter().flatten().collect();
+    let context: Vec<String> = locs.iter().map(|l| at(s(l, "file"), l["line"].as_u64())).collect();
+    let mut a = format!("[[{}]]\n==== {id} {}\n\n[cols=\"1,1,1\"]\n|===\n", anchor(id), inline(s(f, "title")));
+    a.push_str(&[cell(Some(color), &format!("Severity: *{label}*")), cell(Some(sc), &format!("Status: *{st}*")), cell(None, &format!("PoC: {}", f["poc"].as_str().map(|p| at(p, None)).unwrap_or_else(|| "—".into())))].join(" "));
+    a.push_str("\n|===\n\n");
+    if !context.is_empty() {
+        a.push_str(&format!("*Context:* {}\n\n", context.join(", ")));
+    }
+    a.push_str(&format!("*Description:* {}\n\n", md_to_adoc(s(f, "description")).trim_start()));
+    if let Some(l) = locs.first() {
+        let file = s(l, "file");
+        if let Ok(text) = std::fs::read_to_string(root.join(file)) {
+            let n = text.lines().count() as u64;
+            let line = l["line"].as_u64().unwrap_or(1);
+            // The function around the line, else the lines around it.
+            let before: Vec<&str> = text.lines().take(line as usize).collect();
+            let fn_name = before.iter().rev().find_map(|x| regex::Regex::new(r"function\s+(\w+)").unwrap().captures(x).map(|c| c[1].to_string()));
+            let (s0, e0) = fn_name.and_then(|f| function_lines(&text, &f, 40)).filter(|(s0, e0)| (*s0 as u64) <= line && line <= *e0 as u64).map(|(a, b)| (a as u64, b as u64)).unwrap_or((line.saturating_sub(3).max(1), (line + 6).min(n)));
+            a.push_str(&code_block(file, s0 as usize, e0 as usize, linked, None));
+        }
+    }
+    for (k, l) in [("impact", "Impact"), ("recommendation", "Recommendation"), ("response", "Response")] {
+        if !s(f, k).is_empty() {
+            a.push_str(&format!("*{l}:* {}\n\n", md_to_adoc(s(f, k)).trim_start()));
+        }
+    }
+    if let Some(p) = f["poc"].as_str() {
+        a.push_str(&format!("*Proof of concept:* {} reproduces it.\n\n", at(p, None)));
+        if let Ok(text) = std::fs::read_to_string(root.join(p)) {
+            if let Some((s0, e0)) = regex::Regex::new(r"function\s+(test\w*)").unwrap().captures(&text).and_then(|c| function_lines(&text, &c[1], 50)) {
+                a.push_str(&code_block(p, s0, e0, linked, None));
+            }
+        }
+    }
+    // Fix review: where it stands, the fix's pull request or commit, and the tests that cover it.
+    let mut review = String::new();
+    if let Some(fix) = f["fix"].as_object() {
+        let commit = fix.get("commit").and_then(|c| c.as_str()).unwrap_or("");
+        let shortc = &commit[..commit.len().min(7)];
+        let url = fix.get("url").and_then(|u| u.as_str());
+        review.push_str(&match (fix.get("pr").and_then(|p| p.as_u64()), url) {
+            (Some(n), Some(u)) => format!("Fixed in {u}[PR #{n}] (commit `{shortc}`). "),
+            (None, Some(u)) => format!("Fixed in commit {u}[{shortc}]. "),
+            _ if !commit.is_empty() => format!("Fixed in commit `{shortc}`. "),
+            _ => String::new(),
+        });
+    } else {
+        review.push_str(&format!("{st}. "));
+    }
+    if !s(f, "evidence").is_empty() {
+        review.push_str(md_to_adoc(s(f, "evidence")).trim());
+    }
+    a.push_str(&format!("*Fix review:* {}\n\n", review.trim()));
+    let tests: Vec<String> = f["tests"].as_array().into_iter().flatten().filter_map(|t| t.as_str().map(String::from)).filter(|t| Some(t.as_str()) != f["poc"].as_str()).collect();
+    let fns: Vec<String> = regex::Regex::new(r"\b(test[A-Z_]\w*)").unwrap().captures_iter(s(f, "evidence")).map(|c| c[1].to_string()).collect();
+    for t in tests {
+        let Ok(text) = std::fs::read_to_string(root.join(&t)) else { continue };
+        let named: Vec<(usize, usize)> = fns.iter().filter_map(|n| function_lines(&text, n, 50)).collect();
+        let shown = if named.is_empty() { regex::Regex::new(r"function\s+(test\w*)").unwrap().captures(&text).and_then(|c| function_lines(&text, &c[1], 50)).into_iter().collect() } else { named };
+        for (s0, e0) in shown {
+            a.push_str(&code_block(&t, s0, e0, linked, Some("Regression test")));
+        }
+    }
+    a
+}
+
+fn code_block(path: &str, a: usize, b: usize, linked: bool, what: Option<&str>) -> String {
+    let lang = if path.ends_with(".sol") { "solidity" } else { "text" };
+    let label = format!("{path}#L{a}-L{b}");
+    let title = if linked { format!("{{url-blob}}{label}[{label}]") } else { label };
+    format!(".{}{title}\n[source,{lang},linenums,start={a}]\n----\ninclude::{{src-dir}}{path}[lines={a}..{b}]\n----\n\n", what.map(|w| format!("{w} ")).unwrap_or_default())
+}
+
+// ---- asciidoctor-pdf (an optional export) ----
+
+/// asciidoctor-pdf: where Homebrew puts it, on PATH as a login shell sees it, or in RubyGems' user bin.
 fn asciidoctor_pdf() -> Option<PathBuf> {
     let home = std::env::var("HOME").unwrap_or_default();
     let mut found = ["/opt/homebrew/bin/asciidoctor-pdf", "/usr/local/bin/asciidoctor-pdf"].into_iter().map(PathBuf::from).find(|p| p.exists());
@@ -770,11 +1067,13 @@ fn asciidoctor_pdf() -> Option<PathBuf> {
     })
 }
 
-pub const INSTALL: &str = "asciidoctor-pdf isn't installed, so only the AsciiDoc was written. Install it with Homebrew (it brings Ruby, asciidoctor-pdf and the Rouge highlighter):\n\n    brew install asciidoctor\n\nthen generate the report again.";
+pub const INSTALL: &str = "The audit is saved; the PDF needs asciidoctor-pdf, which isn't installed. Install it with Homebrew (it brings Ruby and asciidoctor-pdf; Solidity highlighting uses python3):\n\n    brew install asciidoctor\n\nthen generate the report again.";
 
 #[derive(Serialize)]
 pub struct Generated {
-    /// The AsciiDoc folder, folder-relative (e.g. audit/report).
+    /// The internal audit in the standard format, folder-relative (e.g. audit/formal-mind.audit.json).
+    pub json: String,
+    /// The AsciiDoc it was rendered to, folder-relative.
     pub adoc: String,
     /// The PDF, folder-relative, when asciidoctor-pdf made one.
     pub pdf: Option<String>,
@@ -784,19 +1083,27 @@ pub struct Generated {
     pub warnings: Vec<String>,
 }
 
-/// Writes the report into `<audit folder>/report/` and, with asciidoctor-pdf, the PDF next to it.
+/// Writes Formal Mind's internal audit (`<audit folder>/formal-mind.audit.json`), renders it to AsciiDoc in
+/// .formal/report/, and with asciidoctor-pdf to `<audit folder>/formal-mind.pdf`.
 pub fn generate(root: &Path, dirs: &[String]) -> Result<Generated, String> {
     let dirs: Vec<String> = if dirs.is_empty() { vec!["audit".into(), "audits".into(), "reports".into()] } else { dirs.to_vec() };
     let audit = dirs.iter().map(|d| root.join(d)).find(|d| d.is_dir()).unwrap_or_else(|| crate::swarm_ctx::report_dir(root));
-    let report_dir = audit.join("report");
-    let input = gather(root, &dirs);
-    for (name, text) in render(root, &report_dir, &input) {
-        let p = report_dir.join(&name);
-        std::fs::create_dir_all(p.parent().unwrap_or(&report_dir)).map_err(|e| e.to_string())?;
-        std::fs::write(&p, text).map_err(|e| e.to_string())?;
-    }
+    std::fs::create_dir_all(&audit).map_err(|e| e.to_string())?;
+    let json_path = audit.join(JSON);
+    let previous = std::fs::read_to_string(&json_path).ok().and_then(|t| serde_json::from_str::<Value>(&t).ok()).filter(|v| v["schema"] == "formalmind.audit/v1");
+    let (doc, problems) = internal_audit(root, &dirs, previous.as_ref());
+    std::fs::write(&json_path, serde_json::to_string_pretty(&doc).map_err(|e| e.to_string())? + "\n").map_err(|e| e.to_string())?;
+
+    let out_dir = root.join(".formal").join("report");
+    std::fs::create_dir_all(&out_dir).map_err(|e| e.to_string())?;
+    let adoc = out_dir.join("formal-mind.adoc");
+    std::fs::write(&adoc, render(root, &doc, "../../")).map_err(|e| e.to_string())?;
+    std::fs::write(out_dir.join("formal-mind-theme.yml"), THEME).map_err(|e| e.to_string())?;
+    std::fs::write(out_dir.join("formal-mind-lockup-light.svg"), LOGO_LIGHT).map_err(|e| e.to_string())?;
+    std::fs::write(out_dir.join("formal-mind-lockup-dark.svg"), LOGO_DARK).map_err(|e| e.to_string())?;
+
     let rel = |p: &Path| p.strip_prefix(root).unwrap_or(p).to_string_lossy().replace('\\', "/");
-    let mut out = Generated { adoc: rel(&report_dir), pdf: None, note: None, findings: input.findings.len(), warnings: input.problems.clone() };
+    let mut out = Generated { json: rel(&json_path), adoc: rel(&adoc), pdf: None, note: None, findings: doc["findings"].as_array().map_or(0, Vec::len), warnings: problems };
     let Some(bin) = asciidoctor_pdf() else {
         out.note = Some(INSTALL.into());
         return Ok(out);
@@ -809,12 +1116,12 @@ pub fn generate(root: &Path, dirs: &[String]) -> Result<Generated, String> {
         cmd.args(["-a", "source-highlighter=rouge"]);
     }
     let run = cmd
-        .current_dir(&report_dir)
+        .current_dir(&out_dir)
         // Homebrew's Ruby, for a GUI app whose PATH lacks it.
         .env("PATH", format!("{}:/opt/homebrew/bin:/usr/local/bin:{}", bin.parent().map(|p| p.display().to_string()).unwrap_or_default(), std::env::var("PATH").unwrap_or_default()))
         .args(["--failure-level", "ERROR", "-o"])
         .arg(&pdf)
-        .arg("README.adoc")
+        .arg("formal-mind.adoc")
         .output()
         .map_err(|e| format!("{}: {e}", bin.display()))?;
     let log = String::from_utf8_lossy(&run.stderr).to_string();
@@ -822,7 +1129,7 @@ pub fn generate(root: &Path, dirs: &[String]) -> Result<Generated, String> {
     if pdf.exists() && run.status.success() {
         out.pdf = Some(rel(&pdf));
     } else {
-        out.note = Some(format!("asciidoctor-pdf failed:\n{}", log.trim()));
+        out.note = Some(format!("The audit is saved, but asciidoctor-pdf failed:\n{}", log.trim()));
     }
     Ok(out)
 }
@@ -839,7 +1146,7 @@ pub async fn report_generate(folder: String, dirs: Vec<String>) -> Result<Genera
 mod tests {
     use super::*;
 
-    const INDEX: &str = "# Audits\n\n| Report | Date |\n|---|---|\n| [a.md](a.md) | x |\n\n## a.md\n\n| ID | Severity | Finding | Status | Evidence |\n|----|---|---|---|---|\n| H-01 | High | Fee \\| rounding | ✅ Fixed | `test/A.t.sol` |\n| I-02 | Info | Small | 📝 Acknowledged | why |\n\n## [b.md](b.md)\n\n| ID | Severity | Finding | Status | Evidence |\n|---|---|---|---|---|\n| — | — | Hardening | 🟢 Works as expected | |\n";
+    const INDEX: &str = "# Audits\n\n| Report | Date | Author | Scope |\n|---|---|---|---|\n| [a.md](a.md) | 2026-01-01 | Lee | All |\n\n## a.md\n\n| ID | Severity | Finding | Status | Evidence |\n|----|---|---|---|---|\n| H-01 | High | Fee \\| rounding | ✅ Fixed | `test/A.t.sol` |\n| I-02 | Info | Small | 📝 Acknowledged | why |\n\n## formal-mind-swarm.md\n\n| ID | Severity | Finding | Status | Evidence |\n|---|---|---|---|---|\n| FM-01 | High | Fill drains | ⏳ Open | PoC `test/formal/Fill.t.sol`; `src/R.sol:2` |\n";
 
     #[test]
     fn index_rows_are_findings() {
@@ -847,7 +1154,7 @@ mod tests {
         assert_eq!(f.len(), 3);
         assert_eq!((f[0].id.as_str(), f[0].severity.as_str(), f[0].title.as_str(), f[0].status.as_str(), f[0].report.as_str()), ("H-01", "High", "Fee | rounding", "Fixed", "a.md"));
         assert_eq!((f[1].severity.as_str(), f[1].status.as_str()), ("Informational", "Acknowledged"));
-        assert_eq!((f[2].report.as_str(), f[2].status.as_str()), ("b.md", "Works as expected"));
+        assert_eq!(f[2].report, "formal-mind-swarm.md");
     }
 
     #[test]
@@ -863,7 +1170,7 @@ mod tests {
     #[test]
     fn markdown_becomes_asciidoc() {
         let a = md_to_adoc("#### Impact\n\n**Bold** `a*b{c}` [x](https://e.com) [y](y.md)\n\n- one\n  - two\n1. first\n\n| A | B |\n|---|---|\n| `p\\|q` | 2 |\n\n```solidity\nuint x;\n```");
-        assert!(a.contains("=== Impact"));
+        assert!(a.contains("*Impact*"));
         assert!(a.contains("**Bold** `++a*b{c}++` https://e.com[x] y"));
         assert!(a.contains("* one\n** two\n. first"));
         assert!(a.contains("|===\n| A | B\n| `++p\\|q++` | 2\n|==="));
@@ -878,27 +1185,58 @@ mod tests {
     }
 
     #[test]
-    fn report_files_follow_the_generator() {
+    fn the_internal_audit_is_ours_alone() {
         let root = std::env::temp_dir().join(format!("fm-report-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&root);
         std::fs::create_dir_all(root.join("audit")).unwrap();
         std::fs::create_dir_all(root.join("src")).unwrap();
         std::fs::write(root.join("src/R.sol"), "contract R {\n    function fill() external {\n        x = 1;\n    }\n}\n").unwrap();
         std::fs::write(root.join("audit/README.md"), INDEX).unwrap();
-        std::fs::write(root.join("audit/a.md"), "### [H-01] Fee\n\n**Location**: `R.sol:fill`\n\nBad.\n").unwrap();
-        let mut input = gather(&root, &["audit".into()]);
-        input.files = vec!["src/R.sol".into()];
-        let files = render(&root, &root.join("audit/report"), &input);
-        let get = |n: &str| files.iter().find(|(k, _)| k == n).map(|(_, v)| v.clone()).unwrap();
-        assert!(get("README.adoc").contains(":src-dir: ../../\n"));
-        assert!(get("README.adoc").contains("include::findings-high.adoc[tags=1]"));
-        let high = get("findings-high.adoc");
-        assert!(high.contains("// tag::1[]\n== H-01 Fee | rounding"));
-        assert!(high.contains("include::{src-dir}src/R.sol[lines=2..4]"));
-        assert!(high.contains("Bad."));
-        assert!(get("manual-review.adoc").contains("== I-02 Small"));
-        assert!(get("lines-of-code.adoc").contains("| `src/R.sol` | 5 | 0 | 0 | 5"));
+        std::fs::write(root.join("audit/a.md"), "### [H-01] Fee\n\nBad.\n").unwrap();
+        std::fs::write(root.join("audit/formal-mind-swarm.md"), "# x\n\n### [FM-01] Fill drains\n\n**Severity:** high\n**Location:** `src/R.sol:2`\n**PoC:** `test/formal/Fill.t.sol`\n\n#### Scenario\n\nAnyone fills.\n").unwrap();
+        let prev = json!({ "findings": [{ "id": "FM-01", "recommendation": "Guard it." }, { "id": "X-1", "title": "By hand", "severity": "low", "status": "open", "description": "d" }] });
+        let (doc, _) = internal_audit(&root, &["audit".into()], Some(&prev));
+        assert_eq!(doc["kind"], "internal");
+        let f = doc["findings"].as_array().unwrap();
+        // Only Formal Mind's findings (and the one added by hand); the external report stays out.
+        assert_eq!(f.iter().map(|x| x["id"].as_str().unwrap()).collect::<Vec<_>>(), ["FM-01", "X-1"]);
+        assert_eq!(f[0]["description"], "Anyone fills.");
+        assert_eq!(f[0]["locations"][0], json!({ "file": "src/R.sol", "line": 2 }));
+        assert_eq!(f[0]["poc"], "test/formal/Fill.t.sol");
+        assert_eq!(f[0]["recommendation"], "Guard it.");
+        assert!(doc["references"].is_null());
+        let adoc = render(&root, &doc, "../../");
+        assert!(adoc.contains("==== FM-01 Fill drains"));
+        assert!(adoc.contains("include::{src-dir}src/R.sol[lines=2..4]"));
+        assert!(adoc.contains("*Recommendation:* Guard it."));
+        assert!(!adoc.contains("H-01"));
         let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// A finding's page, rendered against a real folder's code: `FM_FOLDER=… FM_OUT=… cargo test -- --ignored demo_finding`.
+    #[test]
+    #[ignore]
+    fn demo_finding() {
+        let root = PathBuf::from(std::env::var("FM_FOLDER").unwrap());
+        let out = PathBuf::from(std::env::var("FM_OUT").unwrap());
+        let mut doc: Value = serde_json::from_str(&std::fs::read_to_string(root.join("audit").join(JSON)).unwrap()).unwrap();
+        doc["findings"] = json!([{
+            "id": "FM-01", "title": "Demo: a self-owned native-output order drains the hook", "severity": "high", "status": "fixed",
+            "locations": [{ "file": "src/libraries/AsyncFiller.sol", "line": 325 }],
+            "description": "Sample finding (demo data) to show the layout. `fill` settles native output from `address(hook).balance`.",
+            "impact": "Anyone can take the hook's native balance.", "recommendation": "Keep a per-order native ledger.",
+            "poc": "test/security/NativeOutputEscrow.t.sol", "tests": [],
+            "evidence": "Per-tx native deposit ledger; `test_RevertWhen_FillerDoesNotDepositNativeOutput` covers it.",
+            "fix": { "commit": "6cf3ac56644f6242accfa81f08f14a123e847b28", "pr": 20, "url": "https://github.com/asyncswap/contracts/pull/20" }
+        }]);
+        doc["properties"] = json!(doc["properties"].as_array().unwrap()[..2]);
+        std::fs::create_dir_all(&out).unwrap();
+        let depth = out.strip_prefix(&root).map(|p| p.components().count()).ok();
+        let src = depth.map(|d| "../".repeat(d)).unwrap_or_else(|| format!("{}/", root.display()));
+        std::fs::write(out.join("demo.adoc"), render(&root, &doc, &src)).unwrap();
+        std::fs::write(out.join("formal-mind-theme.yml"), THEME).unwrap();
+        std::fs::write(out.join("formal-mind-lockup-light.svg"), LOGO_LIGHT).unwrap();
+        std::fs::write(out.join("formal-mind-lockup-dark.svg"), LOGO_DARK).unwrap();
     }
 
     /// The report for a real folder: `FM_FOLDER=… cargo test -- --ignored report_of_a_folder --nocapture`.
@@ -907,7 +1245,7 @@ mod tests {
     fn report_of_a_folder() {
         let root = PathBuf::from(std::env::var("FM_FOLDER").unwrap());
         let g = generate(&root, &[]).unwrap();
-        println!("adoc {} · pdf {:?} · {} findings\nnote {:?}", g.adoc, g.pdf, g.findings, g.note);
+        println!("json {} · adoc {} · pdf {:?} · {} findings\nnote {:?}", g.json, g.adoc, g.pdf, g.findings, g.note);
         for w in g.warnings {
             println!("  {w}");
         }
