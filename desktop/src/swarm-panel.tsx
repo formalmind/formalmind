@@ -1058,9 +1058,12 @@ export function SwarmPanel({ folder, name, scan, bridge, session, file: openPath
 	const [file, setFile] = useState<{ path: string; text: string } | null>(null);
 	const [planOpen, setPlanOpen] = useState(false);
 	const [chatOpen, setChatOpen] = useState(() => store.get("fm:chat-open") !== "0");
+	// How many agent messages you had seen when the chat was folded; the button counts the ones since.
+	const [seen, setSeen] = useState(0);
 	const toggleChat = (open: boolean) => {
 		setChatOpen(open);
 		store.set("fm:chat-open", open ? "1" : "0");
+		setSeen(agentMessages);
 	};
 	// Markdown files open rendered; the toggle shows their source (the choice is kept).
 	const [mdSource, setMdSource] = useState(() => store.get("fm:md-view") === "source");
@@ -1406,6 +1409,8 @@ export function SwarmPanel({ folder, name, scan, bridge, session, file: openPath
 	const inPlan = new Set(plan.flatMap((i) => named(i.text).map((u) => u.name)));
 	const finished = !run ? events.find((e) => e.kind === "done") : undefined;
 	const shown = events.filter((e) => e.kind !== "status");
+	const agentMessages = shown.filter((e) => e.kind !== "you" && e.kind !== "tool").length;
+	const unread = chatOpen ? 0 : Math.max(0, agentMessages - seen);
 
 	// The plan as a list with each item's proof, on the Swarm canvas.
 	const planList = (
@@ -1606,17 +1611,21 @@ export function SwarmPanel({ folder, name, scan, bridge, session, file: openPath
 							},
 						}}
 						placeholder={run ? "Talk to the agents: a question, a new focus, an idea to check…" : "What should the swarm focus on? (optional) ↑ starts it"}
-						// The composer's top left runs the swarm: Stop while it runs; Start (or Resume, with plan items left) when not.
+						// The composer's top left: the project this chat talks to, and the run control beside it (Stop while it
+						// runs; Start, or Resume with plan items left, when it doesn't).
 						context={
-							run ? (
-								<button type="button" onClick={() => void invoke("swarm_stop", { run })} title="Stop the swarm" className="inline-flex h-8 items-center gap-1.5 rounded-full bg-secondary px-3 text-[13px] font-medium text-red-600 hover:bg-red-500/10 dark:text-red-400">
-									<Square className="size-2.5 fill-current" />Stop
-								</button>
-							) : (
-								<button type="button" onClick={() => void start()} disabled={provider === "anthropic" && !hasKey} title={provider === "anthropic" && !hasKey ? "Add your Anthropic key in Settings first" : "Start the swarm"} className="btn-dark inline-flex h-8 items-center gap-1.5 px-3 text-[13px] disabled:opacity-50">
-									<Play className="size-3" />{plan.some((i) => i.mark === " ") ? "Resume" : "Start"}
-								</button>
-							)
+							<span className="inline-flex items-center gap-1.5">
+								<span className="inline-flex h-8 items-center gap-1.5 rounded-full bg-secondary px-3 text-[13px] font-medium text-secondary-foreground">{name}</span>
+								{run ? (
+									<button type="button" onClick={() => void invoke("swarm_stop", { run })} title="Stop the swarm" className="inline-flex h-8 items-center gap-1.5 rounded-full px-3 text-[13px] font-medium text-red-600 hover:bg-red-500/10 dark:text-red-400">
+										<Square className="size-2.5 fill-current" />Stop
+									</button>
+								) : (
+									<button type="button" onClick={() => void start()} disabled={provider === "anthropic" && !hasKey} title={provider === "anthropic" && !hasKey ? "Add your Anthropic key in Settings first" : "Start the swarm"} className="btn-dark inline-flex h-8 items-center gap-1.5 px-3 text-[13px] disabled:opacity-50">
+										<Play className="size-3" />{plan.some((i) => i.mark === " ") ? "Resume" : "Start"}
+									</button>
+								)}
+							</span>
 						}
 						extra={run ? (
 							<button type="button" onClick={() => void draft()} disabled={drafting} title="Draft a reply for me" className="inline-flex h-8 shrink-0 items-center whitespace-nowrap gap-1.5 rounded-full px-2.5 text-sm text-muted-foreground hover:bg-muted hover:text-foreground disabled:opacity-50">
@@ -1643,6 +1652,13 @@ export function SwarmPanel({ folder, name, scan, bridge, session, file: openPath
 						local
 						repo={folder}
 						actions={actions}
+						// An agent's name tag opens the chat addressed to it.
+						onTalk={(role) => {
+							toggleChat(true);
+							const to = (v: string) => (v.startsWith("@") ? v.replace(/^@\S+\s*/, `@${role} `) : `@${role} ${v}`);
+							if (run) setSay(to);
+							else setGoal(to);
+						}}
 						// The roadmap is the folder's own plan (.formal/plan.md, one item per AST function), nothing from GitHub.
 						below={{
 							title: "Roadmap",
@@ -1837,9 +1853,10 @@ export function SwarmPanel({ folder, name, scan, bridge, session, file: openPath
 						{chatPanel}
 					</aside>
 				) : (
-					<button type="button" onClick={() => toggleChat(true)} title="Talk to the swarm" aria-label="Talk to the swarm" className="pointer-events-auto absolute bottom-4 right-4 z-20 grid size-12 place-items-center rounded-full border bg-background shadow-pop transition-colors hover:bg-muted">
+					<button type="button" onClick={() => toggleChat(true)} title={unread ? `Talk to the swarm · ${unread} new` : "Talk to the swarm"} aria-label="Talk to the swarm" className="pointer-events-auto absolute bottom-4 right-4 z-20 grid size-12 place-items-center rounded-full bg-foreground text-background shadow-pop transition-opacity hover:opacity-90">
 						<TalkIcon className="size-5" />
-						{run ? <span className="absolute right-0.5 top-0.5 size-2.5 animate-pulse rounded-full border-2 border-background bg-emerald-500" aria-label="running" /> : null}
+						{/* New agent messages since you folded the chat, counted like the bell's. */}
+						{unread ? <span className="absolute -right-0.5 -top-0.5 grid h-5 min-w-5 place-items-center rounded-full border-2 border-background bg-red-500 px-1 text-[10px] font-semibold tabular-nums text-white">{unread > 99 ? "99+" : unread}</span> : null}
 					</button>
 				)
 			) : null}

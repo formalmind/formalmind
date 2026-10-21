@@ -18,18 +18,23 @@ import type { SessionData } from "@/lib/session";
  * that fails to load belongs to an older deploy: reload once to get the new build instead of crashing.
  */
 function page<T, P extends object>(load: () => Promise<T>, pick: (m: T) => React.ComponentType<P>) {
+	const stale = (error: unknown) => {
+		if (!sessionStorage.getItem("fm:reloaded-for-chunk")) {
+			sessionStorage.setItem("fm:reloaded-for-chunk", "1");
+			window.location.reload();
+			return new Promise<never>(() => {});
+		}
+		throw error;
+	};
 	return lazy(() =>
-		load().then(
-			(m) => ({ default: pick(m) }),
-			(error) => {
-				if (!sessionStorage.getItem("fm:reloaded-for-chunk")) {
-					sessionStorage.setItem("fm:reloaded-for-chunk", "1");
-					window.location.reload();
-					return new Promise<never>(() => {});
-				}
-				throw error;
-			},
-		),
+		load().then((m) => {
+			// A chunk can come back without the page in it (a newer build replaced it): treat that as stale too.
+			const component = m ? pick(m) : undefined;
+			if (!component) return stale(new Error("This page belongs to an older build."));
+			// Loaded fine: the next stale chunk may reload again.
+			sessionStorage.removeItem("fm:reloaded-for-chunk");
+			return { default: component };
+		}, stale),
 	);
 }
 const ChatPage = page(() => import("@/components/chat"), (m) => m.ChatPage);
