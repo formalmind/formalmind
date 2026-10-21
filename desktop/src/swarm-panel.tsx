@@ -21,6 +21,7 @@ import { Trace, TraceCollapsible, TraceCollapsibleContent, TraceCollapsibleTrigg
 import { SwarmCanvas } from "@/components/swarm/swarm-canvas";
 import { ROLE_COLORS } from "@/lib/swarm-roles";
 import { localBoard } from "./local-board";
+import { ContextBody, ContextPanel, parseContext } from "./context-panel";
 import type { Scan } from "./local";
 
 /** What the panel needs from its host: the desktop app's Tauri commands and events, or the web demo's stand-ins. */
@@ -30,7 +31,7 @@ export type Bridge = {
 	apiBase: () => string;
 };
 
-type Ev = { run: string; kind: "status" | "say" | "tool" | "result" | "you" | "bug" | "plan" | "done"; role: string; item: string; text: string; spent: number };
+type Ev = { run: string; kind: "status" | "context" | "say" | "tool" | "result" | "you" | "bug" | "plan" | "done"; role: string; item: string; text: string; spent: number };
 type Item = { index: number; mark: string; text: string };
 type Bug = { file: string; title: string; body: string };
 type Provider = "formal" | "anthropic";
@@ -1535,7 +1536,16 @@ export function SwarmPanel({ folder, name, scan, bridge, session, file: openPath
 	const named = (text: string) => entryUnits.filter((u) => u.function && new RegExp(`\\b${u.function}\\b`).test(text));
 	const inPlan = new Set(plan.flatMap((i) => named(i.text).map((u) => u.name)));
 	const finished = !run ? events.find((e) => e.kind === "done") : undefined;
-	const shown = events.filter((e) => e.kind !== "status");
+	const shown = events.filter((e) => e.kind !== "status" && e.kind !== "context");
+	// How full the working agent's context window is and what fills it, from its last reply; past 75% its older steps
+	// are summarized.
+	const contextEv = working ? [...events].reverse().find((e) => e.kind === "context" && e.role === working.role) : undefined;
+	// The canvas's Context notebook: the working agent's, else the last agent's that replied (live from the event
+	// stream: every model call and every compaction sends one).
+	const lastContextEv = contextEv ?? [...events].reverse().find((e) => e.kind === "context");
+	const lastCtx = lastContextEv ? parseContext(lastContextEv.text) : null;
+	const ctx = contextEv ? parseContext(contextEv.text) : null;
+	const ctxPct = ctx ? Math.min(100, Math.round((ctx.used / ctx.window) * 100)) : null;
 	const agentMessages = shown.filter((e) => e.kind !== "you" && e.kind !== "tool").length;
 	const unread = chatOpen ? 0 : Math.max(0, agentMessages - seen);
 
@@ -1670,6 +1680,19 @@ export function SwarmPanel({ folder, name, scan, bridge, session, file: openPath
 							</DropdownMenuItem>
 						</DropdownMenuContent>
 					</DropdownMenu>
+					{working && ctx && ctxPct !== null ? (
+						<DropdownMenu>
+							<DropdownMenuTrigger className="inline-flex h-7 shrink-0 items-center gap-1.5 rounded-md px-1.5 text-[11px] tabular-nums text-muted-foreground outline-none hover:bg-background hover:text-foreground" title={`The ${working.role}'s context window`}>
+								<span className="h-1 w-8 overflow-hidden rounded-full bg-muted">
+									<span className="block h-full rounded-full" style={{ width: `${ctxPct}%`, backgroundColor: colorOf(working.role) }} />
+								</span>
+								{ctxPct}%
+							</DropdownMenuTrigger>
+							<DropdownMenuContent align="end" className="w-auto rounded-2xl border-0 bg-transparent p-0 shadow-lg">
+								<ContextPanel role={working.role} color={colorOf(working.role)} use={ctx} onCompact={run ? () => invoke("swarm_compact", { run }) : undefined} />
+							</DropdownMenuContent>
+						</DropdownMenu>
+					) : null}
 					<DropdownMenu>
 						<DropdownMenuTrigger className="inline-flex h-7 shrink-0 items-center gap-1 rounded-md border bg-background px-2 text-[11px] tabular-nums text-muted-foreground outline-none hover:text-foreground" title="Spending cap">
 							{run || viewing ? `$${spent.toFixed(2)} / $${budget}` : `Budget $${budget}`}
@@ -1785,6 +1808,19 @@ export function SwarmPanel({ folder, name, scan, bridge, session, file: openPath
 							const to = (v: string) => (v.startsWith("@") ? v.replace(/^@\S+\s*/, `@${role} `) : `@${role} ${v}`);
 							if (run) setSay(to);
 							else setGoal(to);
+						}}
+						side={{
+							title: "Context notebook",
+							node: lastCtx && lastContextEv ? (
+								<ContextBody
+									role={lastContextEv.role}
+									color={colorOf(lastContextEv.role)}
+									use={lastCtx}
+									onCompact={run && contextEv ? () => invoke("swarm_compact", { run }) : undefined}
+								/>
+							) : (
+								<p className="text-[13px] text-muted-foreground">Each agent's context window shows here once it replies: what fills it, and how far it is from compacting.</p>
+							),
 						}}
 						// The roadmap is the folder's own plan (.formal/plan.md, one item per AST function), nothing from GitHub.
 						below={{

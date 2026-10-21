@@ -134,6 +134,7 @@ pub fn run() {
             swarm::folder_read,
             swarm::folder_image,
             swarm::swarm_set_budget,
+            swarm::swarm_compact,
             swarm::swarm_queue,
             debug::debug_open,
             debug::debug_close,
