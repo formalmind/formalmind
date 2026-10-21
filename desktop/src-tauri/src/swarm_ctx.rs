@@ -1051,7 +1051,7 @@ pub fn record_difference(root: &Path, cycle: u32, contract: &str, input: &Value)
     let has = |k: &str| d[k].as_str().is_some_and(|t| !t.trim().is_empty());
     if status != "closed" {
         match class.as_str() {
-            "gap" if !has("fix") => return Err("a gap needs `fix`: what the rebuild should do, in your words, citing the Lean it should satisfy (never the draft's code), and `theorem`: the theorem the spec is missing".into()),
+            "gap" if !has("theorem") => return Err("a gap needs `theorem`: the theorem the spec is missing; and `fix` when the rebuild behaves differently: what it should do, in your words, citing the Lean (never the draft's code)".into()),
             "improvement" | "divergence" if !has("question") && status != "decided" => return Err("an improvement or a divergence needs `question`: one question for the maintainer, answerable in a line, your recommendation first".into()),
             "bug" if !has("finding") && !has("fix") => return Err("a bug in the draft is filed with report_bug first (with its PoC): pass its id as `finding`; a bug in the rebuild needs `fix`".into()),
             _ => {}
@@ -1198,22 +1198,29 @@ mod cycle_tests {
         assert_eq!((d["id"].as_str(), d["status"].as_str()), (Some("D-01"), Some("open")));
         assert_eq!(d["draft"][0], json!({ "file": "src/Vault.sol", "line": 12 }));
         // Each class needs what follows from it.
-        assert!(record_difference(&root, 1, "Vault", &json!({ "class": "gap", "title": "t", "description": "d" })).is_err());
+        assert!(record_difference(&root, 1, "Vault", &json!({ "class": "gap", "title": "t", "description": "d", "fix": "f" })).is_err());
+        // A guess the rebuild got right is still a gap in the spec: a theorem, no fix.
+        let lucky = record_difference(&root, 1, "Vault", &json!({ "class": "gap", "title": "Who may collect", "description": "No theorem says only the owner collects; the rebuild guessed it.", "theorem": "collect reverts unless msg.sender = owner" })).unwrap();
+        assert_eq!(lucky["id"], "D-02");
         assert!(record_difference(&root, 1, "Vault", &json!({ "class": "divergence", "title": "t", "description": "d" })).is_err());
         assert!(record_difference(&root, 1, "Vault", &json!({ "class": "bug", "title": "t", "description": "d", "finding": "FM-09" })).is_err());
         assert!(record_difference(&root, 1, "Vault", &json!({ "class": "typo", "title": "t", "description": "d" })).is_err());
         let q = record_difference(&root, 1, "Vault", &json!({ "class": "improvement", "title": "One step", "description": "The rebuild collects in one call.", "question": "Take the one-call collect? Recommended: yes." })).unwrap();
-        assert_eq!((q["id"].as_str(), q["status"].as_str()), (Some("D-02"), Some("asked")));
+        assert_eq!((q["id"].as_str(), q["status"].as_str()), (Some("D-03"), Some("asked")));
         // An update by id keeps what it doesn't restate.
         let closed = record_difference(&root, 1, "Vault", &json!({ "id": "D-01", "status": "closed" })).unwrap();
         assert_eq!((closed["status"].as_str(), closed["class"].as_str()), (Some("closed"), Some("gap")));
-        update_difference(&root, "D-02", |d| {
+        update_difference(&root, "D-03", |d| {
             d["status"] = json!("decided");
             d["decision"] = json!("Yes.");
         })
         .unwrap();
         let all = differences(&root);
-        assert_eq!(all.len(), 2);
+        assert_eq!(all.len(), 3);
+        // The lucky guess is an open gap until the spec states it.
+        assert_eq!(confidence(&all, 1), "low");
+        record_difference(&root, 1, "Vault", &json!({ "id": "D-02", "status": "closed" })).unwrap();
+        let all = differences(&root);
         assert_eq!(confidence(&all, 1), "medium");
         let mut c = load_cycle(&root);
         c.contract_mut("Vault").unwrap().state = "agreed".into();
@@ -1224,8 +1231,8 @@ mod cycle_tests {
         sync_rebuild(&root, &c).unwrap();
         let doc = internal_doc(&root);
         assert_eq!((doc["rebuild"]["cycle"].as_u64(), doc["rebuild"]["phase"].as_str()), (Some(1), Some("rest")));
-        assert!(doc["rebuild"]["summary"].as_str().unwrap().contains("2 differences (1 gap, 1 improvement, 0 divergences, 0 bugs); 2 resolved"));
-        assert_eq!(doc["rebuild"]["differences"].as_array().unwrap().len(), 2);
+        assert!(doc["rebuild"]["summary"].as_str().unwrap().contains("3 differences (2 gaps, 1 improvement, 0 divergences, 0 bugs); 3 resolved"));
+        assert_eq!(doc["rebuild"]["differences"].as_array().unwrap().len(), 3);
         // The next start opens cycle 2.
         assert_eq!(start_cycle(&root, &[("Vault".into(), "src/Vault.sol".into())], 5).0.n, 2);
         let _ = std::fs::remove_dir_all(&root);
