@@ -562,7 +562,28 @@ fn clean_summary(md: &str) -> String {
             !p.is_empty() && !CHAT.iter().any(|c| l.starts_with(c)) && !l.contains("plan item") && !l.contains("proofs page") && !l.contains("lake build") && !l.contains("plan.md")
         })
         .collect();
-    if kept.is_empty() { md.split("\n\n").next().unwrap_or(md).trim().to_string() } else { kept.join("\n\n") }
+    let text = if kept.is_empty() { md.split("\n\n").next().unwrap_or(md).trim().to_string() } else { kept.join("\n\n") };
+    affirm(&text)
+}
+
+/// A property is stated by what holds, not by the absence of a bug: "no bug" clauses and sentences come out, and the
+/// one caveat worth keeping (what the proof doesn't cover) is said plainly.
+fn affirm(text: &str) -> String {
+    let rules: [(&str, &str); 6] = [
+        // What the swarm does next is the conversation's, not the property's: from "Next," to the paragraph's end.
+        (r"(?i)[ \t]*\bNext(?:,| is| up:)[ \t][^\n]*", ""),
+        (r"(?i)this item found no bugs?, but it doesn't prove (the function is safe overall)\.", "These proofs cover the behaviour above; they don't establish that $1."),
+        (r"(?i),? so there'?s no bugs? to report", ""),
+        (r"(?i),? and (?:i found )?no bugs?(?: in it)?", ""),
+        (r"(?i),? and has no bugs?", ""),
+        (r"(?im)[^.\n]*\b(?:no bugs?|wrote no PoC)\b[^.\n]*\.[ \t]?", ""),
+    ];
+    let mut t = text.to_string();
+    for (re, with) in rules {
+        t = regex::Regex::new(re).unwrap().replace_all(&t, with).to_string();
+    }
+    // Paragraphs a removal emptied.
+    t.split("\n\n").map(str::trim_end).filter(|p| !p.trim().is_empty()).collect::<Vec<_>>().join("\n\n")
 }
 
 fn git(root: &Path, args: &[&str]) -> Option<String> {
@@ -834,7 +855,7 @@ pub fn render(root: &Path, doc: &Value, src_dir: &str) -> String {
     // ---- Detailed findings ----
     a.push_str("== Detailed Findings\n\n");
     if findings.is_empty() {
-        a.push_str(&format!("Formal Mind's swarm has filed no findings at commit {short}. Its work on this code is the formal verification below.\n\n"));
+        a.push_str(&format!("Every property the swarm checked at commit {short} holds. Its results are the verified properties in <<_formal_verification>>.\n\n"));
     } else {
         a.push_str("[%header,cols=\"1,5,2,2\"]\n|===\n");
         a.push_str(&[head("ID"), head("Title"), head("Severity"), head("Status")].join(" "));
@@ -1192,6 +1213,16 @@ mod tests {
         assert!(a.contains("* one\n** two\n. first"));
         assert!(a.contains("|===\n| A | B\n| `++p\\|q++` | 2\n|==="));
         assert!(a.contains("[source,solidity]\n----\nuint x;\n----"));
+    }
+
+    #[test]
+    fn properties_say_what_holds() {
+        assert_eq!(affirm("`Fee.calc` matches its slice and has no bug. It rounds down."), "`Fee.calc` matches its slice. It rounds down.");
+        assert_eq!(affirm("It matches its slice, and I found no bug in it."), "It matches its slice.");
+        assert_eq!(affirm("The property holds, so there's no bug to report. Next, the swarm re-runs the build."), "The property holds.");
+        assert_eq!(affirm("A.\n\nNo bug turned up.\n\nB."), "A.\n\nB.");
+        assert_eq!(affirm("I found no bug in this function, so I wrote no PoC. Next."), "Next.");
+        assert_eq!(affirm("This item found no bug, but it doesn't prove the function is safe overall."), "These proofs cover the behaviour above; they don't establish that the function is safe overall.");
     }
 
     #[test]
