@@ -106,9 +106,92 @@ fn cost(model: &str, usage: &Value) -> f64 {
         m if m.contains("sonnet") => (2.0, 10.0, 0.2),
         _ => (4.0, 20.0, 0.2),
     };
-    let n = |k: &str| usage[k].as_f64().unwrap_or(0.0);
-    (n("input_tokens") * inp + n("cache_creation_input_tokens") * inp * 1.25 + n("cache_read_input_tokens") * read + n("output_tokens") * out) / 1e6
+    let one = |u: &Value| {
+        let n = |k: &str| u[k].as_f64().unwrap_or(0.0);
+        (n("input_tokens") * inp + n("cache_creation_input_tokens") * inp * 1.25 + n("cache_read_input_tokens") * read + n("output_tokens") * out) / 1e6
+    };
+    // A compaction call reports its tokens in `usage.iterations` and zeros at the top level; when the iterations list
+    // the message itself, they are the whole bill.
+    let iterations = usage["iterations"].as_array().cloned().unwrap_or_default();
+    let listed = iterations.iter().any(|i| i["type"] == "message");
+    iterations.iter().map(one).sum::<f64>() + if listed { 0.0 } else { one(usage) }
 }
+
+// ---- context: how full each agent's window is, and compaction ----
+//
+// Every reply's usage says how much of the window the conversation takes. Past COMPACT_AT of it, the older steps are
+// summarized by the API's on-demand compaction (beta compact-2026-09-04): the summary is a signed `compaction` block
+// that goes first in `messages` in place of the steps it covers, and the last KEEP_STEPS steps follow it word for word
+// (their thinking stays valid because the cut falls at the reply to a request already sent). The task (and the
+// report a triage job attaches) is restated after the kept steps, since a summary can't carry a document.
+
+const COMPACTION_BETA: &str = "compact-2026-09-04";
+const COMPACT_AT: f64 = 0.75;
+const KEEP_STEPS: usize = 3;
+
+/// The context window of the models the swarm uses (Opus, Sonnet and Haiku 5.5 all take 1M tokens).
+fn context_window(_model: &str) -> u64 {
+    1_000_000
+}
+
+/// Tokens the next request will carry: this reply's whole input (cached or not) plus the reply itself.
+fn context_used(usage: &Value) -> u64 {
+    ["input_tokens", "cache_creation_input_tokens", "cache_read_input_tokens", "output_tokens"].iter().map(|k| usage[*k].as_u64().unwrap_or(0)).sum()
+}
+
+/// Whether a failed call failed because the conversation no longer fits.
+fn too_long(status: u16, message: &str) -> bool {
+    let m = message.to_ascii_lowercase();
+    status == 413 || (status == 400 && (m.contains("too long") || m.contains("context window") || m.contains("maximum context")))
+}
+
+fn has_compaction(messages: &[Value]) -> bool {
+    messages.iter().any(|m| m["content"].as_array().is_some_and(|c| c.iter().any(|b| b["type"] == "compaction")))
+}
+
+/// Where to cut the conversation: the summary covers `messages[..cut]` and `messages[cut..]` is kept. A cut falls on
+/// an assistant reply whose request ended at `cut` (a user turn), so each tool call stays with its result and the kept
+/// steps directly follow what was summarized. Keeps up to `keep` steps; None when there are none to keep (summarize all).
+fn compact_cut(messages: &[Value], keep: usize) -> Option<usize> {
+    let cuts: Vec<usize> = (2..messages.len()).filter(|&i| messages[i]["role"] == "assistant" && messages[i - 1]["role"] == "user").collect();
+    match cuts.len() {
+        0 => None,
+        n => Some(cuts[n.saturating_sub(keep.max(1))]),
+    }
+}
+
+/// A shorter range to summarize when `messages[..cut]` is itself too long for the summarizer: the cut about halfway.
+fn earlier_cut(messages: &[Value], cut: usize) -> Option<usize> {
+    (2..cut / 2 + 1).rev().find(|&i| messages[i]["role"] == "assistant" && messages[i - 1]["role"] == "user")
+}
+
+/// The conversation after compaction: the summary first, the kept steps unchanged, then the task restated on the last
+/// user turn (which hasn't been answered yet, so adding to it edits nothing the model has seen reply to).
+fn splice(messages: &[Value], cut: usize, summary: Value, task: &Value) -> Vec<Value> {
+    let mut out = vec![json!({ "role": "assistant", "content": summary })];
+    out.extend(messages[cut.min(messages.len())..].iter().cloned());
+    let mut restated = vec![json!({ "type": "text", "text": "The earlier steps of this job were summarized above. Your task, as first given:" })];
+    match task {
+        Value::Array(blocks) => restated.extend(blocks.iter().cloned()),
+        Value::String(s) => restated.push(json!({ "type": "text", "text": s })),
+        other => restated.push(json!({ "type": "text", "text": other.to_string() })),
+    }
+    match out.last_mut() {
+        Some(last) if last["role"] == "user" => {
+            let mut content = match last["content"].take() {
+                Value::Array(c) => c,
+                Value::String(s) => vec![json!({ "type": "text", "text": s })],
+                _ => vec![],
+            };
+            content.extend(restated);
+            last["content"] = Value::Array(content);
+        }
+        _ => out.push(json!({ "role": "user", "content": restated })),
+    }
+    out
+}
+
+const SUMMARY_INSTRUCTIONS: &str = "Summarize this agent's work so far for the agent itself, which continues the job from your summary and the few most recent steps that follow it. Keep: the task and the plan item or report it is about; every file written or changed and what it now holds; the commands run and their results (which `lake build` or `forge test` runs passed or failed, and the errors that matter); findings recorded or bugs reported, with their IDs and statuses; what was tried and didn't work; and what is left to do next. Be specific: names of defs, theorems, lemmas, files, line numbers. Do not call tools; respond with the summary text only.";
 
 fn model_of(req: &SwarmRequest) -> &str {
     match req.model.as_deref() {
@@ -475,6 +558,72 @@ async fn model_access(client: &reqwest::Client, folder_path: &str, api_base: &st
 }
 
 impl Turn<'_> {
+    /// A Messages request for this agent: the step itself, or (with `compaction`) the summary of `messages`.
+    fn body(&self, role: &str, goal: &str, messages: &[Value], compaction: Option<Value>) -> Value {
+        let mut body = json!({
+            "model": model_of(self.req), "max_tokens": 16000, "system": system(role, &self.req.folder, goal),
+            "messages": messages, "tools": tools(role),
+            // Automatic prompt caching: the stable prefix (system, tools, history) is read back cheaply each step.
+            "cache_control": { "type": "ephemeral" },
+            "output_config": { "effort": if role == "prover" { "high" } else { "medium" } },
+        });
+        if let Some(c) = compaction {
+            body["compaction"] = c;
+        }
+        body
+    }
+
+    /// POST /v1/messages; the compaction beta goes along when the request asks for a summary or carries one.
+    async fn call(&self, key: &str, base: &str, body: &Value) -> Result<(u16, Value), String> {
+        let mut req = self.client.post(format!("{base}/v1/messages")).header("x-api-key", key).header("anthropic-version", "2023-06-01");
+        if body.get("compaction").is_some() || body["messages"].as_array().is_some_and(|m| has_compaction(m)) {
+            req = req.header("anthropic-beta", COMPACTION_BETA);
+        }
+        let res = req.json(body).send().await.map_err(|e| e.to_string())?;
+        let status = res.status().as_u16();
+        let reply: Value = res.json().await.map_err(|e| e.to_string())?;
+        Ok((status, reply))
+    }
+
+    /// Adds a call's cost to the session's spend.
+    fn charge(&self, usage: &Value) {
+        let total = {
+            let mut spent = self.swarm.spent.lock().unwrap();
+            *spent += cost(model_of(self.req), usage);
+            *spent
+        };
+        with_queue(&self.queue, |q| q.spent = total);
+    }
+
+    /// Summarizes the older steps of `messages` in place (see `compact_cut` and `splice`). When even those don't fit
+    /// the summarizer, a shorter, earlier range is summarized; the next steps compact the rest.
+    #[allow(clippy::too_many_arguments)]
+    async fn compact(&self, key: &str, base: &str, role: &str, item: &str, goal: &str, messages: &mut Vec<Value>, task: &Value) -> Result<(), String> {
+        let mut cut = compact_cut(messages, KEEP_STEPS).unwrap_or(messages.len());
+        for _ in 0..4 {
+            self.emit("status", role, item, format!("compacting: summarizing {cut} of {} messages", messages.len()));
+            let compaction = json!({ "type": "summarize", "instructions": SUMMARY_INSTRUCTIONS });
+            let (status, reply) = self.call(key, base, &self.body(role, goal, &messages[..cut], Some(compaction))).await?;
+            let message = reply["error"]["message"].as_str().unwrap_or("the compaction call failed").to_string();
+            if status < 300 {
+                self.charge(&reply["usage"]);
+            }
+            let stop = reply["stop_reason"].as_str().unwrap_or("");
+            if status < 300 && stop == "compaction" {
+                let kept = messages.len() - cut;
+                *messages = splice(messages, cut, reply["content"].clone(), task);
+                // Shown in the chat's tool trace.
+                self.emit("tool", role, item, format!("compact: the earlier steps summarized, the last {kept} messages kept"));
+                return Ok(());
+            }
+            let full = if status < 300 { stop == "model_context_window_exceeded" } else { too_long(status, &message) };
+            if !full {
+                return Err(if status < 300 { format!("no summary came back ({stop})") } else { message });
+            }
+            cut = earlier_cut(messages, cut).ok_or("the conversation is too long to summarize")?;
+        }
+        Err("the conversation is too long to summarize".into())
+    }
 
     /// One agent turn: a tool loop against Claude until it stops calling tools.
     async fn agent(&self, role: &str, item: &str, task: impl Into<Value>) -> Result<Outcome, String> {
@@ -495,7 +644,7 @@ impl Turn<'_> {
                 m.push(json!({ "role": "user", "content": "The app quit and this job is being resumed. Carry on from where you were; don't redo finished work." }));
                 m
             }
-            _ => vec![json!({ "role": "user", "content": task })],
+            _ => vec![json!({ "role": "user", "content": task.clone() })],
         };
         let keep = |m: &Vec<Value>| {
             if let Some(j) = job {
@@ -506,39 +655,47 @@ impl Turn<'_> {
         let mut out = Outcome::default();
         self.emit("status", role, item, format!("{role} is working"));
         let steps = if role == "prover" { PROVER_STEPS } else { MAX_STEPS };
+        let window = context_window(model_of(self.req));
+        // What the last reply said the conversation takes; unknown (0) after a resume. Each step's reply sets it.
+        let mut used: u64 = 0;
         for step in 1..=steps {
             if self.swarm.stop.load(Ordering::SeqCst) {
                 return Ok(out);
             }
+            if used as f64 >= window as f64 * COMPACT_AT {
+                // Not fatal: if no summary comes back, the step runs as is and a too-long call compacts below.
+                if let Err(e) = self.compact(&key, &base, role, item, &goal, &mut messages, &task).await {
+                    self.emit("tool", role, item, format!("compact: no summary yet ({e})"));
+                }
+                keep(&messages);
+            }
             // A heartbeat before each model call, which can take minutes: the board and the plan card show it.
             self.emit("status", role, item, format!("step {step}: thinking"));
-            let body = json!({
-                "model": model_of(self.req), "max_tokens": 16000, "system": system(role, &self.req.folder, &goal),
-                "messages": messages, "tools": tools(role),
-                // Automatic prompt caching: the stable prefix (system, tools, history) is read back cheaply each step.
-                "cache_control": { "type": "ephemeral" },
-                "output_config": { "effort": if role == "prover" { "high" } else { "medium" } },
-            });
-            let res = self
-                .client
-                .post(format!("{base}/v1/messages"))
-                .header("x-api-key", &key)
-                .header("anthropic-version", "2023-06-01")
-                .json(&body)
-                .send()
-                .await
-                .map_err(|e| e.to_string())?;
-            let status = res.status();
-            let reply: Value = res.json().await.map_err(|e| e.to_string())?;
-            if !status.is_success() {
-                return Err(reply["error"]["message"].as_str().unwrap_or("The model call failed").to_string());
-            }
-            let total = {
-                let mut spent = self.swarm.spent.lock().unwrap();
-                *spent += cost(model_of(self.req), &reply["usage"]);
-                *spent
+            // A conversation that no longer fits (a long job, a resumed one, a large report) is compacted and the step
+            // retried once, instead of pausing the swarm on a job that would fail the same way on every resume.
+            let mut retried = false;
+            let reply = loop {
+                let (status, reply) = self.call(&key, &base, &self.body(role, &goal, &messages, None)).await?;
+                let message = reply["error"]["message"].as_str().unwrap_or("The model call failed").to_string();
+                let full = if status < 300 { reply["stop_reason"] == "model_context_window_exceeded" } else { too_long(status, &message) };
+                if status < 300 && !full {
+                    break reply;
+                }
+                if status < 300 {
+                    self.charge(&reply["usage"]);
+                }
+                if !full || retried {
+                    return Err(if full { "the conversation is still too long after compacting it".into() } else { message });
+                }
+                retried = true;
+                self.emit("status", role, item, "the conversation no longer fits the context window: compacting it".into());
+                self.compact(&key, &base, role, item, &goal, &mut messages, &task).await?;
+                keep(&messages);
             };
-            with_queue(&self.queue, |q| q.spent = total);
+            self.charge(&reply["usage"]);
+            used = context_used(&reply["usage"]);
+            // How full this agent's window is, for the chat: "<tokens>/<window>".
+            self.emit("context", role, item, format!("{used}/{window}"));
             let content = reply["content"].clone();
             messages.push(json!({ "role": "assistant", "content": content }));
             keep(&messages);
@@ -1190,6 +1347,104 @@ mod tests {
         save_transcript(&root, id, &[json!({"role": "user", "content": "go"}), json!({"role": "assistant", "content": [{"type": "tool_use"}]})]);
         assert_eq!(load_transcript(&root, id).unwrap().len(), 2);
         std::fs::remove_dir_all(root).unwrap();
+    }
+
+    /// A job's conversation: the task (a report attached), then `steps` replies each calling a tool and its result.
+    fn conversation(steps: usize) -> (Value, Vec<Value>) {
+        let task = json!([
+            { "type": "document", "source": { "type": "base64", "media_type": "application/pdf", "data": "JVBERi0=" }, "title": "audit/report.pdf" },
+            { "type": "text", "text": "Record every finding." }
+        ]);
+        let mut m = vec![json!({ "role": "user", "content": task.clone() })];
+        for s in 0..steps {
+            m.push(json!({ "role": "assistant", "content": [
+                { "type": "thinking", "thinking": "", "signature": format!("sig{s}") },
+                { "type": "tool_use", "id": format!("t{s}"), "name": "functions", "input": {} }
+            ] }));
+            m.push(json!({ "role": "user", "content": [{ "type": "tool_result", "tool_use_id": format!("t{s}"), "content": format!("result {s}") }] }));
+        }
+        (task, m)
+    }
+
+    /// Every tool_use is answered by a tool_result in the next message, and every tool_result answers one.
+    fn pairs_valid(m: &[Value]) -> bool {
+        let ids = |v: &Value, ty: &str, key: &str| -> Vec<String> {
+            v["content"].as_array().map(|c| c.iter().filter(|b| b["type"] == ty).map(|b| b[key].as_str().unwrap_or("").to_string()).collect()).unwrap_or_default()
+        };
+        (0..m.len()).all(|i| {
+            let uses = ids(&m[i], "tool_use", "id");
+            let answered = m.get(i + 1).map(|n| ids(n, "tool_result", "tool_use_id")).unwrap_or_default();
+            let results = ids(&m[i], "tool_result", "tool_use_id");
+            let asked = if i == 0 { vec![] } else { ids(&m[i - 1], "tool_use", "id") };
+            uses.iter().all(|u| answered.contains(u)) && results.iter().all(|r| asked.contains(r))
+        })
+    }
+
+    #[test]
+    fn compaction_keeps_head_and_tail_with_valid_pairs() {
+        let (task, m) = conversation(10);
+        let cut = compact_cut(&m, KEEP_STEPS).unwrap();
+        // The cut is the reply to a request that ended on a user turn, KEEP_STEPS steps from the end.
+        assert_eq!(m[cut]["role"], "assistant");
+        assert_eq!(m[cut - 1]["role"], "user");
+        assert_eq!(m.len() - cut, 2 * KEEP_STEPS);
+        assert!(pairs_valid(&m[..cut]));
+
+        let summary = json!([{ "type": "compaction", "content": "Summary.", "signature": "s" }]);
+        let out = splice(&m, cut, summary.clone(), &task);
+        assert!(pairs_valid(&out));
+        // The summary first, as an assistant message of its own.
+        assert_eq!(out[0], json!({ "role": "assistant", "content": summary }));
+        assert!(has_compaction(&out));
+        // The kept steps follow it unchanged, thinking blocks included.
+        assert_eq!(&out[1..out.len() - 1], &m[cut..m.len() - 1]);
+        // The last user turn keeps its tool results first, then the task (with its document) restated.
+        let last = out.last().unwrap()["content"].as_array().unwrap().clone();
+        assert_eq!(last[0], m.last().unwrap()["content"][0]);
+        assert_eq!(last[0]["type"], "tool_result");
+        assert_eq!(&last[last.len() - 2..], task.as_array().unwrap().as_slice());
+        assert_eq!(out.len(), 1 + 2 * KEEP_STEPS);
+    }
+
+    #[test]
+    fn compaction_of_a_short_or_resumed_job() {
+        // Fewer steps than KEEP_STEPS: the first step is summarized, the rest kept; one step alone is summarized whole.
+        assert_eq!(compact_cut(&conversation(2).1, KEEP_STEPS), Some(3));
+        assert_eq!(compact_cut(&conversation(1).1, KEEP_STEPS), None);
+        // Nothing to keep: the whole conversation is summarized and the task restated as a new user turn.
+        let task = json!("Prove item 3.");
+        let only = vec![json!({ "role": "user", "content": "Prove item 3." })];
+        assert_eq!(compact_cut(&only, KEEP_STEPS), None);
+        let out = splice(&only, only.len(), json!([{ "type": "compaction", "content": "S", "signature": "s" }]), &task);
+        assert_eq!(out.len(), 2);
+        assert_eq!(out[1]["role"], "user");
+        assert_eq!(out[1]["content"][1]["text"], "Prove item 3.");
+        // A resumed job ends with the quit note (a string); the task joins it as blocks.
+        let (task, mut m) = conversation(6);
+        m.push(json!({ "role": "user", "content": "The app quit and this job is being resumed." }));
+        let cut = compact_cut(&m, KEEP_STEPS).unwrap();
+        let out = splice(&m, cut, json!([{ "type": "compaction", "content": "S", "signature": "s" }]), &task);
+        assert!(pairs_valid(&out));
+        assert_eq!(out.last().unwrap()["content"][0]["text"], "The app quit and this job is being resumed.");
+        // Compacting again: the old summary is inside the new range, never kept in front of it.
+        let again = compact_cut(&out, 1).unwrap();
+        assert!(again > 0 && out[again]["role"] == "assistant");
+        // A range too long for the summarizer halves, still on a valid cut.
+        let (_, m) = conversation(20);
+        let half = earlier_cut(&m, m.len()).unwrap();
+        assert!(half <= m.len() / 2 && m[half]["role"] == "assistant" && m[half - 1]["role"] == "user");
+        assert!(pairs_valid(&m[..half]));
+    }
+
+    #[test]
+    fn usage_counts_the_window_and_compaction_cost() {
+        let u = json!({ "input_tokens": 10, "cache_creation_input_tokens": 200, "cache_read_input_tokens": 3000, "output_tokens": 40 });
+        assert_eq!(context_used(&u), 3250);
+        // A compaction call: zeros at the top level, the cost in iterations.
+        let c = json!({ "input_tokens": 0, "output_tokens": 0, "iterations": [{ "type": "compaction", "input_tokens": 1_000_000, "output_tokens": 0 }] });
+        assert!((cost("claude-opus-5-5", &c) - 4.0).abs() < 1e-9);
+        assert!(too_long(400, "prompt is too long: 1200000 tokens > 1000000 maximum"));
+        assert!(!too_long(400, "messages.1: tool_use ids must be unique"));
     }
 
     #[test]

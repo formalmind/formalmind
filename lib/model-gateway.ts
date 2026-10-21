@@ -27,7 +27,18 @@ type Usage = {
 	cache_creation_input_tokens?: number;
 	cache_read_input_tokens?: number;
 	cache_creation?: { ephemeral_5m_input_tokens?: number; ephemeral_1h_input_tokens?: number };
+	/** Per-call parts, e.g. a compaction's summary; on-demand compaction reports zeros at the top level. */
+	iterations?: (Usage & { type?: string })[];
 };
+
+/** The tokens a call is billed for: its iterations when it has them (with the top level unless they list the message). */
+export function billable(u: Usage): Usage {
+	const its = u.iterations ?? [];
+	if (!its.length) return u;
+	const parts: Usage[] = its.some((i) => i.type === "message") ? its : [u, ...its];
+	const sum = (k: "input_tokens" | "output_tokens" | "cache_creation_input_tokens" | "cache_read_input_tokens") => parts.reduce((n, p) => n + (p[k] ?? 0), 0);
+	return { input_tokens: sum("input_tokens"), output_tokens: sum("output_tokens"), cache_creation_input_tokens: sum("cache_creation_input_tokens"), cache_read_input_tokens: sum("cache_read_input_tokens") };
+}
 
 export function costCents(model: string, u: Usage): number {
 	const [, inp, out, read] = PRICES.find(([re]) => re.test(model)) ?? PRICES[0];
@@ -83,7 +94,7 @@ export async function proxy(request: Request, path: string): Promise<Response> {
 
 	// <proofs repo>:<run>:<agent>:<issue or PR>:<call>, so Billing can say which agent spent it, on what.
 	const ref = `${caller.repo}:${caller.run}:${caller.role}:${caller.ref}:${crypto.randomUUID().slice(0, 8)}`;
-	const charge = (model: string, usage: Usage) =>
+	const charge = (model: string, reported: Usage, usage = billable(reported)) =>
 		recordSpend(caller.sub, costCents(model, usage), ref, {
 			in: usage.input_tokens ?? 0,
 			out: usage.output_tokens ?? 0,
