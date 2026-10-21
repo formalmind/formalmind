@@ -2,8 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { Link, useLocation, useNavigate } from "react-router";
-import { Folder, FolderOpen, ChevronRight, MessagesSquare, Plus } from "lucide-react"
-import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
+import { Folder, FolderOpen, ChevronRight, GitBranch, Plus } from "lucide-react"
 import { SwarmMenu } from "@/components/projects/swarm-control"
 import {
 	Sidebar,
@@ -26,7 +25,7 @@ import { loadDemoRepos, type DemoData } from "@/components/demo/load"
 import { SidebarResizer } from "@/components/sidebar-resizer"
 import { LogoMark } from "@/components/logo"
 import { BUILD } from "@/lib/build-info"
-import { projectPath, useProjectChats, useProjects, useWorkingChats, type Project } from "@/components/projects/use-projects"
+import { projectPath, useProjects, type Project } from "@/components/projects/use-projects"
 
 /** `anim` names the hover animation in globals.css (icon-anim-*). */
 type NavItem = { title: string; url: string; icon: React.ElementType; anim?: string }
@@ -104,34 +103,6 @@ function useRepoTree(repo: string, on: boolean) {
 	return { tree, error }
 }
 
-/** The project's chats, from the row: they live by the chat, not in the sidebar. */
-function ChatsMenu({ repo }: { repo: string }) {
-	const chats = useProjectChats(repo)
-	const working = useWorkingChats()
-	const navigate = useNavigate()
-	return (
-		<DropdownMenu>
-			<DropdownMenuTrigger
-				aria-label={`Chats in ${repo}`}
-				title="Chats"
-				className="flex size-6 shrink-0 items-center justify-center rounded-md text-muted-foreground opacity-0 outline-none hover:bg-background hover:text-sidebar-foreground group-hover/folder:opacity-100 focus-visible:opacity-100 data-[state=open]:opacity-100 group-data-[collapsible=icon]:hidden"
-			>
-				<MessagesSquare className="size-3.5" />
-			</DropdownMenuTrigger>
-			<DropdownMenuContent align="start" className="w-64">
-				<DropdownMenuLabel className="text-xs font-normal text-muted-foreground">Chats</DropdownMenuLabel>
-				{chats.length === 0 ? <DropdownMenuItem disabled className="text-[13px]">No chats yet</DropdownMenuItem> : null}
-				{chats.slice(0, 20).map((c) => (
-					<DropdownMenuItem key={c.id} onSelect={() => navigate(projectPath(repo, `chat/${c.id}`))} className="text-[13px]">
-						<span className="min-w-0 flex-1 truncate">{c.title}</span>
-						{working.has(`${repo}:${c.id}`) ? <span className="size-2 shrink-0 rounded-full bg-blue-500 motion-safe:animate-pulse" aria-label="Agent working" /> : null}
-					</DropdownMenuItem>
-				))}
-			</DropdownMenuContent>
-		</DropdownMenu>
-	)
-}
-
 function ProjectFolder({ project, open, onOpenChange, pathname, collapsed, onExpand }: { project: Project; open: boolean; onOpenChange: (open: boolean) => void; pathname: string; collapsed: boolean; onExpand: () => void }) {
 	const name = project.repo.split("/")[1] ?? project.repo
 	const navigate = useNavigate()
@@ -170,15 +141,17 @@ function ProjectFolder({ project, open, onOpenChange, pathname, collapsed, onExp
 						<span className="truncate group-data-[collapsible=icon]:hidden">{name}</span>
 						<ChevronRight className={`size-3.5 shrink-0 text-muted-foreground transition-transform duration-150 group-data-[collapsible=icon]:hidden ${open ? "rotate-90" : ""}`} aria-hidden />
 					</CollapsibleTrigger>
-					<Link
-						to={projectPath(project.repo, "chat")}
-						aria-label={`New chat in ${project.repo}`}
-						title="New chat"
-						className="flex size-6 shrink-0 items-center justify-center rounded-md text-muted-foreground opacity-0 hover:bg-background hover:text-sidebar-foreground group-hover/folder:opacity-100 focus-visible:opacity-100 group-data-[collapsible=icon]:hidden"
+					{/* An imported repository: the branch mark says it comes from git, and opens it on GitHub. */}
+					<a
+						href={`https://github.com/${project.repo}`}
+						target="_blank"
+						rel="noreferrer"
+						aria-label={`${project.repo} on GitHub`}
+						title={`${project.repo} on GitHub`}
+						className="flex size-6 shrink-0 items-center justify-center rounded-md text-muted-foreground/70 hover:bg-background hover:text-sidebar-foreground group-data-[collapsible=icon]:hidden"
 					>
-						<Plus className="size-3.5" />
-					</Link>
-					<ChatsMenu repo={project.repo} />
+						<GitBranch className="size-3.5" />
+					</a>
 					{project.proofsRepo ? <SwarmMenu repo={project.repo} /> : null}
 				</div>
 				<CollapsibleContent className="pl-3 group-data-[collapsible=icon]:hidden">
