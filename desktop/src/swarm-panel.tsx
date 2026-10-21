@@ -87,7 +87,8 @@ function blocks(events: Ev[]): Block[] {
 		} else if (e.kind === "result") {
 			const step = last && "steps" in last ? last.steps.at(-1) : undefined;
 			if (step && !step.result) step.result = e;
-		} else out.push({ e });
+		} else if (e.text.trim()) out.push({ e });
+		// A line with nothing to say (a start without a focus) isn't shown.
 	}
 	return out;
 }
@@ -1738,9 +1739,11 @@ export function SwarmPanel({ folder, name, scan, bridge, session, file: openPath
 	// `onlyQueued`: a run for the work already queued (reading a report), which stops when that's done.
 	const start = async (onlyQueued = false) => {
 		setError(null);
-		setEvents([]);
+		// A new session starts empty; Resume carries on below the chat you're reading.
+		const fresh = session === "new" && !viewing;
+		if (fresh) setEvents([]);
 		try {
-			const id = await invoke<string>("swarm_start", { request: { folder, goal: goal.trim() || null, budget_usd: budget, api_base: apiBase(), provider, model, session: session === "new" && !viewing ? `s-${Date.now().toString(16)}` : viewing ?? "swarm", only_queued: onlyQueued } });
+			const id = await invoke<string>("swarm_start", { request: { folder, goal: goal.trim() || null, budget_usd: budget, api_base: apiBase(), provider, model, session: fresh ? `s-${Date.now().toString(16)}` : viewing ?? "swarm", only_queued: onlyQueued } });
 			runRef.current = id;
 			setRun(id);
 			setViewing(id);
@@ -1915,14 +1918,14 @@ export function SwarmPanel({ folder, name, scan, bridge, session, file: openPath
 						</DropdownMenuTrigger>
 						<DropdownMenuContent align="start" className="w-64">
 							<DropdownMenuLabel className="text-xs font-normal text-muted-foreground">Sessions in {name}</DropdownMenuLabel>
-							<DropdownMenuRadioGroup value={viewing ?? ""} onValueChange={pickSession}>
-								{sessions.map((x, i) => (
-									<DropdownMenuRadioItem key={x.run} value={x.run} className="text-[13px]">
-										<span className="truncate">{x.title || (x.run === "swarm" ? "Main session" : `Session ${sessions.length - i}`)}</span>
-										{x.run === run ? <span className="ml-auto size-1.5 shrink-0 animate-pulse rounded-full bg-emerald-500" aria-label="running" /> : null}
-									</DropdownMenuRadioItem>
-								))}
-							</DropdownMenuRadioGroup>
+							{/* The session you're reading stays highlighted, with a check on the right. */}
+							{sessions.map((x, i) => (
+								<DropdownMenuItem key={x.run} onSelect={() => pickSession(x.run)} aria-current={x.run === viewing} className={`text-[13px] ${x.run === viewing ? "bg-accent text-accent-foreground" : ""}`}>
+									<span className="truncate">{x.title || (x.run === "swarm" ? "Main session" : `Session ${sessions.length - i}`)}</span>
+									{x.run === run ? <span className="ml-auto shrink-0 text-[11px] text-muted-foreground">running</span> : null}
+									{x.run === viewing ? <Check className={`size-3.5 shrink-0 ${x.run === run ? "" : "ml-auto"}`} /> : null}
+								</DropdownMenuItem>
+							))}
 							<DropdownMenuSeparator />
 							<DropdownMenuItem onSelect={() => pickSession("new")} className="text-[13px]">
 								<Plus className="size-3.5" /> New session
