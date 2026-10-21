@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { MarkGithubIcon } from "@primer/octicons-react";
@@ -56,9 +56,20 @@ const BOT_ISSUE: SwarmItem = {
 	state: "open",
 };
 
-function Frame({ step, total, onSkip, children }: { step: number; total: number; onSkip?: () => void; children: React.ReactNode }) {
+function Frame({ step, total, onSkip, onBack, children }: { step: number; total: number; onSkip?: () => void; onBack?: () => void; children: React.ReactNode }) {
+	const start = useRef<{ x: number; y: number } | null>(null);
 	return (
-		<main className="fm-safe-top fm-safe-bottom relative flex min-h-dvh flex-col overflow-x-hidden bg-[radial-gradient(ellipse_at_top,#151a24_0%,#08090b_60%)] px-6 pb-8 text-white">
+		<main
+			// A swipe to the right goes back a step, as in the introduction.
+			onTouchStart={(e) => (start.current = { x: e.touches[0].clientX, y: e.touches[0].clientY })}
+			onTouchEnd={(e) => {
+				const from = start.current;
+				if (!from || !onBack) return;
+				const dx = e.changedTouches[0].clientX - from.x;
+				const dy = e.changedTouches[0].clientY - from.y;
+				if (dx > 50 && Math.abs(dx) > Math.abs(dy) * 1.5) onBack();
+			}}
+			className="fm-safe-top fm-safe-bottom relative flex min-h-dvh flex-col overflow-x-hidden bg-[radial-gradient(ellipse_at_top,#151a24_0%,#08090b_60%)] px-6 pb-8 text-white">
 			<div className="flex h-12 items-center gap-3">
 				{/* The introduction's dots: the current step drawn long. */}
 				<div className="flex flex-1 gap-1.5" aria-label={`Step ${step + 1} of ${total}`}>
@@ -151,7 +162,7 @@ export function Setup({ user, onDone }: { user: SessionData["user"]; onDone: () 
 	const handle = user.nickname ?? user.name ?? "there";
 
 	return (
-		<Frame step={step} total={total} onSkip={step < total - 1 ? () => finish() : undefined}>
+		<Frame step={step} total={total} onSkip={step < total - 1 ? () => finish() : undefined} onBack={step > 0 ? () => setStep(step - 1) : undefined}>
 			{step === 0 ? (
 				<>
 					<div className="fm-rise grid flex-1 place-items-center">
