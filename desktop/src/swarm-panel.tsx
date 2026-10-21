@@ -865,13 +865,10 @@ function CoverageView({ data, scripts, onOpenFile }: { data: Formal; scripts: Sc
 	const fnName = (f: FormalFn) => f.name.split(".").pop() ?? f.name;
 	const calledBy = (f: FormalFn) => (scripts?.entryPoints ?? []).filter((e) => e.function === fnName(f) && (e.contract === contractOf(f) || e.contract === data.contract)).flatMap((e) => e.scripts);
 	const [filter, setFilter] = useState<(typeof COVERAGE_FILTERS)[number]["id"]>("all");
-	// Library functions are listed by default; unticking is remembered.
-	const [deps, setDepsState] = useState(() => store.get("fm:audit-libraries") !== "0");
-	const setDeps = (on: boolean) => {
-		setDepsState(on);
-		store.set("fm:audit-libraries", on ? "1" : "0");
-	};
-	const shown = data.functions.filter((f) => (deps || !f.dependency) && (filter === "all" || (filter === "modeled" ? ["modeled", "sorry"].includes(fnStatus(f, data.theorems).key) : fnStatus(f, data.theorems).key === filter)));
+	// A function's identity: several share a name (overloads, or the same library compiled twice), so add where it is.
+	const fnKey = (f: FormalFn) => `${f.name}@${f.file ?? ""}:${f.line}`;
+	// Library functions are always listed and counted.
+	const shown = data.functions.filter((f) => (filter === "all" || (filter === "modeled" ? ["modeled", "sorry"].includes(fnStatus(f, data.theorems).key) : fnStatus(f, data.theorems).key === filter)));
 	const groups = [
 		{ title: "Called by scripts", fns: shown.filter((f) => f.entry && calledBy(f).length) },
 		{ title: scripts ? "Other entry points" : "Entry points", fns: shown.filter((f) => f.entry && !calledBy(f).length) },
@@ -879,9 +876,9 @@ function CoverageView({ data, scripts, onOpenFile }: { data: Formal; scripts: Sc
 		{ title: "Libraries", fns: shown.filter((f) => !f.entry && f.dependency) },
 	].filter((g) => g.fns.length);
 	const [picked, setPicked] = useState<string | null>(null);
-	const current = data.functions.find((f) => f.name === picked) ?? groups[0]?.fns[0] ?? null;
-	// The counts cover what the list shows: with "libraries" ticked, library functions and their proofs count too.
-	const own = data.functions.filter((f) => deps || !f.dependency);
+	const current = data.functions.find((f) => fnKey(f) === picked) ?? groups[0]?.fns[0] ?? null;
+	// The counts cover everything the list shows, library functions and their proofs included.
+	const own = data.functions;
 	const proved = own.filter((f) => fnStatus(f, data.theorems).key === "proved").length;
 	const inLean = own.filter((f) => !f.why).length;
 	const status = current ? fnStatus(current, data.theorems) : null;
@@ -892,7 +889,14 @@ function CoverageView({ data, scripts, onOpenFile }: { data: Formal; scripts: Sc
 				<span><span className="font-mono font-medium text-emerald-700 dark:text-emerald-400">{proved}</span><span className="text-muted-foreground"> proved</span></span>
 				<span><span className="font-mono font-medium text-amber-700 dark:text-amber-400">{own.length - inLean}</span><span className="text-muted-foreground"> opaque</span></span>
 				<span className="text-muted-foreground"><span className="font-mono">{data.theorems.length}</span> theorems{data.theorems.some((t) => t.sorry) ? ` · ${data.theorems.filter((t) => t.sorry).length} with sorry` : ""}</span>
-				<span className="ml-auto text-[11px] text-muted-foreground">{data.namespace} model · {data.modelLines} lines</span>
+				{/* How much is proved: the share of every listed function (libraries included) with a finished proof. */}
+				<span className="ml-auto inline-flex items-center gap-2 text-[11px] text-muted-foreground" title={`${proved} of ${own.length} functions proved`}>
+					<span className="h-1.5 w-24 overflow-hidden rounded-full bg-muted">
+						<span className="block h-full rounded-full bg-emerald-500" style={{ width: `${own.length ? (proved / own.length) * 100 : 0}%` }} />
+					</span>
+					<span className="font-mono font-medium text-foreground">{own.length ? `${Math.round((proved / own.length) * 1000) / 10}%` : "0%"}</span>
+					proved
+				</span>
 			</div>
 			<div className="flex min-h-0 flex-1 gap-1">
 				<nav className="flex w-72 shrink-0 flex-col overflow-hidden rounded-xl border bg-card">
@@ -902,10 +906,6 @@ function CoverageView({ data, scripts, onOpenFile }: { data: Formal; scripts: Sc
 								{f.label}
 							</button>
 						))}
-						<label className="ml-auto flex items-center gap-1 pr-1 text-[11px] text-muted-foreground">
-							<input type="checkbox" checked={deps} onChange={(e) => setDeps(e.target.checked)} className="size-3" />
-							libraries
-						</label>
 					</div>
 					<div className="min-h-0 flex-1 overflow-y-auto p-1">
 						{groups.map((g) => (
@@ -915,11 +915,11 @@ function CoverageView({ data, scripts, onOpenFile }: { data: Formal; scripts: Sc
 									const st = fnStatus(f, data.theorems);
 									return (
 										<button
-											key={f.name}
+											key={fnKey(f)}
 											type="button"
-											onClick={() => setPicked(f.name)}
+											onClick={() => setPicked(fnKey(f))}
 											title={st.label}
-											className={`flex w-full items-center gap-2 rounded-md px-2 py-1 text-left font-mono text-[12px] ${current?.name === f.name ? "bg-muted text-foreground" : "text-muted-foreground hover:bg-muted/60 hover:text-foreground"}`}
+											className={`flex w-full items-center gap-2 rounded-md px-2 py-1 text-left font-mono text-[12px] ${current && fnKey(current) === fnKey(f) ? "bg-muted text-foreground" : "text-muted-foreground hover:bg-muted/60 hover:text-foreground"}`}
 										>
 											<span className={`size-2 shrink-0 rounded-full ${st.dot}`} />
 											<span className="truncate">{f.name.split(".").slice(-1)[0]}</span>
