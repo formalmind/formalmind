@@ -669,11 +669,13 @@ pub fn folder_image(folder: String, path: String) -> Result<String, String> {
         "svg" => "image/svg+xml",
         "avif" => "image/avif",
         "ico" => "image/x-icon",
-        _ => return Err("Not an image".into()),
+        // PDFs too: the Code tab shows them in the web view's own PDF viewer.
+        "pdf" => "application/pdf",
+        _ => return Err("Not an image or a PDF".into()),
     };
     let bytes = std::fs::read(&p).map_err(|e| e.to_string())?;
-    if bytes.len() > 8 << 20 {
-        return Err("Image too large".into());
+    if bytes.len() > if ext == "pdf" { 32 << 20 } else { 8 << 20 } {
+        return Err("File too large".into());
     }
     Ok(format!("data:{mime};base64,{}", base64(&bytes)))
 }

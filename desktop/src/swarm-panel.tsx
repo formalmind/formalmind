@@ -715,7 +715,7 @@ function BugsView({ folder, files, invoke, bugs, openBug, setOpenBug, withPoc, o
 	);
 }
 
-type Mode = "code" | "chat" | "swarm" | "roadmap" | "audit" | "bugs" | "debug";
+export type Mode = "code" | "chat" | "swarm" | "roadmap" | "audit" | "bugs" | "debug";
 
 const MODES: { id: Mode; label: string; icon: typeof Code2 }[] = [
 	{ id: "code", label: "Code", icon: Code2 },
@@ -728,7 +728,7 @@ const MODES: { id: Mode; label: string; icon: typeof Code2 }[] = [
  * The page's modes, Debug and then the folder's name, as one macOS-style segmented control. The Mac app shows it in its
  * title bar; the web app centres it at the top of the page.
  */
-function NavGroup({ name, git, onDebug, mode, onMode, inBar, compact }: { name: string; git: boolean; onDebug?: () => void; mode: Mode; onMode: (m: Mode) => void; inBar?: boolean; compact?: boolean }) {
+export function NavGroup({ name, git, onDebug, mode, onMode, inBar, compact }: { name: string; git: boolean; onDebug?: () => void; mode: Mode; onMode: (m: Mode) => void; inBar?: boolean; compact?: boolean }) {
 	const seg = "inline-flex shrink-0 items-center gap-1.5 rounded-md px-2.5 text-[12px] font-medium outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring";
 	const h = inBar ? "h-6" : "h-7";
 	return (
@@ -1053,7 +1053,11 @@ function AuditView({ folder, scan, invoke, preferred, onOpenFile, reload = 0 }: 
  * `debug` (the desktop app) renders Debug mode — the folder's Foundry tests in the debugger — for a test file;
  * without it there is no Debug mode.
  */
-export function SwarmPanel({ folder, name, scan, bridge, session, file: openPath, actions, debug }: { folder: string; name: string; scan: Scan | null; bridge: Bridge; session?: string | null; file?: string | null; actions?: React.ReactNode; debug?: (file: string | null, test: string | null, onPick: (file: string) => void) => React.ReactNode }) {
+/**
+ * `defaultMode` is the tab without a ?mode; `onSwarm` sends the Swarm tab elsewhere (the website's imported repositories
+ * keep their swarm on the project canvas).
+ */
+export function SwarmPanel({ folder, name, scan, bridge, session, file: openPath, actions, debug, defaultMode, onSwarm }: { folder: string; name: string; scan: Scan | null; bridge: Bridge; session?: string | null; file?: string | null; actions?: React.ReactNode; debug?: (file: string | null, test: string | null, onPick: (file: string) => void) => React.ReactNode; defaultMode?: Mode; onSwarm?: () => void }) {
 	const { invoke, listen, apiBase } = bridge;
 	const [run, setRun] = useState<string | null>(null);
 	const [events, setEvents] = useState<Ev[]>([]);
@@ -1075,7 +1079,8 @@ export function SwarmPanel({ folder, name, scan, bridge, session, file: openPath
 	const [sessions, setSessions] = useState<Session[]>([]);
 	const [proofs, setProofs] = useState<Record<string, Proof>>({});
 	const [openItem, setOpenItem] = useState<number | null>(null);
-	const [file, setFile] = useState<{ path: string; text: string } | null>(null);
+	// `url`: a PDF, shown in the browser's own viewer instead of as text.
+	const [file, setFile] = useState<{ path: string; text: string; url?: string } | null>(null);
 	const [planOpen, setPlanOpen] = useState(false);
 	const [chatOpen, setChatOpen] = useState(() => store.get("fm:chat-open") !== "0");
 	// How many agent messages you had seen when the chat was folded; the button counts the ones since.
@@ -1136,7 +1141,7 @@ export function SwarmPanel({ folder, name, scan, bridge, session, file: openPath
 	// The page's mode (Code, Swarm, Audit) and the open file live in the URL, so they survive reloads.
 	const [params, setParams] = useSearchParams();
 	// Debug mode exists only where the page is given a debugger; an old link to it opens Code instead.
-	const asked = (params.get("mode") as Mode | null) ?? "swarm";
+	const asked = (params.get("mode") as Mode | null) ?? defaultMode ?? "swarm";
 	// The roadmap lives on the Swarm canvas now and Chat has no tab; old links to either open Swarm.
 	const mode = resolveMode(asked, Boolean(debug));
 	// The main contract's entry points, read from the AST, so the plan can name the ones each item covers.
@@ -1151,11 +1156,19 @@ export function SwarmPanel({ folder, name, scan, bridge, session, file: openPath
 		);
 	}, [mode, folder, mainSource, invoke]);
 	const setMode = (m: Mode) => {
+		if (m === "swarm" && onSwarm) return onSwarm();
 		const next = new URLSearchParams(params);
 		next.set("mode", m);
 		setParams(next);
 	};
 	const loadFile = (path: string) => {
+		if (/\.pdf$/i.test(path)) {
+			void invoke<string>("folder_image", { folder, path }).then(
+				(url) => setFile({ path, text: "", url }),
+				(e) => setError(String(e)),
+			);
+			return;
+		}
 		void invoke<string>("folder_read", { folder, path }).then(
 			(text) => setFile({ path, text }),
 			(e) => setError(String(e)),
@@ -1793,7 +1806,9 @@ export function SwarmPanel({ folder, name, scan, bridge, session, file: openPath
 									}}
 									onScroll={() => setHover(null)}
 								>
-									{vim && slot ? (
+									{file.url ? (
+										<iframe src={file.url} title={file.path} className="h-full w-full border-0" />
+									) : vim && slot ? (
 										// The Mac app runs real Neovim (bundled); the web keeps the light cursor below.
 										<NvimTerminal bridge={bridge} folder={folder} path={file.path} line={markLine} />
 									) : jsonOk && !jsonRaw ? (

@@ -153,7 +153,8 @@ function ProjectFolder({ project, open, onOpenChange, pathname, collapsed, onExp
 	const { tree, error, path } = useRepoTree(project.repo, open, source)
 	const here = source?.current()
 	const current = source ? Boolean(path && here?.path === path) : pathname === home || pathname.startsWith(`${home}/`)
-	const file = source ? (current ? (here?.file ?? null) : null) : pathname === projectPath(project.repo, "file") ? new URLSearchParams(location.search).get("path") : null
+	const q = new URLSearchParams(location.search)
+	const file = source ? (current ? (here?.file ?? null) : null) : pathname === projectPath(project.repo, "code") ? q.get("file") : pathname === projectPath(project.repo, "file") ? q.get("path") : null
 
 	return (
 		<Collapsible open={open} onOpenChange={onOpenChange} asChild>
@@ -212,7 +213,7 @@ function ProjectFolder({ project, open, onOpenChange, pathname, collapsed, onExp
 								truncated={tree.truncated}
 								selected={file}
 								storageKey={`fm:tree:${project.repo}`}
-								onOpen={(f) => (source && path ? source.open(path, f) : navigate(`${projectPath(project.repo, "file")}?path=${encodeURIComponent(f)}`))}
+								onOpen={(f) => (source && path ? source.open(path, f) : navigate(`${projectPath(project.repo, "code")}?mode=code&file=${encodeURIComponent(f)}`))}
 							/>
 						) : (
 							<p className="px-2 py-1 text-[12px] text-muted-foreground">{error ?? (source && !path ? "Cloning…" : "Listing the files…")}</p>

@@ -6,6 +6,7 @@ import type { UIMessage } from "ai";
 import { Loader2 } from "lucide-react";
 import { SwarmChat } from "@/components/swarm/swarm-chat";
 import { SwarmWorkspace } from "@/components/swarm/swarm-workspace";
+import { NavGroup } from "@/desktop/src/swarm-panel";
 import { ChatComposer } from "@/components/chat-composer";
 import { ProjectPicker } from "@/components/projects/project-picker";
 import { useChatWithInterruptions } from "@/hooks/useChatWithInterruptions";
@@ -71,13 +72,19 @@ function Unknown() {
 /** A project's home: the swarm's map, narrowed to this project's agents and work. */
 export function ProjectHomePage() {
 	const { project, repo, loading } = useRouteProject();
+	const navigate = useNavigate();
 	useEffect(() => {
 		if (repo) document.title = `${repo.split("/")[1]} · Formal Mind`;
 	}, [repo]);
 	if (loading) return <Loading />;
 	if (!project || !repo) return <Unknown />;
-	if (!project.proofsRepo) return <NotStarted repo={repo} what="swarm" />;
-	return <SwarmWorkspace repo={project.proofsRepo} only={repo} />;
+	return (
+		// The same tabs as the folder page: Code, Proofs and Bugs open the repository's page; Swarm is this canvas.
+		<div className="relative flex min-h-0 flex-1 flex-col">
+			{project.proofsRepo ? <SwarmWorkspace repo={project.proofsRepo} only={repo} /> : <NotStarted repo={repo} what="swarm" />}
+			<NavGroup name={repo.split("/")[1] ?? repo} git mode="swarm" onMode={(m) => m !== "swarm" && navigate(`${projectPath(repo, "code")}?mode=${m}`)} />
+		</div>
+	);
 }
 
 export function ProjectRoadmapPage() {
