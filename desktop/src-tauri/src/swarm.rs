@@ -33,6 +33,8 @@ pub struct Swarm {
     spent: Mutex<f64>,
     /// The spending cap, raised from the chat's header while the swarm runs.
     budget: Mutex<f64>,
+    /// Set by the Context panel's Compact now: the working agent compacts before its next step.
+    compact_now: AtomicBool,
 }
 
 #[derive(Default)]
@@ -585,6 +587,26 @@ impl Turn<'_> {
         Ok((status, reply))
     }
 
+    /// What the fixed parts of every request in this turn take, for the Context panel: the system prompt, the tool
+    /// definitions and the task (with any attached report), counted by /v1/messages/count_tokens (free, not metered)
+    /// as differences of three counts. Zeros where a count fails; the panel then shows them as messages.
+    async fn measure(&self, key: &str, base: &str, role: &str, goal: &str, task: &Value) -> (u64, u64, u64) {
+        let count = |body: Value| async move {
+            let res = self.client.post(format!("{base}/v1/messages/count_tokens")).header("x-api-key", key).header("anthropic-version", "2023-06-01").json(&body).send().await.ok()?;
+            if !res.status().is_success() {
+                return None;
+            }
+            res.json::<Value>().await.ok()?["input_tokens"].as_u64()
+        };
+        let model = model_of(self.req);
+        let sys = system(role, &self.req.folder, goal);
+        let probe = json!([{ "role": "user", "content": "." }]);
+        let Some(with_system) = count(json!({ "model": model, "system": sys, "messages": probe })).await else { return (0, 0, 0) };
+        let with_tools = count(json!({ "model": model, "system": sys, "tools": tools(role), "messages": probe })).await.unwrap_or(with_system);
+        let with_task = count(json!({ "model": model, "system": sys, "tools": tools(role), "messages": [{ "role": "user", "content": task }] })).await.unwrap_or(with_tools);
+        (with_system, with_tools.saturating_sub(with_system), with_task.saturating_sub(with_tools))
+    }
+
     /// Adds a call's cost to the session's spend.
     fn charge(&self, usage: &Value) {
         let total = {
@@ -658,11 +680,14 @@ impl Turn<'_> {
         let window = context_window(model_of(self.req));
         // What the last reply said the conversation takes; unknown (0) after a resume. Each step's reply sets it.
         let mut used: u64 = 0;
+        let compact_at = (window as f64 * COMPACT_AT) as u64;
+        let (sys_tokens, tool_tokens, task_tokens) = self.measure(&key, &base, role, &goal, &task).await;
         for step in 1..=steps {
             if self.swarm.stop.load(Ordering::SeqCst) {
                 return Ok(out);
             }
-            if used as f64 >= window as f64 * COMPACT_AT {
+            // Compact now does nothing on a conversation that is just the task.
+            if used >= compact_at || (self.swarm.compact_now.swap(false, Ordering::SeqCst) && messages.len() > 2) {
                 // Not fatal: if no summary comes back, the step runs as is and a too-long call compacts below.
                 if let Err(e) = self.compact(&key, &base, role, item, &goal, &mut messages, &task).await {
                     self.emit("tool", role, item, format!("compact: no summary yet ({e})"));
@@ -694,8 +719,9 @@ impl Turn<'_> {
             };
             self.charge(&reply["usage"]);
             used = context_used(&reply["usage"]);
-            // How full this agent's window is, for the chat: "<tokens>/<window>".
-            self.emit("context", role, item, format!("{used}/{window}"));
+            // How full this agent's window is and what fills it, for the chat's Context panel.
+            let context = json!({ "used": used, "window": window, "compact_at": compact_at, "system": sys_tokens, "tools": tool_tokens, "task": task_tokens });
+            self.emit("context", role, item, context.to_string());
             let content = reply["content"].clone();
             messages.push(json!({ "role": "assistant", "content": content }));
             keep(&messages);
@@ -1185,7 +1211,7 @@ pub fn swarm_start(app: AppHandle, swarms: State<'_, Swarms>, request: SwarmRequ
     merge_old_sessions(Path::new(&request.folder));
     let qf = queue_file(Path::new(&request.folder), &run);
     let spent = load_queue(&qf).spent;
-    let swarm = Arc::new(Swarm { stop: AtomicBool::new(false), folder: request.folder.clone(), queue: qf.clone(), spent: Mutex::new(spent), budget: Mutex::new(request.budget_usd.max(spent)) });
+    let swarm = Arc::new(Swarm { stop: AtomicBool::new(false), folder: request.folder.clone(), queue: qf.clone(), spent: Mutex::new(spent), budget: Mutex::new(request.budget_usd.max(spent)), compact_now: AtomicBool::new(false) });
     swarms.0.lock().unwrap().insert(run.clone(), swarm.clone());
     let id = run.clone();
     tauri::async_runtime::spawn(async move {
@@ -1317,6 +1343,15 @@ pub fn swarm_set_budget(swarms: State<'_, Swarms>, run: String, usd: f64) -> Res
     let map = swarms.0.lock().unwrap();
     let s = map.get(&run).ok_or("The swarm isn't running")?;
     *s.budget.lock().unwrap() = usd.max(0.0);
+    Ok(())
+}
+
+/// Compacts the working agent's conversation before its next step (the Context panel's Compact now).
+#[tauri::command]
+pub fn swarm_compact(swarms: State<'_, Swarms>, run: String) -> Result<(), String> {
+    let map = swarms.0.lock().unwrap();
+    let s = map.get(&run).ok_or("The swarm isn't running")?;
+    s.compact_now.store(true, Ordering::SeqCst);
     Ok(())
 }
 

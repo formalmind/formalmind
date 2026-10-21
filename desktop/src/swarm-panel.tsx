@@ -21,6 +21,7 @@ import { Trace, TraceCollapsible, TraceCollapsibleContent, TraceCollapsibleTrigg
 import { SwarmCanvas } from "@/components/swarm/swarm-canvas";
 import { ROLE_COLORS } from "@/lib/swarm-roles";
 import { localBoard } from "./local-board";
+import { ContextPanel, parseContext } from "./context-panel";
 import type { Scan } from "./local";
 
 /** What the panel needs from its host: the desktop app's Tauri commands and events, or the web demo's stand-ins. */
@@ -1542,11 +1543,11 @@ export function SwarmPanel({ folder, name, scan, bridge, session, file: openPath
 	const inPlan = new Set(plan.flatMap((i) => named(i.text).map((u) => u.name)));
 	const finished = !run ? events.find((e) => e.kind === "done") : undefined;
 	const shown = events.filter((e) => e.kind !== "status" && e.kind !== "context");
-	// How full the working agent's context window is, from its last reply ("<tokens>/<window>"); past 75% its older
-	// steps are summarized.
+	// How full the working agent's context window is and what fills it, from its last reply; past 75% its older steps
+	// are summarized.
 	const contextEv = working ? [...events].reverse().find((e) => e.kind === "context" && e.role === working.role) : undefined;
-	const [ctxUsed, ctxWindow] = (contextEv?.text ?? "").split("/").map(Number);
-	const ctxPct = ctxWindow ? Math.min(100, Math.round((ctxUsed / ctxWindow) * 100)) : null;
+	const ctx = contextEv ? parseContext(contextEv.text) : null;
+	const ctxPct = ctx ? Math.min(100, Math.round((ctx.used / ctx.window) * 100)) : null;
 	const agentMessages = shown.filter((e) => e.kind !== "you" && e.kind !== "tool").length;
 	const unread = chatOpen ? 0 : Math.max(0, agentMessages - seen);
 
@@ -1681,13 +1682,18 @@ export function SwarmPanel({ folder, name, scan, bridge, session, file: openPath
 							</DropdownMenuItem>
 						</DropdownMenuContent>
 					</DropdownMenu>
-					{working && ctxPct !== null ? (
-						<span className="inline-flex h-7 shrink-0 items-center gap-1.5 px-1 text-[11px] tabular-nums text-muted-foreground" title={`The ${working.role}'s context window: ${ctxUsed.toLocaleString()} of ${ctxWindow.toLocaleString()} tokens. Past 75%, its older steps are summarized.`}>
-							<span className="h-1 w-8 overflow-hidden rounded-full bg-muted">
-								<span className="block h-full rounded-full" style={{ width: `${ctxPct}%`, backgroundColor: colorOf(working.role) }} />
-							</span>
-							{ctxPct}%
-						</span>
+					{working && ctx && ctxPct !== null ? (
+						<DropdownMenu>
+							<DropdownMenuTrigger className="inline-flex h-7 shrink-0 items-center gap-1.5 rounded-md px-1.5 text-[11px] tabular-nums text-muted-foreground outline-none hover:bg-background hover:text-foreground" title={`The ${working.role}'s context window`}>
+								<span className="h-1 w-8 overflow-hidden rounded-full bg-muted">
+									<span className="block h-full rounded-full" style={{ width: `${ctxPct}%`, backgroundColor: colorOf(working.role) }} />
+								</span>
+								{ctxPct}%
+							</DropdownMenuTrigger>
+							<DropdownMenuContent align="end" className="w-auto rounded-2xl border-0 bg-transparent p-0 shadow-lg">
+								<ContextPanel role={working.role} color={colorOf(working.role)} use={ctx} onCompact={run ? () => invoke("swarm_compact", { run }) : undefined} />
+							</DropdownMenuContent>
+						</DropdownMenu>
 					) : null}
 					<DropdownMenu>
 						<DropdownMenuTrigger className="inline-flex h-7 shrink-0 items-center gap-1 rounded-md border bg-background px-2 text-[11px] tabular-nums text-muted-foreground outline-none hover:text-foreground" title="Spending cap">
