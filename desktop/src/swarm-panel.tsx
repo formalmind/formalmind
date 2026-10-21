@@ -1559,16 +1559,6 @@ export function SwarmPanel({ folder, name, scan, bridge, session, file: openPath
 							</DropdownMenuRadioGroup>
 						</DropdownMenuContent>
 					</DropdownMenu>
-					{/* Stop while it runs; Start (or Resume, with plan items left) when it doesn't. */}
-					{run ? (
-						<button type="button" onClick={() => void invoke("swarm_stop", { run })} title="Stop the swarm" className="inline-flex h-7 shrink-0 items-center gap-1 rounded-md border bg-background px-2 text-[11px] text-foreground hover:bg-muted">
-							<Square className="size-3" />Stop
-						</button>
-					) : (
-						<button type="button" onClick={() => void start()} disabled={provider === "anthropic" && !hasKey} title={provider === "anthropic" && !hasKey ? "Add your Anthropic key in Settings first" : "Start the swarm"} className="btn-dark inline-flex h-7 shrink-0 items-center gap-1 px-2.5 text-[11px] disabled:opacity-50">
-							<Play className="size-3" />{plan.some((i) => i.mark === " ") ? "Resume" : "Start"}
-						</button>
-					)}
 					<button type="button" onClick={() => toggleChat(false)} title="Hide the chat" aria-label="Hide the chat" className="inline-flex size-7 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-background hover:text-foreground">
 						<ChevronDown className="size-3.5" />
 					</button>
@@ -1582,7 +1572,7 @@ export function SwarmPanel({ folder, name, scan, bridge, session, file: openPath
 						) : block.e.kind === "you" ? (
 							<Message key={i} align="end">
 								<MessageContent>
-									<div className="ml-auto w-fit max-w-[85%] whitespace-pre-wrap rounded-2xl rounded-br-md bg-foreground px-3 py-2 text-background">{block.e.text}</div>
+									<div className="ml-auto w-fit max-w-[85%] whitespace-pre-wrap rounded-2xl rounded-br-md bg-muted px-3 py-2 text-foreground">{block.e.text}</div>
 								</MessageContent>
 							</Message>
 						) : (
@@ -1616,10 +1606,17 @@ export function SwarmPanel({ folder, name, scan, bridge, session, file: openPath
 							},
 						}}
 						placeholder={run ? "Talk to the agents: a question, a new focus, an idea to check…" : "What should the swarm focus on? (optional) ↑ starts it"}
+						// The composer's top left runs the swarm: Stop while it runs; Start (or Resume, with plan items left) when not.
 						context={
-							<span className="inline-flex h-8 items-center gap-1.5 rounded-full bg-secondary px-3 text-sm font-medium text-secondary-foreground">
-								{name} swarm
-							</span>
+							run ? (
+								<button type="button" onClick={() => void invoke("swarm_stop", { run })} title="Stop the swarm" className="inline-flex h-8 items-center gap-1.5 rounded-full bg-secondary px-3 text-[13px] font-medium text-red-600 hover:bg-red-500/10 dark:text-red-400">
+									<Square className="size-2.5 fill-current" />Stop
+								</button>
+							) : (
+								<button type="button" onClick={() => void start()} disabled={provider === "anthropic" && !hasKey} title={provider === "anthropic" && !hasKey ? "Add your Anthropic key in Settings first" : "Start the swarm"} className="btn-dark inline-flex h-8 items-center gap-1.5 px-3 text-[13px] disabled:opacity-50">
+									<Play className="size-3" />{plan.some((i) => i.mark === " ") ? "Resume" : "Start"}
+								</button>
+							)
 						}
 						extra={run ? (
 							<button type="button" onClick={() => void draft()} disabled={drafting} title="Draft a reply for me" className="inline-flex h-8 shrink-0 items-center whitespace-nowrap gap-1.5 rounded-full px-2.5 text-sm text-muted-foreground hover:bg-muted hover:text-foreground disabled:opacity-50">
