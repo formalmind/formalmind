@@ -7,6 +7,7 @@
  */
 
 import { useEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { ArrowUpRight, Bell, Check, Copy, X } from "lucide-react";
 import {
   dismissNotification,
@@ -67,8 +68,22 @@ export function NotificationCenter() {
     latestNotificationRef.current = { id: latest.id, createdAt: latest.createdAt };
   }, [active, all, headerOpen]);
 
+  // The panel is drawn at the page's top level, under the bell, so nothing on the page (the swarm chat) covers it.
+  const bellRef = useRef<HTMLDivElement>(null);
+  const [anchor, setAnchor] = useState<{ top: number; right: number } | null>(null);
+  useEffect(() => {
+    if (!headerOpen) return;
+    const place = () => {
+      const r = bellRef.current?.getBoundingClientRect();
+      if (r) setAnchor({ top: r.bottom + 8, right: Math.max(12, window.innerWidth - r.right) });
+    };
+    place();
+    window.addEventListener("resize", place);
+    return () => window.removeEventListener("resize", place);
+  }, [headerOpen]);
+
   return (
-    <div data-fm-bell className="relative shrink-0">
+    <div ref={bellRef} data-fm-bell className="relative shrink-0">
       <button
         type="button"
         aria-label={
@@ -94,11 +109,12 @@ export function NotificationCenter() {
           </span>
         )}
       </button>
-      {headerOpen && (
+      {headerOpen && anchor && createPortal(
         <div
           role="dialog"
           aria-label="Notifications"
-          className="absolute right-0 top-full z-[9999999] mt-2 w-[min(22rem,calc(100vw-1.5rem))]"
+          className="fixed z-[9999999] w-[min(22rem,calc(100vw-1.5rem))]"
+          style={{ top: anchor.top, right: anchor.right }}
         >
           <div className="space-y-2 rounded-3xl bg-muted p-3 shadow-md">
             {all.length === 0 ? (
@@ -202,7 +218,8 @@ export function NotificationCenter() {
               </div>
             )}
           </div>
-        </div>
+        </div>,
+        document.body,
       )}
     </div>
   );
