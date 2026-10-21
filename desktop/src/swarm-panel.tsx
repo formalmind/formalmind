@@ -4,7 +4,7 @@ import { createPortal } from "react-dom";
 import { NvimTerminal } from "./nvim-terminal";
 import { reportError } from "@/lib/report-error";
 import { JsonTree } from "./json-tree";
-import { Bug, Check, ChevronDown, Code2, Copy, FileCode2, FileDown, Network, Play, Plus, ScanSearch, Square, WandSparkles, Wrench } from "lucide-react";
+import { Bug, Check, ChevronDown, Code2, Copy, FileCode2, FileDown, Network, Play, Plus, ScanSearch, Square, SquareTerminal, WandSparkles } from "lucide-react";
 
 // The project roadmap (GitHub Projects-style), the same view the web app had on its own page.
 import { motion as vimMotion, search as vimSearch, setVimMode, useVimMode, type Cursor } from "@/components/vim-mode";
@@ -99,7 +99,7 @@ function Steps({ steps, running }: { steps: { call: Ev; result?: Ev }[]; running
 			<TraceCollapsible>
 				<TraceCollapsibleTrigger>
 					<TraceLine status={running ? "running" : undefined}>
-						<TraceIcon><Wrench className="size-3.5" /></TraceIcon>
+						<TraceIcon><SquareTerminal className="size-3.5" /></TraceIcon>
 						<TraceTitle className="font-mono text-[11px]">{one ?? `Used ${steps.length} tools`}</TraceTitle>
 					</TraceLine>
 				</TraceCollapsibleTrigger>
