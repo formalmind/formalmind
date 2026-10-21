@@ -1628,6 +1628,18 @@ export function SwarmPanel({ folder, name, scan, bridge, session, file: openPath
 	const [viewing, setViewing] = useState<string | null>(null);
 	// The session you're reading, if it's running (Stop, messages and the budget act on it).
 	const run = viewing && runs.includes(viewing) ? viewing : null;
+	// Grouped once per change of the events (a long session has about a thousand): typing in the composer re-renders the
+	// panel, and must not regroup the history, rebuild the board or redraw every message.
+	const chatBlocks = useMemo(() => blocks(events.filter((e) => e.kind !== "status" && e.kind !== "context")), [events]);
+	const scrubItems = useMemo(
+		() =>
+			chatBlocks.map((b) =>
+				"steps" in b
+					? { label: `${b.steps.length} tool step${b.steps.length === 1 ? "" : "s"}`, text: b.steps.map((st) => st.call.text).join(" · ") }
+					: { label: b.e.kind === "you" ? "You" : `${b.e.role[0]?.toUpperCase() ?? ""}${b.e.role.slice(1)}${b.e.item ? ` · item ${b.e.item}` : ""}`, text: b.e.text },
+			),
+		[chatBlocks],
+	);
 	const viewingRef = useRef<string | null>(null);
 	viewingRef.current = viewing;
 	const chat = useRef<HTMLDivElement>(null);
@@ -1802,7 +1814,36 @@ export function SwarmPanel({ folder, name, scan, bridge, session, file: openPath
 	const named = (text: string) => entryUnits.filter((u) => u.function && new RegExp(`\\b${u.function}\\b`).test(text));
 	const inPlan = new Set(plan.flatMap((i) => named(i.text).map((u) => u.name)));
 	const finished = !run ? events.find((e) => e.kind === "done") : undefined;
-	const shown = events.filter((e) => e.kind !== "status" && e.kind !== "context");
+	const shown = chatBlocks;
+	const board = useMemo(() => localBoard(folder, plan, events, Boolean(run), budget), [folder, plan, events, run, budget]);
+	const chatList = useMemo(
+		() =>
+			chatBlocks.map((block, i) => (
+				<div key={i} data-msg={i}>
+					{"steps" in block ? (
+						<Steps steps={block.steps} running={Boolean(run) && i === chatBlocks.length - 1} />
+					) : block.e.kind === "you" ? (
+						<Message align="end">
+							<MessageContent>
+								<div className="ml-auto w-fit max-w-[85%] whitespace-pre-wrap rounded-2xl rounded-br-md bg-muted px-3 py-2 text-foreground">{block.e.text}</div>
+							</MessageContent>
+						</Message>
+					) : (
+						<AgentMessage
+							e={block.e}
+							onBug={() => {
+								// Open the bugs card on this report.
+								const hit = bugs.find((b) => block.e.text.includes(b.file));
+								setMode("bugs");
+								if (hit) setOpenBug(hit.file);
+							}}
+						/>
+					)}
+				</div>
+			)),
+		// eslint-disable-next-line react-hooks/exhaustive-deps
+		[chatBlocks, run, bugs],
+	);
 	// How full the working agent's context window is and what fills it, from its last reply; past 75% its older steps
 	// are summarized.
 	const contextEv = working ? [...events].reverse().find((e) => e.kind === "context" && e.role === working.role) : undefined;
@@ -1812,7 +1853,7 @@ export function SwarmPanel({ folder, name, scan, bridge, session, file: openPath
 	const lastCtx = lastContextEv ? parseContext(lastContextEv.text) : null;
 	const ctx = contextEv ? parseContext(contextEv.text) : null;
 	const ctxPct = ctx ? Math.min(100, Math.round((ctx.used / ctx.window) * 100)) : null;
-	const agentMessages = shown.filter((e) => e.kind !== "you" && e.kind !== "tool").length;
+	const agentMessages = useMemo(() => events.filter((e) => !["status", "context", "you", "tool"].includes(e.kind)).length, [events]);
 	const unread = chatOpen ? 0 : Math.max(0, agentMessages - seen);
 
 	// The plan as a list with each item's proof, on the Swarm canvas.
@@ -1989,11 +2030,7 @@ export function SwarmPanel({ folder, name, scan, bridge, session, file: openPath
 				<div className="relative flex min-h-0 flex-1 flex-col">
 				<ChatScrubber
 					scroller={chat}
-					items={blocks(shown).map((b) =>
-						"steps" in b
-							? { label: `${b.steps.length} tool step${b.steps.length === 1 ? "" : "s"}`, text: b.steps.map((st) => st.call.text).join(" · ") }
-							: { label: b.e.kind === "you" ? "You" : `${b.e.role[0]?.toUpperCase() ?? ""}${b.e.role.slice(1)}${b.e.item ? ` · item ${b.e.item}` : ""}`, text: b.e.text },
-					)}
+					items={scrubItems}
 				/>
 				<div
 					ref={chat}
@@ -2004,26 +2041,7 @@ export function SwarmPanel({ folder, name, scan, bridge, session, file: openPath
 					className="min-h-0 flex-1 space-y-3 overflow-y-auto py-3 pl-6 pr-3 text-[13px]"
 				>
 					{shown.length === 0 && !run ? <p className="text-muted-foreground">Talk to the agents here. Before a run, what you write is the swarm's focus and ↑ starts it; while it runs, they read your messages before their next turn.</p> : null}
-					{blocks(shown).map((block, i) => (
-						<div key={i} data-msg={i}>
-						{"steps" in block ? (
-							<Steps steps={block.steps} running={Boolean(run) && i === blocks(shown).length - 1} />
-						) : block.e.kind === "you" ? (
-							<Message align="end">
-								<MessageContent>
-									<div className="ml-auto w-fit max-w-[85%] whitespace-pre-wrap rounded-2xl rounded-br-md bg-muted px-3 py-2 text-foreground">{block.e.text}</div>
-								</MessageContent>
-							</Message>
-						) : (
-							<AgentMessage e={block.e} onBug={() => {
-								// Open the bugs card on this report.
-								const hit = bugs.find((b) => block.e.text.includes(b.file));
-								setMode("bugs");
-								if (hit) setOpenBug(hit.file);
-							}} />
-						)}
-						</div>
-					))}
+					{chatList}
 					{finished ? <p className="rounded-lg border px-3 py-2 text-xs text-muted-foreground">Finished: {finished.text}</p> : null}
 				</div>
 				</div>
@@ -2083,7 +2101,7 @@ export function SwarmPanel({ folder, name, scan, bridge, session, file: openPath
 				{/* Swarm mode shows the canvas; Code and Audit replace it. The name and the controls stay in every mode. */}
 				{mode === "swarm" ? (
 					<SwarmCanvas
-						state={localBoard(folder, plan, events, Boolean(run), budget)}
+						state={board}
 						fill
 						local
 						repo={folder}
