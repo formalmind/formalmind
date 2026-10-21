@@ -6,6 +6,7 @@ import { Link, useLocation, useNavigate } from "react-router";
 import { Archive, ArchiveRestore, Folder, FolderOpen, ChevronRight, GitBranch, Plus } from "lucide-react"
 import { ProjectContextMenu } from "@/components/projects/swarm-control"
 import { useArchived } from "@/components/folder-menu"
+import { cachedTree, freshEnough, syncRepo, type RepoTree } from "@/lib/browser-git"
 import {
 	Sidebar,
 	SidebarContent,
@@ -71,33 +72,44 @@ function useOpenFolders() {
 }
 
 /** One project as a folder: its icon, name, a chevron, and a + for a new chat; inside, its chats. */
-type RepoTree = { files: string[]; truncated: boolean }
-const trees = new Map<string, Promise<RepoTree>>()
+/** The server's listing (GitHub API): used only when the browser has no copy of the repository and git can't fetch one. */
+async function apiTree(repo: string): Promise<RepoTree> {
+	const r = await fetch(`/api/projects/tree?repo=${encodeURIComponent(repo)}`)
+	const body = await r.json().catch(() => ({}))
+	if (!r.ok) throw new Error(body.error ?? "Couldn't list the files.")
+	return body as RepoTree
+}
 
-/** A project's files on its default branch, fetched once per session. */
+/**
+ * A project's files on its default branch. The browser's own git copy shows straight away when there is one, then a
+ * background fetch brings it up to date; a first visit clones it. The API listing is the fallback when git can't.
+ */
 function useRepoTree(repo: string, on: boolean) {
 	const [tree, setTree] = useState<RepoTree | null>(null)
 	const [error, setError] = useState<string | null>(null)
 	useEffect(() => {
 		if (!on) return
-		if (!trees.has(repo)) {
-			trees.set(
-				repo,
-				fetch(`/api/projects/tree?repo=${encodeURIComponent(repo)}`).then(async (r) => {
-					const body = await r.json().catch(() => ({}))
-					if (!r.ok) throw new Error(body.error ?? "Couldn't list the files.")
-					return body as RepoTree
-				}),
-			)
-		}
 		let live = true
-		trees.get(repo)!.then(
-			(t) => live && setTree(t),
-			(e) => {
-				trees.delete(repo)
-				if (live) setError(String(e.message ?? e))
-			},
-		)
+		void (async () => {
+			const cached = await cachedTree(repo).catch(() => null)
+			if (cached && live) setTree(cached)
+			if (cached && freshEnough(repo)) return
+			try {
+				await syncRepo(repo)
+				const fresh = await cachedTree(repo)
+				if (fresh && live) {
+					setTree(fresh)
+					setError(null)
+				}
+			} catch (e) {
+				console.warn("[git] couldn't sync", repo, e)
+				if (cached) return
+				await apiTree(repo).then(
+					(t) => live && setTree(t),
+					(e2) => live && setError(String(e2.message ?? e2)),
+				)
+			}
+		})()
 		return () => {
 			live = false
 		}

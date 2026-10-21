@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { useParams, useSearchParams } from "react-router";
+import { cachedFile, syncRepo } from "@/lib/browser-git";
 import { MarkGithubIcon } from "@primer/octicons-react";
 import { useHighlightedCode } from "@/hooks/use-highlighted-code";
 import { repoOf } from "@/components/projects/use-projects";
@@ -18,13 +19,27 @@ export function ProjectFilePage() {
 		setFile(null);
 		setError(null);
 		if (!path) return;
-		void fetch(`/api/projects/file?repo=${encodeURIComponent(repo)}&path=${encodeURIComponent(path)}`)
-			.then(async (r) => {
+		// The browser's git copy first; the API when it hasn't got the file; a fresh fetch when the API fails too.
+		const url = `https://github.com/${repo}/blob/HEAD/${path}`;
+		let live = true;
+		void (async () => {
+			const cached = await cachedFile(repo, path).catch(() => null);
+			if (cached !== null) return live && setFile({ text: cached, url });
+			try {
+				const r = await fetch(`/api/projects/file?repo=${encodeURIComponent(repo)}&path=${encodeURIComponent(path)}`);
 				const body = await r.json().catch(() => ({}));
 				if (!r.ok) throw new Error(body.error ?? "Couldn't open the file.");
-				setFile(body);
-			})
-			.catch((e) => setError(String(e.message ?? e)));
+				if (live) setFile(body);
+			} catch (e) {
+				const text = await syncRepo(repo).then(() => cachedFile(repo, path)).catch(() => null);
+				if (!live) return;
+				if (text !== null) setFile({ text, url });
+				else setError(String((e as Error).message ?? e));
+			}
+		})();
+		return () => {
+			live = false;
+		};
 	}, [repo, path]);
 	const lines = useHighlightedCode(file?.text ?? "", LANGUAGE[path.split(".").pop() ?? ""] ?? "text");
 
