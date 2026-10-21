@@ -1566,10 +1566,21 @@ export function SwarmPanel({ folder, name, scan, bridge, session, file: openPath
 	const runRef = useRef<string | null>(null);
 	const chat = useRef<HTMLDivElement>(null);
 
+	/**
+	 * A session's events to keep on screen: the whole conversation (messages, plans, findings, starts and ends), but only
+	 * the latest 600 of the bookkeeping around it (tool calls, results, status and context), which is most of a long log.
+	 */
+	const trim = (evs: Ev[]) => {
+		const noise = (e: Ev) => ["tool", "result", "status", "context"].includes(e.kind);
+		let keep = 600;
+		const out: Ev[] = [];
+		for (let i = evs.length - 1; i >= 0; i--) if (!noise(evs[i]) || keep-- > 0) out.push(evs[i]);
+		return out.reverse();
+	};
 	/** Shows a session's saved events (.formal/runs/<run>.jsonl), so quitting the app loses nothing. */
 	const load = (id: string) => {
 		setViewing(id);
-		void invoke<Ev[]>("swarm_history", { folder, run: id }).then((evs) => setEvents(evs.slice(-600)), () => setEvents([]));
+		void invoke<Ev[]>("swarm_history", { folder, run: id }).then((evs) => setEvents(trim(evs)), () => setEvents([]));
 	};
 	const listSessions = () =>
 		invoke<Session[]>("swarm_sessions", { folder }).then(
@@ -1602,7 +1613,7 @@ export function SwarmPanel({ folder, name, scan, bridge, session, file: openPath
 		});
 		const off = listen<Ev>("swarm", ({ payload }) => {
 			if (runRef.current && payload.run !== runRef.current) return;
-			setEvents((all) => [...all.slice(-600), payload]);
+			setEvents((all) => trim([...all, payload]));
 			if (["plan", "bug", "done"].includes(payload.kind) || (payload.kind === "status" && / is working$/.test(payload.text))) refresh();
 			// A finding recorded from a report shows in Bugs straight away.
 			if (payload.kind === "tool" && payload.text.startsWith("record_finding")) setReload((n) => n + 1);
