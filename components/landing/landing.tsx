@@ -106,10 +106,10 @@ export function Landing({ signedIn }: { signedIn: boolean }) {
 
 			<main onScroll={(e) => setScrolled(e.currentTarget.scrollTop > 8)} className="flex min-h-0 flex-1 flex-col overflow-y-auto pt-16">
 				<section className="mx-auto w-full max-w-6xl shrink-0 px-4 pb-10 pt-16 text-center sm:px-6 sm:pt-24">
-					<h1 className="mx-auto max-w-2xl text-balance bg-gradient-to-b from-neutral-500 to-neutral-950 bg-clip-text pb-1 text-transparent dark:from-neutral-500 dark:to-white text-[34px] font-medium leading-10 tracking-[-1px] sm:text-5xl sm:leading-[1.1] sm:tracking-[-1.5px]">
-						<span className="block">A Swarm of Agents</span>
-						<span className="block">Verifying Ethereum</span>
-						<span className="block">smart contracts</span>
+					<h1 className="mx-auto max-w-2xl text-balance text-[34px] font-medium leading-10 tracking-[-1px] sm:text-5xl sm:leading-[1.1] sm:tracking-[-1.5px]">
+						<span className="block text-neutral-400 dark:text-neutral-500">A Swarm of Agents</span>
+						<span className="block text-neutral-600 dark:text-neutral-300">Verifying Ethereum</span>
+						<span className="block text-neutral-950 dark:text-white">smart contracts</span>
 					</h1>
 					<p className="mx-auto mt-4 max-w-[560px] text-balance text-[15px] leading-[22px] text-muted-foreground">
 						Formal proofs of your contracts, one small pull request at a time, within a daily budget you set.
