@@ -146,6 +146,11 @@ html.fm-mobile.dark {
 	background-size: 200% 100%;
 	animation: fm-sheen 1.4s ease-in-out infinite;
 }
+/* A brighter sweep, where the skeleton is the picture rather than a wait (setup's GitHub card). */
+.fm-skeleton-strong .fm-skeleton {
+	background: linear-gradient(90deg, hsl(var(--muted)) 0%, hsl(var(--muted-foreground) / 0.42) 50%, hsl(var(--muted)) 100%);
+	background-size: 200% 100%;
+}
 /* The working agent's line: its text shimmers instead of a spinner beside it. */
 .fm-shimmer-text {
 	background: linear-gradient(90deg, hsl(var(--muted-foreground)) 0%, hsl(var(--foreground)) 50%, hsl(var(--muted-foreground)) 100%);

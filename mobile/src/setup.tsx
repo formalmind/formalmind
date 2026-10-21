@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import { useNavigate } from "react-router";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { MarkGithubIcon } from "@primer/octicons-react";
@@ -12,6 +12,7 @@ import { macOnline, setStartBudget, startBudget, useMac } from "./relay";
 import { rememberProject } from "./tabs";
 import { SwarmShowcase } from "./showcase";
 import { Skeleton } from "./bar";
+import { useSwipe } from "./swipe";
 import { CoverageCard, TheoremCard } from "./proofs";
 import formal from "./fixtures/formal-asyncswap.json";
 
@@ -45,16 +46,14 @@ const card = "rounded-2xl border border-white/10 bg-white/[0.05]";
  */
 function BotIssueCard() {
 	return (
-		<div className={`dark ${card} p-4 text-foreground`}>
+		<div className={`dark fm-skeleton-strong ${card} p-4 text-foreground`}>
 			<div className="flex items-center gap-1.5">
 				<Skeleton className="h-3 w-16" />
 				<Skeleton className="h-3 w-32" />
 			</div>
 			<Skeleton className="mt-3 h-4 w-[92%]" />
 			<Skeleton className="mt-1.5 h-4 w-[64%]" />
-			<Skeleton className="mt-4 h-2.5 w-full" />
-			<Skeleton className="mt-2 h-2.5 w-[95%]" />
-			<Skeleton className="mt-2 h-2.5 w-[70%]" />
+			<Skeleton className="mt-4 h-[52px] w-full" />
 			<Skeleton className="mt-4 h-4 w-24 rounded" />
 			<div className="mt-3 flex items-center gap-2 border-t pt-3 text-xs text-muted-foreground">
 				<img src="https://avatars.githubusercontent.com/in/1319020?v=4&s=40" alt="" className="size-4 rounded-full" />
@@ -69,18 +68,11 @@ function BotIssueCard() {
 const THEOREM = (formal as unknown as Formal).theorems.find((t) => t.name === "sweep_notOwner") ?? (formal as unknown as Formal).theorems[0];
 
 function Frame({ step, total, onSkip, onBack, children }: { step: number; total: number; onSkip?: () => void; onBack?: () => void; children: React.ReactNode }) {
-	const start = useRef<{ x: number; y: number } | null>(null);
+	const swipe = useSwipe((dir) => dir === "right" && onBack?.());
 	return (
 		<main
 			// A swipe to the right goes back a step, as in the introduction.
-			onTouchStart={(e) => (start.current = { x: e.touches[0].clientX, y: e.touches[0].clientY })}
-			onTouchEnd={(e) => {
-				const from = start.current;
-				if (!from || !onBack) return;
-				const dx = e.changedTouches[0].clientX - from.x;
-				const dy = e.changedTouches[0].clientY - from.y;
-				if (dx > 50 && Math.abs(dx) > Math.abs(dy) * 1.5) onBack();
-			}}
+			{...swipe}
 			className="fm-safe-top fm-safe-bottom relative flex min-h-dvh flex-col overflow-x-hidden bg-[radial-gradient(ellipse_at_top,#151a24_0%,#08090b_60%)] px-6 pb-8 text-white">
 			<div className="flex h-12 items-center gap-3">
 				{/* The introduction's dots: the current step drawn long. */}

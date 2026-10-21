@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { ChevronLeft, FileCode2 } from "lucide-react";
 import { ShelvesSkeleton } from "./bar";
 import { readEntryPoints, setMainEntryPoint } from "@/lib/entry-points";
+import { useHighlightedCode } from "@/hooks/use-highlighted-code";
 import { FileView, fnStatus, type Bridge, type Formal, type FormalFn, type FormalTheorem } from "@/desktop/src/swarm-panel";
 
 const support = (f: string) => /(^|\/)(libraries|interfaces|types|utils)\//.test(f) || /\/I[A-Z]\w*\.sol$/.test(f);
@@ -67,13 +68,19 @@ export function CoverageCard({ contract, theorems, proved, notYet, opaque, class
 /** A function as a card: its name, where it stands, its kind, its theorems, and the first lines of its Solidity. */
 /** A theorem: checked or not, where it lives, and its first lines (`full`: all of it, wrapped). */
 export function TheoremCard({ t, onOpen, full = false, className = "w-[78%] max-w-[300px] shrink-0 snap-start" }: { t: FormalTheorem; onOpen?: () => void; full?: boolean; className?: string }) {
+	// Lean, coloured as the code viewer colours it.
+	const lines = useHighlightedCode(full ? t.text.trimEnd() : t.text.split("\n").slice(0, 4).join("\n"), "lean");
 	return (
 		<button type="button" onClick={onOpen} className={`flex flex-col rounded-2xl border bg-card p-3.5 text-left shadow-card active:bg-muted/40 ${className}`}>
 			<span className={`text-[12px] font-medium ${t.sorry ? TONE.sorry : TONE.proved}`}>{t.sorry ? "Has sorry" : "Checked"}</span>
 			<span className="mt-1 truncate font-mono text-[14px] font-medium">{t.name}</span>
 			<span className="truncate font-mono text-[11px] text-muted-foreground">{t.file.split("/").pop()}:{t.line}</span>
 			<pre className={`mt-3 overflow-hidden rounded-lg bg-muted/60 px-2 py-1.5 font-mono text-[10.5px] leading-[1.45] text-muted-foreground ${full ? "whitespace-pre-wrap break-words" : "h-[60px]"}`}>
-				{full ? t.text.trimEnd() : t.text.split("\n").slice(0, 4).join("\n")}
+				{lines.map((line, i) => (
+					<span key={i} className="block">
+						{line}
+					</span>
+				))}
 			</pre>
 		</button>
 	);

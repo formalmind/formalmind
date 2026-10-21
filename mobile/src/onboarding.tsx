@@ -1,10 +1,11 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import { Plus } from "lucide-react";
 import { HomeEmpty } from "@/components/home-empty";
 import { fnStatus, type Formal } from "@/desktop/src/swarm-panel";
 import { FindingCard } from "./bugs";
 import { MacCardView } from "./home";
 import { CoverageCard, FnCard } from "./proofs";
+import { useSwipe } from "./swipe";
 import formal from "./fixtures/formal-asyncswap.json";
 
 const KEY = "fm:mobile-intro";
@@ -111,21 +112,19 @@ const PAGES: Page[] = [
 /** The introduction: what Formal Mind is and what the phone does, a page at a time (swipe or Continue). */
 export function Onboarding({ onDone }: { onDone: () => void }) {
 	const [i, setI] = useState(0);
-	const start = useRef<number | null>(null);
 	const last = i === PAGES.length - 1;
 	const next = () => (last ? onDone() : setI(i + 1));
 	const page = PAGES[i];
+	const swipe = useSwipe((dir) => {
+		if (dir === "left" && !last) setI(i + 1);
+		if (dir === "right" && i > 0) setI(i - 1);
+	});
 	// Each page starts in place, whatever the last one scrolled.
 	useEffect(() => window.scrollTo(0, 0), [i]);
 	return (
 		<main
 			className="fm-safe-top fm-safe-bottom relative flex min-h-dvh flex-col overflow-x-hidden bg-[radial-gradient(ellipse_at_top,#151a24_0%,#08090b_60%)] px-6 pb-8 text-white"
-			onTouchStart={(e) => (start.current = e.touches[0].clientX)}
-			onTouchEnd={(e) => {
-				const dx = e.changedTouches[0].clientX - (start.current ?? e.changedTouches[0].clientX);
-				if (dx < -50 && !last) setI(i + 1);
-				if (dx > 50 && i > 0) setI(i - 1);
-			}}
+			{...swipe}
 		>
 			<div className="flex h-12 items-center justify-end">
 				{!last ? (
