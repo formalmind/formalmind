@@ -2,10 +2,11 @@
  *
  * The index lists each skill with a sha256 digest of the SKILL.md as served,
  * so a client can tell when one changed. Every claim below names its source:
- * the mention workflow and the swarm README in asyncswap/v2-proofs, or the
- * code under lib/ and server/routes/ in this repository. */
+ * the code under desktop/, lib/ and server/routes/ in this repository, or
+ * desktop/README.md and docs/audit-format.md. */
 
-import { GITHUB_APP, ORIGIN, PROOFS_REPO, STATUS_LINE, SWARM_DOC } from "./narrative";
+import { GITHUB_APP, ORIGIN } from "./narrative";
+import { MAC_DOWNLOAD, WINDOWS_DOWNLOAD } from "../lib/downloads";
 
 interface Skill {
   name: string;
@@ -13,59 +14,76 @@ interface Skill {
   body: string;
 }
 
-const ASK: Skill = {
-  name: "ask-formalmind",
+/* Where things stand, for the skills. */
+const STATUS =
+  "Status: early access. The app is free to download for macOS (Apple Silicon and Intel) and Windows; agents run on formal.team credits or your own Anthropic or OpenAI key.";
+
+const LOCAL_SWARM: Skill = {
+  name: "run-the-local-swarm",
   description:
-    "Talk to the Formal Mind swarm on GitHub: mention @formalmind in an issue, pull request, review or comment of a proofs repository to get an answer, a review or a change, or comment /ask <role> <question> to put a question to one role (planner, prover, reviewer, merger, rebuilder, editor, chief, assistant). Use when you have a GitHub account and want the swarm to explain, review or update a Lean 4 specification it maintains.",
-  body: `# Ask formalmind on GitHub
+    "Run the Formal Mind swarm on a Solidity repository on your own computer: download the app, add the folder, pick who pays for the model (formal.team credits, your Anthropic key or your OpenAI key), and Start. A planner, provers and a reviewer write and check Lean 4 proofs of each in-scope function and file bugs with Foundry PoCs, keeping everything in the folder (.formal/, formal/, audit/, test/) and nothing on GitHub. Use when a person wants formal proofs or an audit of their contracts, or asks how the swarm works, what it costs or how to stop and resume it.",
+  body: `# Run the local swarm
 
-> **${STATUS_LINE}**
+> **${STATUS}**
 
-The swarm lives in GitHub issues and pull requests. Today it works ${PROOFS_REPO} (the Lean 4 + Mathlib specification of asyncswap/v2); a repository onboarded through formal.team gets its own \`<owner>/<name>-proofs\` repository worked the same way. Both ways of talking to it below need a GitHub account that can comment on that repository. No Formal Mind credential is involved.
+The swarm runs in the Formal Mind desktop app, on a folder on your computer. The code, \`lake\` and \`forge\` stay on the machine; only the model calls leave it. It opens no issues or pull requests, sets no labels, comments nowhere and pushes nothing: its tools cannot run git.
 
-## 1. Mention @formalmind for the bot
+## 1. Install and add the folder
 
-Write \`@formalmind\` in an issue, a pull request, a review, or a comment on any of them. The mention workflow (\`.github/workflows/formalmind-mention.yml\`) runs two jobs:
+1. Download the app: macOS ${MAC_DOWNLOAD} (one universal build), Windows ${WINDOWS_DOWNLOAD}. It updates itself.
+2. Sign in with GitHub (the app opens the browser and comes back on its own).
+3. **Add a project → Local folder** and pick the repository. Only folders you add can be read, and nothing is uploaded.
 
-- **triage**, in seconds. It reacts 👀 to your message, then asks a model which of three modes the message is: **chat** (small talk or a question the thread already answers: it replies at once, one to three sentences), **read** (a question about the spec that needs the repository), or **toolchain** (a change: it needs Lean, Mathlib and \`lake build\`).
-- **run**, for read and toolchain. It checks out the repository, installs the Lean toolchain for toolchain mode, reads the whole thread with \`gh\`, and acts.
+The folder needs Solidity the swarm can compile with solc (it reads remappings from the repository's files) and, for proving, a Lean 4 toolchain (\`elan\`); a Lake project in the folder or in \`formal/\` is used when there is one. \`forge\` runs bug PoCs.
 
-The bot posts as **formalmind[bot]**, like a normal commenter: code in fenced blocks, blob permalinks that GitHub renders inline, inline review comments with suggestion blocks on pull requests, and pushes to the pull request branch when you ask for a change. When the run ends it reacts a second time to your message to say how it went. Phrase requests plainly: "what does \`matchAmounts_sound\` guarantee?", "review this PR", "prove the remaining case in Reduce.lean".
+## 2. Choose who pays
 
-## 2. /ask a role
+Settings → Models, one of:
 
-Comment \`/ask <role> <question>\` on any issue or pull request of the proofs repository, where role is one of \`planner\`, \`prover\`, \`reviewer\`, \`merger\`, \`rebuilder\`, \`editor\`, \`chief\` or \`assistant\`. The comment adds the label \`fm:ask-<role>\`, and the dispatcher gives that role the next turn, before any other work (asyncswap/v2-proofs/.github/formalmind/README.md, "Turns, questions and take-overs"). The role answers in one comment, removes the label, and either hands back or takes the job over when it is the better one to do it. Three answers per item per day; after that the item is parked for a human.
+- **formal.team credits**: Claude, metered per call by formal.team and listed in Billing (${ORIGIN}/billing; deposits of $10 to $1,000 through Stripe). A call is refused when the balance is empty.
+- **Your Anthropic key** (Claude) or **your OpenAI key** (GPT-5, GPT-5 mini), kept in the system keychain; the calls go straight to that provider.
 
-To reach the maintainer, write on the assistant's issue (the "Assistant notebook" in the proofs repository): the assistant picks it up and is the only role that talks to the maintainer.
+## 3. Start
 
-## 3. Read the state first
+On the folder's page, type an optional focus ("the matching engine first") and press **Start**; set a spending cap in the chat header. The swarm then:
 
-Before asking, the swarm's state is public and cheaper to read than to ask for:
+1. **Plans**, without a model: \`.formal/plan.md\` gets one item per function of the in-scope contracts (what the Foundry scripts under \`script/\` deploy or call, their bases and what they deploy), the scripts' calls first, then the functions that write storage, then views. Functions already proved come checked.
+2. **Proves**: a prover takes the next \`- [ ]\` item with the function's slice of the solc AST and its generated Lean model (\`formal/Generated/<Contract>.lean\`), writes \`formal/Refinement/Swarm/<Contract><Fn>.lean\` and runs \`lake build\`.
+3. **Checks**: no \`sorry\`, \`admit\`, \`axiom\` or \`native_decide\`, a clean build, and the Proofs page counting the function as proved. Three failures mark the item \`- [!]\`.
+4. **Reviews**: the reviewer checks the theorems and the prover's notes against the Solidity; approved items are \`- [x]\` and their notes go into \`audit/formal-mind.audit.json\`.
+5. **Files bugs**: a finding needs a Foundry PoC under \`test/\` (by convention \`test/formal/\`) that the swarm runs with \`forge test\`; it lands in \`audit/formal-mind-swarm.md\`, the audit index \`audit/README.md\` and \`audit/formal-mind.audit.json\`, and shows on the Bugs page.
 
-- MCP: ${ORIGIN}/mcp, tools \`get_swarm_state\`, \`list_open_work\`, \`get_changelog\`, \`get_role_doc\` (card at ${ORIGIN}/.well-known/mcp/server-card.json). Signed in as the person (an OAuth token, see the \`connect-formal-mind-as-mcp\` skill), ${ORIGIN}/mcp/account adds their own projects, usage and credits.
-- GitHub: open issues and pull requests carrying \`fm:*\` labels are the queue (\`fm:todo\` queued, \`fm:in-progress\` being worked, \`fm:review\` waiting for the reviewer, \`fm:approved\` waiting for the merger, \`fm:blocked\` waiting for a human). The labels are listed in ${SWARM_DOC}.
-- \`FORMAL_MIND.md\` in the proofs repository is the changelog, including what could not be proved.
+Several sessions can run side by side, in one folder or several. Messages you send while it works are answered by the assistant before the next turn and can change the plan.
+
+## 4. Stop, resume, follow
+
+- **Stop** any time, or let the cap stop it. Quitting the app pauses it (with agents working, ⌘Q keeps the app in the background until they finish). The queue (\`.formal/queue.json\`) and each job's conversation (\`.formal/jobs/\`) are saved, so **Resume** carries on mid-step and finished work is never redone. Raising the cap also resumes.
+- Network or overload errors retry three times, then pause with a Retry.
+- Follow along on the Swarm canvas (the working agent on its item, the ledger, the context meter), and on the **Proofs**, **Bugs** and **Code** tabs. Every event is logged to \`.formal/runs/<run>.jsonl\`.
+
+## 5. The report
+
+Bugs → **Generate report** writes Formal Mind's audit of the folder at the current commit, \`audit/formal-mind.audit.json\` (\`kind: "internal"\`): the swarm's findings with PoC, evidence and fix, the Proofs coverage of each contract in scope, and the reviewed properties. It costs $150 from formal.team credits, once per repository and commit; the app shows the balance before and after and asks first. See the \`read-formal-mind-results\` skill for the format.
 
 ## Edge cases
 
-- Do not write \`@fm-<role>\`: those handles are not the swarm's. Use \`/ask <role>\`.
-- \`@formalmind\` summons the chat bot; \`/ask\` reaches a swarm role. They are different workflows.
-- Only one model job runs at a time, within a budget of $5 a day; when the day's budget is spent the swarm pauses until UTC midnight, and your question waits with it.
-- Nothing you ask for is merged without a clean \`lake build\` on the exact head, and never with \`sorry\`, \`admit\` or a new axiom.
+- Commit the swarm's files yourself when you want them kept: it never commits or pushes.
+- Scope comes from the scripts under \`script/\`; a repository without deploy scripts gives the swarm little to plan.
+- The swarm reads only the code (the solc AST), not comments or commit history.
 
-Source: asyncswap/v2-proofs/.github/workflows/formalmind-mention.yml, asyncswap/v2-proofs/.github/workflows/formalmind-ask.yml, asyncswap/v2-proofs/.github/formalmind/README.md.
+Source: desktop/README.md ("Local swarm", "Formal Mind's report"), desktop/SWARM-STATES.md, desktop/src-tauri/src/swarm.rs, desktop/src/settings.tsx, server/routes/desktop/model-session/route.ts, lib/model-gateway.ts.
 `,
 };
 
 const ONBOARD: Skill = {
   name: "onboard-a-repository",
   description:
-    "Get the Formal Mind swarm working on a Solidity repository: plan it without signing in (POST /api/onboarding/plan), then, signed in with GitHub at formal.team, choose a team size and a daily budget, add prepaid credits with Stripe, install the formalmind GitHub App, and start the swarm, which creates <owner>/<name>-proofs from the Lean template and lists it for the dispatcher. Use when helping a person set up formal verification for their contracts.",
+    "Get a Solidity repository into Formal Mind: plan it without signing in (POST /api/onboarding/plan), then, signed in with GitHub, add it as a project (a local folder in the desktop app, or a remote GitHub repository on formal.team) to read its code, audits (Bugs) and theorem coverage (Proofs). Optionally set up specs: a <owner>/<name>-proofs repository where Formal Mind writes the Lean specs as commits land. Use when helping a person start with Formal Mind on their contracts.",
   body: `# Onboard a repository
 
-> **${STATUS_LINE}**
+> **${STATUS}**
 
-Onboarding is a browser flow behind GitHub sign-in, with one step open to anyone: the plan. An agent can run the plan itself and walk a person through the rest.
+A project is a repository with four tabs: **Code** (read it, with LSP navigation), **Bugs** (every audit report and finding, with status, PoC and the report's section), **Proofs** (the theorems so far, per Solidity function) and the **Swarm** that does the work. Planning is open to anyone; the rest needs a GitHub sign-in.
 
 ## 1. Plan the repository (no sign-in)
 
@@ -76,32 +94,73 @@ Content-Type: application/json
 {"repo":"owner/name"}
 \`\`\`
 
-\`repo\` may be \`owner/name\` or a github.com URL. The repository must be public and contain Solidity contracts outside tests and libraries (422 otherwise). The response is \`text/plain\`: one JSON object streamed a few characters at a time, with \`summary\` (two sentences on what the protocol does, from the code), the contracts found, and the first issues the planner would open. Read the body to the end, then parse it. Limits: five plans per hour per address (429), and a plan for a repository is cached for a week and replayed to everyone who asks (\`X-Plan-Cache: hit\`). Errors come as JSON with an \`error\` message: 404 (no public repository), 503 (GitHub rate limit), 502 (GitHub did not answer).
+\`repo\` may be \`owner/name\` or a github.com URL. The repository must be public and contain Solidity contracts outside tests and libraries (422 otherwise). The response is \`text/plain\`: one JSON object streamed a few characters at a time, with \`summary\` (two sentences on what the protocol does, from the code), the contracts found, and the first work the planner would hand out. Read the body to the end, then parse it. Limits: five plans per hour per address (429), and a plan for a repository is cached for a week and replayed to everyone who asks (\`X-Plan-Cache: hit\`). Errors come as JSON with an \`error\` message: 404 (no public repository), 503 (GitHub rate limit), 502 (GitHub did not answer).
+
+The landing page (${ORIGIN}) runs the same plan live and then goes on to sign-in.
 
 Source: server/routes/onboarding/plan/route.ts, lib/plan.ts.
 
-## 2. Sign in and set the swarm up (browser)
+## 2. Add it as a project (signed in)
 
-At ${ORIGIN}/login the person signs in with GitHub. Onboarding at ${ORIGIN}/onboarding then has six steps (components/onboarding/steps.tsx):
+**Add a project** (the home page, the sidebar's +, or the project picker) offers two ways:
 
-1. **Your plan**: the planner's first pass from step 1; continue with it or plan a different repository.
-2. **Team**: how many agents work in parallel. The protocol is the same for every team size; more agents work disjoint issues at once, and the planner and the chief are on call in every team.
-3. **Daily budget**: the swarm only starts a run when the run's whole cap fits in what is left today, and pauses until tomorrow when the budget is spent.
-4. **Credits**: model usage is paid from prepaid credits bought through Stripe Checkout, $10 to $1,000 per deposit (lib/billing.ts). The daily budget decides how fast they are spent. Metering runs against credits is planned, not live yet.
-5. **GitHub**: install the formalmind GitHub App, ${GITHUB_APP}, on the repository's owner, for all repositories, so the App can reach the new proofs repository too. The App is how the swarm works in a repository: it opens issues and pull requests, labels them, and runs its workflows there.
-6. **Start**: creates \`<owner>/<name>-proofs\` from the formalmind/lean-template repository under the same owner (an existing one is reused) and lists it in the swarm's \`projects.json\`, so the dispatcher sweeps it on its next half-hourly pass (lib/proofs-repo.ts). Start fails with a message naming the step when the App is not installed, when GitHub refuses to create the repository, or when listing it fails. The same step is \`POST ${ORIGIN}/api/projects/init\` with \`{"repo":"owner/name"}\` and a \`swarm:write\` OAuth token, or the \`start_swarm\` tool on ${ORIGIN}/mcp/account; both refuse a repository that is not yet one of the account's projects (plan it first with \`plan_repository\`).
+- **Local folder**, in the desktop app: the repository on disk. Everything is read locally, and the swarm runs here (the \`run-the-local-swarm\` skill).
+- **Remote repository**, on formal.team or in the app: a public GitHub repository, \`owner/name\`. Nothing else is set up: the browser keeps a shallow git copy, and the Code, Bugs and Proofs tabs read from it. Proofs compiles the Solidity in the browser (solc-js) and maps each function to its Lean coverage (formal-ast as WebAssembly). The same step is \`POST ${ORIGIN}/api/projects\` with \`{"repo":"owner/name"}\` and the person's session; 404 when the repository is private or missing.
 
-## 3. What happens next
+## 3. Set up specs (optional)
 
-The planner reads the repository and writes the first \`fm:todo\` issues in the proofs repository; provers, the reviewer and the merger work them within the budget, and every run is logged on the swarm's notebook issues. The person follows along in the swarm workspace at ${ORIGIN}/ or on GitHub, and can ask any role with \`/ask <role> <question>\` (see the \`ask-formalmind\` skill).
+A project whose specs are not being built shows **Set up specs** and **Open Proofs**. Set up specs is the hosted, commit-following part: the person chooses a daily budget, adds credits, installs the formalmind GitHub App (${GITHUB_APP}) on the owner for all repositories, and starts. That creates \`<owner>/<name>-proofs\` from the formalmind/lean-template repository under the same owner (an existing one is reused), where Formal Mind writes the Lean specification as the protocol's commits land (lib/proofs-repo.ts). Proving stays in the app, on the Proofs tab or in the desktop app.
+
+The start step is also \`POST ${ORIGIN}/api/projects/init\` with \`{"repo":"owner/name"}\` and a \`swarm:write\` OAuth token, or the \`start_swarm\` tool on ${ORIGIN}/mcp/account (the \`connect-formal-mind-as-mcp\` skill); both refuse a repository that is not yet one of the account's projects (plan it first with \`plan_repository\`), and fail with the step named when the GitHub App is not installed.
 
 ## Edge cases
 
-- Private repositories cannot be planned in step 1.
-- The swarm is one team with one budget across its projects, so a new project shares the queue with the others.
-- Steps 2 to 5 (budget, credits, the GitHub App) need the browser and a GitHub sign-in. The plan and Start are also available to an agent holding an OAuth token for the account (\`connect-formal-mind-as-mcp\` skill, ${ORIGIN}/auth.md).
+- Private repositories cannot be planned or added as remote projects; add the local folder in the desktop app instead.
+- Budget, credits and the GitHub App install need the person in the browser.
+- A remote project's tabs work without specs being set up.
 
-Source: server/routes/onboarding/*, server/routes/projects/init/route.ts, lib/proofs-repo.ts, lib/billing.ts, components/onboarding/steps.tsx.
+Source: server/routes/onboarding/*, server/routes/projects/route.ts, server/routes/projects/init/route.ts, components/projects/project-pages.tsx, lib/proofs-repo.ts, lib/billing.ts, lib/ast/.
+`,
+};
+
+const RESULTS: Skill = {
+  name: "read-formal-mind-results",
+  description:
+    "Read what Formal Mind left in a repository: the swarm's plan and progress in .formal/, Lean proofs in formal/, audit reports and findings in the formalmind.audit/v1 JSON format (audit/*.audit.json, including Formal Mind's own formal-mind.audit.json) with their Foundry PoCs under test/. Use when working in a repository where Formal Mind ran, to answer what is proved, which findings are open, or to write an audit file the Bugs page can show.",
+  body: `# Read Formal Mind's results in a repository
+
+> **${STATUS}**
+
+Formal Mind keeps its state in the repository's own files, so an agent with the checkout can read all of it.
+
+## The files
+
+| Path | What it holds |
+| --- | --- |
+| \`.formal/plan.md\` | One item per in-scope function: \`- [ ]\` to do, \`- [x]\` proved and reviewed, \`- [!]\` blocked or a bug was filed. Each line names the generated def, e.g. \`Router.matchBook\`, and where the function is. |
+| \`.formal/proofs.json\` | The proof files of each reviewed item. |
+| \`.formal/queue.json\`, \`.formal/jobs/\`, \`.formal/runs/*.jsonl\` | The swarm's queue, each job's saved conversation, and the event log of each run. |
+| \`formal/Generated/<Contract>.lean\` | The Lean model of each contract, generated from the solc AST by formal-ast. Regenerated, never hand-edited. |
+| \`formal/Refinement/…\` | Proofs about the generated defs; the swarm writes \`formal/Refinement/Swarm/<Contract><Fn>.lean\`. \`lake build\` checks them. |
+| \`audit/README.md\` | The audit index: each report, with a table \`| ID | Severity | Finding | Status | Evidence |\`. |
+| \`audit/formal-mind-swarm.md\` | The swarm's findings, each with a PoC under \`test/\` (by convention \`test/formal/\`). |
+| \`<report>.audit.json\` | One per audit report, beside it, in the format below. Formal Mind's own is \`audit/formal-mind.audit.json\`. |
+
+## The audit format (\`formalmind.audit/v1\`)
+
+One JSON file per report: \`schema\` (\`"formalmind.audit/v1"\`), \`kind\` (\`external\` for an audit firm's report, \`internal\` for Formal Mind's), \`title\`, \`auditor\`, \`date\` (\`YYYY-MM-DD\`), \`commit\`, \`repository\`, \`scope\` (paths), \`summary\`, \`source\` (the report file it was read from), and \`findings\`. An internal audit adds \`coverage\` (per contract: functions, in Lean, proved, not modeled, theorems, sorry, and a row per function) and \`properties\` (\`P-01\`…: what was proved, with each theorem's name and file).
+
+A finding: \`id\` (the report's own, \`H-01\`, \`M-2\`; \`F-01\` when it has none), \`title\`, \`severity\` (\`critical\`, \`high\`, \`medium\`, \`low\`, \`informational\`, \`gas\`), \`status\` **in the current code** (\`open\`, \`fixed\`, \`acknowledged\`, \`works as expected\`, \`rejected\`), \`reportStatus\` (what the report said), \`locations\` (\`{ file, line? }\`), \`description\` (Markdown, required), \`impact\`, \`recommendation\`, \`response\`, \`evidence\` (why this status: what changed and the test that covers it), \`tests\`, \`poc\`, \`fix\` (\`{ commit?, pr?, url? }\`) and \`page\` (in the source PDF).
+
+The Bugs page reads only these files, plus the legacy tables in \`audit/README.md\`. In the app, Bugs → **Read findings** has the auditor turn an external PDF or Markdown report into its \`.audit.json\`, checking each finding against the current code.
+
+## Answering common questions
+
+- **What is proved?** Items checked in \`.formal/plan.md\`, the \`properties\` of \`audit/formal-mind.audit.json\`, or the Proofs tab. A theorem counts only when \`lake build\` passes and it has no \`sorry\`, \`admit\` or new axiom.
+- **What is open?** Findings with \`status: "open"\` across the \`.audit.json\` files.
+- **Reproduce a bug**: \`forge test --match-path <poc>\`.
+
+Source: docs/audit-format.md, lib/audit-format.ts, desktop/README.md ("Local swarm", "Formal Mind's report").
 `,
 };
 
@@ -111,7 +170,7 @@ const CONNECT: Skill = {
     "Add Formal Mind to Claude, ChatGPT, Cursor or any remote-MCP client as a connector at formal.team/mcp/account, sign in with GitHub, and ask about or act on your own account: your projects, what the swarm spent today, your credits, the swarm's state, plan a repository, start the swarm on it. Also how an agent gets an OAuth token for the account by hand (RFC 8414 metadata, dynamic registration, PKCE, refresh, revoke). Use when a person wants their AI assistant to see or run their Formal Mind swarm.",
   body: `# Connect Formal Mind as an MCP connector
 
-> **${STATUS_LINE}**
+> **${STATUS}**
 
 Formal Mind runs an OAuth 2.0 authorization server at ${ORIGIN} and an account MCP server at ${ORIGIN}/mcp/account. A connector added in an MCP client discovers the authorization server by itself, registers, sends you to sign in with GitHub, shows a consent page naming the client and the scopes, and from then on holds a token for your account (an hour at a time, renewed until you revoke it). Nothing here changes how you sign in to formal.team; the public swarm record stays readable without any of this at ${ORIGIN}/mcp.
 
@@ -124,9 +183,9 @@ Formal Mind runs an OAuth 2.0 authorization server at ${ORIGIN} and an account M
 
 ## 2. Ask
 
-With \`swarm:read\`: "what are my projects", "what did my swarm spend today", "how many credits do I have", "what is the swarm working on". With \`swarm:write\`: "plan owner/repo for me" (the planner reads the repository and drafts the first issues; the repository becomes one of your projects), then "start the swarm on owner/repo" (creates \`owner/repo-proofs\` from the Lean template and lists it for the dispatcher; it needs the formalmind GitHub App installed on the owner, ${GITHUB_APP}).
+With \`swarm:read\`: "what are my projects", "what did my swarm spend today", "how many credits do I have", "what is the swarm working on". With \`swarm:write\`: "plan owner/repo for me" (the planner reads the repository and drafts the first issues; the repository becomes one of your projects), then "set up specs for owner/repo" (\`start_swarm\` creates \`owner/repo-proofs\` from the Lean template, where Formal Mind writes the specs as commits land; it needs the formalmind GitHub App installed on the owner, ${GITHUB_APP}). The local swarm in the desktop app needs none of this (the \`run-the-local-swarm\` skill).
 
-The tools: \`my_projects\`, \`my_usage\`, \`my_credits\`, \`swarm_state\` (swarm:read); \`plan_repository\`, \`start_swarm\` (swarm:write). Metering credits against the swarm's model calls is planned, so \`my_credits\` reports deposits, and \`my_usage\` reports the swarm's ledger.
+The tools: \`my_projects\`, \`my_usage\`, \`my_credits\`, \`swarm_state\` (swarm:read); \`plan_repository\`, \`start_swarm\` (swarm:write). Model calls on formal.team credits are metered, so \`my_credits\` reports the balance with every deposit and spend, and \`my_usage\` the cost lines.
 
 ## 3. By hand (any agent)
 
@@ -147,12 +206,13 @@ Source: worker/oauth.ts, lib/oauth.ts, lib/auth.ts, worker/account-mcp.ts, worke
 `,
 };
 
-const SKILLS: Skill[] = [ASK, ONBOARD, CONNECT];
+const SKILLS: Skill[] = [LOCAL_SWARM, ONBOARD, RESULTS, CONNECT];
 
+/* The description is quoted: it holds colons, which YAML would otherwise read as keys. */
 function skillMd(s: Skill): string {
   return `---
 name: ${s.name}
-description: ${s.description}
+description: ${JSON.stringify(s.description)}
 license: MIT
 metadata:
   publisher: formalmind

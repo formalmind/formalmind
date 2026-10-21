@@ -73,7 +73,7 @@ export const ACCOUNT_TOOLS: AccountTool[] = [
   {
     name: "my_credits",
     title: "My credits",
-    description: "The account's prepaid credits: the balance in cents and USD and each deposit (Stripe Checkout). Metering the swarm's model calls against credits is planned, not live; the balance is what was deposited. Needs swarm:read.",
+    description: "The account's prepaid credits: the balance in cents and USD and every entry, deposits (Stripe Checkout) and the metered spend of model calls made on credits. Needs swarm:read.",
     inputSchema: { type: "object", properties: {} },
     annotations: READ,
     scope: "swarm:read",

@@ -97,7 +97,7 @@ export const AGENT_LINKS_MARKDOWN = `## For agents
 
 - [llms.txt](${ORIGIN}/llms.txt) and [llms-full.txt](${ORIGIN}/llms-full.txt): orientation and the full account of the swarm
 - [MCP server card](${ORIGIN}/.well-known/mcp/server-card.json): read-only MCP server at ${ORIGIN}/mcp (swarm state, open work, changelog, role documentation) and the account server at ${ORIGIN}/mcp/account (your projects, usage, credits, swarm state, plan and start; OAuth 2.0)
-- [Agent Skills](${ORIGIN}/.well-known/agent-skills/index.json): how to ask the swarm on GitHub, how to onboard a repository, and how to connect Formal Mind as an MCP connector
+- [Agent Skills](${ORIGIN}/.well-known/agent-skills/index.json): how to run the local swarm, how to onboard a repository, how to read Formal Mind's results in a repository, and how to connect Formal Mind as an MCP connector
 - [API catalog](${ORIGIN}/.well-known/api-catalog): the open plan endpoint, the two MCP servers and the token-capable account routes
 - [auth.md](${ORIGIN}/auth.md): GitHub sign-in for people; the OAuth 2.0 authorization server, scopes and tokens for agents`;
 
@@ -115,8 +115,9 @@ ${SHORT} The full account, roles, labels and safety rails included, is in [llms-
 
 - [MCP server card](${ORIGIN}/.well-known/mcp/server-card.json): read-only tools at ${ORIGIN}/mcp (Streamable HTTP, no auth): the swarm's live state, its open work, the proofs changelog and each role's instructions; and the account server at ${ORIGIN}/mcp/account (OAuth 2.0, GitHub sign-in): my_projects, my_usage, my_credits, swarm_state, plan_repository, start_swarm
 - [Skill: connect-formal-mind-as-mcp](${ORIGIN}/.well-known/agent-skills/connect-formal-mind-as-mcp/SKILL.md): add ${ORIGIN}/mcp/account to Claude, ChatGPT or Cursor and act on your own account
-- [Skill: ask-formalmind](${ORIGIN}/.well-known/agent-skills/ask-formalmind/SKILL.md): mention @formalmind or /ask a role in an issue or pull request of a proofs repository
-- [Skill: onboard-a-repository](${ORIGIN}/.well-known/agent-skills/onboard-a-repository/SKILL.md): plan a repository, set a budget, add credits, install the GitHub App, start the swarm
+- [Skill: run-the-local-swarm](${ORIGIN}/.well-known/agent-skills/run-the-local-swarm/SKILL.md): run the swarm on a folder in the desktop app; proofs, bugs and state stay in the folder
+- [Skill: onboard-a-repository](${ORIGIN}/.well-known/agent-skills/onboard-a-repository/SKILL.md): plan a repository, add it as a project, optionally set up specs from its commits
+- [Skill: read-formal-mind-results](${ORIGIN}/.well-known/agent-skills/read-formal-mind-results/SKILL.md): the files Formal Mind keeps in a repository and the formalmind.audit/v1 format
 - [auth.md](${ORIGIN}/auth.md): GitHub sign-in for people; OAuth 2.0 (RFC 8414 metadata, dynamic registration, PKCE, refresh, revocation) for agents acting on an account
 
 ## The swarm
@@ -158,9 +159,9 @@ ${HOW_IT_WORKS}
 
 - **Read the swarm.** The MCP server at ${ORIGIN}/mcp (Streamable HTTP, JSON responses, no authentication) has four read-only tools: \`get_swarm_state\` (projects, open work with labels, merged pull requests, spend today, the chief's and the assistant's latest notes, the rebuild cycle, recent runs), \`list_open_work\` (open issues and pull requests carrying an fm: label, optionally filtered by label), \`get_changelog\` (the latest entries of FORMAL_MIND.md) and \`get_role_doc\` (a role's instructions). Everything they return is also public on GitHub.
 - **Plan a repository.** \`POST ${ORIGIN}/api/onboarding/plan\` with body \`{"repo":"owner/name"}\` and no credentials. The response is \`text/plain\`: a JSON object streamed a few characters at a time, with the protocol summary, the contracts found, and the first issues the planner would open. Limits: public repositories with Solidity contracts outside tests and libraries; five plans per hour per address (429 after that); a plan is cached for a week and replayed (header \`X-Plan-Cache: hit\`).
-- **Talk to the swarm on GitHub.** In a proofs repository the swarm works, mention \`@formalmind\` for the bot, or comment \`/ask <role> <question>\` to put a question to one role. This needs a GitHub account; the skill at ${ORIGIN}/.well-known/agent-skills/ask-formalmind/SKILL.md says how replies and reactions work.
+- **Run the swarm locally.** The desktop app runs the swarm on a folder on the person's computer, with nothing on GitHub; the skill at ${ORIGIN}/.well-known/agent-skills/run-the-local-swarm/SKILL.md says how, and ${ORIGIN}/.well-known/agent-skills/read-formal-mind-results/SKILL.md how to read what it leaves in the repository.
 - **Act on a person's account.** With an OAuth access token from ${ORIGIN} (the person signs in with GitHub and allows the client on a consent page), the account MCP server at ${ORIGIN}/mcp/account and the API routes listed in ${ORIGIN}/auth.md give the account's projects, usage, credits and swarm state (\`swarm:read\`), and plan a repository or start the swarm on it (\`swarm:write\`). The section below says how.
-- **Onboard a repository for a person.** Planning and Start can be done with a \`swarm:write\` token (\`plan_repository\`, \`start_swarm\`, or \`POST /api/projects/init\`); setting a budget, buying credits and installing the GitHub App are browser flows behind GitHub sign-in. The skill at ${ORIGIN}/.well-known/agent-skills/onboard-a-repository/SKILL.md walks a person through them.
+- **Onboard a repository for a person.** Planning and Start can be done with a \`swarm:write\` token (\`plan_repository\`, \`start_swarm\`, or \`POST /api/projects/init\`); adding a project, setting a budget, buying credits and installing the GitHub App are browser flows behind GitHub sign-in. The skill at ${ORIGIN}/.well-known/agent-skills/onboard-a-repository/SKILL.md walks a person through them.
 
 ${AGENT_ACCESS}
 
@@ -327,7 +328,7 @@ function apiCatalog(): Response {
       {
         anchor: `${ORIGIN}/api/onboarding/plan`,
         "service-doc": [
-          { href: `${ORIGIN}/.well-known/agent-skills/onboard-a-repository/SKILL.md`, type: "text/markdown", title: "POST a repository, receive the planner's first issues as a text stream" },
+          { href: `${ORIGIN}/.well-known/agent-skills/onboard-a-repository/SKILL.md`, type: "text/markdown", title: "POST a repository, receive the planner's plan as a text stream" },
         ],
       },
     ],

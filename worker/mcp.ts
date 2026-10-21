@@ -155,7 +155,7 @@ function buildServer(): Server {
         SHORT +
         " " +
         STATUS_LINE +
-        " These tools read the swarm's public record on GitHub (issues, labels, notebook comments and FORMAL_MIND.md); they change nothing. To ask the swarm something or onboard a repository, read the skills at " +
+        " These tools read the swarm's public record on GitHub (issues, labels, notebook comments and FORMAL_MIND.md); they change nothing. To run the swarm locally, onboard a repository or read Formal Mind's files in one, read the skills at " +
         ORIGIN +
         "/.well-known/agent-skills/index.json.",
     },

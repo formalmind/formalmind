@@ -82,14 +82,25 @@ function aiCatalog(): Response {
         ],
       },
       {
-        identifier: id("skill", "ask-formalmind"),
-        displayName: "Skill: ask formalmind on GitHub",
-        description: "How to mention @formalmind or /ask a role in an issue or pull request of a proofs repository, what the triage tiers do, and how replies and reactions work.",
+        identifier: id("skill", "run-the-local-swarm"),
+        displayName: "Skill: run the local swarm",
+        description: "Download the desktop app, add a Solidity folder, choose credits or your own key, and Start: the swarm proves each in-scope function in Lean 4 and files bugs with Foundry PoCs, keeping everything in the folder and nothing on GitHub.",
         type: "text/markdown",
-        url: `${ORIGIN}/.well-known/agent-skills/ask-formalmind/SKILL.md`,
+        url: `${ORIGIN}/.well-known/agent-skills/run-the-local-swarm/SKILL.md`,
         representativeQueries: [
-          "how do I ask the formalmind bot a question about the spec",
-          "how do I ask the prover to pick up an issue",
+          "how do I get formal proofs for my Solidity repository",
+          "how do I stop and resume the formal mind swarm",
+        ],
+      },
+      {
+        identifier: id("skill", "read-formal-mind-results"),
+        displayName: "Skill: read Formal Mind's results",
+        description: "The files Formal Mind keeps in a repository (.formal/, formal/, audit/) and the formalmind.audit/v1 format for audit reports and findings.",
+        type: "text/markdown",
+        url: `${ORIGIN}/.well-known/agent-skills/read-formal-mind-results/SKILL.md`,
+        representativeQueries: [
+          "which audit findings are still open in this repository",
+          "what has formal mind proved about this contract",
         ],
       },
       {
@@ -106,12 +117,12 @@ function aiCatalog(): Response {
       {
         identifier: id("skill", "onboard-a-repository"),
         displayName: "Skill: onboard a repository",
-        description: "Plan a Solidity repository, set a daily budget, add prepaid credits, install the GitHub App, and start the swarm on it.",
+        description: "Plan a Solidity repository, add it as a project (a local folder or a remote repository) with its Code, Bugs and Proofs tabs, and optionally set up specs built from its commits.",
         type: "text/markdown",
         url: `${ORIGIN}/.well-known/agent-skills/onboard-a-repository/SKILL.md`,
         representativeQueries: [
-          "how do I get formal proofs for my Solidity repository",
-          "what does Formal Mind cost and how is the budget enforced",
+          "how do I add my repository to Formal Mind",
+          "what does Formal Mind cost",
         ],
       },
       {
