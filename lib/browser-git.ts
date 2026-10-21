@@ -89,15 +89,21 @@ export async function cachedTree(repo: string): Promise<RepoTree | null> {
 	return { files: files.slice(0, LIMIT), truncated: files.length > LIMIT };
 }
 
-/** One file of the last fetched commit as text, or null when it isn't in the browser's copy. */
-export async function cachedFile(repo: string, path: string): Promise<string | null> {
+/** One file of the last fetched commit as bytes (a PDF, an image), or null when it isn't in the browser's copy. */
+export async function cachedBytes(repo: string, path: string): Promise<Uint8Array | null> {
 	const k = await load();
 	const oid = await latest(k, repo);
 	if (!oid) return null;
 	try {
 		const { blob } = await k.git.readBlob({ fs: k.fs, dir: dirOf(repo), oid, filepath: path });
-		return new TextDecoder().decode(blob);
+		return blob;
 	} catch {
 		return null;
 	}
+}
+
+/** One file of the last fetched commit as text, or null when it isn't in the browser's copy. */
+export async function cachedFile(repo: string, path: string): Promise<string | null> {
+	const bytes = await cachedBytes(repo, path);
+	return bytes ? new TextDecoder().decode(bytes) : null;
 }
