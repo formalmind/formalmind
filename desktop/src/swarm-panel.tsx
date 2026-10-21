@@ -503,7 +503,10 @@ function BugsView({ folder, files, invoke, bugs, openBug, setOpenBug, withPoc, o
 		// eslint-disable-next-line react-hooks/exhaustive-deps
 	}, [folder, pickedReport, picked?.id, picked?.title, invoke]);
 	const counts = findings.reduce<Record<string, number>>((m, f) => ({ ...m, [f.status]: (m[f.status] ?? 0) + 1 }), {});
-	const byReport = [...new Set(findings.map((f) => f.report))].map((r) => ({ report: r, items: findings.filter((f) => f.report === r) }));
+	// The status chips filter the list (several at once; none selected shows every finding).
+	const [only, setOnly] = useState<Set<AuditFinding["status"]>>(new Set());
+	const shownFindings = only.size ? findings.filter((f) => only.has(f.status)) : findings;
+	const byReport = [...new Set(shownFindings.map((f) => f.report))].map((r) => ({ report: r, items: shownFindings.filter((f) => f.report === r) }));
 	const reportPath = openBug?.startsWith("report:") ? openBug.slice(7) : null;
 	const [report, setReport] = useState<{ path: string; text: string } | null>(null);
 	// What's open: a picked report or finding; with nothing picked, the first report, else the first finding.
@@ -563,14 +566,36 @@ function BugsView({ folder, files, invoke, bugs, openBug, setOpenBug, withPoc, o
 				</ul>
 				{findings.length ? (
 					<>
-						<p className={`${head} mt-3`}>Audit findings · {findings.length}</p>
+						<p className={`${head} mt-3`}>Audit findings · {only.size ? `${shownFindings.length} of ${findings.length}` : findings.length}</p>
 						<div className="flex flex-wrap gap-1 px-2 pb-2">
-							{(Object.keys(STATUS) as AuditFinding["status"][]).filter((k) => counts[k]).map((k) => (
-								<span key={k} className={`inline-flex items-center gap-1 rounded-md border px-1.5 py-0.5 text-[11px] ${STATUS[k].chip}`}>
-									<span className={`size-1.5 rounded-full ${STATUS[k].dot}`} />
-									{counts[k]} {STATUS[k].label.toLowerCase()}
-								</span>
-							))}
+							{(Object.keys(STATUS) as AuditFinding["status"][]).filter((k) => counts[k]).map((k) => {
+								const on = only.has(k);
+								return (
+									<button
+										key={k}
+										type="button"
+										aria-pressed={on}
+										title={on ? "Show every finding" : `Show only ${STATUS[k].label.toLowerCase()}`}
+										onClick={() =>
+											setOnly((cur) => {
+												const next = new Set(cur);
+												if (next.has(k)) next.delete(k);
+												else next.add(k);
+												return next;
+											})
+										}
+										className={`inline-flex items-center gap-1 rounded-md border px-1.5 py-0.5 text-[11px] transition-opacity ${STATUS[k].chip} ${only.size && !on ? "opacity-45 hover:opacity-80" : ""} ${on ? "ring-1 ring-current" : ""}`}
+									>
+										<span className={`size-1.5 rounded-full ${STATUS[k].dot}`} />
+										{counts[k]} {STATUS[k].label.toLowerCase()}
+									</button>
+								);
+							})}
+							{only.size ? (
+								<button type="button" onClick={() => setOnly(new Set())} className="rounded-md px-1.5 py-0.5 text-[11px] text-muted-foreground hover:bg-muted hover:text-foreground">
+									Clear
+								</button>
+							) : null}
 						</div>
 						{byReport.map((g) => (
 							<div key={g.report} className="mb-2">
