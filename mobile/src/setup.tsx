@@ -154,9 +154,14 @@ export function Setup({ user, onDone }: { user: SessionData["user"]; onDone: () 
 			{step === 0 ? (
 				<>
 					<div className="fm-rise grid flex-1 place-items-center">
-						<span className="grid size-24 place-items-center overflow-hidden rounded-full border border-white/15 bg-white/10 font-display text-4xl">
-							{user.picture ? <img src={user.picture} alt="" className="size-full object-cover" /> : handle.slice(0, 1).toUpperCase()}
-						</span>
+						{/* Your GitHub picture; without one, the app's icon on its own. */}
+						{user.picture ? (
+							<span className="grid size-24 place-items-center overflow-hidden rounded-full border border-white/15 bg-white/10">
+								<img src={user.picture} alt="" className="size-full object-cover" />
+							</span>
+						) : (
+							<img src="/onboarding/icon.png" alt="Formal Mind" className="size-[148px] drop-shadow-[0_18px_40px_rgb(0_0_0/0.6)]" />
+						)}
 					</div>
 					<Headline muted={`Welcome, @${handle}.`} strong="Let’s prove your contracts." body="A minute of setup: what the swarm does, how far your proofs go, and where your first project starts." />
 					<button type="button" onClick={next} className={`${primary} mt-10`}>Continue</button>
