@@ -2476,7 +2476,7 @@ dependencies = [
 
 [[package]]
 name = "formalmind-desktop"
-version = "0.1.27"
+version = "0.1.28"
 dependencies = [
  "formal-ast",
  "keyring",

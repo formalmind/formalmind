@@ -1,6 +1,6 @@
 [package]
 name = "formalmind-desktop"
-version = "0.1.27"
+version = "0.1.28"
 description = "Formal Mind desktop app"
 edition = "2021"
 
