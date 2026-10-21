@@ -677,6 +677,12 @@ const THEME: &str = include_str!("../report-template/formal-mind-theme.yml");
 /// The brand's lockups: light text for the black cover, dark text for the running header.
 const LOGO_LIGHT: &str = include_str!("../report-template/formal-mind-lockup-light.svg");
 const LOGO_DARK: &str = include_str!("../report-template/formal-mind-lockup-dark.svg");
+/// Inter for the report's text (OFL 1.1; its licence travels with it).
+const FONTS: [(&str, &[u8]); 3] = [
+    ("Inter-Regular.ttf", include_bytes!("../report-template/fonts/Inter-Regular.ttf")),
+    ("Inter-SemiBold.ttf", include_bytes!("../report-template/fonts/Inter-SemiBold.ttf")),
+    ("LICENSE.txt", include_bytes!("../report-template/fonts/LICENSE.txt")),
+];
 /// The internal audit's files in the audit folder: the standard file, and the PDF beside it.
 pub const JSON: &str = "formal-mind.audit.json";
 pub const PDF: &str = "formal-mind.pdf";
@@ -749,7 +755,7 @@ pub fn render(root: &Path, doc: &Value, src_dir: &str) -> String {
     let lean = crate::swarm_ctx::lake_dir(root).and_then(|d| std::fs::read_to_string(d.join("lean-toolchain")).ok()).map(|t| t.trim().rsplit(':').next().unwrap_or("").trim_start_matches('v').to_string());
 
     let mut a = format!(
-        "= Security Assessment & Formal Verification: {project}\nFormal Mind\n:doctype: book\n:title-page:\n:toc:\n:toclevels: 3\n:sectnums:\n:sectnumlevels: 3\n:!chapter-signifier:\n:appendix-caption: Appendix\n:revnumber: {short}\n:revdate: {}\n:revremark: Security assessment\n:source-highlighter: pygments\n:pygments-style: default\n:pygments-linenums-mode: inline\n:pdf-themesdir: {{docdir}}\n:pdf-theme: formal-mind\n:title-logo-image: image:formal-mind-lockup-light.svg[pdfwidth=2.6in]\n:src-dir: {src_dir}\n",
+        "= Security Assessment & Formal Verification: {project}\nFormal Mind\n:doctype: book\n:title-page:\n:toc:\n:toclevels: 3\n:sectnums:\n:sectnumlevels: 3\n:!chapter-signifier:\n:appendix-caption: Appendix\n:revnumber: {short}\n:revdate: {}\n:revremark: Security assessment\n:source-highlighter: pygments\n:pygments-style: default\n:pygments-linenums-mode: inline\n:pdf-themesdir: {{docdir}}\n:pdf-fontsdir: {{docdir}}/fonts;GEM_FONTS_DIR\n:pdf-theme: formal-mind\n:title-logo-image: image:formal-mind-lockup-light.svg[pdfwidth=2.6in]\n:src-dir: {src_dir}\n",
         s(doc, "date")
     );
     if let (Some(r), Some(c)) = (repo, commit) {
@@ -1101,6 +1107,10 @@ pub fn generate(root: &Path, dirs: &[String]) -> Result<Generated, String> {
     std::fs::write(out_dir.join("formal-mind-theme.yml"), THEME).map_err(|e| e.to_string())?;
     std::fs::write(out_dir.join("formal-mind-lockup-light.svg"), LOGO_LIGHT).map_err(|e| e.to_string())?;
     std::fs::write(out_dir.join("formal-mind-lockup-dark.svg"), LOGO_DARK).map_err(|e| e.to_string())?;
+    std::fs::create_dir_all(out_dir.join("fonts")).map_err(|e| e.to_string())?;
+    for (name, bytes) in FONTS {
+        std::fs::write(out_dir.join("fonts").join(name), bytes).map_err(|e| e.to_string())?;
+    }
 
     let rel = |p: &Path| p.strip_prefix(root).unwrap_or(p).to_string_lossy().replace('\\', "/");
     let mut out = Generated { json: rel(&json_path), adoc: rel(&adoc), pdf: None, note: None, findings: doc["findings"].as_array().map_or(0, Vec::len), warnings: problems };
@@ -1237,6 +1247,10 @@ mod tests {
         std::fs::write(out.join("formal-mind-theme.yml"), THEME).unwrap();
         std::fs::write(out.join("formal-mind-lockup-light.svg"), LOGO_LIGHT).unwrap();
         std::fs::write(out.join("formal-mind-lockup-dark.svg"), LOGO_DARK).unwrap();
+        std::fs::create_dir_all(out.join("fonts")).unwrap();
+        for (name, bytes) in FONTS {
+            std::fs::write(out.join("fonts").join(name), bytes).unwrap();
+        }
     }
 
     /// The report for a real folder: `FM_FOLDER=… cargo test -- --ignored report_of_a_folder --nocapture`.
