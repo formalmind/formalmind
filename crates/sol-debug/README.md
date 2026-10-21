@@ -73,7 +73,7 @@ Only the test is traced by default; add `--trace-setup` to step through `setUp()
 
 The common forge cheatcodes work: `prank` / `startPrank`, `deal`, `etch`, `getCode` / `deployCodeTo`, `warp`,
 `roll`, `addr`, `sign`, `label`, `assume`, `expectRevert` and the `assert*` family. `vm.ffi` only runs `hnc` (to
-compile Huff). Fuzz tests run once, with zeroed arguments.
+compile Huff).
 
 ### A real protocol
 
