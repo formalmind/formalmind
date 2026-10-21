@@ -756,8 +756,8 @@ function BugsView({ folder, files, invoke, bugs, openBug, setOpenBug, withPoc, o
 export type Mode = "code" | "chat" | "swarm" | "roadmap" | "audit" | "bugs" | "debug";
 
 const MODES: { id: Mode; label: string; icon: typeof Code2 }[] = [
-	{ id: "swarm", label: "Swarm", icon: Network },
 	{ id: "code", label: "Code", icon: Code2 },
+	{ id: "swarm", label: "Swarm", icon: Network },
 	{ id: "audit", label: "Proofs", icon: ScanSearch },
 	{ id: "bugs", label: "Bugs", icon: Bug },
 ];
