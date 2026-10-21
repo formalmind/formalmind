@@ -1,6 +1,6 @@
 [package]
 name = "formalmind-desktop"
-version = "0.1.15"
+version = "0.1.39"
 description = "Formal Mind desktop app"
 edition = "2021"
 
@@ -28,6 +28,7 @@ revm = { version = "43", default-features = false, features = ["std"] }
 regex = "1"
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
 tokio = { version = "1", features = ["process", "time"] }
+portable-pty = "0.9"
 
 [dev-dependencies]
 tokio = { version = "1", features = ["macros", "rt"] }

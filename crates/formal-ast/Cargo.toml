@@ -18,7 +18,8 @@ toml = "0.8"
 tiny-keccak = { version = "2.0", features = ["keccak"] }
 
 [[bin]]
-name = "formal-ast"
+# The CLI ships as `formalmind` (releases tagged formalmind-cli-v<version>); the crate stays formal-ast.
+name = "formalmind"
 path = "src/main.rs"
 
 [lib]

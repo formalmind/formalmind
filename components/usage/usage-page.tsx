@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import { PanelCard, PanelLabel } from "@/components/panel-card";
 import { Download, GitFork, Star } from "lucide-react";
 import { notify } from "@/lib/notifications";
 import { ROLE_COLORS } from "@/lib/swarm-roles";
@@ -31,30 +32,16 @@ const PAGE = 8;
 /** A shimmering block the exact size of what it stands in for, so nothing moves when the data lands. */
 const Bone = ({ className = "" }: { className?: string }) => <span className={`fm-shimmer inline-block rounded ${className}`} aria-hidden />;
 
-const Label = ({ children }: { children: React.ReactNode }) => (
-	<p className="font-mono text-[11px] font-medium uppercase tracking-wider text-muted-foreground">{children}</p>
-);
-
-/** As in the reference: a gray container carrying the title, and the content on a white card inside it. */
-function Card({ label, action, children, className = "", bodyClassName = "p-4" }: { label: string; action?: React.ReactNode; children: React.ReactNode; className?: string; bodyClassName?: string }) {
-	return (
-		<section className={`flex flex-col rounded-2xl border bg-muted/60 p-1.5 ${className}`}>
-			<header className="flex h-9 shrink-0 items-center justify-between gap-2 pl-2.5 pr-1">
-				<Label>{label}</Label>
-				{action}
-			</header>
-			<div className={`shadow-card flex min-h-0 flex-1 flex-col rounded-xl border bg-card ${bodyClassName}`}>{children}</div>
-		</section>
-	);
-}
+const Label = PanelLabel;
+const Card = PanelCard;
 
 /** Up or down against the previous period of the same length. */
 function Delta({ now, before }: { now: number; before: number }) {
-	if (before === 0 && now === 0) return <span className="font-mono text-xs text-muted-foreground">no change</span>;
+	if (before === 0 && now === 0) return <span className="font-mono text-[11px] text-muted-foreground">no change</span>;
 	const pct = before === 0 ? 100 : ((now - before) / before) * 100;
 	const up = pct >= 0;
 	return (
-		<span className={`rounded-md px-1.5 py-0.5 font-mono text-xs font-medium ${up ? "bg-emerald-500/10 text-emerald-700 dark:text-emerald-400" : "bg-red-500/10 text-red-700 dark:text-red-400"}`}>
+		<span className={`rounded-md px-1.5 py-0.5 font-mono text-[11px] font-medium ${up ? "bg-emerald-500/10 text-emerald-700 dark:text-emerald-400" : "bg-red-500/10 text-red-700 dark:text-red-400"}`}>
 			{up ? "↗" : "↘"} {Math.abs(pct).toFixed(1)}%
 		</span>
 	);
@@ -135,7 +122,7 @@ function TrendChart({ days }: { days: { date: string; usd: number; runs: number 
 				))}
 			</div>
 			{h && hover !== null ? (
-				<div className="shadow-pop pointer-events-none absolute top-2 z-10 rounded-xl bg-popover px-3 py-2 text-xs" style={{ left: `calc(2.5rem + ${x(hover)}% * (100% - 2.5rem) / 100%)`, transform: `translateX(${x(hover) > 70 ? "-105%" : "8px"})` }}>
+				<div className="shadow-pop pointer-events-none absolute top-2 z-10 rounded-xl bg-popover px-3 py-2 text-[11px]" style={{ left: `calc(2.5rem + ${x(hover)}% * (100% - 2.5rem) / 100%)`, transform: `translateX(${x(hover) > 70 ? "-105%" : "8px"})` }}>
 					<p className="font-medium">{h.date}</p>
 					<p className="mt-1 flex justify-between gap-4 font-mono"><span className="text-muted-foreground">spent</span>{usd(h.usd)}</p>
 					<p className="flex justify-between gap-4 font-mono"><span className="text-muted-foreground">runs</span>{h.runs}</p>
@@ -265,35 +252,35 @@ export function UsagePage() {
 			<main className="mx-auto w-full max-w-6xl space-y-4 px-6 pb-10 pt-4">
 				<div className="flex flex-wrap items-end justify-between gap-4">
 					<div>
-						<h1 className="text-2xl font-semibold tracking-tight">Usage</h1>
-						<p className="mt-1 text-sm text-muted-foreground">What the swarm spent, and on what.</p>
+						<h1 className="text-[15px] font-medium">Usage</h1>
+						<p className="mt-1 text-[13px] text-muted-foreground">What the swarm spent, and on what.</p>
 					</div>
 					<div className="flex items-center gap-2">
-						<div className="inline-flex rounded-xl bg-muted p-1 text-sm">
+						<div className="inline-flex rounded-xl bg-muted p-0.5 text-[12px]">
 							{RANGES.map((r) => (
-								<button key={r} type="button" onClick={() => setRange(r)} className={`rounded-lg px-3 py-1 ${r === range ? "shadow-card bg-background font-medium" : "text-muted-foreground hover:text-foreground"}`}>
+								<button key={r} type="button" onClick={() => setRange(r)} className={`rounded-lg px-2.5 py-0.5 ${r === range ? "shadow-card bg-background font-medium" : "text-muted-foreground hover:text-foreground"}`}>
 									{r === 7 ? "7 days" : r === 30 ? "30 days" : "90 days"}
 								</button>
 							))}
 						</div>
-						<button type="button" onClick={exportCsv} disabled={!ready || s.inRange.length === 0} className="btn-dark h-9 gap-2 px-3 text-sm disabled:opacity-50">
+						<button type="button" onClick={exportCsv} disabled={!ready || s.inRange.length === 0} className="btn-dark h-7 gap-1.5 px-2.5 text-[12px] disabled:opacity-50">
 							<Download className="size-4" /> Export CSV
 						</button>
 					</div>
 				</div>
-				{error ? <p className="text-sm text-destructive">{error}</p> : null}
+				{error ? <p className="text-[13px] text-destructive">{error}</p> : null}
 
 				<div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
 					{stats.map((st) => (
 						<section key={st.label} className="rounded-2xl border bg-muted/60 p-1.5">
 							<div className="shadow-card rounded-xl border bg-card px-4 py-3">
 								<Label>{st.label}</Label>
-								<div className="mt-2 flex h-9 items-center justify-between gap-2">
-									{ready ? <span className="font-mono text-2xl font-medium tabular-nums">{st.value}</span> : <Bone className="h-7 w-28" />}
+								<div className="mt-1.5 flex h-7 items-center justify-between gap-2">
+									{ready ? <span className="font-mono text-lg font-medium tabular-nums">{st.value}</span> : <Bone className="h-7 w-28" />}
 									{ready ? st.side : null}
 								</div>
 							</div>
-							<div className="flex h-8 items-center gap-2 px-3 text-xs text-muted-foreground">{ready ? st.foot : <Bone className="h-3 w-40" />}</div>
+							<div className="flex h-8 items-center gap-2 px-3 text-[11px] text-muted-foreground">{ready ? st.foot : <Bone className="h-3 w-40" />}</div>
 						</section>
 					))}
 				</div>
@@ -301,18 +288,18 @@ export function UsagePage() {
 				<div className="grid gap-4 md:grid-cols-[minmax(0,1fr)_18rem]">
 					<Card label="Spend trend">
 						<div className="mb-4 flex items-baseline gap-3">
-							{ready ? <span className="font-mono text-xl font-medium tabular-nums">{usd(s.total)}</span> : <Bone className="h-6 w-24" />}
-							<span className="text-xs text-muted-foreground">over {range} days</span>
+							{ready ? <span className="font-mono text-base font-medium tabular-nums">{usd(s.total)}</span> : <Bone className="h-6 w-24" />}
+							<span className="text-[11px] text-muted-foreground">over {range} days</span>
 						</div>
 						{ready ? <TrendChart days={s.days} /> : <Bone className="h-56 w-full rounded-lg" />}
-						<div className="mt-4 grid grid-cols-3 divide-x rounded-xl border text-sm">
+						<div className="mt-4 grid grid-cols-3 divide-x rounded-xl border text-[13px]">
 							{[
 								["Avg / day", usd(s.total / range)],
 								["Busiest day", s.peak.usd > 0 ? s.peak.date : "—"],
 								["All time", usd(s.allTime)],
 							].map(([k, v]) => (
 								<div key={k} className="px-4 py-2.5">
-									<p className="text-xs text-muted-foreground">{k}</p>
+									<p className="text-[11px] text-muted-foreground">{k}</p>
 									<p className="mt-0.5 h-5 font-mono tabular-nums">{ready ? v : <Bone className="h-4 w-20" />}</p>
 								</div>
 							))}
@@ -335,14 +322,14 @@ export function UsagePage() {
 								<span className={`flex-1 rounded-full ${ready ? "bg-muted" : "fm-shimmer"}`} />
 							)}
 						</div>
-						<ul className="mt-4 space-y-0.5 text-sm">
+						<ul className="mt-3 text-[13px]">
 							{ready
 								? s.byRole.map(([k, v]) => (
-										<li key={k} className="flex h-9 items-center gap-2 border-b last:border-0">
+										<li key={k} className="flex h-8 items-center gap-2 border-b last:border-0">
 											<span className="size-2 rounded-sm" style={{ background: roleColor(k) }} />
 											<span className="flex-1 capitalize">{k}</span>
 											<span className="font-mono tabular-nums">{usd(v)}</span>
-											<span className="w-10 text-right font-mono text-xs text-muted-foreground">{s.total ? Math.round((v / s.total) * 100) : 0}%</span>
+											<span className="w-10 text-right font-mono text-[11px] text-muted-foreground">{s.total ? Math.round((v / s.total) * 100) : 0}%</span>
 										</li>
 									))
 								: Array.from({ length: 5 }, (_, i) => (
@@ -361,7 +348,7 @@ export function UsagePage() {
 								value={query}
 								onChange={(e) => setQuery(e.target.value)}
 								placeholder="Search runs…"
-								className="h-7 w-48 rounded-lg border bg-transparent px-2.5 text-xs outline-none focus:border-foreground/30"
+								className="h-7 w-48 rounded-lg border bg-transparent px-2.5 text-[11px] outline-none focus:border-foreground/30"
 							/>
 						}
 						bodyClassName="p-0 overflow-hidden"
@@ -371,13 +358,13 @@ export function UsagePage() {
 							<span>Agent · item · project</span>
 							<span className="text-right">Cost</span>
 						</div>
-						<ul className="divide-y text-sm">
+						<ul className="divide-y text-[13px]">
 							{ready
 								? shown.map((c, i) => (
 										<li key={`${c.createdAt}-${i}`} className="grid h-11 grid-cols-[8.5rem_1fr_5rem] items-center gap-4 px-4">
-											<span className="font-mono text-xs text-muted-foreground tabular-nums">{localTime(c.createdAt)}</span>
+											<span className="font-mono text-[11px] text-muted-foreground tabular-nums">{localTime(c.createdAt)}</span>
 											<span className="flex min-w-0 items-center gap-2 truncate">
-												<span className="inline-flex shrink-0 items-center gap-1.5 rounded-full bg-muted px-2 py-0.5 text-xs capitalize">
+												<span className="inline-flex shrink-0 items-center gap-1.5 rounded-full bg-muted px-2 py-0.5 text-[11px] capitalize">
 													<span className="size-1.5 rounded-full" style={{ background: roleColor(c.role) }} />
 													{c.role}
 												</span>
@@ -392,7 +379,7 @@ export function UsagePage() {
 									))}
 							{ready && shown.length === 0 ? <li className="flex h-11 items-center px-4 text-muted-foreground">{query ? "No runs match." : "No runs in this range."}</li> : null}
 						</ul>
-						<div className="flex h-12 items-center justify-between border-t px-4 text-xs text-muted-foreground">
+						<div className="flex h-12 items-center justify-between border-t px-4 text-[11px] text-muted-foreground">
 							<span>{ready ? `${filtered.length} runs` : ""}</span>
 							<div className="flex items-center gap-1">
 								<button type="button" disabled={page === 0} onClick={() => setPage(page - 1)} className="rounded-md border px-2 py-1 disabled:opacity-40">Previous</button>
@@ -404,14 +391,14 @@ export function UsagePage() {
 
 					<div className="space-y-4">
 						<Card label="Activity">
-							<p className="text-xs text-muted-foreground">Runs per day, last 13 weeks</p>
+							<p className="text-[11px] text-muted-foreground">Runs per day, last 13 weeks</p>
 							<div className="mt-3">{ready ? <Heatmap costs={costs ?? []} /> : <Bone className="aspect-[13/7] w-full rounded-lg" />}</div>
 						</Card>
 						<Card label="By project">
-							<ul className="space-y-0.5 text-sm">
+							<ul className="space-y-0.5 text-[13px]">
 								{ready
 									? s.byRepo.map(([k, v]) => (
-											<li key={k} className="flex h-9 items-center gap-2 border-b last:border-0">
+											<li key={k} className="flex h-8 items-center gap-2 border-b last:border-0">
 												<span className="flex-1 truncate"><RepoCard repo={k} /></span>
 												<span className="font-mono tabular-nums">{usd(v)}</span>
 											</li>
@@ -457,7 +444,7 @@ function RefCard({ repo, ref_ }: { repo: string; ref_: string }) {
 			</HoverCardTrigger>
 			<HoverCardContent align="start" className="w-80 p-4">
 				{item ? <ItemPreview item={item} repo={repo} /> : (
-					<p className="text-xs text-muted-foreground">{item === null ? `Could not load ${repo}#${number}.` : "Loading…"}</p>
+					<p className="text-[11px] text-muted-foreground">{item === null ? `Could not load ${repo}#${number}.` : "Loading…"}</p>
 				)}
 			</HoverCardContent>
 		</HoverCard>
@@ -489,16 +476,16 @@ function RepoCard({ repo }: { repo: string }) {
 			<HoverCardContent align="start" className="w-80 p-4">
 				{summary ? (
 					<div>
-						<a href={summary.owner.url} target="_blank" rel="noreferrer" className="flex items-center gap-2 text-xs text-muted-foreground hover:text-foreground">
+						<a href={summary.owner.url} target="_blank" rel="noreferrer" className="flex items-center gap-2 text-[11px] text-muted-foreground hover:text-foreground">
 							<img src={`${summary.owner.avatar}&s=48`} alt="" className="size-6 rounded-full" />
 							{summary.owner.login}
 						</a>
-						<a href={summary.url} target="_blank" rel="noreferrer" className="mt-2 block text-sm font-semibold hover:underline">
+						<a href={summary.url} target="_blank" rel="noreferrer" className="mt-2 block text-[13px] font-semibold hover:underline">
 							{summary.name}
 							{summary.private ? <span className="ml-2 rounded-full border px-1.5 text-[10px] font-normal text-muted-foreground">Private</span> : null}
 						</a>
-						{summary.description ? <p className="mt-1.5 text-xs leading-5 text-muted-foreground">{summary.description}</p> : null}
-						<div className="mt-3 flex items-center gap-4 border-t pt-3 text-xs text-muted-foreground">
+						{summary.description ? <p className="mt-1.5 text-[11px] leading-5 text-muted-foreground">{summary.description}</p> : null}
+						<div className="mt-3 flex items-center gap-4 border-t pt-3 text-[11px] text-muted-foreground">
 							{summary.language ? <span>{summary.language}</span> : null}
 							<span className="inline-flex items-center gap-1"><Star className="size-3" />{summary.stars}</span>
 							<span className="inline-flex items-center gap-1"><GitFork className="size-3" />{summary.forks}</span>
@@ -506,7 +493,7 @@ function RepoCard({ repo }: { repo: string }) {
 						</div>
 					</div>
 				) : (
-					<p className="text-xs text-muted-foreground">{summary === null ? `Could not load ${repo}.` : "Loading…"}</p>
+					<p className="text-[11px] text-muted-foreground">{summary === null ? `Could not load ${repo}.` : "Loading…"}</p>
 				)}
 			</HoverCardContent>
 		</HoverCard>

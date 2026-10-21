@@ -1,26 +1,34 @@
 //! Slices: what an agent gets for one unit. A few KB of Markdown cut from the source by `src`, never the AST.
 
+use crate::fs::{Disk, Files};
 use crate::graph::{CallKind, Graph, Id, Src};
 use crate::scope::{Scope, Unit};
 use std::collections::HashMap;
 use std::fmt::Write;
-use std::path::{Path, PathBuf};
+use std::path::Path;
+use std::sync::Arc;
 
 /// Source text by solc file id, read on demand.
 pub struct Sources {
-    root: PathBuf,
+    files: Arc<dyn Files>,
     paths: HashMap<Id, String>,
     text: HashMap<Id, String>,
 }
 
 impl Sources {
+    /// Sources read from a folder on disk.
     pub fn new(root: &Path, g: &Graph) -> Sources {
-        Sources { root: root.to_path_buf(), paths: g.files.values().map(|f| (f.id, f.path.clone())).collect(), text: HashMap::new() }
+        Sources::from_files(Arc::new(Disk(root.to_path_buf())), g)
+    }
+
+    /// Sources read from a project's files (`Project::files`).
+    pub fn from_files(files: Arc<dyn Files>, g: &Graph) -> Sources {
+        Sources { files, paths: g.files.values().map(|f| (f.id, f.path.clone())).collect(), text: HashMap::new() }
     }
 
     fn file(&mut self, id: Id) -> &str {
         if !self.text.contains_key(&id) {
-            let text = self.paths.get(&id).and_then(|p| std::fs::read_to_string(self.root.join(p)).ok()).unwrap_or_default();
+            let text = self.paths.get(&id).and_then(|p| self.files.read(p)).unwrap_or_default();
             self.text.insert(id, text);
         }
         &self.text[&id]
@@ -31,6 +39,15 @@ impl Sources {
         let file = self.file(src.file).as_bytes();
         let end = (src.start + src.len).min(file.len());
         String::from_utf8_lossy(&file[src.start.min(end)..end]).into_owned()
+    }
+
+    /// The code at `src` from the start of its first line, so the first line keeps its indentation.
+    pub fn lines(&mut self, src: Src) -> String {
+        let file = self.file(src.file).as_bytes();
+        let start = src.start.min(file.len());
+        let from = file[..start].iter().rposition(|b| *b == b'\n').map_or(0, |i| i + 1);
+        let from = if file[from..start].iter().all(|b| *b == b' ' || *b == b'\t') { from } else { start };
+        self.text(Src { start: from, len: src.start + src.len - from, file: src.file })
     }
 
     /// `File.sol:line`, short, for lists.

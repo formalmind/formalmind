@@ -26,6 +26,7 @@ import * as projectsInit from "@/server/routes/projects/init/route";
 import * as projectsSwarm from "@/server/routes/projects/swarm/route";
 import * as projectsTree from "@/server/routes/projects/tree/route";
 import * as projectsFile from "@/server/routes/projects/file/route";
+import * as projectsGit from "@/server/routes/projects/git/route";
 import * as swarmAgent from "@/server/routes/swarm/agent/route";
 import * as swarmChat from "@/server/routes/swarm/chat/route";
 import * as swarmState from "@/server/routes/swarm/state/route";
@@ -34,6 +35,7 @@ import * as usage from "@/server/routes/usage/route";
 import * as desktopAuthorize from "@/server/routes/desktop/authorize/route";
 import * as desktopToken from "@/server/routes/desktop/token/route";
 import * as desktopModelSession from "@/server/routes/desktop/model-session/route";
+import * as desktopReport from "@/server/routes/desktop/report/route";
 import * as githubItem from "@/server/routes/github/item/route";
 import * as githubWebhook from "@/server/routes/github/webhook/route";
 
@@ -57,6 +59,7 @@ const ROUTES: Record<string, { module: RouteModule; open?: boolean; scope?: Scop
 	"/api/desktop/authorize": { module: desktopAuthorize, open: true },
 	"/api/desktop/token": { module: desktopToken, open: true },
 	"/api/desktop/model-session": { module: desktopModelSession },
+	"/api/desktop/report": { module: desktopReport },
 	"/api/github/install-status": { module: githubInstallStatus },
 	"/api/github/item": { module: githubItem },
 	"/api/github/webhook": { module: githubWebhook, open: true },
@@ -71,6 +74,8 @@ const ROUTES: Record<string, { module: RouteModule; open?: boolean; scope?: Scop
 	"/api/projects/swarm": { module: projectsSwarm, scope: "swarm:write" },
 	"/api/projects/tree": { module: projectsTree, scope: "swarm:read" },
 	"/api/projects/file": { module: projectsFile, scope: "swarm:read" },
+	// A read-only git proxy (upload-pack only) so the web app can clone a project into the browser.
+	"/api/projects/git": { module: projectsGit, scope: "swarm:read" },
 	"/api/swarm/agent": { module: swarmAgent },
 	"/api/swarm/chat": { module: swarmChat },
 	"/api/stats": { module: stats, open: true },

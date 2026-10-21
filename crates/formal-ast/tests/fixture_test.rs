@@ -142,3 +142,45 @@ fn lean_model_type_checks() {
         Err(_) => eprintln!("skipped the Lean check: no `lean` on PATH"),
     }
 }
+
+#[test]
+fn calls_with_value_translate() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixture");
+    let (a, output) = match formal_ast::analyze_full(&root, "src/Payer.sol", None) {
+        Ok(x) => x,
+        Err(e) => return eprintln!("skipped: {e}"),
+    };
+    let model = formal_ast::lean::Gen::new(&output, &a.graph, &a.scope).generate("Model");
+    assert!(model.report.opaque.is_empty(), "{:?}", model.report.opaque);
+    // `to.call{value: msg.value}("")` → (success, returndata), not a revert.
+    assert!(model.text.contains("lowCall : Nat → Nat → List Nat → M σ (Bool × List Nat)"));
+    assert!(model.text.contains("← ext.lowCall to"), "{}", model.text);
+    // `sink.take{value: msg.value, gas: 50000}(x)`: the value is passed after the address; gas is not modelled.
+    assert!(model.text.contains("callV_ISink_take : Nat → Nat → Nat → M σ Nat"));
+
+    let dir = std::env::temp_dir().join(format!("formal-ast-payer-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(dir.join("Payer.lean"), &model.text).unwrap();
+    std::fs::copy(root.join("lean-toolchain"), dir.join("lean-toolchain")).unwrap();
+    match std::process::Command::new("lean").arg("Payer.lean").current_dir(&dir).output() {
+        Ok(out) => {
+            let text = String::from_utf8_lossy(&out.stdout).to_string() + &String::from_utf8_lossy(&out.stderr);
+            assert!(out.status.success() && !text.contains("error"), "lean rejected the model:\n{text}");
+        }
+        Err(_) => eprintln!("skipped the Lean check: no `lean` on PATH"),
+    }
+}
+
+#[test]
+fn theorem_text_stops_at_the_next_declaration() {
+    let dir = std::env::temp_dir().join(format!("formal-ast-thm-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let lean = "theorem a_ok : True := by\n  trivial\n\n/-- About `Vault.withdraw`. -/\ntheorem b_ok : True := trivial\n\nset_option maxHeartbeats 1000 in\n/-! ## Vault.deposit -/\ntheorem c_ok : True := trivial\n";
+    std::fs::write(dir.join("T.lean"), lean).unwrap();
+    let ts = formal_ast::theorems(&dir);
+    let names: Vec<&str> = ts.iter().map(|t| t.name.as_str()).collect();
+    assert_eq!(names, ["a_ok", "b_ok", "c_ok"]);
+    // A following docstring, section header or `set_option` belongs to the next declaration.
+    assert!(!ts[0].text.contains("Vault.withdraw"), "{}", ts[0].text);
+    assert!(!ts[1].text.contains("set_option") && !ts[1].text.contains("Vault.deposit"), "{}", ts[1].text);
+}

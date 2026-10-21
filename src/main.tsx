@@ -1,3 +1,4 @@
+import { reportUncaught } from "@/lib/report-error";
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import { BrowserRouter } from "react-router";
@@ -18,6 +19,8 @@ window.addEventListener("load", () => setTimeout(() => sessionStorage.removeItem
 
 // WebMCP: read-only swarm tools for an agent driving this page, when the browser offers a model context.
 registerWebMcpTools();
+
+reportUncaught();
 
 createRoot(document.getElementById("root")!).render(
 	<StrictMode>

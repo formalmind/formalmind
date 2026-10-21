@@ -6,12 +6,12 @@ import type { UIMessage } from "ai";
 import { Loader2 } from "lucide-react";
 import { SwarmChat } from "@/components/swarm/swarm-chat";
 import { SwarmWorkspace } from "@/components/swarm/swarm-workspace";
+import { NavGroup } from "@/desktop/src/swarm-panel";
 import { ChatComposer } from "@/components/chat-composer";
 import { ProjectPicker } from "@/components/projects/project-picker";
 import { useChatWithInterruptions } from "@/hooks/useChatWithInterruptions";
 import type { OpenAIModel } from "@/lib/llm";
 import { SWARM_REPO } from "@/lib/swarm-repo";
-import { SidebarTrigger } from "@/components/ui/sidebar";
 import {
 	getProjectChat,
 	newChatId,
@@ -45,22 +45,32 @@ function Loading() {
 }
 
 /** Shown for a project whose swarm has not started: it gets a proofs repository at the end of setup. */
+/**
+ * A project whose specs aren't being built yet. Formal Mind builds a repository's specs from its commits, in a proofs
+ * repository beside it (set up once); proving is done in the app, on the Proofs tab here or in the Mac app.
+ */
 function NotStarted({ repo, what }: { repo: string; what: string }) {
+	const name = repo.split("/")[1] ?? repo;
 	return (
-		<div className="flex flex-1 flex-col p-4 sm:p-6">
-			<div className="flex items-center gap-3">
-				<SidebarTrigger className="-ml-1" />
-				<h1 className="text-sm">{repo}</h1>
-			</div>
-			<div className="mt-10 max-w-md">
-				<p className="text-sm text-foreground">The swarm for {repo} hasn&apos;t started yet.</p>
-				<p className="mt-1 text-sm leading-6 text-muted-foreground">
-					Its {what} shows up here once setup is finished and the agents have a proofs repository to work in.
-				</p>
-				<Link to={`/onboarding?repo=${encodeURIComponent(repo)}`} className="mt-4 inline-flex h-9 items-center rounded-full bg-primary px-4 text-sm text-primary-foreground hover:opacity-90">
-					Finish setup
-				</Link>
-			</div>
+		// Below the tabs, centred, in the app's card.
+		<div className="flex flex-1 items-center justify-center p-6 pt-20">
+			<section className="w-full max-w-md rounded-2xl border bg-muted/60 p-1.5">
+				<h1 className="flex h-8 items-center px-2.5 font-mono text-[11px] font-medium uppercase tracking-wider text-muted-foreground">{what === "roadmap" ? "Roadmap" : "Swarm"} · {name}</h1>
+				<div className="shadow-card space-y-3 rounded-xl border bg-card p-4 text-[13px]">
+					<p className="font-medium">Specs for {name} aren&apos;t being built yet.</p>
+					<p className="leading-6 text-muted-foreground">
+						Formal Mind writes the specs as commits land, in a proofs repository kept beside {name}; its {what} shows here once that is set up. Proving them is done in the app: on the Proofs tab, or in the Mac app.
+					</p>
+					<div className="flex flex-wrap gap-2 pt-1">
+						<Link to={`/onboarding?repo=${encodeURIComponent(repo)}`} className="btn-dark h-9 px-4">
+							Set up specs
+						</Link>
+						<Link to={`${projectPath(repo, "code")}?mode=audit`} className="btn-soft h-9 px-4">
+							Open Proofs
+						</Link>
+					</div>
+				</div>
+			</section>
 		</div>
 	);
 }
@@ -73,13 +83,19 @@ function Unknown() {
 /** A project's home: the swarm's map, narrowed to this project's agents and work. */
 export function ProjectHomePage() {
 	const { project, repo, loading } = useRouteProject();
+	const navigate = useNavigate();
 	useEffect(() => {
 		if (repo) document.title = `${repo.split("/")[1]} · Formal Mind`;
 	}, [repo]);
 	if (loading) return <Loading />;
 	if (!project || !repo) return <Unknown />;
-	if (!project.proofsRepo) return <NotStarted repo={repo} what="swarm" />;
-	return <SwarmWorkspace repo={project.proofsRepo} only={repo} />;
+	return (
+		// The same tabs as the folder page: Code, Proofs and Bugs open the repository's page; Swarm is this canvas.
+		<div className="relative flex min-h-0 flex-1 flex-col">
+			{project.proofsRepo ? <SwarmWorkspace repo={project.proofsRepo} only={repo} /> : <NotStarted repo={repo} what="swarm" />}
+			<NavGroup name={repo.split("/")[1] ?? repo} git mode="swarm" onMode={(m) => m !== "swarm" && navigate(`${projectPath(repo, "code")}?mode=${m}`)} />
+		</div>
+	);
 }
 
 export function ProjectRoadmapPage() {
@@ -125,7 +141,6 @@ function ProjectChat({ repo, chatId }: { repo: string; chatId: string }) {
 	return (
 		<div className="flex min-h-0 flex-1 flex-col">
 			<div className="flex items-center gap-3 p-4 pb-0 sm:px-6 sm:pt-6">
-				<SidebarTrigger className="-ml-1" />
 				<h1 className="min-w-0 truncate text-sm">{saved?.title ?? "New chat"}</h1>
 			</div>
 			<div className="mx-auto flex min-h-0 w-full max-w-3xl flex-1 flex-col">
@@ -188,9 +203,8 @@ export function SwarmChatPage() {
 	return (
 		<div className="flex min-h-0 flex-1 flex-col">
 			<div className="flex items-center gap-3 p-4 pb-0 sm:px-6 sm:pt-6">
-				<SidebarTrigger className="-ml-1" />
 				<h1 className="text-sm">Ask the swarm</h1>
-				<Link to="/" className="text-sm text-muted-foreground hover:text-foreground">Back to the swarm</Link>
+				<Link to="/swarm" className="text-sm text-muted-foreground hover:text-foreground">Back to the swarm</Link>
 			</div>
 			<div className="mx-auto flex min-h-0 w-full max-w-3xl flex-1 flex-col">
 				<SwarmChat
@@ -209,5 +223,5 @@ export function FirstProject({ page = "" }: { page?: string }) {
 	const projects = useProjects();
 	if (projects === null) return <Loading />;
 	const first = projects[0];
-	return first ? <Navigate to={projectPath(first.repo, page)} replace /> : <Navigate to="/onboarding?new=1" replace />;
+	return first ? <Navigate to={projectPath(first.repo, page)} replace /> : <Navigate to="/?add=1" replace />;
 }

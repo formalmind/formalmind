@@ -24,6 +24,23 @@ pub struct Report {
     pub opaque: Vec<(String, String)>,
     /// Every `Ext` field: immutables, external calls, opaque functions.
     pub ext: Vec<String>,
+    /// Every function the model reached, in order: its Lean definition, or why it was left opaque.
+    pub functions: Vec<FnModel>,
+}
+
+/// One Solidity function in the model.
+#[derive(Debug, Clone, Serialize)]
+pub struct FnModel {
+    #[serde(skip)]
+    pub id: Id,
+    /// `Contract.name`.
+    pub name: String,
+    /// The Lean name (`Contract.name`), or the `Ext` field standing in for it.
+    pub lean: String,
+    /// The generated definition, when translated.
+    pub def: Option<String>,
+    /// Why it was left opaque.
+    pub why: Option<String>,
 }
 
 pub struct Model {
@@ -827,17 +844,20 @@ impl<'a> Gen<'a> {
                 }
             }
         }
-        let mut report = Report { translated: vec![], opaque: vec![], ext: vec![] };
+        let mut report = Report { translated: vec![], opaque: vec![], ext: vec![], functions: vec![] };
         let done = std::mem::take(&mut self.done);
         let mut defs = vec![];
         for (f, r) in &done {
             match r {
                 Ok(text) => {
                     report.translated.push(self.g.qualified(*f));
+                    let lean = self.fn_name.get(f).cloned().unwrap_or_default();
+                    report.functions.push(FnModel { id: *f, name: self.g.qualified(*f), lean, def: Some(text.clone()), why: None });
                     defs.push(text.clone());
                 }
                 Err(why) => {
                     report.opaque.push((self.g.qualified(*f), why.clone()));
+                    report.functions.push(FnModel { id: *f, name: self.g.qualified(*f), lean: self.ext_fn_field(*f), def: None, why: Some(why.clone()) });
                     let sig = self.opaque_sig(*f);
                     self.ext.insert(format!("{} : {sig}", self.ext_fn_field(*f)), format!("opaque {}: {why}", self.g.qualified(*f)));
                 }
@@ -2728,8 +2748,43 @@ impl<'g, 'a> Fx<'g, 'a> {
             }
             return Ok(format!("({{ {} }} : {ty})", fields.join(", ")));
         }
-        if callee["nodeType"] == "FunctionCallOptions" {
-            return bail("call with {value/gas} options");
+        // Call options: `{value: v}` is passed on; `{gas: g}` is not modelled (the call under any gas).
+        let (callee, call_value) = if callee["nodeType"] == "FunctionCallOptions" {
+            let names: Vec<String> = callee["names"].as_array().into_iter().flatten().map(s).collect();
+            let opts: Vec<Value> = callee["options"].as_array().cloned().unwrap_or_default();
+            let mut value = None;
+            for (n, o) in names.iter().zip(&opts) {
+                match n.as_str() {
+                    "value" => value = Some(self.expr(o)?),
+                    "gas" => {}
+                    other => return bail(format!("call option {other}")),
+                }
+            }
+            (&callee["expression"], value)
+        } else {
+            (callee, None)
+        };
+        // `addr.call(data)`, with or without options: a low-level call → (success, returndata).
+        if callee["nodeType"] == "MemberAccess" && callee["memberName"] == "call" && tstr(&callee["expression"]).starts_with("address") {
+            let addr = self.expr(&callee["expression"])?;
+            let addr = self.atom(addr);
+            let value = self.atom(call_value.unwrap_or_else(|| "0".into()));
+            let data = match args.first() {
+                Some(a) if a["nodeType"] == "Literal" => {
+                    let bytes = literal_bytes(a).ok_or("bytes literal")?;
+                    format!("[{}]", bytes.iter().map(|b| b.to_string()).collect::<Vec<_>>().join(", "))
+                }
+                Some(a) => self.expr(a)?,
+                None => return bail("call without data"),
+            };
+            let data = self.atom(data);
+            self.g.ext.insert(
+                "lowCall : Nat → Nat → List Nat → M σ (Bool × List Nat)".into(),
+                "a low-level call (address, value, calldata) → (success, returndata); a failed call returns false and doesn't revert".into(),
+            );
+            let t = self.fresh("__t");
+            self.line(format!("let {t} ← ext.lowCall {addr} {value} {data}"));
+            return Ok(t);
         }
         if callee["nodeType"] == "MemberAccess" && matches!(callee["memberName"].as_str(), Some("wrap" | "unwrap")) && tstr(&callee["expression"]).starts_with("type(") {
             return self.expr(&args[0]);
@@ -2879,6 +2934,7 @@ impl<'g, 'a> Fx<'g, 'a> {
         let unit = rets.is_empty();
         match ck {
             // A public library function runs on our storage too (delegatecall): the same as an internal call.
+            CallKind::Internal | CallKind::ExternalLibrary if call_value.is_some() => bail("internal call with {value}"),
             CallKind::Internal | CallKind::ExternalLibrary => {
                 let f = if direct { target } else { self.g.scope.resolve(self.g.g, target) };
                 let storage: Vec<bool> = self.g.nodes.get(&f).and_then(|n| n["parameters"]["parameters"].as_array()).map(|ps| ps.iter().map(|p| p["storageLocation"] == "storage").collect()).unwrap_or_default();
@@ -2934,6 +2990,13 @@ impl<'g, 'a> Fx<'g, 'a> {
                     self.g.ext.insert(format!("{field} : {ty}"), format!("view call {iface}.{tname}: reads, can't write our storage"));
                     self.g.ext_calls.insert(field.clone(), ExtCall { field: field.clone(), iface: iface.clone(), function: tname.clone(), params: ptys.clone(), ret: product(&rtys), view: true });
                     self.line(format!("let {t} ← view (fun env s => ext.{field} env s {addr} {})", a.join(" ")));
+                } else if let Some(value) = call_value {
+                    // `{value: v}`: the same call, sending `v` wei along (a field of its own, taking the value after the address).
+                    let value = self.atom(value);
+                    let field = format!("callV_{iface}_{tname}");
+                    let ty = format!("Nat → Nat → {}M σ {}", ptys.iter().map(|p| format!("{p} → ")).collect::<String>(), product(&rtys));
+                    self.g.ext.insert(format!("{field} : {ty}"), format!("external call {iface}.{tname} with value (address, value, args…): may re-enter and change our storage"));
+                    self.line(format!("let {t} ← ext.{field} {addr} {value} {}", a.join(" ")));
                 } else {
                     let field = format!("call_{iface}_{tname}");
                     let ty = format!("Nat → {}M σ {}", ptys.iter().map(|p| format!("{p} → ")).collect::<String>(), product(&rtys));

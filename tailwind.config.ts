@@ -15,6 +15,8 @@ export default {
 	],
 	theme: {
 		extend: {
+			// A quick start that settles softly: the sliding tab pill and the chat morph.
+			transitionTimingFunction: { "out-quint": "cubic-bezier(0.22, 1, 0.36, 1)" },
 			fontFamily: { sans: ['Inter', 'ui-sans-serif', 'system-ui', '-apple-system', 'sans-serif'] },
 			colors: {
 				background: 'hsl(var(--background))',

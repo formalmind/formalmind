@@ -7,7 +7,8 @@
  */
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { ArrowUpRight, Bell, X } from "lucide-react";
+import { createPortal } from "react-dom";
+import { ArrowUpRight, Bell, Check, Copy, X } from "lucide-react";
 import {
   dismissNotification,
   markNotificationRead,
@@ -67,8 +68,22 @@ export function NotificationCenter() {
     latestNotificationRef.current = { id: latest.id, createdAt: latest.createdAt };
   }, [active, all, headerOpen]);
 
+  // The panel is drawn at the page's top level, under the bell, so nothing on the page (the swarm chat) covers it.
+  const bellRef = useRef<HTMLDivElement>(null);
+  const [anchor, setAnchor] = useState<{ top: number; right: number } | null>(null);
+  useEffect(() => {
+    if (!headerOpen) return;
+    const place = () => {
+      const r = bellRef.current?.getBoundingClientRect();
+      if (r) setAnchor({ top: r.bottom + 8, right: Math.max(12, window.innerWidth - r.right) });
+    };
+    place();
+    window.addEventListener("resize", place);
+    return () => window.removeEventListener("resize", place);
+  }, [headerOpen]);
+
   return (
-    <div data-fm-bell className="relative shrink-0">
+    <div ref={bellRef} data-fm-bell className="relative shrink-0">
       <button
         type="button"
         aria-label={
@@ -94,11 +109,12 @@ export function NotificationCenter() {
           </span>
         )}
       </button>
-      {headerOpen && (
+      {headerOpen && anchor && createPortal(
         <div
           role="dialog"
           aria-label="Notifications"
-          className="absolute right-0 top-full z-[9999999] mt-2 w-[min(22rem,calc(100vw-1.5rem))]"
+          className="fixed z-[9999999] w-[min(22rem,calc(100vw-1.5rem))]"
+          style={{ top: anchor.top, right: anchor.right }}
         >
           <div className="space-y-2 rounded-3xl bg-muted p-3 shadow-md">
             {all.length === 0 ? (
@@ -123,19 +139,24 @@ export function NotificationCenter() {
                   <p className="truncate text-sm font-medium text-foreground">{n.title}</p>
                   {n.read && <span className="shrink-0 text-[10px] text-muted-foreground">Read</span>}
                 </div>
-                <div className="min-w-0 break-words text-xs font-medium text-muted-foreground">
+                <div className={`min-w-0 select-text break-words text-xs font-medium text-muted-foreground ${n.variant === "error" ? "max-h-40 overflow-y-auto whitespace-pre-wrap" : ""}`}>
                   <span>{relativeTime(n.createdAt, now)}</span>
                   {n.description != null && <> {n.description}</>}
                 </div>
-                {n.action && (
-                  <button
-                    type="button"
-                    className="btn-dark mt-2 h-7 px-3 text-xs"
-                    onClick={() => window.dispatchEvent(new Event(n.action!.event))}
-                  >
-                    {n.action.label}
-                  </button>
-                )}
+                {n.action || n.variant === "error" ? (
+                  <div className="mt-2 flex items-center gap-1.5">
+                    {n.action && (
+                      <button
+                        type="button"
+                        className="btn-dark h-7 px-3 text-xs"
+                        onClick={() => window.dispatchEvent(new Event(n.action!.event))}
+                      >
+                        {n.action.label}
+                      </button>
+                    )}
+                    {n.variant === "error" || n.copy ? <CopyNotice text={n.copy ?? [n.title, n.description].filter(Boolean).join(": ")} /> : null}
+                  </div>
+                ) : null}
               </div>
                 ))}
                 {(headerShowReadHistory ? readHistory : unread).length === 0 && (
@@ -197,8 +218,29 @@ export function NotificationCenter() {
               </div>
             )}
           </div>
-        </div>
+        </div>,
+        document.body,
       )}
     </div>
+  );
+}
+
+/** Copies a notice (an error and its details) to paste elsewhere. */
+function CopyNotice({ text }: { text: string }) {
+  const [done, setDone] = useState(false);
+  return (
+    <button
+      type="button"
+      className="inline-flex h-7 items-center gap-1.5 rounded-full border bg-muted px-3 text-xs text-muted-foreground transition-colors hover:text-foreground"
+      onClick={() => {
+        void navigator.clipboard?.writeText(text).then(() => {
+          setDone(true);
+          setTimeout(() => setDone(false), 1500);
+        });
+      }}
+    >
+      {done ? <Check aria-hidden="true" className="size-3.5" /> : <Copy aria-hidden="true" className="size-3.5" />}
+      {done ? "Copied" : "Copy"}
+    </button>
   );
 }

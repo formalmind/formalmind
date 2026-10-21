@@ -726,6 +726,8 @@ impl<'a> App<'a> {
             Some(r) => format!(" stack · result {} ", short_word(r)),
             None => " stack ".into(),
         };
+        // Words are shown whole (session.rs); a long one scrolls sideways like any pane, so selection and copy stay
+        // on the cells you see.
         self.render_pane(f, area, Pane::Stack, title, lines);
     }
 

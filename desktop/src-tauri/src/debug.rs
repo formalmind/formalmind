@@ -80,6 +80,8 @@ pub struct RunView {
     calls: Vec<Call>,
     /// Cheatcodes the test called that the session doesn't answer.
     missing: Vec<String>,
+    /// What console.log printed (setUp's and the run's).
+    console: Vec<String>,
     view: StepView,
 }
 
@@ -194,13 +196,15 @@ fn err(e: impl std::fmt::Display) -> String {
     format!("{e:#}")
 }
 
-/// The `test…()` functions of the contracts defined in `file`.
+/// The `test…()` functions of the contracts defined in `file`, or a script's `run…()` (scripts under script/ are what
+/// production runs; they debug the same way: setUp, then the function).
 fn tests_in(s: &Session, file: &str) -> Vec<TestFn> {
+    let prefix = if file.ends_with(".s.sol") { "run" } else { "test" };
     let mut out = Vec::new();
     for a in s.artifacts.iter().filter(|a| a.file == file || a.file.ends_with(&format!("/{file}"))) {
         for sig in a.methods.values() {
-            // Fuzz tests take arguments; only the ones that run as they are.
-            if let Some(test) = sig.strip_suffix("()").filter(|t| t.starts_with("test")) {
+            // Fuzz tests (and scripts) taking arguments are left out; only the ones that run as they are.
+            if let Some(test) = sig.strip_suffix("()").filter(|t| t.starts_with(prefix)) {
                 out.push(TestFn { contract: format!("{}:{}", a.file, a.name), name: a.name.clone(), test: test.to_string() });
             }
         }
@@ -210,12 +214,20 @@ fn tests_in(s: &Session, file: &str) -> Vec<TestFn> {
 
 /// Compiles `file` (relative to `folder`, an added local folder) on a new session thread and lists its tests.
 #[tauri::command]
-pub async fn debug_open(state: tauri::State<'_, Debuggers>, folder: String, file: String) -> Result<Opened, String> {
-    open(&state, folder, file).await
+pub async fn debug_open(app: tauri::AppHandle, state: tauri::State<'_, Debuggers>, folder: String, file: String) -> Result<Opened, String> {
+    open(&state, folder, file, Some(app)).await
 }
 
-pub async fn open(state: &Debuggers, folder: String, file: String) -> Result<Opened, String> {
-    if !crate::local::read()?.folders.contains(&folder) {
+/// A line of Debug's output panel: what's running now (compiling, forking, running) and what it printed.
+pub fn log(app: &Option<tauri::AppHandle>, folder: &str, line: impl Into<String>) {
+    use tauri::Emitter;
+    if let Some(app) = app {
+        let _ = app.emit("debug:log", serde_json::json!({ "folder": folder, "line": line.into() }));
+    }
+}
+
+pub async fn open(state: &Debuggers, folder: String, file: String, app: Option<tauri::AppHandle>) -> Result<Opened, String> {
+    if !crate::local::read()?.allows(&folder) {
         return Err("Add the folder first".into());
     }
     let (tx, jobs) = mpsc::channel::<Job>();
@@ -223,13 +235,20 @@ pub async fn open(state: &Debuggers, folder: String, file: String) -> Result<Ope
     std::thread::Builder::new()
         .name("sol-debug".into())
         .spawn(move || {
-            let root = PathBuf::from(folder);
+            let root = PathBuf::from(&folder);
+            log(&app, &folder, format!("$ solc {file}"));
+            let started = std::time::Instant::now();
             let mut d = match Session::compile(&root, &file) {
                 Ok(s) => {
-                    let _ = ready.send(Ok(tests_in(&s, &file)));
+                    let tests = tests_in(&s, &file);
+                    log(&app, &folder, format!("compiled in {:.1?} · {} contracts · {} to run", started.elapsed(), s.artifacts.len(), tests.len()));
+                    let _ = ready.send(Ok(tests));
                     Debugger { root, file, fresh: Some(s), loaded: None, other: None }
                 }
-                Err(e) => return drop(ready.send(Err(err(e)))),
+                Err(e) => {
+                    log(&app, &folder, format!("compile failed: {}", err(&e)));
+                    return drop(ready.send(Err(err(e))));
+                }
             };
             // Until the session is closed (its sender dropped).
             for job in jobs {
@@ -254,18 +273,52 @@ pub fn close(state: &Debuggers, id: u32) {
 
 /// Runs one test (setUp untraced, then the test recorded) and opens on its first statement.
 #[tauri::command]
-pub async fn debug_run(state: tauri::State<'_, Debuggers>, id: u32, contract: String, test: String) -> Result<RunView, String> {
-    run_test(&state, id, contract, test).await
+pub async fn debug_run(app: tauri::AppHandle, state: tauri::State<'_, Debuggers>, id: u32, contract: String, test: String, chain_id: Option<u64>, fork_url: Option<String>) -> Result<RunView, String> {
+    run_test(&state, id, contract, test, chain_id, fork_url, Some(app)).await
 }
 
-pub async fn run_test(state: &Debuggers, id: u32, contract: String, test: String) -> Result<RunView, String> {
+/// `chain_id`: what `block.chainid` reads (scripts read deployments/<chainId>/ by it); 31337 when unset.
+/// `fork_url`: run on a fork (a local Anvil fork's URL), which brings its own chain id.
+pub async fn run_test(state: &Debuggers, id: u32, contract: String, test: String, chain_id: Option<u64>, fork_url: Option<String>, app: Option<tauri::AppHandle>) -> Result<RunView, String> {
     ask(state, id, move |d| {
-        let s = match d.fresh.take() {
+        let folder = d.root.display().to_string();
+        let name = contract.rsplit(':').next().unwrap_or(&contract).to_string();
+        let mut s = match d.fresh.take() {
             Some(s) => s,
-            None => Session::compile(&d.root, &d.file).map_err(err)?,
+            None => {
+                log(&app, &folder, format!("$ solc {}", d.file));
+                Session::compile(&d.root, &d.file).map_err(err)?
+            }
         };
-        let l = load(s, &contract, &test, d.loaded.take())?;
-        let out = run_view(&l, &contract, &test);
+        match &fork_url {
+            Some(url) => {
+                log(&app, &folder, format!("forking {url} …"));
+                let f = s.set_fork(url).map_err(|e| {
+                    log(&app, &folder, format!("fork failed: {}", err(&e)));
+                    err(e)
+                })?;
+                log(&app, &folder, format!("fork: chain {} at block {}", f.chain_id, f.block));
+            }
+            None => s.set_chain_id(chain_id.unwrap_or(31337)),
+        }
+        log(&app, &folder, format!("▸ {name}.setUp() then {name}.{test}()"));
+        let started = std::time::Instant::now();
+        let mut l = load(s, &contract, &test, d.loaded.take()).map_err(|e| {
+            log(&app, &folder, format!("failed: {e}"));
+            e
+        })?;
+        let console = l.s.take_console();
+        for line in &console {
+            log(&app, &folder, format!("console.log: {line}"));
+        }
+        log(&app, &folder, format!("{} · {} steps · {} gas · {:.1?}", if l.run.success { "pass".to_string() } else { format!("revert {}", l.run.revert_reason().unwrap_or_default()) }, l.run.trace.steps.len(), l.run.gas_used, started.elapsed()));
+        let mut out = run_view(&l, &contract, &test);
+        out.console = console;
+        // On a fork, reads that failed came back as zero: say so rather than let them pass as state.
+        let rpc = l.s.fork_errors();
+        if !rpc.is_empty() {
+            out.verdict = format!("{} · {} fork reads failed (first: {})", out.verdict, rpc.len(), rpc[0]);
+        }
         d.loaded = Some(l);
         d.other = None;
         Ok(out)
@@ -321,6 +374,7 @@ fn run_view(l: &Loaded, contract: &str, test: &str) -> RunView {
         gas: l.run.gas_used,
         calls,
         missing: l.s.evm.inspector.cheats.missing.clone(),
+        console: vec![],
         view: view(l, verdict),
     }
 }
@@ -371,7 +425,7 @@ pub async fn debug_compare(state: tauri::State<'_, Debuggers>, id: u32, other: S
 }
 
 pub async fn compare(state: &Debuggers, id: u32, other: String, contract: String, test: String, slot_map: Option<String>) -> Result<Compared, String> {
-    if !crate::local::read()?.folders.contains(&other) {
+    if !crate::local::read()?.allows(&other) {
         return Err("Add the other folder first".into());
     }
     ask(state, id, move |d| {

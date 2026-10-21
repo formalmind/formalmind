@@ -8,6 +8,26 @@ import rehypeRaw from "rehype-raw";
 import rehypeSanitize, { defaultSchema } from "rehype-sanitize";
 import type { Schema } from "hast-util-sanitize";
 import { MermaidDiagram } from "@/components/mermaid-diagram";
+import { useHighlightedCode } from "@/hooks/use-highlighted-code";
+
+/** Languages highlight.js lacks: their blocks go through the app's code highlighter (the one the editor uses). */
+const OWN: Record<string, string> = { solidity: "solidity", sol: "solidity", lean: "lean", lean4: "lean" };
+
+function OwnHighlight({ code, language }: { code: string; language: string }) {
+	const lines = useHighlightedCode(code, language);
+	return (
+		<pre>
+			<code>
+				{lines.map((line, i) => (
+					<span key={i} className="block">
+						{line}
+						{"\n"}
+					</span>
+				))}
+			</code>
+		</pre>
+	);
+}
 
 const schema: Schema = {
 	...defaultSchema,
@@ -24,25 +44,34 @@ const PROSE =
 
 /**
  * A model's reply as markdown, the same everywhere: GitHub-flavoured (tables, task lists), math, highlighted code,
- * Mermaid diagrams and a safe subset of HTML; links open in a new tab.
+ * Mermaid diagrams and a safe subset of HTML; links open in a new tab. `image` maps an image's `src` (a file's
+ * Markdown points at paths beside it) to what to load; while it has no answer the image waits.
  */
-export function ChatMarkdown({ children, className = "" }: { children: string; className?: string }) {
+export function ChatMarkdown({ children, className = "", image }: { children: string; className?: string; image?: (src: string) => string | null | undefined }) {
 	return (
 		<div className={`${PROSE} ${className}`}>
 			<ReactMarkdown
 				remarkPlugins={[remarkGfm, remarkMath]}
-				rehypePlugins={[rehypeRaw, [rehypeSanitize, schema], [rehypeHighlight, { plainText: ["mermaid"] }], rehypeKatex]}
+				rehypePlugins={[rehypeRaw, [rehypeSanitize, schema], [rehypeHighlight, { plainText: ["mermaid", ...Object.keys(OWN)] }], rehypeKatex]}
 				components={{
 					a: ({ node, ...props }) => {
 						void node;
 						return <a {...props} target="_blank" rel="noreferrer" />;
 					},
+					img: ({ node, src, ...props }) => {
+						void node;
+						const url = typeof src === "string" && image ? image(src) : src;
+						return url ? <img {...props} src={url} /> : <span className="inline-block h-24 w-full rounded-md bg-muted" aria-label={props.alt} />;
+					},
 					pre({ children: content, ...props }) {
 						const child = Children.toArray(content).find(isValidElement);
 						const code = child?.props as { className?: string; children?: React.ReactNode } | undefined;
-						if (code?.className?.split(/\s+/).includes("language-mermaid")) {
-							return <MermaidDiagram chart={String(code.children ?? "").replace(/\n$/, "")} />;
+						const classes = code?.className?.split(/\s+/) ?? [];
+						if (classes.includes("language-mermaid")) {
+							return <MermaidDiagram chart={String(code?.children ?? "").replace(/\n$/, "")} />;
 						}
+						const own = classes.map((c) => OWN[c.replace(/^language-/, "")]).find(Boolean);
+						if (own) return <OwnHighlight code={String(code?.children ?? "").replace(/\n$/, "")} language={own} />;
 						return <pre {...props}>{content}</pre>;
 					},
 				}}

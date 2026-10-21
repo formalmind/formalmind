@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { Link } from "react-router";
 import { DEPOSITS_USD } from "@/lib/billing-plans";
+import { PanelCard, PanelLabel } from "@/components/panel-card";
 import { notify } from "@/lib/notifications";
 import type { CreditEntry, TokenCounts } from "@/lib/billing";
 
@@ -30,6 +31,13 @@ function historyLines(entries: CreditEntry[]): Line[] {
 		if (e.kind === "deposit") {
 			const stripe = e.ref.startsWith("cs_") ? `https://dashboard.stripe.com/${e.ref.startsWith("cs_test_") ? "test/" : ""}search?query=${e.ref}` : undefined;
 			lines.push({ key: e.ref, at: e.at, cents: e.cents, label: e.ref.startsWith("adjust:") ? "Credit adjustment" : "Credits added", href: stripe });
+			continue;
+		}
+		// Formal Mind's audit report: report:<repo>@<commit>.
+		if (e.ref.startsWith("report:")) {
+			const [repo, commit = ""] = e.ref.slice("report:".length).split("@");
+			const github = repo.includes("/");
+			lines.push({ key: e.ref, at: e.at, cents: e.cents, label: "Audit report", repo, item: { text: commit.slice(0, 7), href: github ? `https://github.com/${repo}/commit/${commit}` : "" } });
 			continue;
 		}
 		// A spend's ref is <proofs repo>:<run>[:<job>:<issue or PR>]:<call>.
@@ -65,6 +73,8 @@ function historyLines(entries: CreditEntry[]): Line[] {
 export function BillingPage() {
 	const [balance, setBalance] = useState<Balance | null>(null);
 	const [paying, setPaying] = useState<number | null>(null);
+	const [custom, setCustom] = useState("");
+	const payable = Boolean(balance?.configured);
 
 	// Back from Stripe Checkout: confirm the payment first, then show the balance.
 	useEffect(() => {
@@ -104,49 +114,78 @@ export function BillingPage() {
 
 	return (
 		<div className="flex min-h-0 flex-1 flex-col overflow-y-auto">
-			<main className="mx-auto w-full max-w-4xl space-y-6 px-6 pb-10 pt-2">
-				<section className="rounded-xl border p-5">
-					<p className="text-sm text-muted-foreground">Credit balance</p>
-					<p className="mt-1 text-3xl font-semibold tabular-nums">{balance ? usd(balance.cents) : "…"}</p>
-					<p className="mt-2 text-xs text-muted-foreground">
+			<main className="mx-auto w-full max-w-4xl space-y-3 px-6 pb-10 pt-2">
+				<section className="rounded-2xl border bg-muted/60 p-1.5">
+				<div className="shadow-card rounded-xl border bg-card px-4 py-3">
+					<PanelLabel>Credit balance</PanelLabel>
+					<p className="mt-1.5 flex h-7 items-center font-mono text-lg font-medium tabular-nums">{balance ? usd(balance.cents) : "…"}</p>
+				</div>
+				<p className="flex min-h-8 items-center px-3 py-1.5 text-[11px] text-muted-foreground">
+					<span>
 						Prepaid model usage for your swarm. It pauses for the day once the daily budget is spent.{" "}
 						<Link to="/usage" className="underline underline-offset-2 hover:text-foreground">
 							See usage
 						</Link>
-					</p>
+					</span>
+				</p>
 				</section>
 
-				<section className="rounded-xl border p-5">
-					<h2 className="text-sm font-medium">Add credits</h2>
-					{balance && !balance.configured ? (
-						<p className="mt-4 text-sm text-muted-foreground">Payments aren't connected yet.</p>
-					) : (
-						<div className="mt-4 flex flex-wrap gap-2">
-							{DEPOSITS_USD.map((amount) => (
-								<button
-									key={amount}
-									type="button"
-									disabled={!balance || paying !== null}
-									onClick={() => void buy(amount)}
-									className="inline-flex h-9 items-center rounded-full border px-4 text-sm font-medium tabular-nums transition-colors hover:bg-muted disabled:opacity-50"
-								>
-									{paying === amount ? "Opening checkout…" : `$${amount}`}
-								</button>
-							))}
-						</div>
-					)}
-					<p className="mt-4 text-xs text-muted-foreground">Paid securely with Stripe.</p>
-				</section>
+				<PanelCard label="Add credits">
+					<p className="text-[11px] text-muted-foreground">Pick an amount, or enter your own between $10 and $1,000.</p>
+					<form
+						className="mt-3 flex flex-wrap items-center gap-1.5"
+						onSubmit={(e) => {
+							e.preventDefault();
+							const n = Number(custom);
+							if (n >= 10 && n <= 1000) void buy(n);
+						}}
+					>
+						{DEPOSITS_USD.map((amount) => (
+							<button
+								key={amount}
+								type="button"
+								disabled={!payable || paying !== null}
+								onClick={() => void buy(amount)}
+								className="inline-flex h-7 items-center rounded-full border px-3 text-[12px] font-medium tabular-nums transition-colors hover:bg-muted disabled:opacity-50"
+							>
+								{paying === amount ? "Opening checkout…" : `$${amount}`}
+							</button>
+						))}
+						<label className="inline-flex h-7 items-center rounded-full border pl-3 text-[12px] transition-colors focus-within:border-neutral-300 dark:focus-within:border-neutral-600">
+							<span className="text-muted-foreground">$</span>
+							<input
+								type="number"
+								inputMode="decimal"
+								min={10}
+								max={1000}
+								step={1}
+								value={custom}
+								onChange={(e) => setCustom(e.target.value)}
+								placeholder="Other"
+								aria-label="Other amount in dollars"
+								className="w-20 bg-transparent px-1 tabular-nums outline-none [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none"
+							/>
+							<button
+								type="submit"
+								disabled={!payable || paying !== null || !(Number(custom) >= 10 && Number(custom) <= 1000)}
+								className="h-7 rounded-r-full border-l px-3 font-medium transition-colors hover:bg-muted disabled:opacity-50"
+							>
+								{paying !== null && paying === Number(custom) ? "Opening…" : "Add"}
+							</button>
+						</label>
+					</form>
+					{balance && !balance.configured ? <p className="mt-3 text-[11px] text-amber-700 dark:text-amber-400">Payments aren't connected on this server yet, so checkout is off here.</p> : null}
+					<p className="mt-4 text-[11px] text-muted-foreground">Paid securely with Stripe.</p>
+				</PanelCard>
 
-				<section className="rounded-xl border">
-					<h2 className="border-b px-5 py-3 text-sm font-medium">History</h2>
+				<PanelCard label="History" bodyClassName="overflow-hidden">
 					{!balance?.entries.length ? (
-						<p className="px-5 py-4 text-sm text-muted-foreground">{balance ? "No payments yet." : "Loading…"}</p>
+						<p className="px-4 py-3 text-[13px] text-muted-foreground">{balance ? "No payments yet." : "Loading…"}</p>
 					) : (
-						<ul className="divide-y text-sm">
+						<ul className="divide-y text-[13px]">
 							{historyLines(balance.entries).map((l) => (
 								<li key={l.key} className="flex items-center gap-4 px-5 py-2.5">
-									<span className="w-32 shrink-0 text-xs text-muted-foreground tabular-nums">{new Date(l.at).toLocaleString(undefined, { dateStyle: "short", timeStyle: "short" })}</span>
+									<span className="w-32 shrink-0 text-[11px] text-muted-foreground tabular-nums">{new Date(l.at).toLocaleString(undefined, { dateStyle: "short", timeStyle: "short" })}</span>
 									<span className="min-w-0 flex-1">
 										<span className="flex items-center gap-1.5 truncate">
 											{l.href ? (
@@ -158,17 +197,17 @@ export function BillingPage() {
 											{l.item?.href ? <a href={l.item.href} target="_blank" rel="noreferrer" className="text-muted-foreground hover:text-foreground hover:underline">{l.item.text}</a> : null}
 											{l.repo?.startsWith("local/") ? <span className="truncate text-muted-foreground">{l.repo.slice(6)} (on your computer)</span> : null}
 											{l.repo && !l.repo.startsWith("local/") ? <a href={`https://github.com/${l.repo}`} target="_blank" rel="noreferrer" className="truncate text-muted-foreground hover:text-foreground hover:underline">{l.repo}</a> : null}
-											{l.run ? <a href={l.run.href} target="_blank" rel="noreferrer" className="text-xs text-muted-foreground underline-offset-2 hover:text-foreground hover:underline">{l.run.text} ↗</a> : null}
+											{l.run ? <a href={l.run.href} target="_blank" rel="noreferrer" className="text-[11px] text-muted-foreground underline-offset-2 hover:text-foreground hover:underline">{l.run.text} ↗</a> : null}
 										</span>
 										{l.tokens ? (
 											<span
-												className="block text-xs text-muted-foreground"
+												className="block text-[11px] text-muted-foreground"
 												title={`input ${l.tokens.in.toLocaleString()} · output ${l.tokens.out.toLocaleString()} · cache read ${l.tokens.read.toLocaleString()} · cache write ${l.tokens.write.toLocaleString()}`}
 											>
 												{l.calls} model calls · {compact(l.tokens.in + l.tokens.out + l.tokens.read + l.tokens.write)} tokens ({compact(l.tokens.out)} out, {compact(l.tokens.read)} cached)
 											</span>
 										) : l.calls && l.calls > 1 ? (
-											<span className="block text-xs text-muted-foreground">{l.calls} model calls</span>
+											<span className="block text-[11px] text-muted-foreground">{l.calls} model calls</span>
 										) : null}
 									</span>
 									<span className={`font-mono tabular-nums ${l.cents > 0 ? "text-emerald-600 dark:text-emerald-400" : ""}`}>{l.cents > 0 ? "+" : ""}{usd(l.cents)}</span>
@@ -176,7 +215,7 @@ export function BillingPage() {
 							))}
 						</ul>
 					)}
-				</section>
+				</PanelCard>
 			</main>
 		</div>
 	);

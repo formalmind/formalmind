@@ -1,4 +1,6 @@
+import { useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "react-router";
+import { loadDemoData, type DemoData } from "@/components/demo/load";
 import { DEMO_TREE } from "@/components/demo-tree";
 import { SettingsMenu } from "@/components/projects/swarm-control";
 import { NotificationCenter } from "@/components/notification-center";
@@ -86,27 +88,83 @@ const EVENTS = [
 	ev("status", "prover", "3", "prover is working", 1.84),
 ];
 
+/** A long made-up conversation, offered as its own session beside a real repository so the chat (and its scrubber) can be
+ * tried out; it is labelled as demo data and never reaches the plan or Bugs. */
+const SAMPLE_RUN = "sample";
+const SAMPLE_EVENTS = (() => {
+	const out = EVENTS.map((e) => ({ ...e, run: SAMPLE_RUN }));
+	const roles = ["prover", "reviewer", "assistant", "planner"];
+	for (let i = 4; i <= 24; i++) {
+		const role = roles[i % roles.length];
+		out.push({ run: SAMPLE_RUN, kind: "say", role, item: String(i), text: `(demo) Item ${i}: ${role === "reviewer" ? "the statement matches the Solidity; approved." : role === "prover" ? "proved the guards and the storage it writes; lake build passes." : role === "planner" ? "added the next functions from the AST to the plan." : "noted, carrying on with the next item."}`, spent: 1.84 + i * 0.07 });
+		if (i % 3 === 0) out.push({ run: SAMPLE_RUN, kind: "you", role: "you", item: "", text: `(demo) What's left after item ${i}?`, spent: 1.84 + i * 0.07 });
+		if (i % 4 === 0) out.push({ run: SAMPLE_RUN, kind: "tool", role, item: String(i), text: `read_file src/Vault.sol ${i * 10} ${i * 10 + 40}`, spent: 1.84 + i * 0.07 });
+	}
+	return out;
+})();
+
 const listeners = new Set<(e: { payload: unknown }) => void>();
-const demo: Bridge = {
+/** The demo's bridge: a real repository's files and AST when `data` is there, the sample folder otherwise. */
+const makeDemo = (data: DemoData | null): Bridge => ({
 	apiBase: () => "",
 	listen: async (_event, cb) => {
 		listeners.add(cb as (e: { payload: unknown }) => void);
 		return () => listeners.delete(cb as (e: { payload: unknown }) => void);
 	},
 	invoke: async <T,>(cmd: string, args?: Record<string, unknown>): Promise<T> => {
+		// The sample swarm (a lending protocol's plan, chat and bug) belongs to the sample folder only: next to a real
+		// repository's files it would read as that repository's findings.
+		const sample = !data;
 		const answers: Record<string, unknown> = {
-			swarm_plan: PLAN,
-			swarm_bugs: BUGS,
-			swarm_sessions: [{ run: RUN, title: "Liquidations and the penalty cap", outcome: "", spent: 1.84, events: EVENTS.length }],
-			swarm_history: EVENTS,
-			swarm_proofs: PROOFS,
-			folder_read: SOURCES[String(args?.path ?? "")] ?? "// (demo: no contents)\n",
-			swarm_running: RUN,
+			swarm_plan: sample ? PLAN : [],
+			swarm_bugs: sample ? BUGS : [],
+			swarm_sessions: sample ? [{ run: RUN, title: "Liquidations and the penalty cap", outcome: "", spent: 1.84, events: EVENTS.length }] : [{ run: SAMPLE_RUN, title: "Sample session (demo data)", outcome: "", spent: 3.5, events: SAMPLE_EVENTS.length }],
+			swarm_history: sample ? EVENTS : args?.run === SAMPLE_RUN ? SAMPLE_EVENTS : [],
+			swarm_proofs: sample ? PROOFS : {},
+			folder_read: data ? (data.sources[String(args?.path ?? "")] ?? "// Not in the demo data (only the repository's own text files are).\n") : (SOURCES[String(args?.path ?? "")] ?? "// (demo: no contents)\n"),
+			swarm_running: sample ? [RUN] : [],
 			anthropic_key_status: false,
-			folder_tree: { files: DEMO_TREE, truncated: false },
+			folder_tree: { files: data ? data.files : DEMO_TREE, truncated: false },
 			ast_units: AST_UNITS,
 			ast_slice: AST_SLICE,
 		};
+		if (cmd === "folder_image") {
+			const url = data?.images?.[String(args?.path ?? "")];
+			if (!url) throw "Not in the demo data.";
+			return url as T;
+		}
+		// Code navigation without a language server: the word under the cursor, declared somewhere in the sources.
+		if ((cmd === "lsp_definition" || cmd === "lsp_hover") && data) {
+			const text = data.sources[String(args?.path ?? "")] ?? "";
+			const line = text.split("\n")[Number(args?.line ?? 0)] ?? "";
+			const at = Number(args?.character ?? 0);
+			const word = (line.slice(0, at + 1).match(/[\w$]+$/)?.[0] ?? "") + (line.slice(at + 1).match(/^[\w$]+/)?.[0] ?? "");
+			const decl = new RegExp(`^\\s*(?:abstract\\s+)?(?:contract|interface|library|struct|enum|error|event|function|modifier|type)\\s+${word}\\b`);
+			for (const [path, src] of Object.entries(data.sources)) {
+				if (!path.endsWith(".sol") || !word) continue;
+				const lines = src.split("\n");
+				const i = lines.findIndex((l) => decl.test(l));
+				if (i < 0) continue;
+				if (cmd === "lsp_definition") return [{ path, line: i, character: lines[i].indexOf(word) }] as T;
+				return `\`\`\`solidity\n${lines[i].trim()}\n\`\`\`\n\n${path}:${i + 1}` as T;
+			}
+			return (cmd === "lsp_definition" ? [] : null) as T;
+		}
+		if (cmd === "ast_scripts") {
+			if (!data?.scripts) throw "No scripts in the demo data.";
+			return data.scripts as T;
+		}
+		if (cmd === "ast_formal") {
+			const formal = data?.formals?.[String(args?.entry ?? "")];
+			if (!formal) throw "No deployable contract in this file (libraries, interfaces and types have no model).";
+			return formal as T;
+		}
+		if (data && (cmd === "ast_units" || cmd === "ast_slice")) {
+			const audit = data.audits[String(args?.entry ?? "")];
+			if (!audit) throw "No deployable contract in this file (libraries, interfaces and types have no audit).";
+			if (cmd === "ast_slice") return (audit.slices?.[String(args?.function ?? "")] ?? "No slice for this unit.") as T;
+			return audit as T;
+		}
 		if (cmd === "swarm_suggest") return new Promise((done) => setTimeout(() => done("Good catch on the penalty cap. Write the PoC for that bug, then move on to the oracle item." as T), 700));
 		if (cmd === "swarm_say") {
 			setTimeout(() => {
@@ -115,7 +173,7 @@ const demo: Bridge = {
 		}
 		return answers[cmd] as T;
 	},
-};
+});
 
 const AST_UNITS = {
 	contract: "Vault",
@@ -152,5 +210,13 @@ external nonpayable · src/Vault.sol:42
 
 export function LocalDemoPage() {
 	const [params] = useSearchParams();
-	return <SwarmPanel folder="/Users/you/code/lending-protocol" name="lending-protocol" scan={FILES} bridge={demo} file={params.get("file")} actions={<><SettingsMenu repos={[]} className="inline-flex size-8 items-center justify-center rounded-full border bg-background/90 text-muted-foreground shadow-sm backdrop-blur hover:text-foreground" /><NotificationCenter /></>} />;
+	const [data, setData] = useState<DemoData | null | undefined>(undefined);
+	const repo = params.get("repo");
+	useEffect(() => void loadDemoData(repo).then(setData), [repo]);
+	const bridge = useMemo(() => makeDemo(data ?? null), [data]);
+	if (data === undefined) return null;
+	const scan = data
+		? { solidity: data.files.filter((f) => f.endsWith(".sol")), lean: data.files.filter((f) => f.endsWith(".lean")), truncated: false, git: true }
+		: FILES;
+	return <SwarmPanel key={data?.path ?? "sample"} folder={data?.path ?? "/Users/you/code/lending-protocol"} name={data?.name ?? "lending-protocol"} scan={scan} bridge={bridge} file={params.get("file")} actions={<><SettingsMenu repos={[]} className="inline-flex size-8 items-center justify-center rounded-full border bg-background/90 text-muted-foreground shadow-sm backdrop-blur hover:text-foreground" /><NotificationCenter /></>} />;
 }

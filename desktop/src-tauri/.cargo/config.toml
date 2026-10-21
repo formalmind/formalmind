@@ -1,0 +1,6 @@
+# Dev runs (`tauri dev` → `cargo run`) are signed with the Developer ID first, so keychain approvals stick.
+[target.aarch64-apple-darwin]
+runner = "scripts/dev-sign-run.sh"
+
+[target.x86_64-apple-darwin]
+runner = "scripts/dev-sign-run.sh"

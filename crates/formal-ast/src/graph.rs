@@ -688,7 +688,8 @@ impl<'a> FnVisitor<'a> {
         } else {
             CallKind::Internal
         };
-        let mapped: Vec<Option<Ref>> = if call_kind == CallKind::Internal {
+        // Library functions run on our storage too (delegatecall), so their storage arguments map like internal ones.
+        let mapped: Vec<Option<Ref>> = if call_kind.runs_here() {
             // `using for` passes the receiver as the first argument.
             let mut all: Vec<&Value> = vec![];
             if callee["nodeType"] == "MemberAccess" && !base_type.starts_with("type(") {

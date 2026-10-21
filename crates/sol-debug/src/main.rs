@@ -28,6 +28,12 @@ struct Args {
     /// Run a Foundry test of --contract: setUp() then this function, with cheatcodes.
     #[arg(long)]
     test: Option<String>,
+    /// The chain id `block.chainid` reads (default 31337, as in forge); scripts read deployments by it.
+    #[arg(long = "chain-id")]
+    chain_id: Option<u64>,
+    /// Run on a fork: state is read over JSON-RPC from this URL (an Anvil fork, usually) at its latest block.
+    #[arg(long = "fork-url")]
+    fork_url: Option<String>,
     /// With --test: run the same test file in this second project too (a port of the first, e.g. to Huff) and
     /// report where the two runs first disagree on calls, events or storage.
     #[arg(long)]
@@ -85,6 +91,13 @@ fn main() -> Result<()> {
         std::env::set_var("SOL_DEBUG_THEME", t);
     }
     let mut s = Session::compile(&a.root, &a.entry)?;
+    if let Some(url) = &a.fork_url {
+        let f = s.set_fork(url)?;
+        eprintln!("fork: chain {} at block {}", f.chain_id, f.block);
+    }
+    if let Some(id) = a.chain_id {
+        s.set_chain_id(id);
+    }
     let ci = s.artifact(&a.contract)?;
 
     if let Some(line) = a.map_line {
@@ -156,6 +169,13 @@ fn main() -> Result<()> {
         let verdict = if run.test.success { "PASS".to_string() } else { format!("FAIL: {}", run.test.revert_reason().unwrap_or_default()) };
         println!("\n{verdict}  {}::{test}  ({} steps, {} gas, {:.1?})", a.contract, run.test.trace.steps.len(), run.test.gas_used, t.elapsed());
         print_writes(&s, &run.test);
+        let console = s.take_console();
+        if !console.is_empty() {
+            println!("console:");
+            for line in console {
+                println!("  {line}");
+            }
+        }
         if !s.evm.inspector.cheats.missing.is_empty() {
             println!("unsupported cheatcodes called: {:?}", s.evm.inspector.cheats.missing);
         }

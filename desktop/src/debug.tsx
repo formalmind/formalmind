@@ -1,6 +1,10 @@
+import { FORKS_ENABLED, ScriptRunDialog } from "./script-run-dialog";
+import { recordRun } from "@/lib/run-results";
+import { reportError } from "@/lib/report-error";
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router";
 import { invoke } from "@tauri-apps/api/core";
+import { listen } from "@tauri-apps/api/event";
 import { Bug, ChevronDown, ChevronRight, Columns2, FileCode2, FlaskConical, FolderPlus, Link2, Loader2, Play, Unlink2, X } from "lucide-react";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { useHighlightedCode } from "@/hooks/use-highlighted-code";
@@ -47,6 +51,7 @@ type Compared = { label_a: string; label_b: string; a: RunView; b: RunView; sect
 const KEYS = "j/k op · n/N line · s/S into · f/F out · c/C continue · g/G ends · /search ;, · :b line · :w var · :pc n · :step n";
 const name = (path: string) => path.split(/[\\/]/).filter(Boolean).pop() ?? path;
 const isTest = (f: string) => f.endsWith(".t.sol");
+const isScript = (f: string) => f.endsWith(".s.sol");
 
 /** A card in the app's floating style: a muted frame, a mono caption, the white content inside. */
 function Pane({ title, meta, className = "", children, scrollRef }: { title: string; meta?: string; className?: string; children: React.ReactNode; scrollRef?: React.Ref<HTMLDivElement> }) {
@@ -155,7 +160,7 @@ function Calls({ calls, view, go }: { calls: Call[]; view: StepView; go: (step: 
 function Opcodes({ view }: { view: StepView }) {
 	const ref = useScrollTo(view.step);
 	return (
-		<Pane title="Opcodes" meta={`pc ${view.pc}`} scrollRef={ref}>
+		<Pane title="Opcodes" meta={`pc ${view.pc}`} scrollRef={ref} className="w-[13.5rem] flex-none !basis-auto">
 			{view.ops.length === 0 ? <p className="p-2 text-muted-foreground">Code not from this compile</p> : null}
 			<ul className="py-1">
 				{view.ops.map((o) => (
@@ -173,12 +178,20 @@ function Opcodes({ view }: { view: StepView }) {
 
 function Stack({ view }: { view: StepView }) {
 	return (
-		<Pane title="Stack" className="flex-[0.7]" meta={view.result ? `result ${view.result.short}` : `${view.stack.length}`}>
+		<Pane title="Stack" className="min-w-[13rem] flex-1" meta={view.result ? `result ${view.result.short}` : `${view.stack.length}`}>
 			<ul className="py-1">
 				{view.stack.map((w, i) => (
-					<li key={i} title={w.full} className="flex gap-2 px-2">
+					<li key={i} className="flex gap-2 whitespace-nowrap px-2">
 						<span className="w-5 shrink-0 text-right text-muted-foreground">{i}</span>
-						<span className="truncate">{w.short}</span>
+						{/* Never cut: small numbers as they are, anything longer as its full hex (leading zeros dropped). */}
+						<button
+							type="button"
+							title="Copy the full word"
+							onClick={() => void navigator.clipboard?.writeText(w.full)}
+							className="rounded px-0.5 text-left hover:bg-muted active:bg-emerald-500/20"
+						>
+							{w.short.includes("…") ? w.full : w.short}
+						</button>
 					</li>
 				))}
 				{view.stack.length === 0 ? <li className="px-2 text-muted-foreground">empty</li> : null}
@@ -190,12 +203,16 @@ function Stack({ view }: { view: StepView }) {
 function Memory({ view }: { view: StepView }) {
 	const ref = useScrollTo(view.step);
 	return (
-		<Pane title="Memory" meta={`${view.memory_size} bytes`} className="flex-[1.3]" scrollRef={ref}>
+		<Pane title="Memory" meta={`${view.memory_size} bytes`} className="min-w-[16rem] flex-[1.6]" scrollRef={ref}>
 			<ul className="py-1">
 				{view.memory.map((m) => (
-					<li key={m.offset} data-current={m.fresh || undefined} className={`flex gap-2 px-2 ${m.fresh ? "bg-amber-500/15 text-amber-700 dark:text-amber-300" : ""}`}>
+					<li key={m.offset} data-current={m.fresh || undefined} className={`flex w-max min-w-full gap-2 whitespace-nowrap px-2 ${m.fresh ? "bg-amber-500/15 text-amber-700 dark:text-amber-300" : ""}`}>
 						<span className="w-10 shrink-0 text-right text-muted-foreground">{m.offset.toString(16)}{m.offset === 0x40 ? "·fp" : ""}</span>
-						<span className="break-all">{m.hex}</span>
+						{/* 32 bytes as two halves of 16, so a word reads at a glance. */}
+						<span>
+							{m.hex.slice(0, 32)}
+							<span className="ml-2">{m.hex.slice(32)}</span>
+						</span>
 					</li>
 				))}
 				{view.memory.length === 0 ? <li className="px-2 text-muted-foreground">empty</li> : null}
@@ -396,7 +413,7 @@ function TestTree({ files, selected, tests, opening, running, current, onFile, o
 	}, [files]);
 	return (
 		<ul className="space-y-2 p-2 font-mono text-[11px]">
-			{files.length === 0 ? <li className="p-2 font-sans text-[13px] text-muted-foreground">No Foundry tests (*.t.sol) in this folder.</li> : null}
+			{files.length === 0 ? <li className="p-2 font-sans text-[13px] text-muted-foreground">No Foundry scripts (*.s.sol) or tests (*.t.sol) in this folder.</li> : null}
 			{dirs.map(([dir, list]) => (
 				<li key={dir}>
 					<p className="px-1.5 pb-0.5 text-muted-foreground">{dir}/</p>
@@ -405,13 +422,13 @@ function TestTree({ files, selected, tests, opening, running, current, onFile, o
 							<li key={f}>
 								<button type="button" onClick={() => onFile(f)} className={`flex w-full items-center gap-1.5 truncate rounded px-1.5 py-1 text-left hover:bg-muted ${selected === f ? "bg-muted font-medium" : ""}`} title={f}>
 									<ChevronRight className={`size-3 shrink-0 text-muted-foreground transition-transform ${selected === f ? "rotate-90" : ""}`} />
-									<FileCode2 className="size-3 shrink-0 text-sky-500" />
+									<FileCode2 className={`size-3 shrink-0 ${isScript(f) ? "text-amber-500" : "text-sky-500"}`} />
 									<span className="truncate">{name(f)}</span>
 								</button>
 								{selected === f ? (
 									<ul className="ml-4 border-l pl-1">
 										{opening ? <li className="flex items-center gap-1.5 px-1.5 py-1 text-muted-foreground"><Loader2 className="size-3 animate-spin" />Compiling with solc…</li> : null}
-										{tests?.length === 0 ? <li className="px-1.5 py-1 text-muted-foreground">No test…() functions</li> : null}
+										{tests?.length === 0 ? <li className="px-1.5 py-1 text-muted-foreground">{isScript(f) ? "No run…() function without arguments" : "No test…() functions"}</li> : null}
 										{tests?.map((t) => {
 											const key = `${t.contract}::${t.test}`;
 											return (
@@ -535,12 +552,16 @@ function Report({ cmp, linked, slotMap, onLink, onHome, onGo, onSlotMap, onClose
 }
 
 /** /debug?path=<folder>&file=<test file>&test=<Contract::test>: pick a test file, pick a test, debug it. */
+/** The debugger on its own page (/debug?path=…&file=…&test=…). */
 export function DebugPage() {
 	const [params] = useSearchParams();
 	const navigate = useNavigate();
 	const folder = params.get("path") ?? "";
-	const file = params.get("file");
-	const wanted = params.get("test");
+	return <DebugView folder={folder} file={params.get("file")} test={params.get("test")} onPick={(f) => navigate(`/debug?path=${encodeURIComponent(folder)}&file=${encodeURIComponent(f)}`, { replace: true })} />;
+}
+
+/** A folder's Foundry tests: pick a file, run a test, step through it (also Debug mode of a folder's page). */
+export function DebugView({ folder, file, test: wanted, onPick, embedded }: { folder: string; file: string | null; test?: string | null; onPick: (file: string) => void; embedded?: boolean }) {
 	const [scan, setScan] = useState<Scan | null>(null);
 	const [session, setSession] = useState<{ id: number; file: string; tests: TestFn[] } | null>(null);
 	const [opening, setOpening] = useState(false);
@@ -553,6 +574,12 @@ export function DebugPage() {
 	const [focusB, setFocusB] = useState(false);
 	const [linked, setLinked] = useState(true);
 	const typing = useRef(false);
+	// Reported when the error changes (not when the file does), named after the file it came from.
+	const where = useRef("");
+	where.current = `Debug · ${file ?? name(folder)}`;
+	useEffect(() => {
+		if (error) reportError(where.current, error);
+	}, [error]);
 
 	useEffect(() => {
 		setScan(null);
@@ -582,6 +609,31 @@ export function DebugPage() {
 		};
 	}, [folder, file]);
 
+	// Where runs happen, from the URL: an Anvil fork (`fork`, a local URL, with its `chain`), a chain id without a
+	// fork, or forge's empty local chain (31337). The Chain menu lists the chains running now; "Set up a chain…"
+	// opens the same settings as a script's play button.
+	const [urlParams, setUrlParams] = useSearchParams();
+	const fork = urlParams.get("fork");
+	const chain = Number(urlParams.get("chain")) || 31337;
+	const [running_, setRunningChains] = useState<{ name: string; folder: string; chain_id: number; port: number; alive: boolean }[]>([]);
+	const [setup, setSetup] = useState(false);
+	const loadChains = useCallback(() => {
+		void invoke<{ name: string; folder: string; chain_id: number; port: number; alive: boolean }[]>("anvil_list").then((l) => setRunningChains(l.filter((f) => f.alive)), () => setRunningChains([]));
+	}, []);
+	useEffect(() => {
+		if (!FORKS_ENABLED) return;
+		loadChains();
+		const t = setInterval(loadChains, 5000);
+		return () => clearInterval(t);
+	}, [loadChains]);
+	const pickChain = (target: { chainId: number; fork: string | null }) => {
+		const next = new URLSearchParams(urlParams);
+		next.set("chain", String(target.chainId));
+		if (target.fork) next.set("fork", target.fork);
+		else next.delete("fork");
+		setUrlParams(next, { replace: true });
+	};
+
 	const start = useCallback(
 		async (t: TestFn) => {
 			if (!session) return;
@@ -589,26 +641,40 @@ export function DebugPage() {
 			setRunning(key);
 			setError(null);
 			try {
-				const r = await invoke<RunView>("debug_run", { id: session.id, contract: t.contract, test: t.test });
+				const r = await invoke<RunView>("debug_run", { id: session.id, contract: t.contract, test: t.test, chainId: FORKS_ENABLED ? chain : 31337, forkUrl: FORKS_ENABLED ? fork : null });
 				setRun({ ...r, key });
+				recordRun(folder, session.file, t.name, t.test, r.success);
 				setCmp(null);
 			} catch (e) {
 				setError(String(e));
+				// It couldn't run (setUp reverted, a cheatcode is missing…): that counts as failed.
+				recordRun(folder, session.file, t.name, t.test, false);
 			} finally {
 				setRunning(null);
 			}
 		},
-		[session],
+		[session, folder, chain, fork],
 	);
-	// A test named in the URL (`&test=Contract::test`) runs as soon as its file has compiled.
+	// A test named in the URL (`&test=Contract::test`) runs once its file has compiled, and again when it changes.
 	useEffect(() => {
 		const t = session?.tests.find((x) => `${x.name}::${x.test}` === wanted || x.test === wanted);
-		if (t && !run && !running) void start(t);
+		if (t && run?.key !== `${t.contract}::${t.test}` && !running) void start(t);
 		// eslint-disable-next-line react-hooks/exhaustive-deps
-	}, [session]);
+	}, [session, wanted]);
 
-	const tests = useMemo(() => (scan?.solidity ?? []).filter(isTest), [scan]);
-	const pick = (f: string) => navigate(`/debug?path=${encodeURIComponent(folder)}&file=${encodeURIComponent(f)}`, { replace: true });
+	// A new chain runs the current one again.
+	useEffect(() => {
+		const t = session?.tests.find((x) => run && `${x.contract}::${x.test}` === run.key);
+		if (t && !running) void start(t);
+		// eslint-disable-next-line react-hooks/exhaustive-deps
+	}, [chain, fork]);
+
+	// Scripts first (what production runs), then tests.
+	const tests = useMemo(() => {
+		const all = scan?.solidity ?? [];
+		return [...all.filter(isScript).sort(), ...all.filter(isTest)];
+	}, [scan]);
+	const pick = onPick;
 	const onView = useCallback((v: StepView) => setRun((r) => (r ? { ...r, view: v } : r)), []);
 
 	const compare = useCallback(
@@ -678,8 +744,9 @@ export function DebugPage() {
 	}, [cmp, home]);
 
 	return (
-		<div className="flex h-full min-h-0 flex-1 gap-2 p-2">
-			<aside className="flex w-60 shrink-0 flex-col rounded-2xl border bg-muted/80 p-1">
+		<div className="flex h-full min-h-0 min-w-0 flex-1 gap-2 overflow-hidden p-2">
+			{/* In a folder's Debug mode the sidebar's file tree lists the scripts and tests instead. */}
+			{embedded ? null : <aside className="flex w-60 shrink-0 flex-col rounded-2xl border bg-muted/80 p-1">
 				<div className="flex h-7 shrink-0 items-center gap-2 px-2.5">
 					<FlaskConical className="size-3.5 text-muted-foreground" />
 					<span className="font-mono text-[11px] font-medium uppercase tracking-wider text-muted-foreground">Tests</span>
@@ -690,8 +757,49 @@ export function DebugPage() {
 						<TestTree files={tests} selected={file} tests={session?.file === file ? session.tests : null} opening={opening} running={running} current={run?.key ?? null} onFile={pick} onTest={(t) => void start(t)} />
 					)}
 				</div>
-			</aside>
+			</aside>}
 			<main className="flex min-h-0 min-w-0 flex-1 flex-col">
+				<div className={`mb-2 shrink-0 items-center gap-2 text-[11px] text-muted-foreground ${FORKS_ENABLED ? "flex" : "hidden"}`}>
+					<label className="inline-flex items-center gap-1.5" title="Where runs happen: a running Anvil fork (state read from it), or an empty local chain">
+						<span className="font-mono uppercase tracking-wider">Chain</span>
+						{/* Green: the chain runs are on is up (the local one always is; a fork while it answers). */}
+						<span className={`size-2 rounded-full ${!fork || running_.some((f) => `http://127.0.0.1:${f.port}` === fork) ? "bg-emerald-500" : "bg-amber-500"}`} />
+						<select
+							value={fork ?? (chain === 31337 ? "local" : `id:${chain}`)}
+							onChange={(e) => {
+								const v = e.target.value;
+								if (v === "setup") return setSetup(true);
+								if (v === "local") return pickChain({ chainId: 31337, fork: null });
+								const f = running_.find((x) => `http://127.0.0.1:${x.port}` === v);
+								if (f) pickChain({ chainId: f.chain_id, fork: v });
+							}}
+							className="h-6 rounded-md border bg-background px-1.5 font-mono text-[11px] text-foreground"
+						>
+							<option value="local">Local · 31337</option>
+							{chain !== 31337 && !fork ? <option value={`id:${chain}`}>Chain {chain} · no fork</option> : null}
+							{fork && !running_.some((f) => `http://127.0.0.1:${f.port}` === fork) ? <option value={fork}>Fork {fork.replace(/^https?:\/\/127\.0\.0\.1/, "")} · chain {chain}</option> : null}
+							{running_.map((f) => (
+								<option key={f.name} value={`http://127.0.0.1:${f.port}`}>
+									{f.name} · chain {f.chain_id} · :{f.port}
+								</option>
+							))}
+							<option value="setup">Set up a chain…</option>
+						</select>
+					</label>
+				</div>
+				{setup && file ? (
+					<ScriptRunDialog
+						folder={folder}
+						file={file}
+						fn={run?.key.split("::").pop() ?? wanted?.split("::").pop() ?? "run"}
+						onClose={() => setSetup(false)}
+						onRun={(t) => {
+							setSetup(false);
+							loadChains();
+							pickChain(t);
+						}}
+					/>
+				) : null}
 				{error ? <p className="mb-2 whitespace-pre-wrap rounded-xl border border-red-500/30 bg-red-50/80 p-3 font-mono text-[11px] text-red-700 dark:bg-red-950/40 dark:text-red-400">{error}</p> : null}
 				{cmp && session ? (
 					<>
@@ -711,12 +819,62 @@ export function DebugPage() {
 					<div className="grid flex-1 place-items-center">
 						<div className="max-w-sm space-y-2 text-center text-[13px] text-muted-foreground">
 							<Bug className="mx-auto size-6" />
-							<p className="font-medium text-foreground">{running ? "Running the test…" : file ? "Pick a test to debug" : "Pick a test file"}</p>
-							<p>The test runs in an embedded EVM after solc compiles it (no forge). Every opcode is mapped to its line and AST node, and storage is named by the layout. Step with vim keys: {KEYS}.</p>
+							<p className="font-medium text-foreground">{running || opening ? "Compiling and running…" : embedded ? "Pick a script or test in the sidebar" : file ? "Pick a test to debug" : "Pick a test file"}</p>
+							{embedded ? <p>Open the ›  beside a file under script/ or test/ to list its run…() and test…() functions; click one to debug it.</p> : null}
+							<p>It runs in an embedded EVM after solc compiles it (no forge). Every opcode is mapped to its line and AST node, and storage is named by the layout. Step with vim keys: {KEYS}.</p>
 						</div>
 					</div>
 				)}
+				<OutputPanel folder={folder} busy={opening || Boolean(running)} />
 			</main>
 		</div>
+	);
+}
+
+/**
+ * Debug's output, like a terminal under the panes: what's running now (solc, anvil, the fork, setUp and the run)
+ * and what the run printed with console.log, so a long compile or fork start never looks frozen.
+ */
+function OutputPanel({ folder, busy }: { folder: string; busy: boolean }) {
+	const [lines, setLines] = useState<{ at: number; text: string }[]>([]);
+	const [open, setOpen] = useState(true);
+	const box = useRef<HTMLDivElement | null>(null);
+	useEffect(() => {
+		const off = listen<{ folder: string; line: string }>("debug:log", ({ payload }) => {
+			if (payload.folder !== folder) return;
+			setLines((l) => [...l.slice(-400), { at: Date.now(), text: payload.line }]);
+		});
+		return () => void off.then((f) => f());
+	}, [folder]);
+	useEffect(() => {
+		box.current?.scrollTo({ top: box.current.scrollHeight });
+	}, [lines, open]);
+	const tone = (t: string) =>
+		t.startsWith("$") ? "text-sky-400" : t.startsWith("console.log") ? "text-zinc-100" : /^(pass|anvil ready|compiled|fork:)/.test(t) ? "text-emerald-400" : /fail|revert|didn't/.test(t) ? "text-red-400" : "text-zinc-400";
+	return (
+		<section className="mt-2 flex shrink-0 flex-col overflow-hidden rounded-xl border bg-zinc-950 font-mono text-[11px] leading-5 text-zinc-300">
+			<button type="button" onClick={() => setOpen(!open)} className="flex h-7 shrink-0 items-center gap-2 px-3 text-left text-zinc-400 hover:text-zinc-200">
+				<ChevronRight className={`size-3 transition-transform ${open ? "rotate-90" : ""}`} />
+				<span className="uppercase tracking-wider">Output</span>
+				{busy ? <Loader2 className="size-3 animate-spin text-sky-400" /> : null}
+				<span className="truncate text-zinc-500">{lines.at(-1)?.text ?? "Runs show what they do here."}</span>
+				{lines.length ? (
+					<span role="button" tabIndex={-1} onClick={(e) => { e.stopPropagation(); setLines([]); }} className="ml-auto shrink-0 rounded px-1.5 text-zinc-500 hover:bg-zinc-800 hover:text-zinc-200">
+						clear
+					</span>
+				) : null}
+			</button>
+			{open ? (
+				<div ref={box} className="max-h-40 min-h-16 overflow-auto border-t border-zinc-800 px-3 py-1.5">
+					{lines.length === 0 ? <p className="text-zinc-500">Nothing yet. Run a script or a test from the file tree.</p> : null}
+					{lines.map((l, i) => (
+						<p key={i} className="flex gap-3 whitespace-pre-wrap break-all">
+							<span className="shrink-0 select-none text-zinc-600">{new Date(l.at).toLocaleTimeString([], { hour12: false })}</span>
+							<span className={tone(l.text)}>{l.text}</span>
+						</p>
+					))}
+				</div>
+			) : null}
+		</section>
 	);
 }

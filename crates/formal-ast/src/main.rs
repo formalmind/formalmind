@@ -8,7 +8,7 @@ use std::time::Instant;
 
 /// Reads a Solidity protocol through solc's AST (never forge): its graph, scope, units of work and slices.
 #[derive(Parser)]
-#[command(name = "formal-ast")]
+#[command(name = "formalmind")]
 struct Cli {
     /// The project folder (with foundry.toml / remappings.txt).
     #[arg(long, default_value = ".")]
@@ -32,6 +32,12 @@ enum Command {
     Slice { function: String },
     /// The whole graph, scope, units and clusters as JSON (writes .formal/ast/graph.json under the root).
     Json,
+    /// Audit mode's data as JSON: units, clusters and every unit's slice.
+    Audit,
+    /// Production's entry points: what each script under script/ deploys and calls (the entry argument is ignored).
+    Scripts,
+    /// The Audit page's coverage as JSON: each function's Lean model (or why it is opaque) and the theorems naming it.
+    Formal,
     /// A world of linked models: the entry plus `--with file[:Contract]` members, interface calls bound to the
     /// members that implement them.
     Link {
@@ -50,6 +56,10 @@ enum Command {
 
 fn main() -> Result<()> {
     let cli = Cli::parse();
+    if matches!(cli.command, Command::Scripts) {
+        println!("{}", formal_ast::script_entries(&cli.root)?);
+        return Ok(());
+    }
     let started = Instant::now();
     let (a, output) = analyze_full(&cli.root, &cli.entry, cli.contract.as_deref())?;
     let g = &a.graph;
@@ -80,6 +90,15 @@ fn main() -> Result<()> {
             for (f, why) in &model.report.opaque {
                 println!("  opaque {f}: {why}");
             }
+        }
+        Command::Scripts => unreachable!(),
+        Command::Formal => {
+            println!("{}", formal_ast::formal_json(&a, &output, took.as_millis() as u64));
+        }
+        Command::Audit => {
+            let mut v = formal_ast::audit_json(&a, took.as_millis() as u64);
+            v["slices"] = serde_json::to_value(formal_ast::all_slices(&a))?;
+            println!("{v}");
         }
         Command::Link { out, with } => {
             let mut parts = vec![lean::Gen::new(&output, g, &a.scope).parts()];

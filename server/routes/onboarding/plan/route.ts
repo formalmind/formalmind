@@ -7,6 +7,8 @@ import { EXAMPLE_REPOS, PLANNER_SYSTEM, parseRepo, planPrompt, planSchema, scanR
 const PER_HOUR = 5;
 /** A plan made for one visitor serves everyone who asks for the same repository this week. */
 const CACHE_SECONDS = 7 * 24 * 3600;
+/** Compression holds a stream back until it ends (wrangler dev gzips it whole); identity and no-transform keep it chunk by chunk. */
+const STREAMING = { "Cache-Control": "no-cache, no-transform", "Content-Encoding": "identity" };
 const isExample = (repo: string) => EXAMPLE_REPOS.some((example) => example.toLowerCase() === repo.toLowerCase());
 
 /**
@@ -15,8 +17,8 @@ const isExample = (repo: string) => EXAMPLE_REPOS.some((example) => example.toLo
  */
 function playBack(plan: RepoPlan) {
 	const text = JSON.stringify(plan);
-	// About 250 small chunks, 32ms apart: a cached plan unfolds over roughly eight seconds, readable as it lands.
-	const step = Math.max(12, Math.ceil(text.length / 250));
+	// About 100 chunks, 20ms apart: a cached plan unfolds in about two seconds, quick but still seen landing.
+	const step = Math.max(12, Math.ceil(text.length / 100));
 	const encoder = new TextEncoder();
 	let at = 0;
 	return new ReadableStream<Uint8Array>({
@@ -24,7 +26,7 @@ function playBack(plan: RepoPlan) {
 			if (at >= text.length) return controller.close();
 			controller.enqueue(encoder.encode(text.slice(at, at + step)));
 			at += step;
-			await new Promise((resolve) => setTimeout(resolve, 32));
+			await new Promise((resolve) => setTimeout(resolve, 20));
 		},
 	});
 }
@@ -36,7 +38,7 @@ export async function POST(request: Request) {
 
 	const cacheKey = `plan:${repo.toLowerCase()}`;
 	const cached = await getJSON<RepoPlan>(cacheKey).catch(() => null);
-	if (cached) return new Response(playBack(cached), { headers: { "Content-Type": "text/plain; charset=utf-8", "X-Plan-Cache": "hit" } });
+	if (cached) return new Response(playBack(cached), { headers: { ...STREAMING, "Content-Type": "text/plain; charset=utf-8", "X-Plan-Cache": "hit" } });
 
 	const ip = request.headers.get("cf-connecting-ip") ?? request.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ?? "local";
 	const bucket = `ratelimit:plan:${ip}:${new Date().toISOString().slice(0, 13)}`;
@@ -68,5 +70,5 @@ export async function POST(request: Request) {
 			if (object) await putJSON(cacheKey, object, isExample(repo) ? undefined : { expirationTtl: CACHE_SECONDS }).catch(() => {});
 		},
 	});
-	return result.toTextStreamResponse({ headers: { "X-Plan-Repo": scan.repo } });
+	return result.toTextStreamResponse({ headers: { ...STREAMING, "X-Plan-Repo": scan.repo } });
 }

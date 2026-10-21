@@ -1,7 +1,7 @@
 //! Audit mode: what formal-ast reads from solc's AST for a folder's contract.
 
-use formal_ast::{analyze, scope, slice};
-use serde_json::{json, Value};
+use formal_ast::{analyze, analyze_full, slice};
+use serde_json::Value;
 use std::path::Path;
 
 fn check(folder: &str) -> Result<(), String> {
@@ -16,42 +16,7 @@ pub async fn ast_units(folder: String, entry: String) -> Result<Value, String> {
     tauri::async_runtime::spawn_blocking(move || {
         let started = std::time::Instant::now();
         let a = analyze(Path::new(&folder), &entry, None).map_err(|e| format!("{e:#}"))?;
-        let g = &a.graph;
-        let names = |ids: &std::collections::BTreeSet<i64>| ids.iter().filter_map(|v| g.state_vars.get(v).map(|s| s.name.clone())).collect::<Vec<_>>();
-        let units: Vec<Value> = a
-            .units
-            .iter()
-            .map(|u| {
-                json!({
-                    "name": u.name,
-                    "function": g.functions[&u.function].name,
-                    "mutability": u.mutability,
-                    "reads": names(&u.reads),
-                    "writes": names(&u.writes),
-                    "external": u.external_calls.len(),
-                    "guards": u.guards,
-                    "arith": u.arith,
-                    "unchecked": u.unchecked,
-                    "asm": u.asm,
-                    "closure": u.closure.len(),
-                })
-            })
-            .collect();
-        let clusters: Vec<Value> = scope::clusters(&a.units)
-            .iter()
-            .filter(|c| c.units.len() > 1)
-            .map(|c| json!({ "units": c.units.iter().map(|f| g.functions[f].name.clone()).collect::<Vec<_>>(), "shared": names(&c.shared) }))
-            .collect();
-        Ok(json!({
-            "contract": g.contracts[&a.scope.entry].name,
-            "files": g.files.len(),
-            "inScope": a.scope.files.len(),
-            "reachable": a.scope.reachable.len(),
-            "unusedImports": a.scope.unused_imports,
-            "ms": started.elapsed().as_millis() as u64,
-            "units": units,
-            "clusters": clusters,
-        }))
+        Ok(formal_ast::audit_json(&a, started.elapsed().as_millis() as u64))
     })
     .await
     .map_err(|e| e.to_string())?
@@ -69,4 +34,28 @@ pub async fn ast_slice(folder: String, entry: String, function: String) -> Resul
     })
     .await
     .map_err(|e| e.to_string())?
+}
+
+/// The Lean model's coverage of the entry contract: every function it reached (its Lean definition, or why it is
+/// opaque) and the folder's own theorems that name it.
+#[tauri::command]
+pub async fn ast_formal(folder: String, entry: String) -> Result<Value, String> {
+    check(&folder)?;
+    tauri::async_runtime::spawn_blocking(move || {
+        let started = std::time::Instant::now();
+        let (a, output) = analyze_full(Path::new(&folder), &entry, None).map_err(|e| format!("{e:#}"))?;
+        Ok(formal_ast::formal_json(&a, &output, started.elapsed().as_millis() as u64))
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+/// Production's entry points: what each Foundry script under script/ deploys and calls, and so which of the folder's
+/// contracts are in scope.
+#[tauri::command]
+pub async fn ast_scripts(folder: String) -> Result<Value, String> {
+    check(&folder)?;
+    tauri::async_runtime::spawn_blocking(move || formal_ast::script_entries(Path::new(&folder)).map_err(|e| format!("{e:#}")))
+        .await
+        .map_err(|e| e.to_string())?
 }

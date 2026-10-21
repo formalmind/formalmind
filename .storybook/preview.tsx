@@ -10,8 +10,9 @@ const preview: Preview = {
 	},
 	decorators: [
 		withThemeByClassName({ themes: { light: "", dark: "dark" }, defaultTheme: "light" }),
-		(Story) => (
-			<MemoryRouter>
+		// A story can start at a URL with `parameters: { route: "/settings?section=editor" }`.
+		(Story, { parameters }) => (
+			<MemoryRouter initialEntries={[(parameters.route as string | undefined) ?? "/"]}>
 				<div className="bg-background text-sm text-foreground antialiased">
 					<Story />
 				</div>

@@ -1,3 +1,5 @@
+import { AddProjectHost } from "@/components/add-project";
+import { WebHome } from "@/components/web-home";
 import { lazy, Suspense, useEffect, useState } from "react";
 import { Navigate, Outlet, Route, Routes, useLocation, useParams } from "react-router";
 import { AppSidebar } from "@/components/app-sidebar";
@@ -17,18 +19,23 @@ import type { SessionData } from "@/lib/session";
  * that fails to load belongs to an older deploy: reload once to get the new build instead of crashing.
  */
 function page<T, P extends object>(load: () => Promise<T>, pick: (m: T) => React.ComponentType<P>) {
+	const stale = (error: unknown) => {
+		if (!sessionStorage.getItem("fm:reloaded-for-chunk")) {
+			sessionStorage.setItem("fm:reloaded-for-chunk", "1");
+			window.location.reload();
+			return new Promise<never>(() => {});
+		}
+		throw error;
+	};
 	return lazy(() =>
-		load().then(
-			(m) => ({ default: pick(m) }),
-			(error) => {
-				if (!sessionStorage.getItem("fm:reloaded-for-chunk")) {
-					sessionStorage.setItem("fm:reloaded-for-chunk", "1");
-					window.location.reload();
-					return new Promise<never>(() => {});
-				}
-				throw error;
-			},
-		),
+		load().then((m) => {
+			// A chunk can come back without the page in it (a newer build replaced it): treat that as stale too.
+			const component = m ? pick(m) : undefined;
+			if (!component) return stale(new Error("This page belongs to an older build."));
+			// Loaded fine: the next stale chunk may reload again.
+			sessionStorage.removeItem("fm:reloaded-for-chunk");
+			return { default: component };
+		}, stale),
 	);
 }
 const ChatPage = page(() => import("@/components/chat"), (m) => m.ChatPage);
@@ -39,9 +46,11 @@ const SwarmChatPage = page(() => import("@/components/projects/project-pages"), 
 const ProjectRoadmapPage = page(() => import("@/components/projects/project-pages"), (m) => m.ProjectRoadmapPage);
 const ProjectChatPage = page(() => import("@/components/projects/project-pages"), (m) => m.ProjectChatPage);
 const ProjectFilePage = page(() => import("@/components/projects/project-file"), (m) => m.ProjectFilePage);
+const ProjectCodePage = page(() => import("@/components/projects/project-code"), (m) => m.ProjectCodePage);
 const LocalDemoPage = page(() => import("@/components/local-demo"), (m) => m.LocalDemoPage);
 const UsagePage = page(() => import("@/components/usage/usage-page"), (m) => m.UsagePage);
 const BillingPage = page(() => import("@/components/billing/billing-page"), (m) => m.BillingPage);
+const SettingsPage = page(() => import("@/components/settings-page"), (m) => m.SettingsPage);
 const FirstProject = page(() => import("@/components/projects/project-pages"), (m) => m.FirstProject);
 
 type User = SessionData["user"];
@@ -82,6 +91,7 @@ function SignedInLayout({ user }: { user: User }) {
 			<ChatConversationsProvider>
 				<SidebarProvider defaultOpen={open}>
 					<AppSidebar />
+					<AddProjectHost />
 					<WorkspaceContent>
 						<Suspense fallback={null}>
 							<Outlet />
@@ -112,14 +122,18 @@ export function App() {
 				<Route element={<RequireUser user={user} />}>
 					{user ? (
 						<Route element={<SignedInLayout user={user} />}>
-							<Route path="/" element={<Title text="Swarm · Formal Mind"><SwarmWorkspace repo={SWARM_REPO} /></Title>} />
+							{/* Home is an empty screen with the next step; the swarm canvas lives at /swarm. */}
+							<Route path="/" element={<Title text="Formal Mind"><WebHome /></Title>} />
+							<Route path="/swarm" element={<Title text="Swarm · Formal Mind"><SwarmWorkspace repo={SWARM_REPO} /></Title>} />
 							<Route path="/swarm/chat" element={<Title text="Ask the swarm · Formal Mind"><SwarmChatPage /></Title>} />
 							<Route path="/roadmap" element={<Title text="Roadmap · Formal Mind"><FirstProject page="roadmap" /></Title>} />
 							<Route path="/billing" element={<Title text="Billing · Formal Mind"><BillingPage /></Title>} />
+							<Route path="/settings" element={<Title text="Settings · Formal Mind"><SettingsPage /></Title>} />
 							<Route path="/local-demo" element={<Title text="Local demo · Formal Mind"><LocalDemoPage /></Title>} />
 							<Route path="/usage" element={<Title text="Usage · Formal Mind"><UsagePage /></Title>} />
 							<Route path="/projects/:owner/:name" element={<ProjectHomePage />} />
 							<Route path="/projects/:owner/:name/file" element={<Title text="File · Formal Mind"><ProjectFilePage /></Title>} />
+								<Route path="/projects/:owner/:name/code" element={<ProjectCodePage />} />
 							<Route path="/projects/:owner/:name/roadmap" element={<Title text="Roadmap · Formal Mind"><ProjectRoadmapPage /></Title>} />
 							<Route path="/projects/:owner/:name/chat" element={<Title text="Chat · Formal Mind"><ProjectChatPage /></Title>} />
 							<Route path="/projects/:owner/:name/chat/:chatId" element={<Title text="Chat · Formal Mind"><ProjectChatPage /></Title>} />
@@ -133,9 +147,9 @@ export function App() {
 				</Route>
 				<Route path="/kanban" element={<Navigate to="/roadmap" replace />} />
 				<Route path="/project" element={<Navigate to="/roadmap" replace />} />
-				<Route path="/swarm" element={<Navigate to="/" replace />} />
 				<Route path="*" element={<Navigate to="/" replace />} />
 			</Routes>
 		</ThemeProvider>
 	);
 }
+

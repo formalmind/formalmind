@@ -19,6 +19,8 @@ export interface StoreNotification {
 	/** How long it shows as a toast; 0 for entries restored from storage. */
 	duration: number;
 	read?: boolean;
+	/** Text the notice's Copy button copies (an error with its details). */
+	copy?: string;
 	/** An optional button: its label, and the window event it fires (a string, so it survives storage). */
 	action?: { label: string; event: string };
 }

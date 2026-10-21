@@ -10,7 +10,7 @@ import {
 	LogOut,
 	Monitor,
 	Moon,
-	Sparkles,
+	Settings,
 	Sun,
 } from "lucide-react"
 import { useTheme } from "next-themes"
@@ -33,6 +33,7 @@ import {
 } from "@/components/ui/sidebar"
 
 import { useAuth } from "@/components/auth-context"
+import { inDesktop, openOnWeb } from "@/lib/open-web"
 
 export function NavUser() {
 	const { isMobile } = useSidebar()
@@ -69,56 +70,61 @@ export function NavUser() {
 								</AvatarFallback>
 							</Avatar>
 							<div className="grid flex-1 text-left text-sm leading-tight">
-								<span className="truncate font-semibold">{user.name}</span>
-								<span className="truncate text-sm">{user.email}</span>
+								<span className="truncate font-display text-[17px] font-normal leading-tight">{user.name}</span>
+								<span className="truncate text-xs text-muted-foreground">{user.email}</span>
 							</div>
 							<ChevronsUpDown className="ml-auto size-4" />
 						</SidebarMenuButton>
 					</DropdownMenuTrigger>
 					<DropdownMenuContent
-						className="w-[--radix-dropdown-menu-trigger-width] min-w-56 rounded-lg"
+						className="w-[--radix-dropdown-menu-trigger-width] min-w-52 rounded-lg [&_[role=menuitem]]:py-1 [&_[role=menuitem]]:text-[13px] [&_[role=menuitem]]:text-muted-foreground [&_[role=menuitem]:focus]:text-foreground/80 [&_[role=menuitem]_svg]:size-3.5 [&_[role=separator]]:my-0.5"
 						side={isMobile ? "bottom" : "right"}
 						align="end"
 						sideOffset={4}
 					>
 						<DropdownMenuLabel className="p-0 font-normal">
-							<div className="flex items-center gap-2 px-1 py-1.5 text-left text-sm">
-								<Avatar className="h-8 w-8 rounded-lg">
+							<div className="flex items-center gap-2 px-1 py-1 text-left text-sm">
+								<Avatar className="h-7 w-7 rounded-lg">
 									<AvatarImage src={user.picture} alt={user.name} />
 									<AvatarFallback className="rounded-lg">
 										{user.name?.charAt(0).toUpperCase()}
 									</AvatarFallback>
 								</Avatar>
 								<div className="grid flex-1 text-left text-sm leading-tight">
-									<span className="truncate font-semibold">{user.name}</span>
-									<span className="truncate text-sm">{user.email}</span>
+									<span className="truncate font-display text-[15px] font-normal leading-tight">{user.name}</span>
+									<span className="truncate text-xs text-muted-foreground">{user.email}</span>
 								</div>
 							</div>
 						</DropdownMenuLabel>
 						<DropdownMenuSeparator />
 						<DropdownMenuGroup>
-							<DropdownMenuItem>
-								<Sparkles />
-								Upgrade to Pro
+							<DropdownMenuItem asChild>
+								<Link to="/settings">
+									<Settings />
+									Settings
+								</Link>
 							</DropdownMenuItem>
-						</DropdownMenuGroup>
-						<DropdownMenuSeparator />
-						<DropdownMenuGroup>
 							<DropdownMenuItem asChild>
 								<Link to="/usage">
 									<Gauge />
 									Usage
 								</Link>
 							</DropdownMenuItem>
-							<DropdownMenuItem asChild>
-								<Link to="/billing">
+							{/* The Mac app has no billing page of its own: it opens formal.team's. */}
+							{inDesktop() ? (
+								<DropdownMenuItem onSelect={() => openOnWeb("/billing")}>
 									<CreditCard />
 									Billing
-								</Link>
-							</DropdownMenuItem>
+								</DropdownMenuItem>
+							) : (
+								<DropdownMenuItem asChild>
+									<Link to="/billing">
+										<CreditCard />
+										Billing
+									</Link>
+								</DropdownMenuItem>
+							)}
 						</DropdownMenuGroup>
-						<DropdownMenuSeparator />
-						<ThemeSwitch />
 						<DropdownMenuSeparator />
 						<DropdownMenuItem asChild>
 							{/* Logging out also resets the landing page to its demo. */}
@@ -134,8 +140,8 @@ export function NavUser() {
 	)
 }
 
-/** Light, dark, or whatever the system uses; a row of three, kept open so the change shows straight away. */
-function ThemeSwitch() {
+/** Light, dark, or whatever the system uses: three small buttons, shown beside the version in the sidebar footer. */
+export function ThemeSwitch() {
 	const { theme, setTheme } = useTheme()
 	const options = [
 		{ key: "light", label: "Light", icon: Sun },
@@ -143,8 +149,6 @@ function ThemeSwitch() {
 		{ key: "system", label: "System", icon: Monitor },
 	] as const
 	return (
-		<div className="flex items-center justify-between gap-2 px-2 py-1.5 text-sm">
-			<span>Theme</span>
 			<div role="radiogroup" aria-label="Theme" className="flex rounded-full bg-muted p-0.5">
 				{options.map(({ key, label, icon: Icon }) => (
 					<button
@@ -155,12 +159,11 @@ function ThemeSwitch() {
 						aria-label={label}
 						title={label}
 						onClick={() => setTheme(key)}
-						className={`flex size-6 items-center justify-center rounded-full transition-colors ${(theme ?? "system") === key ? "bg-background text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"}`}
+						className={`flex size-5 items-center justify-center rounded-full transition-colors ${(theme ?? "system") === key ? "bg-background text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"}`}
 					>
-						<Icon className="size-3.5" />
+						<Icon className="size-3" />
 					</button>
 				))}
 			</div>
-		</div>
 	)
 }

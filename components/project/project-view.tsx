@@ -3,7 +3,6 @@
 import { useEffect, useState } from "react";
 import { RefreshCw, X } from "lucide-react";
 import { FilterIcon } from "@primer/octicons-react";
-import { SidebarTrigger } from "@/components/ui/sidebar";
 import type { ProjectData } from "@/lib/project";
 import { matchesFilter } from "./project-meta";
 import { ProjectRoadmap } from "./project-roadmap";
@@ -48,7 +47,6 @@ export function ProjectView({ repo, now }: { repo: string; now?: number }) {
 	return (
 		<div className="flex min-h-0 flex-1 flex-col p-4 sm:p-6">
 			<div className="flex items-start gap-3">
-				<SidebarTrigger className="-ml-1 mt-0.5" />
 				{/* The counts sit under the title, so a narrow window never squeezes them beside it. */}
 				<div className="min-w-0">
 					<h1 className="truncate text-sm font-semibold">{repo}</h1>

@@ -4,6 +4,10 @@ Formal Mind: a website (Vite + React, `src/`, `components/`) with a Hono API on 
 routes in `server/routes/`), and a Tauri 2 Mac app in `desktop/` that reuses the same components through `@/`.
 Check `bunx tsc --noEmit -p .` and `bun run build` before committing.
 
+`crates/formal-ast` (solc's AST → graph, units, Lean coverage) runs natively in the Mac app and as wasm on the website's
+Proofs tab (`crates/formal-ast-wasm`, with solc-js in a Web Worker: `lib/ast/`). The wasm build is committed in
+`lib/formal-ast-wasm`: after changing either crate, run `bun run build:ast-wasm` and commit what it writes.
+
 ## Pushing to main ships
 
 `.githooks/pre-push` runs `scripts/release.sh` on every push to `main` (`bun install` turns the hook on). It:
@@ -28,10 +32,16 @@ The push only goes through if the release succeeds.
   release script clears it, but your own commands won't.
 - If the build fails with `hdiutil: couldn't unmount … Resource busy`, a Formal Mind disk image is still mounted:
   `diskutil eject force "/Volumes/Formal Mind"`, then retry.
+- The Mac app is one universal build (Apple Silicon and Intel: `--target universal-apple-darwin`; the bundled Neovim is
+  made universal by `desktop/scripts/fetch-nvim.sh`). The Windows installer is built by
+  `.github/workflows/desktop-windows.yml` when a `desktop-v*` release is published, attached as
+  `Formal-Mind-windows-setup.exe`, and added to that release's `latest.json` as `windows-x86_64` (it needs the
+  `TAURI_SIGNING_PRIVATE_KEY` repo secret; without it the installer ships without updates).
 - Release assets must keep these names: `Formal-Mind-mac.dmg` (the landing page's Download for Mac link),
-  `Formal-Mind-mac.app.tar.gz` and `latest.json` (the in-app updater). The `signature` in `latest.json` must be the
+  `Formal-Mind-windows-setup.exe` (Download for Windows), `Formal-Mind-mac.app.tar.gz` and `latest.json` (the in-app
+  updater). The `signature` in `latest.json` must be the
   `.sig` of that exact tar. An empty or mismatched signature makes every installed app refuse the update.
 - Installed apps check for updates on launch and every 6 hours. A new version lands in the notification bell with
   an Update button (`desktop/src/update.tsx`).
 
-More on the desktop app (sign-in, local folders, the local executor): `desktop/README.md`.
+More on the desktop app (sign-in, local folders, the local swarm): `desktop/README.md`.

@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { useLocation, useNavigate } from "react-router";
+import { listen } from "@tauri-apps/api/event";
 import { Bug, Gauge, GanttChart, HardDrive, MessageSquare, Network, PanelLeft, Plus, RefreshCw, Settings, X, type LucideIcon } from "lucide-react";
 import { NotificationCenter } from "@/components/notification-center";
 import { useSidebar } from "@/components/ui/sidebar";
@@ -25,7 +26,8 @@ function describe(path: string): { title: string; icon: LucideIcon } {
 		return { title: file ? `Debug ${file.split("/").pop()}` : "Debug", icon: Bug };
 	}
 	if (pathname.startsWith("/projects/")) return { title: pathname.split("/")[3] ?? "Project", icon: Network };
-	return { title: "Swarm", icon: Network };
+	if (pathname === "/swarm") return { title: "Swarm", icon: Network };
+	return { title: "Home", icon: HardDrive };
 }
 
 function load(): { tabs: Tab[]; active: string } {
@@ -49,6 +51,18 @@ export function TabBar() {
 	const { toggleSidebar } = useSidebar();
 	const [state, setState] = useState(load);
 	const here = location.pathname + location.search;
+	// A page with its own tab group (a folder's modes and name) fills the slot; that group is then its tab, so the
+	// active tab isn't drawn a second time.
+	const [grouped, setGrouped] = useState(false);
+	useEffect(() => {
+		const slot = document.getElementById("fm-titlebar-slot");
+		if (!slot) return;
+		const look = () => setGrouped(slot.childElementCount > 0);
+		look();
+		const mo = new MutationObserver(look);
+		mo.observe(slot, { childList: true });
+		return () => mo.disconnect();
+	}, []);
 
 	// The page changed (sidebar link, in-page link): the active tab is now there.
 	useEffect(() => {
@@ -88,6 +102,12 @@ export function TabBar() {
 		} else setState((s) => ({ ...s, tabs: rest }));
 	};
 
+	// Settings… (⌘,) in the app menu.
+	useEffect(() => {
+		const off = listen("fm:settings", () => navigate("/settings"));
+		return () => void off.then((f) => f());
+	}, [navigate]);
+
 	// ⌘T new tab, ⌘W close the current one.
 	useEffect(() => {
 		const onKey = (e: KeyboardEvent) => {
@@ -111,10 +131,13 @@ export function TabBar() {
 				<PanelLeft className="size-4" />
 			</button>
 			<div className="mx-1 h-4 w-px shrink-0 bg-border" />
+			{/* A page's own controls (its modes and the folder's name) come first, left of the window tabs. */}
+			<div id="fm-titlebar-slot" className="mr-1 flex min-w-0 shrink-0 items-center empty:hidden" />
 			<div data-tauri-drag-region className="flex min-w-0 flex-1 items-center gap-1 overflow-hidden">
 				{state.tabs.map((tab) => {
 					const { title, icon: Icon } = describe(tab.path);
 					const active = tab.id === state.active;
+					if (active && grouped) return null;
 					return (
 						<div
 							key={tab.id}

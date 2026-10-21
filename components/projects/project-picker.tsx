@@ -1,3 +1,4 @@
+import { openAddProject } from "@/components/add-project";
 import { Check, ChevronDown, FolderGit2 } from "lucide-react";
 import { useNavigate } from "react-router";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
@@ -24,7 +25,7 @@ export function ProjectPicker({ repo, onSelect }: { repo: string; onSelect?: (re
 						{p.repo}
 					</DropdownMenuItem>
 				))}
-				<DropdownMenuItem onSelect={() => navigate("/onboarding?new=1")}>
+				<DropdownMenuItem onSelect={openAddProject}>
 					<span className="size-4" />
 					New project…
 				</DropdownMenuItem>

@@ -1,7 +1,11 @@
 import { useState } from "react";
 import { Link } from "react-router";
-import { Gauge, MoreHorizontal, Play, Settings, Square, Wallet } from "lucide-react";
-import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
+import { setVimMode, useVimMode } from "@/components/vim-mode";
+import { Archive, ArchiveRestore, FolderSearch, Gauge, Play, Settings, Square, Wallet } from "lucide-react";
+import { AuditFoldersDialog } from "@/components/audit-folders";
+import { inDesktop, openOnWeb } from "@/lib/open-web";
+import { FolderMenu, type FolderMenuItem } from "@/components/folder-menu";
+import { DropdownMenu, DropdownMenuCheckboxItem, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 
 /** A project's swarm, stopped or running: stopping turns its workflow off and cancels runs in flight. */
 function useSwarmControl(repo: string) {
@@ -41,22 +45,32 @@ function SwarmItems({ repo, control, label }: { repo: string; control: ReturnTyp
 	);
 }
 
-/** The ⋯ on a project in the sidebar. */
-export function SwarmMenu({ repo }: { repo: string }) {
+/** A project's ⋯ and right-click menu in the sidebar: stop or resume its swarm, and archive it (or bring it back). */
+export function ProjectContextMenu({ repo, swarm, archived, onArchive, auditKey, children }: { repo: string; swarm: boolean; archived: boolean; onArchive: (archived: boolean) => void; auditKey?: string; children: (dots: React.ReactNode) => React.ReactNode }) {
+	const [audits, setAudits] = useState(false);
 	const control = useSwarmControl(repo);
+	const { paused, busy, set } = control;
+	const items: FolderMenuItem[] = [
+		...(swarm
+			? [
+					paused
+						? { label: "Resume swarm", icon: Play, disabled: busy, onSelect: () => void set(false) }
+						: { label: "Stop swarm", icon: Square, iconClassName: "size-2.5 fill-current", danger: true, disabled: busy || paused === null, onSelect: () => void set(true) },
+					"separator" as const,
+				]
+			: []),
+		{ label: "Audit reports…", icon: FolderSearch, onSelect: () => setAudits(true) },
+		"separator",
+		{ label: archived ? "Unarchive" : "Archive", icon: archived ? ArchiveRestore : Archive, onSelect: () => onArchive(!archived) },
+	];
 	return (
-		<DropdownMenu onOpenChange={(o) => o && void control.load()}>
-			<DropdownMenuTrigger
-				aria-label={`Swarm options for ${repo}`}
-				title="Swarm"
-				className="flex size-6 shrink-0 items-center justify-center rounded-md text-muted-foreground opacity-0 outline-none hover:bg-background hover:text-sidebar-foreground group-hover/folder:opacity-100 focus-visible:opacity-100 data-[state=open]:opacity-100 group-data-[collapsible=icon]:hidden"
-			>
-				<MoreHorizontal className="size-3.5" />
-			</DropdownMenuTrigger>
-			<DropdownMenuContent align="start">
-				<SwarmItems repo={repo} control={control} />
-			</DropdownMenuContent>
-		</DropdownMenu>
+		<>
+			<FolderMenu items={items} onOpen={swarm ? () => void control.load() : undefined}>
+				{children}
+			</FolderMenu>
+			{/* The audit folders are kept by the folder the Bugs tab reads: the repository on the web, its clone in the Mac app. */}
+			{audits ? <AuditFoldersDialog folder={auditKey ?? repo} label={repo} onClose={() => setAudits(false)} /> : null}
+		</>
 	);
 }
 
@@ -104,6 +118,7 @@ export function SwarmContextMenu({ repos, children }: { repos: string[]; childre
 /** The gear beside the bell: account pages, and stopping or resuming each project's swarm. */
 export function SettingsMenu({ repos, className }: { repos: string[]; className?: string }) {
 	const [open, setOpen] = useState(false);
+	const vim = useVimMode();
 	return (
 		<DropdownMenu open={open} onOpenChange={setOpen}>
 			<DropdownMenuTrigger aria-label="Settings" title="Settings" className={className}>
@@ -119,9 +134,18 @@ export function SettingsMenu({ repos, className }: { repos: string[]; className?
 				<DropdownMenuItem asChild>
 					<Link to="/usage"><Gauge className="size-3.5" /> Usage</Link>
 				</DropdownMenuItem>
-				<DropdownMenuItem asChild>
-					<Link to="/billing"><Wallet className="size-3.5" /> Billing</Link>
-				</DropdownMenuItem>
+				{inDesktop() ? (
+					<DropdownMenuItem onSelect={() => openOnWeb("/billing")}><Wallet className="size-3.5" /> Billing</DropdownMenuItem>
+				) : (
+					<DropdownMenuItem asChild>
+						<Link to="/billing"><Wallet className="size-3.5" /> Billing</Link>
+					</DropdownMenuItem>
+				)}
+				<DropdownMenuSeparator />
+				{/* Keeps the menu open so the change shows. */}
+				<DropdownMenuCheckboxItem checked={vim} onCheckedChange={(on) => setVimMode(on)} onSelect={(e) => e.preventDefault()}>
+					Vim mode in code
+				</DropdownMenuCheckboxItem>
 				{repos.map((repo) => (
 					<div key={repo}>
 						<DropdownMenuSeparator />

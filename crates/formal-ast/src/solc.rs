@@ -4,16 +4,23 @@
 //! foundry.toml or the pragma, remappings from the project's files, and the output selection asks for no bytecode,
 //! so a large protocol compiles in a fraction of a second. There is no forge fallback: a solc error is returned as
 //! is, and nothing is built from a partial AST.
+//!
+//! Building solc's input ([`input`]) and reading its output ([`check`]) are apart from running it ([`compile`]): the
+//! website runs solc-js in the browser on the same input.
 
+use crate::fs::{Disk, Files};
 use anyhow::{bail, Context, Result};
 use serde_json::{json, Value};
 use std::path::{Path, PathBuf};
-use std::process::{Command, Stdio};
+use std::sync::Arc;
 
 /// What foundry.toml says about compiling, read directly (no `forge` call).
-#[derive(Debug, Default, Clone)]
+#[derive(Clone)]
 pub struct Project {
+    /// The folder on disk; empty when the files are in memory.
     pub root: PathBuf,
+    /// The project's files.
+    pub files: Arc<dyn Files>,
     pub solc_version: Option<String>,
     pub evm_version: Option<String>,
     pub remappings: Vec<String>,
@@ -24,8 +31,13 @@ pub struct Project {
 impl Project {
     pub fn load(root: &Path) -> Result<Self> {
         let root = root.canonicalize().with_context(|| format!("no such folder: {}", root.display()))?;
-        let mut project = Project { root: root.clone(), ..Default::default() };
-        if let Ok(text) = std::fs::read_to_string(root.join("foundry.toml")) {
+        Project::from_files(root.clone(), Arc::new(Disk(root)))
+    }
+
+    /// A project whose files come from `files` (`root` is only kept for callers that write next to them).
+    pub fn from_files(root: PathBuf, files: Arc<dyn Files>) -> Result<Self> {
+        let mut project = Project { root, files: files.clone(), solc_version: None, evm_version: None, remappings: vec![], libs: vec![] };
+        if let Some(text) = files.read("foundry.toml") {
             let doc: toml::Value = toml::from_str(&text).context("foundry.toml doesn't parse")?;
             let profile = doc.get("profile").and_then(|p| p.get("default"));
             let get = |k: &str| profile.and_then(|p| p.get(k)).and_then(|v| v.as_str()).map(str::to_string);
@@ -38,7 +50,7 @@ impl Project {
                 project.remappings.extend(list.iter().filter_map(|v| v.as_str()).map(str::to_string));
             }
         }
-        if let Ok(text) = std::fs::read_to_string(root.join("remappings.txt")) {
+        if let Some(text) = files.read("remappings.txt") {
             for line in text.lines().map(str::trim).filter(|l| !l.is_empty() && !l.starts_with('#')) {
                 // foundry.toml wins when both name the same prefix.
                 let prefix = line.split('=').next().unwrap_or("");
@@ -58,15 +70,14 @@ impl Project {
         // A dependency's own remappings.txt, scoped to imports from inside it (forge does the same): v4-core's
         // `solmate/=lib/solmate/` becomes `dependencies/v4-core/:solmate/=dependencies/v4-core/lib/solmate/`.
         for lib in project.libs.clone() {
-            let Ok(dirs) = std::fs::read_dir(root.join(&lib)) else { continue };
-            let mut dirs: Vec<_> = dirs.flatten().map(|d| d.file_name().to_string_lossy().to_string()).collect();
+            let mut dirs: Vec<String> = files.read_dir(&lib).into_iter().map(|(name, _)| name).collect();
             dirs.sort();
             for dep in dirs {
-                let Ok(text) = std::fs::read_to_string(root.join(&lib).join(&dep).join("remappings.txt")) else { continue };
+                let Some(text) = files.read(&format!("{lib}/{dep}/remappings.txt")) else { continue };
                 let base = format!("{lib}/{dep}/");
                 for line in text.lines().map(str::trim).filter(|l| !l.is_empty() && !l.starts_with('#') && !l.contains(':')) {
                     if let Some((from, to)) = line.split_once('=') {
-                        if root.join(&base).join(to).exists() {
+                        if files.exists(&format!("{base}{to}")) {
                             project.remappings.push(normalize_remapping(&format!("{base}:{from}={base}{to}")));
                         }
                     }
@@ -92,7 +103,9 @@ fn normalize_remapping(r: &str) -> String {
 }
 
 /// The solc binary for a version: svm's install folder, then `solc` on PATH if its version matches (or none was asked).
+#[cfg(not(target_arch = "wasm32"))]
 pub fn solc_binary(version: Option<&str>) -> Result<PathBuf> {
+    use std::process::Command;
     let home = std::env::var("HOME").unwrap_or_default();
     if let Some(v) = version {
         for dir in [format!("{home}/Library/Application Support/svm"), format!("{home}/.svm"), format!("{home}/.local/share/svm")] {
@@ -119,12 +132,12 @@ pub fn pragma_version(source: &str) -> Option<String> {
     exact.chars().all(|c| c.is_ascii_digit() || c == '.').then(|| exact.to_string())
 }
 
-/// Compiles the entry file (and whatever it imports) and returns solc's output: `sources.<path>.{id, ast}` and
-/// `contracts.<path>.<name>.storageLayout`.
-pub fn compile(project: &Project, entry: &str) -> Result<Value> {
-    let entry_source = std::fs::read_to_string(project.root.join(entry)).with_context(|| format!("can't read {entry}"))?;
+/// What to compile for one entry file: solc's standard JSON input (AST and storage layout only) and the version to
+/// compile it with (foundry.toml's, else the entry's exact pragma; None takes whatever solc there is). The entry is
+/// given by `urls`, so solc reads it and its imports itself (natively from the root, solc-js through its callback).
+pub fn input(project: &Project, entry: &str) -> Result<(Value, Option<String>)> {
+    let entry_source = project.files.read(entry).with_context(|| format!("can't read {entry}"))?;
     let version = project.solc_version.clone().or_else(|| pragma_version(&entry_source));
-    let solc = solc_binary(version.as_deref())?;
     let mut settings = json!({
         "remappings": project.remappings,
         "outputSelection": { "*": { "*": ["storageLayout"], "": ["ast"] } },
@@ -132,8 +145,31 @@ pub fn compile(project: &Project, entry: &str) -> Result<Value> {
     if let Some(evm) = &project.evm_version {
         settings["evmVersion"] = json!(evm);
     }
-    let input = json!({ "language": "Solidity", "sources": { entry: { "urls": [entry] } }, "settings": settings });
+    Ok((json!({ "language": "Solidity", "sources": { entry: { "urls": [entry] } }, "settings": settings }), version))
+}
 
+/// solc's output, or its errors as one: nothing is built from a partial AST.
+pub fn check(output: Value, entry: &str) -> Result<Value> {
+    let errors: Vec<String> = output["errors"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter(|e| e["severity"] == "error")
+        .map(|e| e["formattedMessage"].as_str().unwrap_or("").trim().to_string())
+        .collect();
+    if !errors.is_empty() {
+        bail!("solc failed to compile {entry}:\n{}", errors.join("\n\n"));
+    }
+    Ok(output)
+}
+
+/// Compiles the entry file (and whatever it imports) and returns solc's output: `sources.<path>.{id, ast}` and
+/// `contracts.<path>.<name>.storageLayout`.
+#[cfg(not(target_arch = "wasm32"))]
+pub fn compile(project: &Project, entry: &str) -> Result<Value> {
+    use std::process::{Command, Stdio};
+    let (input, version) = input(project, entry)?;
+    let solc = solc_binary(version.as_deref())?;
     let mut child = Command::new(&solc)
         .args(["--standard-json", "--base-path", ".", "--allow-paths", "."])
         .current_dir(&project.root)
@@ -149,17 +185,7 @@ pub fn compile(project: &Project, entry: &str) -> Result<Value> {
     let out = child.wait_with_output()?;
     let output: Value = serde_json::from_slice(&out.stdout)
         .with_context(|| format!("solc printed no JSON: {}", String::from_utf8_lossy(&out.stderr)))?;
-    let errors: Vec<String> = output["errors"]
-        .as_array()
-        .into_iter()
-        .flatten()
-        .filter(|e| e["severity"] == "error")
-        .map(|e| e["formattedMessage"].as_str().unwrap_or("").trim().to_string())
-        .collect();
-    if !errors.is_empty() {
-        bail!("solc failed to compile {entry}:\n{}", errors.join("\n\n"));
-    }
-    Ok(output)
+    check(output, entry)
 }
 
 #[cfg(test)]

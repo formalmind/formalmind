@@ -1,0 +1,23 @@
+[package]
+name = "formal-ast-wasm"
+version = "0.1.0"
+edition = "2021"
+description = "formal-ast for the browser: the website's Proofs tab, given the files and solc-js's output"
+license = "MIT"
+publish = false
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+formal-ast = { path = "../formal-ast" }
+anyhow = "1"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+# Pinned to the wasm-bindgen CLI that generates lib/formal-ast-wasm (scripts/build-ast-wasm.sh).
+wasm-bindgen = "=0.2.100"
+
+[profile.release]
+opt-level = "s"
+lto = true
+codegen-units = 1

@@ -80,7 +80,9 @@ const PANEL_GAP = 24;
 const CHIP = { x: PAD, y: 14 };
 
 const laneX = (lane: Lane) => PAD + LANES.findIndex((l) => l.key === lane) * (LANE_W + LANE_GAP);
-const panelX = (i: number) => PAD + i * (PANEL_W + PANEL_GAP);
+/** The notebooks share the board's width: three at PANEL_W, or narrower when the host adds a fourth (`side`). */
+const panelW = (n = 3) => (n > 3 ? (W - 2 * PAD - (n - 1) * PANEL_GAP) / n : PANEL_W);
+const panelX = (i: number, n = 3) => PAD + i * (panelW(n) + PANEL_GAP);
 const groupY = (group: number) => group * GROUP_H;
 
 /** What a replay card would look like as a GitHub issue or PR, for the demo's hover cards. */
@@ -160,20 +162,22 @@ const HOME_X: Record<SwarmRole, number> = {
  * Where things sit for a board of `groups` projects: each project's lanes, one under the other, then the
  * bench where the shared roles wait between turns, then the swarm-wide panels. The dispatcher stays on top.
  */
-function geometry(groups: number) {
+function geometry(groups: number, panels = 3) {
 	const bench = groupY(groups - 1) + LANE_BOTTOM + 20;
 	const panelTop = bench + 56;
+	// Where an agent stands at a notebook: near its right edge.
+	const right = panelW(panels) - 68;
 	const home = Object.fromEntries(ROLES.map((r) => [r, { x: HOME_X[r], y: r === "dispatcher" ? 34 : bench }])) as Record<SwarmRole, { x: number; y: number }>;
 	// The assistant waits in the chief's notebook (lower left; the chief works on its right), not on the bench.
-	home.assistant = { x: panelX(2) + 32, y: panelTop + 92 };
+	home.assistant = { x: panelX(2, panels) + 32, y: panelTop + 92 };
 	return {
 		home,
 		panelTop,
 		height: panelTop + PANEL_H + PAD,
 		roadmap: (group: number) => ({ x: laneX("roadmap") + 120, y: groupY(group) + CARD_TOP + 44 }),
-		chief: { x: panelX(2) + 300, y: panelTop + 70 },
-		ledger: { x: panelX(0) + 300, y: panelTop + 70 },
-		notebook: { x: panelX(1) + 300, y: panelTop + 70 },
+		chief: { x: panelX(2, panels) + right, y: panelTop + 70 },
+		ledger: { x: panelX(0, panels) + right, y: panelTop + 70 },
+		notebook: { x: panelX(1, panels) + right, y: panelTop + 70 },
 	};
 }
 
@@ -467,9 +471,9 @@ function placeWaiting(state: SwarmState, cards: Card[], cursors: Scene["cursors"
 	}
 }
 
-function liveScene(state: SwarmState, run: SwarmRun | null): Scene {
+function liveScene(state: SwarmState, run: SwarmRun | null, panels = 3): Scene {
 	const projects = projectsOf(state);
-	const geo = geometry(projects.length);
+	const geo = geometry(projects.length, panels);
 	const groupOf = (repo: string) => Math.max(0, projects.findIndex((p) => p.proofsRepo === repo));
 	const cardId = (item: SwarmItem) => `w:${itemKey(itemRepo(state, item), item.number)}`;
 	let order = projects.length;
@@ -605,6 +609,17 @@ function layout(cards: Card[], heights: Map<string, number>) {
 	return positions;
 }
 
+/** The scene without its GitHub links (cards' and the agents' "where"). */
+function unlinked(scene: Scene): Scene {
+	const next = cloneScene(scene);
+	next.cards = next.cards.map((c) => ({ ...c, href: undefined }));
+	for (const role of ROLES) {
+		const where = next.cursors[role].where;
+		if (where) next.cursors[role] = { ...next.cursors[role], where: { ...where, href: "" } };
+	}
+	return next;
+}
+
 function cloneScene(scene: Scene): Scene {
 	return {
 		...scene,
@@ -619,7 +634,7 @@ function cloneScene(scene: Scene): Scene {
  * `fill` makes the board fill its parent, scaled to fit both ways and centred, below a strip kept clear
  * for the pinned controls; otherwise it scales to the width. `title` and `actions` are pinned top-left and top-right.
  */
-export function SwarmCanvas({ state, fill = false, contain = false, title, actions, repo, onTalk, local = false }: {
+export function SwarmCanvas({ state, fill = false, contain = false, title, actions, repo, onTalk, local = false, below, side }: {
 	state: SwarmState | null;
 	/** A swarm running on this computer (the desktop app): no dispatcher schedule to show. */
 	local?: boolean;
@@ -632,18 +647,35 @@ export function SwarmCanvas({ state, fill = false, contain = false, title, actio
 	fill?: boolean;
 	title?: ReactNode;
 	actions?: ReactNode;
+	/** A card on the board under the notebooks (the project's roadmap), as wide as the board; it scrolls inside. */
+	below?: { title: string; height: number; node: ReactNode };
+	/** A fourth notebook card next to the others (the app's Context notebook); the four share the row. */
+	side?: { title: string; node: ReactNode };
 }) {
 	const frameRef = useRef<HTMLDivElement>(null);
 	const [fit, setFit] = useState({ scale: 1, x: 0, y: 0, w: 0, h: 0 });
 	const { scale } = fit;
 	// The panels grow with their text; the board grows with the tallest.
-	const [panelHs, setPanelHs] = useState([PANEL_H, PANEL_H, PANEL_H]);
+	const [panelHs, setPanelHs] = useState([PANEL_H, PANEL_H, PANEL_H, PANEL_H]);
+	const panels = side ? 4 : 3;
 	const measurePanel = (i: number) => (h: number) => setPanelHs((prev) => (prev[i] === h ? prev : prev.map((v, j) => (j === i ? h : v))));
 	// The live board has a lane group per project; the replay (and the board before any state) has one.
 	const projects = projectsOf(state);
 	const groups = state && (fill || isLiveRun(state.runs[0])) ? projects.length : 1;
-	const geo = useMemo(() => geometry(groups), [groups]);
-	const boardH = Math.max(geo.height, geo.panelTop + Math.max(...panelHs) + PAD);
+	const geo = useMemo(() => geometry(groups, panels), [groups, panels]);
+	const panelsEnd = Math.max(geo.height, geo.panelTop + Math.max(...panelHs.slice(0, panels)) + PAD);
+	const BELOW_GAP = 24;
+	// The card under the notebooks can be resized from its bottom edge; its height is kept per title.
+	const belowKey = below ? `fm:canvas-below:${below.title}` : "";
+	const [belowH, setBelowH] = useState<number | null>(() => {
+		try {
+			return Number(localStorage.getItem(belowKey)) || null;
+		} catch {
+			return null;
+		}
+	});
+	const belowHeight = below ? Math.max(240, belowH ?? below.height) : 0;
+	const boardH = below ? panelsEnd + BELOW_GAP + belowHeight + PAD : panelsEnd;
 	// In fill mode people can pan and zoom: `view` sits on top of the fitted placement.
 	const [view, setRawView] = useState({ k: 1, x: 0, y: 0 });
 	// The canvas is unbounded: pan anywhere; the fit button in the zoom pill brings the board back.
@@ -696,7 +728,7 @@ export function SwarmCanvas({ state, fill = false, contain = false, title, actio
 	const latest = state?.runs[0];
 	const run = isLiveRun(latest) ? latest : null;
 	// The app shows only what is real; the scripted replay is the landing page's demo.
-	const live = fill ? (state ? liveScene(state, run) : emptyScene()) : state && run ? liveScene(state, run) : null;
+	const live = fill ? (state ? liveScene(state, run, panels) : emptyScene()) : state && run ? liveScene(state, run, panels) : null;
 	const scene = useMemo(() => {
 		const s = cloneScene(start);
 		for (let i = 0; i < step; i++) script[i].apply(s);
@@ -924,7 +956,9 @@ export function SwarmCanvas({ state, fill = false, contain = false, title, actio
 		// eslint-disable-next-line react-hooks/exhaustive-deps
 	}, [arrival?.at]);
 
-	const shown = arrival && live ? welcome(live, arrival.repo, arrival.group) : live ?? scene;
+	const board = arrival && live ? welcome(live, arrival.repo, arrival.group) : live ?? scene;
+	// A local swarm's state is the folder's .formal/, not GitHub: its board links nowhere outside the app.
+	const shown = local ? unlinked(board) : board;
 	const [carry, setCarry] = useState<{ role: SwarmRole; card: string; say: string }[]>([]);
 	const lanesSeen = useRef<Map<string, { lane: Lane; id: string }> | null>(null);
 	// The dispatcher's errands: label changes it carries out, one card at a time.
@@ -1079,6 +1113,59 @@ export function SwarmCanvas({ state, fill = false, contain = false, title, actio
 							<TurnChip turn={shown.turn} />
 						</>
 					)}
+					{below ? (
+						<section
+							data-canvas-ui
+							className="absolute flex flex-col overflow-hidden rounded-xl border bg-card shadow-card"
+							style={{ left: PAD, top: panelsEnd + BELOW_GAP, width: W - PAD * 2, height: belowHeight }}
+						>
+							<div className="flex h-9 shrink-0 items-center border-b px-4 font-mono text-[12px] font-medium text-muted-foreground">{below.title}</div>
+							<div data-scroll className="flex min-h-0 flex-1 flex-col overflow-auto">
+								{below.node}
+							</div>
+							{/* Drag to resize (in board units, so it follows the zoom); double-click for the default size. */}
+							<div
+								role="separator"
+								aria-orientation="horizontal"
+								aria-label={`Resize ${below.title}`}
+								title="Drag to resize · double-click to reset"
+								onPointerDown={(e) => {
+									e.preventDefault();
+									e.stopPropagation();
+									const y0 = e.clientY;
+									const h0 = belowHeight;
+									const k = s || 1;
+									let last = h0;
+									const move = (ev: PointerEvent) => {
+										last = Math.max(240, Math.round(h0 + (ev.clientY - y0) / k));
+										setBelowH(last);
+									};
+									const up = () => {
+										window.removeEventListener("pointermove", move);
+										window.removeEventListener("pointerup", up);
+										try {
+											localStorage.setItem(belowKey, String(last));
+										} catch {
+											/* not kept */
+										}
+									};
+									window.addEventListener("pointermove", move);
+									window.addEventListener("pointerup", up);
+								}}
+								onDoubleClick={() => {
+									setBelowH(null);
+									try {
+										localStorage.removeItem(belowKey);
+									} catch {
+										/* not kept */
+									}
+								}}
+								className="group/resize absolute inset-x-0 bottom-0 flex h-3 cursor-row-resize items-end justify-center"
+							>
+								<span className="mb-1 h-1 w-10 rounded-full bg-border transition-colors group-hover/resize:bg-muted-foreground/60" />
+							</div>
+						</section>
+					) : null}
 
 					{Array.from({ length: groups }, (_, group) => (
 						<div key={group} className="contents">
@@ -1117,9 +1204,14 @@ export function SwarmCanvas({ state, fill = false, contain = false, title, actio
 						);
 					})}
 
-					<LedgerPanel spend={shown.spend} budget={state?.budgetUsd} costs={shown.costs} repo={state?.repo ?? repo} top={geo.panelTop} onMeasure={measurePanel(0)} />
-					<NotebookPanel notes={shown.notes} repo={state?.repo ?? repo} top={geo.panelTop} onMeasure={measurePanel(1)} />
-					<ChiefPanel headline={shown.chief} repo={state?.repo ?? repo} top={geo.panelTop} onMeasure={measurePanel(2)} />
+					<LedgerPanel spend={shown.spend} budget={state?.budgetUsd} costs={shown.costs} repo={local ? undefined : (state?.repo ?? repo)} top={geo.panelTop} onMeasure={measurePanel(0)} count={panels} />
+					<NotebookPanel notes={shown.notes} repo={local ? undefined : (state?.repo ?? repo)} top={geo.panelTop} onMeasure={measurePanel(1)} count={panels} />
+					<ChiefPanel headline={shown.chief} repo={local ? undefined : (state?.repo ?? repo)} top={geo.panelTop} onMeasure={measurePanel(2)} count={panels} />
+					{side ? (
+						<Panel index={3} title={side.title} top={geo.panelTop} onMeasure={measurePanel(3)} count={panels}>
+							{side.node}
+						</Panel>
+					) : null}
 
 					{ROLES.map((role, i) => (
 						<SwarmCursor
@@ -1182,7 +1274,9 @@ export function SwarmCanvas({ state, fill = false, contain = false, title, actio
 				<ItemHoverCard {...hover} onEnter={keepHover} onLeave={hideHover} />
 			) : null}
 			{title ? <div className="absolute left-3 top-3 flex min-w-0 max-w-[calc(100%-14rem)] items-center gap-2">{title}</div> : null}
-			<div className="absolute right-3 top-3 flex items-center gap-2">
+			{/* Top right: the page's actions (settings, notifications), and the canvas tools under them. */}
+			<div className="absolute right-3 top-3 z-10 flex flex-col items-end gap-2">
+			<div className="flex items-center gap-2">
 			{actions}
 			{fill || local ? null : (
 				<button
@@ -1197,7 +1291,7 @@ export function SwarmCanvas({ state, fill = false, contain = false, title, actio
 			)}
 			</div>
 			{fill ? (
-				<div data-canvas-ui className="absolute bottom-3 left-3 z-10 flex h-8 items-center rounded-full border bg-background/90 text-muted-foreground shadow-sm backdrop-blur">
+				<div data-canvas-ui className="z-10 flex h-8 items-center rounded-full border bg-background/90 text-muted-foreground shadow-sm backdrop-blur">
 					<button
 						type="button"
 						onClick={() => setHand((on) => !on)}
@@ -1230,6 +1324,7 @@ export function SwarmCanvas({ state, fill = false, contain = false, title, actio
 					</button>
 				</div>
 			) : null}
+			</div>
 		</div>
 		</div>
 	);
@@ -1305,6 +1400,8 @@ function CardDetails({ card, item, inDialog }: { card: Card; item?: SwarmItem; i
 }
 
 function OpenOnGitHub({ href, inDialog }: { href: string; inDialog: boolean }) {
+	// Local items (a folder's plan) have no page on GitHub.
+	if (!href) return null;
 	return (
 		<a
 			href={href}
@@ -1405,7 +1502,7 @@ export function SwarmCursor({ role, x, y, say, turn, thinking, where, onWhereEnt
 							<>
 								{" · "}
 								<a
-									href={where.href}
+									href={where.href || undefined}
 									target="_blank"
 									rel="noreferrer"
 									className="font-mono underline-offset-2 hover:underline"
@@ -1520,11 +1617,12 @@ export function ItemPreview({ item, repo, full = false }: { item: SwarmItem; rep
 	return (
 		<div>
 			<p className="flex items-center gap-1.5 text-xs text-muted-foreground">
-				<span className={`font-medium ${stateColor}`}>{`${state[0].toUpperCase()}${state.slice(1)} ${item.kind === "pr" ? "PR" : "issue"}`}</span>
+				{/* A local swarm's items are its plan's (no URL): proven or open, not issues and PRs. */}
+				<span className={`font-medium ${stateColor}`}>{item.url ? `${state[0].toUpperCase()}${state.slice(1)} ${item.kind === "pr" ? "PR" : "issue"}` : item.merged ? "Proven" : "Plan item"}</span>
 				<span>· {item.repo ?? repo}</span>
 				<span>· {timeAgo(item.createdAt)}</span>
 			</p>
-			<a href={item.url} target="_blank" rel="noreferrer" className="mt-1.5 block text-sm font-semibold leading-snug hover:underline">
+			<a href={item.url || undefined} target="_blank" rel="noreferrer" className="mt-1.5 block text-sm font-semibold leading-snug hover:underline">
 				{item.title} <span className="font-normal text-muted-foreground">#{item.number}</span>
 			</a>
 			{item.excerpt ? <p className={`mt-2 text-xs leading-5 text-muted-foreground ${full ? "whitespace-pre-line" : "line-clamp-3"}`}>{item.excerpt}</p> : null}
@@ -1608,11 +1706,11 @@ function DispatcherChip({ job }: { job: string | null }) {
 	);
 }
 
-type PanelMode = { repo?: string; top?: number; onMeasure?: (height: number) => void };
+type PanelMode = { repo?: string; top?: number; onMeasure?: (height: number) => void; count?: number };
 
 /** Read in place (its list scrolls); the title links to the issue the panel mirrors. */
 /** With `onMeasure` the panel grows to fit its content (from PANEL_H up) and reports its height. */
-function Panel({ index, title, repo, top = ONE.panelTop, onMeasure, children }: PanelMode & { index: number; title: string; children: React.ReactNode }) {
+function Panel({ index, title, repo, top = ONE.panelTop, onMeasure, count = 3, children }: PanelMode & { index: number; title: string; children: React.ReactNode }) {
 	const ref = useRef<HTMLDivElement>(null);
 	const measureRef = useRef(onMeasure);
 	measureRef.current = onMeasure;
@@ -1629,7 +1727,7 @@ function Panel({ index, title, repo, top = ONE.panelTop, onMeasure, children }: 
 			ref={ref}
 			data-component
 			className="absolute flex cursor-default flex-col rounded-lg border bg-background p-3"
-			style={{ left: panelX(index), top, width: PANEL_W, ...(grows ? { minHeight: PANEL_H } : { height: PANEL_H }) }}
+			style={{ left: panelX(index, count), top, width: panelW(count), ...(grows ? { minHeight: PANEL_H } : { height: PANEL_H }) }}
 		>
 			{repo ? (
 				<a

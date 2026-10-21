@@ -15,7 +15,8 @@ use formal_ast::solc::Project;
 use revm::bytecode::{opcode::OpCode, Bytecode};
 use revm::context::result::{ExecutionResult, Output};
 use revm::context::{Context, ContextTr, TxEnv};
-use revm::database::{CacheDB, EmptyDB};
+use crate::fork::Backend;
+use revm::database::CacheDB;
 use revm::handler::{MainBuilder, MainContext, MainnetContext, MainnetEvm};
 use revm::primitives::{address, hex, keccak256, Address, Bytes, TxKind, B256, U256};
 use revm::state::AccountInfo;
@@ -23,7 +24,7 @@ use revm::{DatabaseRef, InspectCommitEvm};
 use std::collections::HashMap;
 use std::path::Path;
 
-pub type Evm = MainnetEvm<MainnetContext<CacheDB<EmptyDB>>, Recorder>;
+pub type Evm = MainnetEvm<MainnetContext<CacheDB<Backend>>, Recorder>;
 
 /// The default sender: forge's, so tests see the same `msg.sender`.
 pub const SENDER: Address = address!("1804c8AB1F12E6bbf3894d4083f33e07309d1f38");
@@ -111,22 +112,21 @@ impl Session {
                 }
             }
         }
-        let mut ctx = Context::mainnet().with_db(CacheDB::new(EmptyDB::default())).modify_cfg_chained(|cfg| {
+        let mut ctx = Context::mainnet().with_db(CacheDB::new(Backend::default())).modify_cfg_chained(|cfg| {
             cfg.disable_nonce_check = true;
             // Unoptimized builds of real protocols are over EIP-170's 24 KiB; the debugger doesn't care.
             cfg.limit_contract_code_size = Some(usize::MAX);
             cfg.limit_contract_initcode_size = Some(usize::MAX);
             cfg.tx_gas_limit_cap = Some(u64::MAX);
+            // forge's chain (anvil's id) unless a run sets another: scripts read deployments by chain id.
+            cfg.chain_id = 31337;
         });
         // forge's defaults: block 1 at timestamp 1.
         ctx.block.number = U256::from(1);
         ctx.block.timestamp = U256::from(1);
         ctx.block.gas_limit = u64::MAX;
         let mut evm = ctx.build_mainnet_with_inspector(Recorder::default());
-        evm.ctx.db_mut().insert_account_info(SENDER, AccountInfo { balance: U256::from(1) << 96, ..Default::default() });
-        // Like forge: one byte of code at `vm`, so Solidity's extcodesize check before a call without return
-        // values (vm.label, vm.prank) passes. The calls themselves never run it.
-        evm.ctx.db_mut().insert_account_info(HEVM, AccountInfo::default().with_code(Bytecode::new_raw(vec![0x00].into())));
+        base_accounts(evm.ctx.db_mut());
         // ffi runs only compilers a test needs to build its contracts (a Huff port compiles with hnc).
         evm.inspector.cheats.ffi_allow = vec!["hnc".into()];
         evm.inspector.cheats.ffi_dir = project.root.clone();
@@ -201,7 +201,9 @@ impl Session {
     }
 
     fn run_tx(&mut self, from: Address, kind: TxKind, data: Bytes, value: U256) -> Result<Run> {
-        let tx = TxEnv::builder().caller(from).kind(kind).data(data).value(value).gas_limit(TX_GAS).build_fill();
+        // The transaction's chain id must be the chain's.
+        let chain = self.evm.ctx.cfg.chain_id;
+        let tx = TxEnv::builder().caller(from).kind(kind).data(data).value(value).gas_limit(TX_GAS).chain_id(Some(chain)).build_fill();
         let result = self.evm.inspect_tx_commit(tx).map_err(|e| anyhow!("transaction failed to run: {e:?}"))?;
         let trace = self.evm.inspector.take();
         Ok(match result {
@@ -292,6 +294,33 @@ impl Session {
         let sig = self.artifacts[contract].signature(sig)?;
         let data = encode_call(&sig, args)?;
         self.transact(from, TxKind::Call(to), data.into(), value)
+    }
+
+    /// Runs on a fork of the chain at `url` (an Anvil fork, usually) instead of an empty chain: state is read over
+    /// JSON-RPC at its latest block, whose chain id, number and timestamp the session takes.
+    pub fn set_fork(&mut self, url: &str) -> Result<crate::fork::ForkInfo> {
+        let (backend, info) = Backend::fork(url)?;
+        *self.evm.ctx.db_mut() = CacheDB::new(backend);
+        base_accounts(self.evm.ctx.db_mut());
+        self.evm.ctx.cfg.chain_id = info.chain_id;
+        self.evm.ctx.block.number = U256::from(info.block);
+        self.evm.ctx.block.timestamp = U256::from(info.timestamp);
+        Ok(info)
+    }
+
+    /// What console.log printed since the last call (setUp's and the run's).
+    pub fn take_console(&mut self) -> Vec<String> {
+        std::mem::take(&mut self.evm.inspector.cheats.console)
+    }
+
+    /// RPC failures while running on a fork (empty on a local chain).
+    pub fn fork_errors(&self) -> Vec<String> {
+        self.evm.ctx.db().db.take_errors()
+    }
+
+    /// The chain id `block.chainid` reads (31337 by default, as in forge).
+    pub fn set_chain_id(&mut self, id: u64) {
+        self.evm.ctx.cfg.chain_id = id;
     }
 
     /// Runs a Foundry test: deploys the test contract, runs `setUp()` (traced only when asked), then the test.
@@ -609,15 +638,22 @@ pub fn show_value(v: &DynSolValue) -> String {
     }
 }
 
-/// A stack word, short: small numbers in decimal, the rest in hex (long ones elided in the middle).
+/// A stack word, never cut (so what's shown is what's copied): small numbers in decimal, the rest in hex without
+/// leading zeros.
 pub fn short_word(v: U256) -> String {
     if v < U256::from(1_000_000u64) {
         return v.to_string();
     }
-    let h = format!("{v:x}");
-    if h.len() <= 16 {
-        format!("0x{h}")
-    } else {
-        format!("0x{}…{}", &h[..6], &h[h.len() - 4..])
-    }
+    format!("{v:#x}")
+}
+
+/// The accounts every chain starts with: the sender's balance, `vm`'s byte of code, the CREATE2 deployer.
+fn base_accounts(db: &mut CacheDB<Backend>) {
+    db.insert_account_info(SENDER, AccountInfo { balance: U256::from(1) << 96, ..Default::default() });
+    // Like forge: one byte of code at `vm`, so Solidity's extcodesize check before a call without return values
+    // (vm.label, vm.prank) passes. The calls themselves never run it.
+    db.insert_account_info(HEVM, AccountInfo::default().with_code(Bytecode::new_raw(vec![0x00].into())));
+    // Like forge's simulation: the standard CREATE2 deployer that scripts deploy through.
+    let create2 = revm::primitives::hex::decode("7fffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffe03601600081602082378035828234f58015156039578182fd5b8082525050506014600cf3").unwrap();
+    db.insert_account_info(revm::primitives::address!("4e59b44847b379578588920cA78FbF26c0B4956C"), AccountInfo::default().with_code(Bytecode::new_raw(create2.into())));
 }
