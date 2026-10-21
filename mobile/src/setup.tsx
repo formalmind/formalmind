@@ -4,10 +4,10 @@ import { openUrl } from "@tauri-apps/plugin-opener";
 import { MarkGithubIcon } from "@primer/octicons-react";
 import { ChevronRight, Laptop } from "lucide-react";
 import { AddProjectCard } from "@/components/add-project";
+import { APP_INSTALL_URL } from "@/components/onboarding/steps";
 import { ItemPreview } from "@/components/swarm/swarm-canvas";
 import type { SwarmItem } from "@/lib/swarm";
 import { projectPath, useProjects } from "@/components/projects/use-projects";
-import { apiBase } from "@/desktop/src/api";
 import type { SessionData } from "@/lib/session";
 import { macOnline, setStartBudget, startBudget, useMac } from "./relay";
 import { rememberProject } from "./tabs";
@@ -201,7 +201,7 @@ export function Setup({ user, onDone }: { user: SessionData["user"]; onDone: () 
 						strong="Specs that keep up."
 						body="Formal Mind writes your specs as commits land, in a proofs repository beside yours, for the whole life of the project. Set it up once on formal.team; proving happens here and on your Mac."
 					/>
-					<button type="button" onClick={() => void openUrl(`${apiBase()}/onboarding`).then(next)} className={`${primary} mt-10 flex items-center justify-center gap-2`}>
+					<button type="button" onClick={() => void openUrl(APP_INSTALL_URL).then(next)} className={`${primary} mt-10 flex items-center justify-center gap-2`}>
 						<MarkGithubIcon size={18} /> Set up on GitHub
 					</button>
 					<button type="button" onClick={next} className={`${quiet} mt-2`}>Later</button>
