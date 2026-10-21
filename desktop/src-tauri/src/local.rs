@@ -9,6 +9,10 @@ pub struct Config {
     /// Folders added from the sidebar, as absolute paths.
     #[serde(default)]
     pub folders: Vec<String>,
+    /// Where each imported GitHub repository lives on this machine ("owner/name" -> absolute path): a clone under
+    /// ~/.formalmind/repos, or a folder you already had that is that repository.
+    #[serde(default)]
+    pub repos: std::collections::BTreeMap<String, String>,
 }
 
 /// ~/.formalmind (or %USERPROFILE%\.formalmind on Windows).
@@ -202,3 +206,91 @@ pub fn log_error(source: String, message: String) -> Result<(), String> {
     let mut f = std::fs::OpenOptions::new().create(true).append(true).open(dir.join("errors.log")).map_err(|e| e.to_string())?;
     writeln!(f, "[{secs}] v{} {source}: {}", env!("CARGO_PKG_VERSION"), message.replace('\n', "\n    ")).map_err(|e| e.to_string())
 }
+
+/// "owner/name" with GitHub's characters only, so it is safe in a path and a URL.
+fn valid_repo(repo: &str) -> bool {
+    let mut parts = repo.split('/');
+    let ok = |p: Option<&str>| p.is_some_and(|p| !p.is_empty() && p != "." && p != ".." && p.chars().all(|c| c.is_ascii_alphanumeric() || "-_.".contains(c)));
+    ok(parts.next()) && ok(parts.next()) && parts.next().is_none()
+}
+
+fn git(args: &[&str], dir: Option<&Path>) -> Result<String, String> {
+    let mut cmd = std::process::Command::new("git");
+    if let Some(d) = dir {
+        cmd.current_dir(d);
+    }
+    // Never wait on a password prompt: your keychain or SSH credentials answer, or it fails.
+    let out = cmd.args(args).env("GIT_TERMINAL_PROMPT", "0").output().map_err(|e| format!("git: {e}"))?;
+    if out.status.success() {
+        Ok(String::from_utf8_lossy(&out.stdout).trim().to_string())
+    } else {
+        Err(String::from_utf8_lossy(&out.stderr).trim().to_string())
+    }
+}
+
+/// Whether a folder's origin is this GitHub repository (https or ssh, with or without .git).
+fn is_repo(folder: &Path, repo: &str) -> bool {
+    git(&["remote", "get-url", "origin"], Some(folder)).is_ok_and(|url| {
+        let url = url.trim_end_matches('/').trim_end_matches(".git").to_ascii_lowercase();
+        url.ends_with(&format!("github.com/{}", repo.to_ascii_lowercase())) || url.ends_with(&format!("github.com:{}", repo.to_ascii_lowercase()))
+    })
+}
+
+/// An imported repository on this machine: the folder it is mapped to, else one of your folders that is that
+/// repository, else a shallow clone into ~/.formalmind/repos/<owner>/<name> (with your own git credentials). The
+/// mapping is kept in ~/.formalmind/config.json; our clones fetch the newest commit each time they are opened.
+#[tauri::command(async)]
+pub fn repo_local(repo: String) -> Result<String, String> {
+    if !valid_repo(&repo) {
+        return Err(format!("{repo} isn't a GitHub repository name"));
+    }
+    let mut config = read()?;
+    let ours = home()?.join("repos");
+    if let Some(path) = config.repos.get(&repo).cloned() {
+        let p = Path::new(&path);
+        if p.join(".git").exists() {
+            if p.starts_with(&ours) {
+                // Updated in the background: the copy we have opens at once (offline too), the newest commit follows.
+                let dir = p.to_path_buf();
+                std::thread::spawn(move || {
+                    let _ = git(&["pull", "--ff-only", "--quiet", "--depth", "1"], Some(&dir));
+                });
+            }
+            return Ok(path);
+        }
+    }
+    let found = config.folders.iter().find(|f| is_repo(Path::new(f), &repo)).cloned();
+    let path = match found {
+        Some(f) => f,
+        None => {
+            let dest = ours.join(&repo);
+            if !dest.join(".git").exists() {
+                fs::create_dir_all(dest.parent().ok_or("bad path")?).map_err(|e| e.to_string())?;
+                let url = format!("https://github.com/{repo}.git");
+                git(&["clone", "--depth", "1", "--quiet", &url, &dest.to_string_lossy()], None)
+                    .map_err(|e| format!("Couldn't clone {repo}: {e}"))?;
+            }
+            dest.to_string_lossy().into_owned()
+        }
+    };
+    config.repos.insert(repo, path.clone());
+    write(&config)?;
+    Ok(path)
+}
+
+#[cfg(test)]
+mod repo_tests {
+    use super::valid_repo;
+
+    #[test]
+    fn repo_names_stay_in_their_folder() {
+        assert!(valid_repo("asyncswap/contracts"));
+        assert!(valid_repo("a.b/c-d_e"));
+        assert!(!valid_repo("../etc"));
+        assert!(!valid_repo("a/.."));
+        assert!(!valid_repo("a/b/c"));
+        assert!(!valid_repo("a"));
+        assert!(!valid_repo("a/b c"));
+    }
+}
+

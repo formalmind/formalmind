@@ -1,6 +1,6 @@
 import { FORKS_ENABLED, ScriptRunDialog, type ScriptTarget } from "./script-run-dialog";
 import { fileResult, useRunResults } from "@/lib/run-results";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useLocation, useNavigate, useSearchParams } from "react-router";
 import { invoke } from "@tauri-apps/api/core";
 import { open } from "@tauri-apps/plugin-dialog";
@@ -9,6 +9,7 @@ import { useArchived } from "@/components/folder-menu";
 import { listen } from "@tauri-apps/api/event";
 import { apiBase } from "./api";
 import { LocalHeading, TreeFolder } from "@/components/session-folder";
+import type { RepoSource } from "@/components/app-sidebar";
 import { FileTree, type Runnable } from "@/components/file-tree";
 import { SwarmPanel, type Bridge } from "./swarm-panel";
 import { DebugView } from "./debug";
@@ -26,6 +27,30 @@ const name = (path: string) => path.split(/[\\/]/).filter(Boolean).pop() ?? path
 const href = (path: string) => `/local?path=${encodeURIComponent(path)}`;
 
 /** Folders on this machine, kept in ~/.formalmind/config.json. Shared by every view through a small event. */
+/**
+ * Imported GitHub repositories on this machine: cloned once into ~/.formalmind/repos (or mapped to a folder you already
+ * have), listed from disk, and opened as a folder page like any local folder.
+ */
+export function useRepoSource(): RepoSource {
+	const navigate = useNavigate();
+	// The app routes in the hash, so the page shown comes from the router, kept in a ref for `current`.
+	const location = useLocation();
+	const at = useRef(location);
+	at.current = location;
+	return useMemo<RepoSource>(
+		() => ({
+			local: (repo) => invoke<string>("repo_local", { repo }),
+			tree: (path) => invoke<Tree>("folder_tree", { path }),
+			open: (path, file) => navigate(file ? `${href(path)}&file=${encodeURIComponent(file)}&mode=code` : href(path)),
+			current: () => {
+				const q = new URLSearchParams(at.current.search);
+				return at.current.pathname === "/local" ? { path: q.get("path"), file: q.get("file") } : { path: null, file: null };
+			},
+		}),
+		[navigate],
+	);
+}
+
 export function useFolders() {
 	const [folders, setFolders] = useState<string[]>([]);
 	useEffect(() => {

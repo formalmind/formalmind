@@ -101,6 +101,7 @@ pub fn run() {
             local::folder_remove,
             local::folder_scan,
             local::folder_tree,
+            local::repo_local,
             ast::ast_units,
             ast::ast_slice,
             ast::ast_formal,

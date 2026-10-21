@@ -72,6 +72,12 @@ function useOpenFolders() {
 }
 
 /** One project as a folder: its icon, name, a chevron, and a + for a new chat; inside, its chats. */
+/**
+ * Where imported repositories are read from when not from the browser: the Mac app clones each one (or maps a folder
+ * you already have) and reads it from disk. `local` resolves the folder; `tree` lists it; `open` shows it (or a file).
+ */
+export type RepoSource = { local: (repo: string) => Promise<string>; tree: (path: string) => Promise<RepoTree>; open: (path: string, file?: string) => void; current: () => { path: string | null; file: string | null } }
+
 /** The server's listing (GitHub API): used only when the browser has no copy of the repository and git can't fetch one. */
 async function apiTree(repo: string): Promise<RepoTree> {
 	const r = await fetch(`/api/projects/tree?repo=${encodeURIComponent(repo)}`)
@@ -84,12 +90,31 @@ async function apiTree(repo: string): Promise<RepoTree> {
  * A project's files on its default branch. The browser's own git copy shows straight away when there is one, then a
  * background fetch brings it up to date; a first visit clones it. The API listing is the fallback when git can't.
  */
-function useRepoTree(repo: string, on: boolean) {
+function useRepoTree(repo: string, on: boolean, source?: RepoSource) {
 	const [tree, setTree] = useState<RepoTree | null>(null)
 	const [error, setError] = useState<string | null>(null)
+	const [path, setPath] = useState<string | null>(null)
 	useEffect(() => {
 		if (!on) return
 		let live = true
+		if (source) {
+			// On disk: clone (or find) it, then list it like any folder.
+			void source.local(repo).then(
+				async (p) => {
+					if (!live) return
+					setPath(p)
+					const t = await source.tree(p)
+					if (live) {
+						setTree(t)
+						setError(null)
+					}
+				},
+				(e) => live && setError(String(e?.message ?? e)),
+			)
+			return () => {
+				live = false
+			}
+		}
 		void (async () => {
 			const cached = await cachedTree(repo).catch(() => null)
 			if (cached && live) setTree(cached)
@@ -113,19 +138,21 @@ function useRepoTree(repo: string, on: boolean) {
 		return () => {
 			live = false
 		}
-	}, [repo, on])
-	return { tree, error }
+	}, [repo, on, source])
+	return { tree, error, path }
 }
 
-function ProjectFolder({ project, open, onOpenChange, pathname, collapsed, onExpand, archived, onArchive }: { project: Project; open: boolean; onOpenChange: (open: boolean) => void; pathname: string; collapsed: boolean; onExpand: () => void; archived: boolean; onArchive: (archived: boolean) => void }) {
+function ProjectFolder({ project, open, onOpenChange, pathname, collapsed, onExpand, archived, onArchive, source }: { project: Project; open: boolean; onOpenChange: (open: boolean) => void; pathname: string; collapsed: boolean; onExpand: () => void; archived: boolean; onArchive: (archived: boolean) => void; source?: RepoSource }) {
 	const name = project.repo.split("/")[1] ?? project.repo
 	const navigate = useNavigate()
 	const home = projectPath(project.repo)
 	// Selected (any page of the project), its files show underneath.
-	const current = pathname === home || pathname.startsWith(`${home}/`)
-	const { tree, error } = useRepoTree(project.repo, current && open)
 	const location = useLocation()
-	const file = pathname === projectPath(project.repo, "file") ? new URLSearchParams(location.search).get("path") : null
+	// In the Mac app the repository opens as its folder on disk, so its files list whenever it is unfolded.
+	const { tree, error, path } = useRepoTree(project.repo, (source ? true : pathname === home || pathname.startsWith(`${home}/`)) && open, source)
+	const here = source?.current()
+	const current = source ? Boolean(path && here?.path === path) : pathname === home || pathname.startsWith(`${home}/`)
+	const file = source ? (current ? (here?.file ?? null) : null) : pathname === projectPath(project.repo, "file") ? new URLSearchParams(location.search).get("path") : null
 
 	return (
 		<Collapsible open={open} onOpenChange={onOpenChange} asChild>
@@ -139,6 +166,13 @@ function ProjectFolder({ project, open, onOpenChange, pathname, collapsed, onExp
 							if (collapsed) {
 								e.preventDefault()
 								onExpand()
+							} else if (source) {
+								// The Mac app: open its folder on disk (Code, Swarm, Proofs, Bugs), cloning it the first time.
+								if (!current) {
+									e.preventDefault()
+									onOpenChange(true)
+									void source.local(project.repo).then((p) => source.open(p), () => {})
+								}
 							} else if (pathname !== home) {
 								// From elsewhere, a click opens the project's map; on it, the click folds the folder.
 								e.preventDefault()
@@ -146,7 +180,7 @@ function ProjectFolder({ project, open, onOpenChange, pathname, collapsed, onExp
 								navigate(home)
 							}
 						}}
-						className={`flex h-8 min-w-0 flex-1 items-center gap-2 px-2 text-left text-sm font-normal outline-none ${pathname === home ? "font-medium text-sidebar-foreground" : "text-sidebar-foreground/90"} focus-visible:ring-2 focus-visible:ring-sidebar-ring`}
+						className={`flex h-8 min-w-0 flex-1 items-center gap-2 px-2 text-left text-sm font-normal outline-none ${(source ? current : pathname === home) ? "font-medium text-sidebar-foreground" : "text-sidebar-foreground/90"} focus-visible:ring-2 focus-visible:ring-sidebar-ring`}
 						title={project.repo}
 					>
 						{/* An imported repository, not a folder on disk: the GitHub mark is its icon (also on the collapsed rail). */}
@@ -170,17 +204,17 @@ function ProjectFolder({ project, open, onOpenChange, pathname, collapsed, onExp
 				)}
 				</ProjectContextMenu>
 				<CollapsibleContent className="pl-3 group-data-[collapsible=icon]:hidden">
-					{current ? (
+					{current || (source && open) ? (
 						tree ? (
 							<FileTree
 								paths={tree.files}
 								truncated={tree.truncated}
 								selected={file}
 								storageKey={`fm:tree:${project.repo}`}
-								onOpen={(f) => navigate(`${projectPath(project.repo, "file")}?path=${encodeURIComponent(f)}`)}
+								onOpen={(f) => (source && path ? source.open(path, f) : navigate(`${projectPath(project.repo, "file")}?path=${encodeURIComponent(f)}`))}
 							/>
 						) : (
-							<p className="px-2 py-1 text-[12px] text-muted-foreground">{error ?? "Listing the files…"}</p>
+							<p className="px-2 py-1 text-[12px] text-muted-foreground">{error ?? (source && !path ? "Cloning…" : "Listing the files…")}</p>
 						)
 					) : null}
 				</CollapsibleContent>
@@ -189,7 +223,7 @@ function ProjectFolder({ project, open, onOpenChange, pathname, collapsed, onExp
 	)
 }
 
-function Projects({ pathname }: { pathname: string }) {
+function Projects({ pathname, source }: { pathname: string; source?: RepoSource }) {
 	const projects = useProjects()
 	const [open, setOpen] = useOpenFolders()
 	const { archived, setArchived } = useArchived()
@@ -222,6 +256,7 @@ function Projects({ pathname }: { pathname: string }) {
 					}}
 					archived={archived.includes(p.repo)}
 					onArchive={(on) => setArchived(p.repo, on)}
+					source={source}
 				/>
 			))}
 			{/* Archived projects leave the list; this brings them back into view (right-click one to unarchive). */}
@@ -237,7 +272,7 @@ function Projects({ pathname }: { pathname: string }) {
 }
 
 /** `extra` is for a host's own sections under the projects (the desktop app's local folders). */
-export function AppSidebar({ extra, ...props }: React.ComponentProps<typeof Sidebar> & { extra?: React.ReactNode }) {
+export function AppSidebar({ extra, repoSource, ...props }: React.ComponentProps<typeof Sidebar> & { extra?: React.ReactNode; repoSource?: RepoSource }) {
 	const location = useLocation()
 	const navigate = useNavigate()
 	const pathname = location.pathname
@@ -341,7 +376,7 @@ export function AppSidebar({ extra, ...props }: React.ComponentProps<typeof Side
 							</Link>
 						</li>
 					</SidebarMenu>
-					<Projects pathname={pathname} />
+					<Projects pathname={pathname} source={repoSource} />
 				</SidebarGroup>
 			</SidebarContent>
 			<SidebarFooter>

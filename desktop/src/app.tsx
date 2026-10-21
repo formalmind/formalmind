@@ -16,7 +16,7 @@ import type { SessionData } from "@/lib/session";
 import { apiBase, clearToken, exchangeCode, loadToken } from "./api";
 
 import { DebugPage } from "./debug";
-import { LocalFolderPage, LocalFolders } from "./local";
+import { LocalFolderPage, LocalFolders, useRepoSource } from "./local";
 import { onboarded, SetupSteps, SignInStep } from "./onboarding";
 import { SettingsPage } from "./settings";
 import { TabBar } from "./tabs";
@@ -42,12 +42,13 @@ const codeFrom = (link: string) => {
 };
 
 function Shell({ user }: { user: User }) {
+	const repoSource = useRepoSource();
 	return (
 		<AuthProvider value={{ user, tokenSet: { accessToken: "", expiresAt: 0 } }}>
 			<ChatConversationsProvider>
 				<SidebarProvider defaultOpen>
 					<TabBar />
-					<AppSidebar extra={<LocalFolders />} />
+					<AppSidebar extra={<LocalFolders />} repoSource={repoSource} />
 					<WorkspaceContent>
 						<Suspense fallback={null}>
 							<Routes>
