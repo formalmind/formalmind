@@ -193,11 +193,12 @@ external nonpayable · src/Vault.sol:42
 export function LocalDemoPage() {
 	const [params] = useSearchParams();
 	const [data, setData] = useState<DemoData | null | undefined>(undefined);
-	useEffect(() => void loadDemoData().then(setData), []);
+	const repo = params.get("repo");
+	useEffect(() => void loadDemoData(repo).then(setData), [repo]);
 	const bridge = useMemo(() => makeDemo(data ?? null), [data]);
 	if (data === undefined) return null;
 	const scan = data
 		? { solidity: data.files.filter((f) => f.endsWith(".sol")), lean: data.files.filter((f) => f.endsWith(".lean")), truncated: false, git: true }
 		: FILES;
-	return <SwarmPanel folder={data?.path ?? "/Users/you/code/lending-protocol"} name={data?.name ?? "lending-protocol"} scan={scan} bridge={bridge} file={params.get("file")} actions={<><SettingsMenu repos={[]} className="inline-flex size-8 items-center justify-center rounded-full border bg-background/90 text-muted-foreground shadow-sm backdrop-blur hover:text-foreground" /><NotificationCenter /></>} />;
+	return <SwarmPanel key={data?.path ?? "sample"} folder={data?.path ?? "/Users/you/code/lending-protocol"} name={data?.name ?? "lending-protocol"} scan={scan} bridge={bridge} file={params.get("file")} actions={<><SettingsMenu repos={[]} className="inline-flex size-8 items-center justify-center rounded-full border bg-background/90 text-muted-foreground shadow-sm backdrop-blur hover:text-foreground" /><NotificationCenter /></>} />;
 }

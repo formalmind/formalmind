@@ -22,7 +22,7 @@ import { NavUser } from "@/components/nav-user"
 import { LocalHeading, TreeFolder } from "@/components/session-folder"
 import { FileTree } from "@/components/file-tree"
 import { DEMO_TREE } from "@/components/demo-tree"
-import { loadDemoData, type DemoData } from "@/components/demo/load"
+import { loadDemoRepos, type DemoData } from "@/components/demo/load"
 import { SidebarResizer } from "@/components/sidebar-resizer"
 import { LogoMark } from "@/components/logo"
 import { BUILD } from "@/lib/build-info"
@@ -242,9 +242,10 @@ export function AppSidebar({ extra, ...props }: React.ComponentProps<typeof Side
 	const pathname = location.pathname
 	const inApp = typeof window !== "undefined" && "__TAURI_INTERNALS__" in window
 	// On localhost, the demo folder: a real repository's files when its data has been built.
-	const [demo, setDemo] = useState<DemoData | null>(null)
+	const [demos, setDemos] = useState<DemoData[]>([])
+	const [addHelp, setAddHelp] = useState(false)
 	useEffect(() => {
-		if (typeof window !== "undefined" && window.location.hostname === "localhost") void loadDemoData().then(setDemo)
+		if (typeof window !== "undefined" && window.location.hostname === "localhost") void loadDemoRepos().then(setDemos)
 	}, [])
 	// The landing page is a page of its own, even for someone signed in.
 	if (pathname === "/welcome") return null
@@ -287,22 +288,38 @@ export function AppSidebar({ extra, ...props }: React.ComponentProps<typeof Side
 				{/* On localhost, the desktop app's local-folder page with demo data, for design feedback. */}
 				{!extra && typeof window !== "undefined" && window.location.hostname === "localhost" ? (
 					<SidebarGroup>
-						<LocalHeading />
+						<LocalHeading onAdd={() => setAddHelp((v) => !v)} />
+						{/* The browser can't read folders on disk: the Mac app's + adds any folder; here the demo data does. */}
+						{addHelp ? (
+							<div className="mx-2 mb-2 space-y-1.5 rounded-lg border bg-background p-2.5 text-[12px] leading-5 text-muted-foreground">
+								<p>The web preview shows repos built into its demo data. To add one, run:</p>
+								<code className="block select-all break-all rounded bg-muted px-1.5 py-1 font-mono text-[11px] text-foreground">bun scripts/demo-data.ts --add ~/path/to/repo</code>
+								<p>then reload. In the Mac app, + adds any folder directly.</p>
+							</div>
+						) : null}
 						<ul className="flex flex-col gap-0.5">
-							<TreeFolder name={demo?.name ?? "lending-protocol"} title={demo?.path} href="/local-demo" current={pathname === "/local-demo"}>
-								<FileTree
-									paths={demo?.files ?? DEMO_TREE}
-									selected={new URLSearchParams(location.search).get("file")}
-									storageKey="fm:tree:demo"
-									onOpen={(f) => {
-										const next = new URLSearchParams(location.search)
-										next.set("file", f)
-										next.set("mode", "code")
-										next.delete("line")
-										navigate(`/local-demo?${next.toString()}`)
-									}}
-								/>
-							</TreeFolder>
+							{(demos.length ? demos : [null]).map((demo, i) => {
+								const params = new URLSearchParams(location.search)
+								const isCurrent = pathname === "/local-demo" && (demo ? (params.get("repo") ?? demos[0]?.name) === demo.name : true)
+								const repoParam = demo && i > 0 ? `?repo=${encodeURIComponent(demo.name)}` : ""
+								return (
+									<TreeFolder key={demo?.path ?? "sample"} name={demo?.name ?? "lending-protocol"} title={demo?.path} href={`/local-demo${repoParam}`} current={isCurrent}>
+										<FileTree
+											paths={demo?.files ?? DEMO_TREE}
+											selected={isCurrent ? params.get("file") : null}
+											storageKey={`fm:tree:demo:${demo?.name ?? "sample"}`}
+											onOpen={(f) => {
+												const next = isCurrent ? new URLSearchParams(location.search) : new URLSearchParams()
+												if (demo) next.set("repo", demo.name)
+												next.set("file", f)
+												next.set("mode", "code")
+												next.delete("line")
+												navigate(`/local-demo?${next.toString()}`)
+											}}
+										/>
+									</TreeFolder>
+								)
+							})}
 						</ul>
 					</SidebarGroup>
 				) : null}
