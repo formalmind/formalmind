@@ -744,7 +744,7 @@ function BugsView({ folder, files, invoke, apiBase, bugs, openBug, setOpenBug, w
 						{fmReports.length === 0 ? <li className="px-2 py-1 text-[12px] text-muted-foreground">No report yet. Generate report writes one from the swarm's findings and proofs.</li> : null}
 					</ul>
 					{fmGroups.map(findingGroup)}
-					<p className="px-2 pb-0.5 pt-2 font-mono text-[10px] text-muted-foreground">Swarm findings · {bugs.length}</p>
+					<p className="px-2 pb-0.5 pt-2 font-mono text-[10px] text-muted-foreground">Swarm agents · {bugs.length}</p>
 					<ul className="space-y-1">
 						{bugs.map((b) => {
 							const f = bugFacts(b.body);
@@ -971,7 +971,7 @@ export function NavGroup({ name, git, onDebug, mode, onMode, inBar, compact }: {
 			{pill ? (
 				<span
 					aria-hidden
-					className={`absolute rounded-md bg-background shadow-sm ${h} ${animate ? "transition-[left,width] duration-300 ease-[cubic-bezier(0.22,1,0.36,1)] motion-reduce:transition-none" : ""}`}
+					className={`absolute rounded-md bg-background shadow-sm ${h} ${animate ? "transition-[left,width] duration-300 ease-out-quint motion-reduce:transition-none" : ""}`}
 					style={{ left: pill.left, width: pill.width }}
 				/>
 			) : null}
@@ -2309,7 +2309,7 @@ export function SwarmPanel({ folder, name, scan, bridge, session, file: openPath
 					    grows back out of it. The chat inside keeps its size and fades, so nothing reflows mid-way. */}
 					<aside
 						ref={chatBox}
-						className={`pointer-events-auto absolute bottom-3 right-3 z-20 overflow-hidden border shadow-pop backdrop-blur ${resizing ? "" : "transition-[width,height,border-radius,background-color] duration-300 ease-[cubic-bezier(0.22,1,0.36,1)]"} motion-reduce:transition-none ${chatOpen ? "rounded-2xl bg-muted/80" : "cursor-pointer rounded-[24px] border-transparent bg-foreground hover:opacity-90"}`}
+						className={`pointer-events-auto absolute bottom-3 right-3 z-20 overflow-hidden border shadow-pop backdrop-blur ${resizing ? "" : "transition-[width,height,border-radius,background-color] duration-300 ease-out-quint"} motion-reduce:transition-none ${chatOpen ? "rounded-2xl bg-muted/80" : "cursor-pointer rounded-[24px] border-transparent bg-foreground hover:opacity-90"}`}
 						style={{
 							width: chatOpen ? `min(${chatSize.w}px, calc(100% - 1.5rem))` : 48,
 							height: chatOpen ? (chatSize.h ? `min(${chatSize.h}px, calc(100% - max(var(--fm-top), 2.75rem) - 1rem))` : "calc(100% - max(var(--fm-top), 2.75rem) - 4rem)") : 48,
