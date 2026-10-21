@@ -164,7 +164,7 @@ export function Landing({ signedIn }: { signedIn: boolean }) {
 				</section>
 
 				{/* The demo takes the width (up to the board's own 1200px) and its height follows; the page scrolls. */}
-				<section className={`mx-auto w-full px-4 pb-6 sm:px-6 ${repo ? "max-w-6xl" : "max-w-[1248px]"}`}>
+				<section className="mx-auto w-full max-w-[1248px] px-4 pb-6 sm:px-6">
 					{/* A plan that failed before anything arrived leaves the demo in place, with the error above. */}
 					{repo && !(error && !plan) ? (
 						<div aria-live="polite">

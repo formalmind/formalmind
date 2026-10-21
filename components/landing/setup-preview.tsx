@@ -1,163 +1,63 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
-import { Rocket } from "lucide-react";
-import { DEFAULT_MODE, SWARM_MODES, TEAM_PRESETS, type SwarmMode, type TeamPreset } from "@/lib/teams";
-import {
-	BudgetCard,
-	CreditsCard,
-	GitHubCard,
-	ModePicker,
-	Panel,
-	SETUP_STEPS,
-	STEP_COPY,
-	SetupSummary,
-	StepList,
-	TeamPicker,
-	type StepKey,
-} from "@/components/onboarding/steps";
+import { useEffect, useState } from "react";
 import { PlanBoard, type PartialPlan } from "./plan-board";
-import { LANDING_KEEP_MS } from "./use-plan";
 
-const SETUP_KEY = "fm-landing-setup";
-type SavedSetup = { savedAt?: number; repo: string; step: StepKey; mode?: SwarmMode; team: TeamPreset; squadSize: number; dailyUsd: number; chosen: { mode?: boolean; team?: boolean; budget?: boolean } };
-
-function readSetup(repo: string): SavedSetup | null {
-	try {
-		const saved = JSON.parse(localStorage.getItem(SETUP_KEY) ?? "null") as SavedSetup | null;
-		return saved?.repo === repo && Date.now() - (saved.savedAt ?? 0) <= LANDING_KEEP_MS ? saved : null;
-	} catch {
-		return null;
-	}
-}
-
-function writeSetup(setup: SavedSetup) {
-	try {
-		localStorage.setItem(SETUP_KEY, JSON.stringify({ ...setup, savedAt: Date.now() }));
-	} catch {
-		// Storage refused (private window): the setup just won't be resumed.
-	}
-}
+/** How long the finished plan stays on screen before sign-in. */
+const LEAD_MS = 2500;
 
 /**
- * The landing page's setup, picked up as soon as a repository is chosen: the live plan is step one, and the
- * rest are onboarding's own steps. Money and GitHub steps lead to sign-up.
+ * The landing page's live demo, in the demo's place: the planner's plan for the repository streaming in, under one
+ * quiet line saying what's happening. When it finishes streaming here, the visitor goes straight on to sign in (then
+ * home, to Add a project with this repository filled in); Stay here keeps them on the plan. A plan resumed from an
+ * earlier visit doesn't lead on by itself.
  */
 export function SetupPreview({ repo, plan, done, failed, startHref }: { repo: string; plan: PartialPlan | undefined; done: boolean; failed: boolean; startHref: string }) {
-	// Where the visitor was and what they picked, kept per repository so leaving the site and coming back resumes it.
-	const saved = readSetup(repo);
-	const [step, setStep] = useState<StepKey>(saved?.step ?? "plan");
-	const [mode, setMode] = useState<SwarmMode>(saved?.mode ?? DEFAULT_MODE);
-	const plannerPick = plan?.team?.preset ?? "pair";
-	const [team, setTeam] = useState<TeamPreset>(saved?.team ?? plannerPick);
-	const [squadSize, setSquadSize] = useState(saved?.squadSize ?? 4);
-	const [dailyUsd, setDailyUsd] = useState(saved?.dailyUsd ?? 5);
-	// A choice turns its step green: picking a team (or continuing past the planner's pick), setting a budget.
-	const [chosen, setChosen] = useState<{ mode?: boolean; team?: boolean; budget?: boolean }>(saved?.chosen ?? {});
+	const [stay, setStay] = useState(false);
+	const [streamed, setStreamed] = useState(false);
 	useEffect(() => {
-		writeSetup({ repo, step, mode, team, squadSize, dailyUsd, chosen });
-	}, [repo, step, mode, team, squadSize, dailyUsd, chosen]);
-	// A new repository starts over at its plan, with the planner's team suggestion.
-	const firstRepo = useRef(repo);
+		if (!done) setStreamed(true);
+	}, [done]);
+	const leaving = streamed && done && !failed && !stay;
 	useEffect(() => {
-		if (firstRepo.current === repo) return;
-		firstRepo.current = repo;
-		setStep("plan");
-		setChosen({});
-	}, [repo]);
-	// The planner's pick fills in the team until the visitor chooses one.
-	useEffect(() => {
-		if (!chosen.team) setTeam(plannerPick);
-		// eslint-disable-next-line react-hooks/exhaustive-deps
-	}, [plannerPick]);
-	const index = SETUP_STEPS.findIndex((s) => s.key === step);
-	const go = (offset: number) => {
-		if (offset > 0 && (step === "mode" || step === "team" || step === "budget")) setChosen((c) => ({ ...c, [step]: true }));
-		goTo(offset);
-	};
-	const goTo = (offset: number) => setStep(SETUP_STEPS[Math.min(SETUP_STEPS.length - 1, Math.max(0, index + offset))].key);
-	const signUp = () => {
-		window.location.href = startHref;
-	};
+		if (!leaving) return;
+		const t = setTimeout(() => {
+			window.location.href = startHref;
+		}, LEAD_MS);
+		return () => clearTimeout(t);
+	}, [leaving, startHref]);
+	const name = repo.split("/").pop();
 
 	return (
-		<div className="rounded-2xl border bg-card p-4 sm:p-6">
-			{/* Steps and the way forward stay at the top, pinned while the step below scrolls. */}
-			<div className="sticky top-0 z-10 -mx-4 -mt-4 flex flex-wrap items-center gap-2 rounded-t-2xl border-b bg-card/95 px-4 py-3 backdrop-blur sm:-mx-6 sm:-mt-6 sm:px-6">
-				<div className="min-w-0 flex-1">
-					<StepList step={step} done={{ plan: done, mode: chosen.mode, team: chosen.team, budget: chosen.budget }} onSelect={setStep} horizontal />
-				</div>
-				<div className="flex shrink-0 gap-2">
-					{index > 0 ? (
-						<button type="button" onClick={() => go(-1)} className="h-9 rounded-full border px-4 text-sm hover:bg-muted">Back</button>
-					) : null}
-					{step === "start" ? (
-						<a href={startHref} className="inline-flex h-9 items-center gap-2 rounded-full bg-primary px-4 text-sm font-medium text-primary-foreground hover:opacity-90">
-							<Rocket className="size-4" /> Set up my swarm
-						</a>
+		// The app's card: a gray frame with a small label (and what's happening), the board on the card inside.
+		<section className="rounded-2xl border bg-muted/60 p-1.5">
+			<header className="flex h-8 items-center gap-3 px-2.5" aria-live="polite">
+				<span className="truncate font-mono text-[11px] font-medium uppercase tracking-wider text-muted-foreground">Plan · {repo}</span>
+				<span className="ml-auto flex shrink-0 items-center gap-2 text-[12px] text-muted-foreground">
+					{failed ? (
+						"The plan didn't finish."
+					) : !done ? (
+						<>
+							<span className="size-1.5 animate-pulse rounded-full bg-emerald-500" aria-hidden />
+							Planning {name}…
+						</>
+					) : leaving ? (
+						<>
+							Planned. Taking you to sign in…
+							<button type="button" onClick={() => setStay(true)} className="underline underline-offset-2 hover:text-foreground">
+								Stay here
+							</button>
+						</>
 					) : (
-						<button type="button" onClick={() => go(1)} className="h-9 rounded-full bg-primary px-4 text-sm font-medium text-primary-foreground hover:opacity-90">Continue</button>
+						<a href={startHref} className="underline underline-offset-2 hover:text-foreground">
+							Sign in to add it
+						</a>
 					)}
-				</div>
+				</span>
+			</header>
+			<div className="shadow-card rounded-xl border bg-card p-3">
+				<PlanBoard repo={repo} plan={plan} status={done ? "done" : "planning"} />
 			</div>
-			<section className="mt-6 min-w-0">
-				{step === "plan" ? (
-					<Panel {...STEP_COPY.plan}>
-						<PlanBoard repo={repo} plan={plan} status={done ? "done" : "planning"} />
-					</Panel>
-				) : step === "mode" ? (
-					<Panel {...STEP_COPY.mode}>
-						<ModePicker
-							value={mode}
-							onChange={(next) => {
-								setMode(next);
-								setChosen((c) => ({ ...c, mode: true }));
-							}}
-						/>
-					</Panel>
-				) : step === "team" ? (
-					<Panel {...STEP_COPY.team}>
-						<TeamPicker
-							value={team}
-							onChange={(next) => {
-								setTeam(next);
-								setChosen((c) => ({ ...c, team: true }));
-							}} plannerPick={plannerPick} squadSize={squadSize} onSquadSize={setSquadSize} />
-					</Panel>
-				) : step === "budget" ? (
-					<Panel {...STEP_COPY.budget}>
-						<BudgetCard
-							dailyUsd={dailyUsd}
-							onChange={(usd) => {
-								setDailyUsd(usd);
-								setChosen((c) => ({ ...c, budget: true }));
-							}}
-						/>
-					</Panel>
-				) : step === "credits" ? (
-					<Panel {...STEP_COPY.credits}>
-						<CreditsCard cents={0} dailyUsd={dailyUsd} configured onDeposit={signUp} />
-					</Panel>
-				) : step === "github" ? (
-					<Panel {...STEP_COPY.github}>
-						<GitHubCard repo={repo} installed={false} checking={false} onCheck={signUp} />
-					</Panel>
-				) : (
-					<Panel {...STEP_COPY.start}>
-						<SetupSummary
-							rows={[
-								{ label: "Repository", value: repo, ok: true },
-								{ label: "Plan", value: done ? `${plan?.issues?.length ?? 0} issues, ${plan?.invariants?.length ?? 0} invariants` : failed ? "not finished: plan it above" : "planning…", ok: done },
-								{ label: "Mode", value: SWARM_MODES.find((m) => m.key === mode)?.name ?? "", ok: true },
-									{ label: "Team", value: `${TEAM_PRESETS.find((t) => t.key === team)?.name}${team === "squad" ? ` of ${squadSize}` : ""}`, ok: true },
-								{ label: "Daily budget", value: `$${dailyUsd} a day`, ok: true },
-								{ label: "Credits", value: "$0.00", ok: false },
-								{ label: "GitHub App", value: "not installed", ok: false },
-							]}
-						/>
-					</Panel>
-				)}
-			</section>
-		</div>
+		</section>
 	);
 }
