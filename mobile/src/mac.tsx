@@ -25,7 +25,7 @@ export function MacScreen() {
 	const online = macOnline(m);
 	return (
 		<div className="min-h-dvh bg-background">
-			<TopBar back="/" title="Swarm on your Mac" sub={!m.loaded ? "Connecting…" : online ? "Online" : "Offline"} right={<NotificationCenter />} />
+			<TopBar back="/" title="Your Mac" sub={!m.loaded ? "Connecting…" : online ? "Online" : "Offline"} right={<NotificationCenter />} />
 			<Offline />
 			<main className="fm-safe-bottom space-y-5 px-4 py-4">
 				{m.state?.folders.length === 0 ? <p className="text-sm text-muted-foreground">No folders on your Mac yet. Add one in Formal Mind there.</p> : null}
@@ -141,34 +141,20 @@ export function SessionChat({ folder, run, aboveTabs, header }: { folder: string
 		}
 	};
 
+	// One button, as in Mike's composer: Send with text; Stop while it works and the box is empty; Start or Resume when
+	// it's stopped.
+	const action: "send" | "stop" | "start" = running ? (text.trim() ? "send" : "stop") : "start";
 	return (
-		<>
-			<div className="flex shrink-0 items-center gap-2 border-b px-4 py-2">
-				<span className="min-w-0 flex-1 truncate text-[13px] text-muted-foreground">
-					{header ?? (running ? "Running" : "Stopped")}
-				</span>
-				<span className="shrink-0 font-mono text-[12px] text-muted-foreground">
-					${spent.toFixed(2)}
-				</span>
-				{running ? (
-					<button type="button" disabled={!!busy} onClick={() => void act("stop")} className="inline-flex h-8 items-center gap-1.5 rounded-full px-3 text-[13px] font-medium text-red-600 active:bg-red-500/10 disabled:opacity-50 dark:text-red-400">
-						<Square className="size-3.5 fill-current" /> Stop
-					</button>
-				) : (
-					<button type="button" disabled={!!busy || !online} onClick={() => void act("start")} className="btn-dark inline-flex h-8 items-center gap-1.5 px-3 text-[13px] disabled:opacity-50">
-						{busy === "start" ? <Loader2 className="size-3.5 animate-spin" /> : <Play className="size-3.5 fill-current" />} {resumable ? "Resume" : "Start"}
-					</button>
-				)}
-			</div>
+		<div className="fm-chat flex min-h-0 flex-1 flex-col">
 			<div
 				ref={scroller}
 				onScroll={(e) => {
 					const el = e.currentTarget;
 					atBottom.current = el.scrollHeight - el.scrollTop - el.clientHeight < 80;
 				}}
-				className="min-h-0 flex-1 space-y-4 overflow-y-auto px-4 py-4 text-[15px]"
+				className="min-h-0 flex-1 space-y-5 overflow-y-auto px-4 pb-6 pt-4 text-[16px] leading-relaxed"
 			>
-				{chat.length === 0 ? <p className="text-sm text-muted-foreground">{online ? "Nothing said in this session yet." : "Waiting for your Mac…"}</p> : null}
+				{chat.length === 0 ? <p className="text-[15px] text-muted-foreground">{online ? "Nothing said in this session yet." : "Waiting for your Mac…"}</p> : null}
 				{chat.map((block, i) => (
 					<div key={i}>
 						{"steps" in block ? (
@@ -176,43 +162,66 @@ export function SessionChat({ folder, run, aboveTabs, header }: { folder: string
 						) : block.e.kind === "you" ? (
 							<Message align="end">
 								<MessageContent>
-									<div className="ml-auto w-fit max-w-[85%] whitespace-pre-wrap rounded-2xl rounded-br-md bg-muted px-3 py-2 text-foreground">{block.e.text}</div>
+									{/* Yours sit in a soft bubble; the agents' replies are plain text. */}
+									<div className="fm-bubble ml-10 w-fit whitespace-pre-wrap rounded-2xl p-3 text-foreground">{block.e.text}</div>
 								</MessageContent>
 							</Message>
 						) : block.e.kind === "error" ? (
-							<p className="rounded-xl bg-red-500/10 px-3 py-2 text-[13px] text-red-700 dark:text-red-400">{block.e.text}</p>
+							<p className="rounded-2xl bg-red-500/10 p-3 text-[14px] text-red-700 dark:text-red-400">{block.e.text}</p>
 						) : (
 							<AgentMessage e={block.e} onBug={() => {}} />
 						)}
 					</div>
 				))}
 				{working ? (
-					<p className="flex items-center gap-2 text-[13px] text-muted-foreground">
+					<p className="flex items-center gap-2 text-[14px] text-muted-foreground">
 						<Loader2 className="size-3.5 animate-spin" /> {working.text}
 					</p>
 				) : null}
+				{error ? <p className="rounded-2xl bg-red-500/10 p-3 text-[14px] text-red-700 dark:text-red-400">{error}</p> : null}
 			</div>
 			<form
 				onSubmit={(e) => {
 					e.preventDefault();
-					void act(running ? "send" : "start");
+					void act(action);
 				}}
-				className={`shrink-0 border-t bg-background px-3 pt-2 ${aboveTabs ? "fm-above-tabs" : "fm-safe-bottom"}`}
+				className={`fm-composer-dock relative shrink-0 px-3 ${aboveTabs ? "fm-above-tabs" : "fm-safe-bottom"}`}
 			>
-				{error ? <p className="mb-2 text-[13px] text-red-600 dark:text-red-400">{error}</p> : null}
-				<div className="flex items-end gap-2 rounded-3xl border bg-card p-1.5 pl-4 focus-within:border-foreground/30">
+				{/* Concentric: 32px controls, a 12px inset, so the shell's corner is 16 + 12 = 28. */}
+				<div className="fm-glass rounded-[28px] p-3">
 					<textarea
 						value={text}
 						onChange={(e) => setText(e.target.value)}
 						rows={1}
-						placeholder={running ? "Message the swarm" : resumable ? "Anything to tell it as it resumes? (optional)" : "What should it focus on? (optional)"}
-						className="max-h-32 min-h-[36px] flex-1 resize-none bg-transparent py-1.5 outline-none placeholder:text-muted-foreground"
+						placeholder={running ? "Message the swarm" : resumable ? "Anything to tell it as it resumes?" : "What should it focus on?"}
+						className="block max-h-32 min-h-[28px] w-full resize-none bg-transparent px-1 py-0.5 outline-none placeholder:text-muted-foreground"
 					/>
-					<button type="submit" disabled={!!busy || !online || (running && !text.trim())} aria-label={running ? "Send" : resumable ? "Resume the swarm" : "Start the swarm"} className="grid size-9 shrink-0 place-items-center rounded-full bg-foreground text-background disabled:opacity-40">
-						{busy === "send" ? <Loader2 className="size-4 animate-spin" /> : running ? <ArrowUp className="size-4" /> : <Play className="size-4 fill-current" />}
-					</button>
+					<div className="mt-2 flex items-center gap-2">
+						<span className="inline-flex h-8 min-w-0 items-center rounded-full bg-foreground/[0.06] px-3 text-[13px] font-medium">
+							<span className="min-w-0 truncate">{header ?? (running ? "Running" : resumable ? "Paused" : "New session")}</span>
+						</span>
+						<span className="ml-auto shrink-0 font-mono text-[12px] text-muted-foreground">${spent.toFixed(2)}</span>
+						<button
+							type="submit"
+							disabled={!!busy || !online}
+							aria-label={action === "send" ? "Send" : action === "stop" ? "Stop the swarm" : resumable ? "Resume the swarm" : "Start the swarm"}
+							className={`inline-flex h-8 shrink-0 items-center justify-center gap-1.5 rounded-full bg-foreground text-[13px] font-medium text-background disabled:opacity-40 ${action === "start" ? "px-3.5" : "w-8"}`}
+						>
+							{busy ? (
+								<Loader2 className="size-4 animate-spin" />
+							) : action === "send" ? (
+								<ArrowUp className="size-4" />
+							) : action === "stop" ? (
+								<Square className="size-3 fill-current" />
+							) : (
+								<>
+									<Play className="size-3 fill-current" /> {resumable ? "Resume" : "Start"}
+								</>
+							)}
+						</button>
+					</div>
 				</div>
 			</form>
-		</>
+		</div>
 	);
 }
