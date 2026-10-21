@@ -1010,7 +1010,6 @@ function CoverageView({ data, scripts, onOpenFile }: { data: Formal; scripts: Sc
 				<span><span className="font-mono font-medium">{inLean}</span><span className="text-muted-foreground">/{own.length} functions in Lean</span></span>
 				<span><span className="font-mono font-medium text-emerald-700 dark:text-emerald-400">{proved}</span><span className="text-muted-foreground"> proved</span></span>
 				<span><span className="font-mono font-medium text-amber-700 dark:text-amber-400">{own.length - inLean}</span><span className="text-muted-foreground"> not modeled</span></span>
-				<span className="text-muted-foreground"><span className="font-mono">{data.theorems.length}</span> theorems{data.theorems.some((t) => t.sorry) ? ` · ${data.theorems.filter((t) => t.sorry).length} with sorry` : ""}</span>
 				{/* How much is proved: the share of every listed function (libraries included) with a finished proof. */}
 				<span className="ml-auto inline-flex items-center gap-2 text-[11px] text-muted-foreground" title={`${proved} of ${own.length} functions proved`}>
 					<span className="h-1.5 w-24 overflow-hidden rounded-full bg-muted">
@@ -1204,7 +1203,13 @@ function AuditView({ folder, scan, invoke, onOpenFile, reload = 0 }: { folder: s
 						</DropdownMenuRadioGroup>
 					</DropdownMenuContent>
 				</DropdownMenu>
-				{ready ? <span className="ml-auto shrink-0 text-[11px] text-muted-foreground">{ready.contract} · {ready.ms} ms</span> : null}
+				{/* The contract and how many theorems it has (the summary row below keeps the coverage). */}
+				{ready ? (
+					<span className="ml-auto shrink-0 text-[11px] text-muted-foreground">
+						{ready.contract} · <span className="font-mono">{ready.theorems.length}</span> theorems
+						{ready.theorems.some((t) => t.sorry) ? ` · ${ready.theorems.filter((t) => t.sorry).length} with sorry` : ""}
+					</span>
+				) : null}
 			</div>
 			{error ? <p className="whitespace-pre-wrap rounded-xl border bg-card p-3 font-mono text-[11px] text-red-600">{error}</p> : null}
 			{!ready && !error ? <p className="p-3 text-[13px] text-muted-foreground">{entry ? "Building the Lean model from the AST…" : "No Solidity sources in this folder."}</p> : null}
