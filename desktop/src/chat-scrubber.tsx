@@ -47,9 +47,9 @@ export function ChatScrubber({ scroller, items }: { scroller: React.RefObject<HT
 	}, [on]);
 
 	if (!on) return null;
-	// Spread along the chat's whole height; a long chat packs them closer (never under 3px apart).
-	const step = Math.max(3, (height - 32) / (items.length - 1));
-	const start = 16;
+	// Tightly spaced and centred on the chat's height; a very long chat packs them closer (never under 3px apart).
+	const step = Math.min(6, Math.max(3, (height - 32) / (items.length - 1)));
+	const start = Math.max(16, (height - step * (items.length - 1)) / 2);
 	const at = (y: number) => Math.min(items.length - 1, Math.max(0, Math.round((y - start) / step)));
 	const go = (i: number) => {
 		const n = nodes()[i];
