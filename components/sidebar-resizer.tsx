@@ -52,14 +52,14 @@ export function SidebarResizer() {
 			className="group/edge absolute inset-y-0 -right-1.5 z-20 w-3 cursor-col-resize"
 		>
 			<span className="absolute inset-y-3 left-1/2 w-px -translate-x-1/2 bg-transparent transition-colors group-hover/edge:bg-border/60" />
-			{/* The collapse control lives on the edge itself: a small tab at its top. */}
+			{/* The collapse control lives on the edge itself: a small tab hanging off its top, just outside the line. */}
 			<button
 				type="button"
 				onPointerDown={(e) => e.stopPropagation()}
 				onClick={() => setOpen(!open)}
 				aria-label={open ? "Collapse sidebar" : "Expand sidebar"}
 				title={open ? "Collapse sidebar" : "Expand sidebar"}
-				className="absolute left-1/2 top-3 grid h-7 w-5 -translate-x-1/2 cursor-pointer place-items-center rounded-md border bg-background text-muted-foreground shadow-sm transition-colors hover:text-foreground"
+				className="absolute left-1/2 top-3 grid h-7 w-5 cursor-pointer place-items-center rounded-r-md border border-l-0 bg-background text-muted-foreground shadow-sm transition-colors hover:text-foreground"
 			>
 				{open ? <PanelLeftClose className="size-3" /> : <PanelLeftOpen className="size-3" />}
 			</button>
