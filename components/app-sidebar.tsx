@@ -17,7 +17,7 @@ import {
 	useSidebar,
 } from "@/components/ui/sidebar"
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible"
-import { NavUser } from "@/components/nav-user"
+import { NavUser, ThemeSwitch } from "@/components/nav-user"
 import { LocalHeading, TreeFolder } from "@/components/session-folder"
 import { FileTree } from "@/components/file-tree"
 import { DEMO_TREE } from "@/components/demo-tree"
@@ -301,7 +301,10 @@ export function AppSidebar({ extra, ...props }: React.ComponentProps<typeof Side
 					{FOOTER.map((item) => <NavLink key={item.url} item={item} active={pathname === item.url} />)}
 				</SidebarMenu>
 				<NavUser />
-				<p className="px-2 text-[11px] text-muted-foreground/70 tabular-nums group-data-[collapsible=icon]:hidden" title="Version and commit">{BUILD}</p>
+				<div className="flex items-center justify-between gap-2 px-2 group-data-[collapsible=icon]:hidden">
+					<p className="text-[11px] text-muted-foreground/70 tabular-nums" title="Version and commit">{BUILD}</p>
+					<ThemeSwitch />
+				</div>
 			</SidebarFooter>
 			<SidebarResizer />
 		</Sidebar>
