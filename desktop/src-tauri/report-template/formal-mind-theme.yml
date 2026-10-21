@@ -104,12 +104,12 @@ header:
     left:
       content: image:formal-mind-lockup-dark.svg[pdfwidth=1.05in]
     right:
-      content: '{document-subtitle}'
+      content: '{document-subtitle} · {revnumber}'
   verso:
     left:
       content: image:formal-mind-lockup-dark.svg[pdfwidth=1.05in]
     right:
-      content: '{document-subtitle}'
+      content: '{document-subtitle} · {revnumber}'
 footer:
   height: 0.55in
   font-size: 8.5
