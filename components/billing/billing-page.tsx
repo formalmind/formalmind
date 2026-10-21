@@ -65,6 +65,8 @@ function historyLines(entries: CreditEntry[]): Line[] {
 export function BillingPage() {
 	const [balance, setBalance] = useState<Balance | null>(null);
 	const [paying, setPaying] = useState<number | null>(null);
+	const [custom, setCustom] = useState("");
+	const payable = Boolean(balance?.configured);
 
 	// Back from Stripe Checkout: confirm the payment first, then show the balance.
 	useEffect(() => {
@@ -107,7 +109,7 @@ export function BillingPage() {
 			<main className="mx-auto w-full max-w-4xl space-y-6 px-6 pb-10 pt-2">
 				<section className="rounded-xl border p-5">
 					<p className="text-sm text-muted-foreground">Credit balance</p>
-					<p className="mt-1 text-3xl font-semibold tabular-nums">{balance ? usd(balance.cents) : "…"}</p>
+					<p className="mt-1 font-display text-[40px] font-normal leading-tight tabular-nums">{balance ? usd(balance.cents) : "…"}</p>
 					<p className="mt-2 text-xs text-muted-foreground">
 						Prepaid model usage for your swarm. It pauses for the day once the daily budget is spent.{" "}
 						<Link to="/usage" className="underline underline-offset-2 hover:text-foreground">
@@ -118,23 +120,50 @@ export function BillingPage() {
 
 				<section className="rounded-xl border p-5">
 					<h2 className="text-sm font-medium">Add credits</h2>
-					{balance && !balance.configured ? (
-						<p className="mt-4 text-sm text-muted-foreground">Payments aren't connected yet.</p>
-					) : (
-						<div className="mt-4 flex flex-wrap gap-2">
-							{DEPOSITS_USD.map((amount) => (
-								<button
-									key={amount}
-									type="button"
-									disabled={!balance || paying !== null}
-									onClick={() => void buy(amount)}
-									className="inline-flex h-9 items-center rounded-full border px-4 text-sm font-medium tabular-nums transition-colors hover:bg-muted disabled:opacity-50"
-								>
-									{paying === amount ? "Opening checkout…" : `$${amount}`}
-								</button>
-							))}
-						</div>
-					)}
+					<p className="mt-1 text-xs text-muted-foreground">Pick an amount, or enter your own between $10 and $1,000.</p>
+					<form
+						className="mt-4 flex flex-wrap items-center gap-2"
+						onSubmit={(e) => {
+							e.preventDefault();
+							const n = Number(custom);
+							if (n >= 10 && n <= 1000) void buy(n);
+						}}
+					>
+						{DEPOSITS_USD.map((amount) => (
+							<button
+								key={amount}
+								type="button"
+								disabled={!payable || paying !== null}
+								onClick={() => void buy(amount)}
+								className="inline-flex h-9 items-center rounded-full border px-4 text-sm font-medium tabular-nums transition-colors hover:bg-muted disabled:opacity-50"
+							>
+								{paying === amount ? "Opening checkout…" : `$${amount}`}
+							</button>
+						))}
+						<label className="inline-flex h-9 items-center rounded-full border pl-4 text-sm focus-within:ring-2 focus-within:ring-ring">
+							<span className="text-muted-foreground">$</span>
+							<input
+								type="number"
+								inputMode="decimal"
+								min={10}
+								max={1000}
+								step={1}
+								value={custom}
+								onChange={(e) => setCustom(e.target.value)}
+								placeholder="Other"
+								aria-label="Other amount in dollars"
+								className="w-20 bg-transparent px-1 tabular-nums outline-none [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none"
+							/>
+							<button
+								type="submit"
+								disabled={!payable || paying !== null || !(Number(custom) >= 10 && Number(custom) <= 1000)}
+								className="h-9 rounded-r-full border-l px-4 font-medium transition-colors hover:bg-muted disabled:opacity-50"
+							>
+								{paying !== null && paying === Number(custom) ? "Opening…" : "Add"}
+							</button>
+						</label>
+					</form>
+					{balance && !balance.configured ? <p className="mt-3 text-xs text-amber-700 dark:text-amber-400">Payments aren't connected on this server yet, so checkout is off here.</p> : null}
 					<p className="mt-4 text-xs text-muted-foreground">Paid securely with Stripe.</p>
 				</section>
 

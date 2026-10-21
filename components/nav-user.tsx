@@ -32,6 +32,7 @@ import {
 } from "@/components/ui/sidebar"
 
 import { useAuth } from "@/components/auth-context"
+import { inDesktop, openOnWeb } from "@/lib/open-web"
 
 export function NavUser() {
 	const { isMobile } = useSidebar()
@@ -102,12 +103,20 @@ export function NavUser() {
 									Usage
 								</Link>
 							</DropdownMenuItem>
-							<DropdownMenuItem asChild>
-								<Link to="/billing">
+							{/* The Mac app has no billing page of its own: it opens formal.team's. */}
+							{inDesktop() ? (
+								<DropdownMenuItem onSelect={() => openOnWeb("/billing")}>
 									<CreditCard />
 									Billing
-								</Link>
-							</DropdownMenuItem>
+								</DropdownMenuItem>
+							) : (
+								<DropdownMenuItem asChild>
+									<Link to="/billing">
+										<CreditCard />
+										Billing
+									</Link>
+								</DropdownMenuItem>
+							)}
 						</DropdownMenuGroup>
 						<DropdownMenuSeparator />
 						<DropdownMenuItem asChild>

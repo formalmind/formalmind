@@ -89,7 +89,7 @@ export function Landing({ signedIn }: { signedIn: boolean }) {
 				>
 				<Link to="/welcome" className="flex items-center gap-2 font-semibold tracking-tight">
 					<LogoMark size={24} />
-					Formal Mind.
+					<span className="font-display text-[23px] font-normal leading-none tracking-normal">Formal Mind.</span>
 				</Link>
 				<nav className="flex items-center gap-2 text-sm">
 					{/* In for someone signed in, started for everyone else (login is on the way); or the Mac app. */}
@@ -107,7 +107,7 @@ export function Landing({ signedIn }: { signedIn: boolean }) {
 			<main onScroll={(e) => setScrolled(e.currentTarget.scrollTop > 8)} className="flex min-h-0 flex-1 flex-col overflow-y-auto pt-16">
 				<section className="mx-auto w-full max-w-6xl shrink-0 px-4 pb-10 pt-16 text-center sm:px-6 sm:pt-24">
 					<h1 className="mx-auto max-w-2xl text-balance text-[34px] font-medium leading-10 tracking-[-1px] sm:text-5xl sm:leading-[1.1] sm:tracking-[-1.5px]">
-						A swarm of agents for verifying Ethereum smart contracts
+						A swarm of agents verifying Ethereum smart contracts
 					</h1>
 					<p className="mx-auto mt-4 max-w-[560px] text-balance text-[15px] leading-[22px] text-muted-foreground">
 						Formal proofs of your contracts, one small pull request at a time, within a daily budget you set.
@@ -176,7 +176,7 @@ export function Landing({ signedIn }: { signedIn: boolean }) {
 						<div className="col-span-2 sm:col-span-1">
 							<Link to="/welcome" className="flex items-center gap-2 font-semibold tracking-tight">
 								<LogoMark size={20} />
-								Formal Mind.
+								<span className="font-display text-[19px] font-normal leading-none tracking-normal">Formal Mind.</span>
 							</Link>
 							<p className="mt-3 max-w-[16rem] text-muted-foreground">A swarm of agents that verifies your Ethereum smart contracts in Lean 4.</p>
 						</div>
