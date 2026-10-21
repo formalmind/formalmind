@@ -72,7 +72,7 @@ function notice(e: RelayEvent) {
 	const where = folderName(e.folder);
 	const id = `${e.folder}:${e.run}:${e.kind}:${e.item}:${e.text.slice(0, 40)}`;
 	// Opens the session it came from (./notifications.tsx); 0 keeps it out of the toasts, the bell counts it.
-	const opts = { id, duration: 0, action: { label: "Open", event: `fm:go:/mac/session?${new URLSearchParams({ folder: e.folder, run: e.run })}` } };
+	const opts = { id, duration: 0, copy: `${e.text}\n\n${where} · ${e.role}${e.item ? ` · item ${e.item}` : ""} · ${e.run}`, action: { label: "Open", event: `fm:go:/mac/session?${new URLSearchParams({ folder: e.folder, run: e.run })}` } };
 	if (e.kind === "bug" && noticeOn("bug")) notify.error(`Bug filed in ${where}`, { ...opts, description: e.text.split(" — ")[0] });
 	else if (e.kind === "plan" && / proven$/.test(e.text) && noticeOn("proof")) notify.success(`Proof done in ${where}`, { ...opts, description: e.text });
 	else if (e.kind === "done" && /budget reached/.test(e.text) && noticeOn("budget")) notify.warning(`Budget reached in ${where}`, { ...opts, description: e.text });
@@ -154,3 +154,6 @@ export const setStartBudget = (usd: number) => {
 		/* the Mac's own cap applies */
 	}
 };
+
+// Dev: the follow loop holds this module's store, so a hot update of it reloads the page instead of swapping it.
+if (import.meta.hot) import.meta.hot.accept(() => location.reload());

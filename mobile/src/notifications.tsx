@@ -1,5 +1,5 @@
-import { useNavigate } from "react-router";
-import { Bell } from "lucide-react";
+import { useNavigate, useParams } from "react-router";
+import { Bell, Check, ChevronRight, Copy, MessageSquare } from "lucide-react";
 import { useState } from "react";
 import { dismissNotification, markNotificationRead, markNotificationUnread, useNotifications, type StoreNotification } from "@/lib/notifications";
 import { TopBar } from "./bar";
@@ -53,7 +53,6 @@ const day = (ms: number) => {
 /** One notice: unread ones in their colour and bold with an Unread tag; read ones quiet. Tap opens it; the button flips it. */
 function Row({ n }: { n: StoreNotification }) {
 	const navigate = useNavigate();
-	const path = pathOf(n);
 	return (
 		<li className={n.read ? "" : "bg-foreground/[0.035]"}>
 			<div className="flex items-start gap-3 px-3 py-3">
@@ -61,7 +60,7 @@ function Row({ n }: { n: StoreNotification }) {
 					type="button"
 					onClick={() => {
 						markNotificationRead(n.id);
-						if (path) navigate(path);
+						navigate(`/notifications/${encodeURIComponent(String(n.id))}`);
 					}}
 					className="min-w-0 flex-1 text-left active:opacity-60"
 				>
@@ -140,6 +139,84 @@ export function NotificationsScreen() {
 					))}
 				</div>
 			</nav>
+		</div>
+	);
+}
+
+/** One notification in full: what happened, where and when; copy it, open its session, or keep it unread. */
+export function NotificationScreen() {
+	const { id } = useParams();
+	const navigate = useNavigate();
+	const n = useNotifications().find((x) => String(x.id) === id);
+	const [copied, setCopied] = useState(false);
+	if (!n) {
+		return (
+			<div className="min-h-dvh bg-background">
+				<TopBar back={true} title="Notification" />
+				<p className="p-6 text-center text-[15px] text-muted-foreground">This notification was cleared.</p>
+			</div>
+		);
+	}
+	const path = pathOf(n);
+	const where = path ? new URLSearchParams(path.split("?")[1]) : null;
+	const text = n.copy ?? [n.title, n.description].filter(Boolean).join("\n\n");
+	const row = "flex min-h-12 w-full items-center gap-3 px-3 py-2.5 text-left text-[15px] active:bg-muted";
+	return (
+		<div className="min-h-dvh bg-background">
+			<TopBar back={true} title="Notification" sub={new Date(n.createdAt).toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" })} />
+			<main className="fm-safe-bottom space-y-5 px-4 py-4">
+				<section className="rounded-2xl border bg-muted/60 p-1.5">
+					<header className="flex h-8 items-center px-2.5">
+						<h2 className="font-mono text-[11px] font-medium uppercase tracking-wider text-muted-foreground">{{ success: "Proof", error: "Bug or error", warning: "Budget", info: "Swarm" }[n.variant]}</h2>
+						<span className="ml-auto text-[12px] text-muted-foreground">{n.read ? "Read" : "Unread"}</span>
+					</header>
+					<div className="shadow-card rounded-xl border bg-card p-4">
+						<h1 className={`text-[19px] font-semibold leading-snug ${TONE[n.variant]}`}>{n.title}</h1>
+						<p className="mt-3 select-text whitespace-pre-wrap break-words text-[15px] leading-relaxed">{n.copy?.split("\n\n")[0] ?? n.description}</p>
+						{where ? (
+							<dl className="mt-4 grid grid-cols-[auto_1fr] gap-x-4 gap-y-1.5 border-t pt-3 text-[13px]">
+								<dt className="text-muted-foreground">Folder</dt>
+								<dd className="min-w-0 truncate font-mono">{where.get("folder")}</dd>
+								<dt className="text-muted-foreground">Session</dt>
+								<dd className="font-mono">{where.get("run")}</dd>
+							</dl>
+						) : null}
+					</div>
+				</section>
+				<div className="divide-y overflow-hidden rounded-2xl border bg-card shadow-card">
+					<button
+						type="button"
+						onClick={() =>
+							void navigator.clipboard.writeText(text).then(() => {
+								setCopied(true);
+								setTimeout(() => setCopied(false), 1500);
+							})
+						}
+						className={row}
+					>
+						{copied ? <Check className="size-4 text-emerald-500" /> : <Copy className="size-4" />}
+						<span className="flex-1">{copied ? "Copied" : "Copy"}</span>
+					</button>
+					{path ? (
+						<button type="button" onClick={() => navigate(path)} className={row}>
+							<MessageSquare className="size-4" />
+							<span className="flex-1">Open the session</span>
+							<ChevronRight className="size-4 text-muted-foreground" />
+						</button>
+					) : null}
+					<button
+						type="button"
+						onClick={() => {
+							markNotificationUnread(n.id);
+							navigate(-1);
+						}}
+						className={row}
+					>
+						<Bell className="size-4" />
+						<span className="flex-1">Keep as unread</span>
+					</button>
+				</div>
+			</main>
 		</div>
 	);
 }

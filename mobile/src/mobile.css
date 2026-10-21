@@ -127,3 +127,11 @@ html.fm-mobile.dark {
 .fm-typing .fm-above-tabs {
 	padding-bottom: 8px;
 }
+/* Typing: a screen is as tall as what the keyboard leaves, so its composer sits on the keyboard. */
+.fm-typing .h-dvh {
+	height: var(--fm-visible-height, 100dvh);
+}
+.fm-typing .fm-safe-bottom form,
+.fm-typing form.fm-safe-bottom {
+	padding-bottom: 8px;
+}
