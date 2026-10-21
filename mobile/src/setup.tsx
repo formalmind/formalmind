@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { useNavigate } from "react-router";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { MarkGithubIcon } from "@primer/octicons-react";
-import { ChevronRight, GitCommitHorizontal, Laptop } from "lucide-react";
+import { ChevronRight, Laptop } from "lucide-react";
 import { AddProjectCard } from "@/components/add-project";
 import { projectPath, useProjects } from "@/components/projects/use-projects";
 import { apiBase } from "@/desktop/src/api";
@@ -10,6 +10,7 @@ import type { SessionData } from "@/lib/session";
 import { ROLE_COLORS } from "@/lib/swarm-roles";
 import { macOnline, setStartBudget, startBudget, useMac } from "./relay";
 import { rememberProject } from "./tabs";
+import { Shot } from "./onboarding";
 
 const KEY = "fm:mobile-setup";
 
@@ -196,14 +197,9 @@ export function Setup({ user, onDone }: { user: SessionData["user"]; onDone: () 
 
 			{step === 3 ? (
 				<>
-					<div className="fm-rise my-auto space-y-2 py-6">
-						{["feat: add matchBook", "fix: round fees down", "refactor: split Router"].map((c, i) => (
-							<div key={c} className={`${card} flex items-center gap-3 p-3 font-mono text-[12px]`} style={{ opacity: 1 - i * 0.25 }}>
-								<GitCommitHorizontal className="size-4 shrink-0 text-white/50" />
-								<span className="min-w-0 flex-1 truncate">{c}</span>
-								<span className="shrink-0 text-emerald-300">spec updated</span>
-							</div>
-						))}
+					{/* Home, as it will greet you: the projects kept in sync and your Mac. */}
+					<div className="fm-rise my-auto grid place-items-center py-4">
+						<Shot src="/onboarding/home.jpg" className="w-[230px] shadow-[0_20px_60px_rgb(0_0_0/0.5)]" style={{ maxHeight: 360, objectFit: "cover", objectPosition: "top" }} />
 					</div>
 					<Headline
 						muted="Set up on GitHub."

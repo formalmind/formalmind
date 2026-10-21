@@ -164,3 +164,22 @@ html.fm-mobile.dark {
 		animation: none;
 	}
 }
+/* The introduction's first glimpse settles from close on the logo out to the app around it. */
+.fm-zoom-in {
+	animation: fm-zoom-in 1.8s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+@keyframes fm-zoom-in {
+	from {
+		transform: scale(1.45);
+		opacity: 0;
+	}
+	to {
+		transform: scale(1);
+		opacity: 1;
+	}
+}
+@media (prefers-reduced-motion: reduce) {
+	.fm-zoom-in {
+		animation: none;
+	}
+}

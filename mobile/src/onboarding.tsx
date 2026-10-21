@@ -1,6 +1,4 @@
 import { useRef, useState } from "react";
-import { Bell, Bug, Code2, Laptop, ScanSearch } from "lucide-react";
-import { LogoMark } from "@/components/logo";
 
 const KEY = "fm:mobile-intro";
 
@@ -24,44 +22,59 @@ export const setIntroduced = (on: boolean) => {
 
 type Page = { muted: string; strong: string; body: string; art: React.ReactNode };
 
-const tile = "grid size-14 place-items-center rounded-2xl border border-white/10 bg-white/[0.06]";
+/* The pages show the app itself: real screens (public/onboarding), their edges fading into the page. */
+
+/** A screen of the app, its edges fading out so it reads as a glimpse rather than a frame. */
+export function Shot({ src, className = "", style }: { src: string; className?: string; style?: React.CSSProperties }) {
+	return (
+		<img
+			src={src}
+			alt=""
+			draggable={false}
+			className={`pointer-events-none select-none rounded-[26px] ${className}`}
+			style={{ WebkitMaskImage: "linear-gradient(to bottom, #000 62%, transparent), linear-gradient(to right, transparent, #000 10%, #000 90%, transparent)", WebkitMaskComposite: "source-in", maskComposite: "intersect", ...style }}
+		/>
+	);
+}
+
+/** The Mac app's corner, zoomed in on the logo, the rest of its UI fading away around it. */
+function MacCorner() {
+	return (
+		<div className="relative h-[300px] w-[340px] overflow-hidden" style={{ WebkitMaskImage: "radial-gradient(ellipse 48% 44% at 50% 50%, #000 30%, transparent 100%)" }}>
+			<img src="/onboarding/mac.jpg" alt="" draggable={false} className="fm-zoom-in pointer-events-none absolute max-w-none select-none" style={{ width: 640, left: 78, top: 80, transformOrigin: "92px 71px" }} />
+		</div>
+	);
+}
 
 const PAGES: Page[] = [
 	{
 		muted: "Formal Mind,",
 		strong: "on your iPhone.",
 		body: "Formal Mind proves Solidity correct: it writes your contracts' behaviour as Lean theorems, proves them, and files the bugs it finds, each with a proof of concept.",
-		art: <LogoMark size={72} />,
+		art: <MacCorner />,
 	},
 	{
 		muted: "Code, proofs, bugs.",
 		strong: "Read them anywhere.",
-		body: "Add a GitHub repository and read its code, its Lean coverage (which functions are modeled, which are proved, and by which theorems), and every finding with its status and PoC. It all runs on the phone, from a copy of the repository.",
+		body: "Add a GitHub repository and see how much of it is proved, by which theorems, and every finding with its status and PoC. It all runs on the phone, from a copy of the repository.",
 		art: (
-			<div className="flex gap-3">
-				<span className={tile}><Code2 className="size-6" /></span>
-				<span className={tile}><ScanSearch className="size-6" /></span>
-				<span className={tile}><Bug className="size-6" /></span>
+			<div className="relative h-[320px] w-[330px]">
+				<Shot src="/onboarding/proofs.jpg" className="absolute left-0 top-0 w-[200px] -rotate-3 shadow-[0_20px_60px_rgb(0_0_0/0.5)]" />
+				<Shot src="/onboarding/bugs.jpg" className="absolute right-0 top-8 w-[200px] rotate-3 shadow-[0_20px_60px_rgb(0_0_0/0.5)]" />
 			</div>
 		),
 	},
 	{
 		muted: "The swarm works on your Mac.",
 		strong: "You steer it from here.",
-		body: "Agents prove your functions and hunt bugs on your Mac, where Lean and Foundry run. Follow what they say, send them a message, start or stop a session. Your code stays on the Mac; only the chat goes through formal.team.",
-		art: (
-			<div className="flex items-center gap-3">
-				<span className={tile}><Laptop className="size-6" /></span>
-				<span className="h-px w-10 bg-white/25" />
-				<span className={`${tile} rounded-[18px]`}><LogoMark size={30} /></span>
-			</div>
-		),
+		body: "Agents prove your functions and hunt bugs on your Mac, where Lean and Foundry run. Follow what they say, send them a message, start or stop a session. Your code stays on the Mac.",
+		art: <Shot src="/onboarding/chat.jpg" className="w-[250px]" style={{ maxHeight: 340, objectFit: "cover", objectPosition: "bottom" }} />,
 	},
 	{
 		muted: "A proof lands, a bug is filed.",
 		strong: "You hear about it.",
 		body: "Notifications tell you when a proof is done, a bug is filed with its PoC, or a session reaches its budget. Choose which in Settings.",
-		art: <span className={tile}><Bell className="size-6" /></span>,
+		art: <Shot src="/onboarding/notifications.jpg" className="w-[300px]" />,
 	},
 ];
 

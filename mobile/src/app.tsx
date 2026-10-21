@@ -98,7 +98,8 @@ export function MobileApp() {
 	// The introduction shows once, before signing in.
 	const [intro, setIntro] = useState(() => !introduced());
 	if (user === undefined) return <div className="min-h-dvh bg-background" />;
-	if (!user && intro) {
+	// Before signing in the first time, or when Settings asks to see it again.
+	if (intro) {
 		return (
 			<Onboarding
 				onDone={() => {
