@@ -21,7 +21,7 @@ import { Trace, TraceCollapsible, TraceCollapsibleContent, TraceCollapsibleTrigg
 import { SwarmCanvas } from "@/components/swarm/swarm-canvas";
 import { ROLE_COLORS } from "@/lib/swarm-roles";
 import { localBoard } from "./local-board";
-import { ContextPanel, parseContext } from "./context-panel";
+import { ContextBody, ContextPanel, parseContext } from "./context-panel";
 import type { Scan } from "./local";
 
 /** What the panel needs from its host: the desktop app's Tauri commands and events, or the web demo's stand-ins. */
@@ -1546,6 +1546,10 @@ export function SwarmPanel({ folder, name, scan, bridge, session, file: openPath
 	// How full the working agent's context window is and what fills it, from its last reply; past 75% its older steps
 	// are summarized.
 	const contextEv = working ? [...events].reverse().find((e) => e.kind === "context" && e.role === working.role) : undefined;
+	// The canvas's Context notebook: the working agent's, else the last agent's that replied (live from the event
+	// stream: every model call and every compaction sends one).
+	const lastContextEv = contextEv ?? [...events].reverse().find((e) => e.kind === "context");
+	const lastCtx = lastContextEv ? parseContext(lastContextEv.text) : null;
 	const ctx = contextEv ? parseContext(contextEv.text) : null;
 	const ctxPct = ctx ? Math.min(100, Math.round((ctx.used / ctx.window) * 100)) : null;
 	const agentMessages = shown.filter((e) => e.kind !== "you" && e.kind !== "tool").length;
@@ -1810,6 +1814,19 @@ export function SwarmPanel({ folder, name, scan, bridge, session, file: openPath
 							const to = (v: string) => (v.startsWith("@") ? v.replace(/^@\S+\s*/, `@${role} `) : `@${role} ${v}`);
 							if (run) setSay(to);
 							else setGoal(to);
+						}}
+						side={{
+							title: "Context notebook",
+							node: lastCtx && lastContextEv ? (
+								<ContextBody
+									role={lastContextEv.role}
+									color={colorOf(lastContextEv.role)}
+									use={lastCtx}
+									onCompact={run && contextEv ? () => invoke("swarm_compact", { run }) : undefined}
+								/>
+							) : (
+								<p className="text-[13px] text-muted-foreground">Each agent's context window shows here once it replies: what fills it, and how far it is from compacting.</p>
+							),
 						}}
 						// The roadmap is the folder's own plan (.formal/plan.md, one item per AST function), nothing from GitHub.
 						below={{

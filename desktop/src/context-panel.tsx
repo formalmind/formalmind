@@ -31,12 +31,11 @@ const pct = (n: number, of: number) => (of ? Math.round((n / of) * 1000) / 10 : 
 /**
  * How full one agent's context window is and what fills it, like Claude Code's Context panel: the system prompt, the
  * tool definitions, the task (with an attached report), the conversation since, the room kept for compaction and what
- * is free. Compact now summarizes the older steps before the agent's next one.
+ * is free. Compact now summarizes the older steps before the agent's next one. `rows` false leaves out the list.
  */
-export function ContextPanel({ role, color, use, onCompact }: { role: string; color: string; use: ContextUse; onCompact?: () => Promise<void> }) {
-	const [open, setOpen] = useState(true);
+export function ContextBody({ role, color, use, onCompact, rows: showRows = true }: { role?: string; color?: string; use: ContextUse; onCompact?: () => Promise<unknown>; rows?: boolean }) {
 	const [asked, setAsked] = useState(false);
-	// The next reply (after the compaction) clears the request.
+	// The next count (after the compaction) clears the request.
 	useEffect(() => setAsked(false), [use.used]);
 	const fixed = use.system + use.tools + use.task;
 	const messages = Math.max(0, use.used - fixed);
@@ -51,53 +50,65 @@ export function ContextPanel({ role, color, use, onCompact }: { role: string; co
 		{ label: "Free space", n: free, swatch: "border border-zinc-300 bg-transparent dark:border-zinc-600" },
 	];
 	return (
+		<div className="space-y-2.5 text-[12px]">
+			<div className="flex items-baseline justify-between gap-2 tabular-nums">
+				<span className="flex items-center gap-1.5 text-[13px] font-medium text-foreground">
+					{role ? <span style={{ color }}>{role}</span> : null}
+					<span>{Math.round(pct(use.used, use.window))}% used</span>
+				</span>
+				<span className="text-muted-foreground">
+					{tokens(use.used)} / {tokens(use.window)}
+				</span>
+			</div>
+			<div className="flex h-1.5 overflow-hidden rounded-full bg-muted" aria-hidden>
+				{rows.slice(0, 5).map((r) => (r.n > 0 ? <span key={r.label} className={`h-full transition-[width] duration-700 ${r.swatch}`} style={{ width: `${pct(r.n, use.window)}%` }} /> : null))}
+			</div>
+			{showRows ? (
+				<ul className="space-y-1">
+					{rows.map((r) => (
+						<li key={r.label} className="flex items-center gap-2 tabular-nums">
+							<span className={`size-2.5 shrink-0 rounded-sm ${r.swatch}`} />
+							<span className="flex-1 truncate text-foreground">{r.label}</span>
+							<span className="text-muted-foreground">{tokens(r.n)}</span>
+							<span className="w-11 text-right text-muted-foreground">{pct(r.n, use.window)}%</span>
+						</li>
+					))}
+				</ul>
+			) : null}
+			<div className="flex items-center justify-between gap-2 border-t pt-2.5">
+				<span className="tabular-nums text-muted-foreground">
+					{use.used >= use.compact_at ? "Compacts before the next step" : `${tokens(use.compact_at - use.used)} until compact`}
+				</span>
+				{onCompact ? (
+					<button
+						type="button"
+						disabled={asked}
+						onClick={() => {
+							setAsked(true);
+							void onCompact().catch(() => setAsked(false));
+						}}
+						className="h-6 shrink-0 rounded-md border bg-background px-2 text-[11px] font-medium text-foreground hover:bg-muted disabled:text-muted-foreground disabled:hover:bg-background"
+						title="Summarize the older steps before the agent's next one"
+					>
+						{asked ? "Before next step" : "Compact now"}
+					</button>
+				) : null}
+			</div>
+		</div>
+	);
+}
+
+/** The same in the app's grey frame, for the chat header's popover; the header collapses the rows. */
+export function ContextPanel({ role, color, use, onCompact }: { role: string; color: string; use: ContextUse; onCompact?: () => Promise<unknown> }) {
+	const [open, setOpen] = useState(true);
+	return (
 		<section className="w-72 rounded-2xl border bg-muted/60 p-1.5">
 			<button type="button" onClick={() => setOpen(!open)} className="flex h-8 w-full items-center gap-1.5 px-2.5 font-mono text-[11px] font-medium uppercase tracking-wider text-muted-foreground hover:text-foreground">
-				<span className="size-1.5 rounded-full" style={{ backgroundColor: color }} />
 				Context · {role}
 				<ChevronDown className={`ml-auto size-3.5 transition-transform ${open ? "" : "-rotate-90"}`} />
 			</button>
-			<div className="space-y-2.5 rounded-xl border bg-card p-3 text-[12px] shadow-card">
-				<div className="flex items-baseline justify-between tabular-nums">
-					<span className="text-[13px] font-medium">{Math.round(pct(use.used, use.window))}% used</span>
-					<span className="text-muted-foreground">
-						{tokens(use.used)} / {tokens(use.window)}
-					</span>
-				</div>
-				<div className="flex h-1.5 overflow-hidden rounded-full bg-muted" aria-hidden>
-					{rows.slice(0, 5).map((r) => (r.n > 0 ? <span key={r.label} className={`h-full ${r.swatch}`} style={{ width: `${pct(r.n, use.window)}%` }} /> : null))}
-				</div>
-				{open ? (
-					<ul className="space-y-1">
-						{rows.map((r) => (
-							<li key={r.label} className="flex items-center gap-2 tabular-nums">
-								<span className={`size-2.5 shrink-0 rounded-sm ${r.swatch}`} />
-								<span className="flex-1 truncate">{r.label}</span>
-								<span className="text-muted-foreground">{tokens(r.n)}</span>
-								<span className="w-11 text-right text-muted-foreground">{pct(r.n, use.window)}%</span>
-							</li>
-						))}
-					</ul>
-				) : null}
-				<div className="flex items-center justify-between gap-2 border-t pt-2.5">
-					<span className="tabular-nums text-muted-foreground">
-						{use.used >= use.compact_at ? "Compacts before the next step" : `${tokens(use.compact_at - use.used)} until compact`}
-					</span>
-					{onCompact ? (
-						<button
-							type="button"
-							disabled={asked}
-							onClick={() => {
-								setAsked(true);
-								void onCompact().catch(() => setAsked(false));
-							}}
-							className="h-7 shrink-0 rounded-md border bg-background px-2.5 text-[12px] font-medium hover:bg-muted disabled:text-muted-foreground disabled:hover:bg-background"
-							title="Summarize the older steps before the agent's next one"
-						>
-							{asked ? "Before next step" : "Compact now"}
-						</button>
-					) : null}
-				</div>
+			<div className="rounded-xl border bg-card p-3 shadow-card">
+				<ContextBody role={role} color={color} use={use} onCompact={onCompact} rows={open} />
 			</div>
 		</section>
 	);
