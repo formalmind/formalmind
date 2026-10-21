@@ -1383,7 +1383,6 @@ export function SwarmPanel({ folder, name, scan, bridge, session, file: openPath
 		}
 		return { w: 416, h: null };
 	});
-	const [resizing, setResizing] = useState(false);
 	const chatBox = useRef<HTMLElement>(null);
 	const startResize = (e: React.PointerEvent, edges: { x: boolean; y: boolean }) => {
 		e.preventDefault();
@@ -1396,7 +1395,6 @@ export function SwarmPanel({ folder, name, scan, bridge, session, file: openPath
 		const maxW = bounds.width - 24;
 		const maxH = box.bottom - bounds.top - 56;
 		let last = chatSize;
-		setResizing(true);
 		const move = (ev: PointerEvent) => {
 			last = {
 				w: edges.x ? Math.round(Math.min(maxW, Math.max(320, start.w + start.x - ev.clientX))) : chatSize.w,
@@ -1407,7 +1405,6 @@ export function SwarmPanel({ folder, name, scan, bridge, session, file: openPath
 		const up = () => {
 			window.removeEventListener("pointermove", move);
 			window.removeEventListener("pointerup", up);
-			setResizing(false);
 			store.set("fm:chat-size", JSON.stringify(last));
 		};
 		window.addEventListener("pointermove", move);
@@ -2310,11 +2307,10 @@ export function SwarmPanel({ folder, name, scan, bridge, session, file: openPath
 			{/* Talk to the agents: floats on the right of the Swarm canvas, the Plan's counterpart on the left. */}
 			{mode === "swarm" ? (
 				<>
-					{/* One shape that morphs: the panel shrinks into the round button at the corner it is anchored to, and
-					    grows back out of it. The chat inside keeps its size and fades, so nothing reflows mid-way. */}
+					{/* One box: the chat when open, the round button at its corner when closed. It switches at once, no animation. */}
 					<aside
 						ref={chatBox}
-						className={`pointer-events-auto absolute bottom-3 right-3 z-20 overflow-hidden border shadow-pop backdrop-blur ${resizing ? "" : "transition-[width,height,border-radius,background-color] duration-300 ease-out-quint"} motion-reduce:transition-none ${chatOpen ? "rounded-2xl bg-muted/80" : "cursor-pointer rounded-[24px] border-transparent bg-foreground hover:opacity-90"}`}
+						className={`pointer-events-auto absolute bottom-3 right-3 z-20 overflow-hidden border shadow-pop backdrop-blur ${chatOpen ? "rounded-2xl bg-muted/80" : "cursor-pointer rounded-[24px] border-transparent bg-foreground hover:opacity-90"}`}
 						style={{
 							width: chatOpen ? `min(${chatSize.w}px, calc(100% - 1.5rem))` : 48,
 							height: chatOpen ? (chatSize.h ? `min(${chatSize.h}px, calc(100% - max(var(--fm-top), 2.75rem) - 1rem))` : "calc(100% - max(var(--fm-top), 2.75rem) - 4rem)") : 48,
@@ -2322,7 +2318,7 @@ export function SwarmPanel({ folder, name, scan, bridge, session, file: openPath
 						onClick={chatOpen ? undefined : () => toggleChat(true)}
 					>
 						<div
-							className={`absolute bottom-1 right-1 flex flex-col transition-opacity duration-200 ${chatOpen ? "opacity-100 delay-100" : "pointer-events-none opacity-0"}`}
+							className={`absolute bottom-1 right-1 flex flex-col ${chatOpen ? "" : "pointer-events-none opacity-0"}`}
 							style={{
 								width: `calc(min(${chatSize.w}px, 100vw - 1.5rem) - 0.5rem - 2px)`,
 								height: chatSize.h ? `calc(${chatSize.h}px - 0.5rem - 2px)` : "calc(100vh - max(var(--fm-top), 2.75rem) - 4.5rem - 2px)",
@@ -2347,7 +2343,7 @@ export function SwarmPanel({ folder, name, scan, bridge, session, file: openPath
 							onClick={() => toggleChat(true)}
 							title={unread ? `Talk to the swarm · ${unread} new` : "Talk to the swarm"}
 							aria-label="Talk to the swarm"
-							className={`absolute bottom-0 right-0 grid size-12 place-items-center text-background transition-opacity duration-200 ${chatOpen ? "pointer-events-none opacity-0" : "opacity-100 delay-100"}`}
+							className={`absolute bottom-0 right-0 grid size-12 place-items-center text-background ${chatOpen ? "pointer-events-none opacity-0" : ""}`}
 						>
 							<TalkIcon className="size-5" />
 						</button>
