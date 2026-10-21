@@ -3,12 +3,12 @@ import { useNavigate, useParams, useSearchParams } from "react-router";
 import { ChevronRight, FileCode2, Folder, Laptop, Loader2 } from "lucide-react";
 import { makeGitBridge } from "@/components/projects/git-bridge";
 import { repoOf } from "@/components/projects/use-projects";
-import { NotificationCenter } from "@/components/notification-center";
+import { BellLink } from "./notifications";
 import { ChatMarkdown } from "@/components/chat-markdown";
 import { cachedTree, syncRepo } from "@/lib/browser-git";
 import { AuditView, BugsView, FileView, type Bug } from "@/desktop/src/swarm-panel";
-import { TopBar } from "./bar";
-import { Offline, SessionChat } from "./mac";
+import { FloatingBar, TopBar } from "./bar";
+import { ChatButtons, Offline, SessionChat } from "./mac";
 import { macOnline, useMac } from "./relay";
 import type { RelayFolder } from "@/lib/relay";
 import { rememberProject, TabBar, type Tab } from "./tabs";
@@ -153,7 +153,8 @@ export function ProjectScreen() {
 
 	return (
 		<div className="relative flex h-dvh flex-col bg-background">
-			<TopBar back={atRoot ? "/" : true} title={name} sub={owner} right={<NotificationCenter />} />
+			{/* Chat is full screen, its controls floating over it; the other tabs keep the bar. */}
+			{tab === "chat" ? <FloatingBar back="/" title={name} right={<ChatButtons />} /> : <TopBar back={atRoot ? "/" : true} title={name} sub={owner} right={<BellLink />} />}
 			{error ? <p className="m-4 rounded-xl border border-red-500/30 bg-red-500/5 p-3 text-sm text-red-700 dark:text-red-400">Couldn&apos;t clone {repo}: {error}</p> : null}
 			<main className="flex min-h-0 flex-1 flex-col">
 				{tab === "code" ? <CodeTab files={files} bridge={bridge} dir={dir} file={file} open={(n) => go(n)} /> : null}
@@ -193,7 +194,7 @@ function ProjectChat({ repo }: { repo: string }) {
 	const folder = folders.find((f) => f.path === picked) ?? folders.find((f) => f.repo?.toLowerCase() === repo.toLowerCase());
 	if (!folder) {
 		return (
-			<div className="fm-under-tabs min-h-0 flex-1 overflow-auto">
+			<div className="fm-under-tabs fm-under-floating min-h-0 flex-1 overflow-auto">
 				<Offline />
 				<div className="px-4 py-4">
 					<p className="mb-3 text-[14px] text-muted-foreground">{folders.length ? `Which folder on your Mac is ${repo}?` : macOnline(m) ? "No folders on your Mac yet." : "Waiting for your Mac…"}</p>
@@ -262,12 +263,12 @@ function FolderChat({ repo, folder }: { repo: string; folder: RelayFolder }) {
 	const runs = folder.sessions.some((s) => s.run === run) ? folder.sessions.map((s) => s.run) : [run, ...folder.sessions.map((s) => s.run)];
 	return (
 		<div className="flex min-h-0 flex-1 flex-col">
-			<Offline />
 			<SessionChat
 				key={`${folder.path}:${run}`}
 				folder={folder.path}
 				run={run}
 				aboveTabs
+				fullScreen
 				header={
 					<select value={run} onChange={(e) => pick(e.target.value)} aria-label="Session" className="max-w-full truncate bg-transparent text-[13px] text-foreground outline-none">
 						{runs.map((r) => (

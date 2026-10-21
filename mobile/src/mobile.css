@@ -85,14 +85,25 @@ html.fm-mobile,
 }
 /* The swarm chat, after Mike's: a warm sunken page, your messages in a soft bubble, the composer floating in glass
    over a short fade. */
-.fm-chat {
+html.fm-mobile {
 	--fm-sunken: #e9e7e4;
 	--fm-bubble: #eae7e2;
-	background: var(--fm-sunken);
 }
-.dark .fm-chat {
+html.fm-mobile.dark {
 	--fm-sunken: #0d0c0b;
 	--fm-bubble: #2e2c29;
+}
+.fm-chat {
+	background: var(--fm-sunken);
+}
+/* Floating controls over a full-screen page: what scrolls up fades out under the status bar. */
+.fm-floating-fade::before {
+	content: "";
+	position: absolute;
+	inset: 0 0 auto 0;
+	height: calc(env(safe-area-inset-top) + 1.25rem);
+	pointer-events: none;
+	background: linear-gradient(to bottom, var(--fm-sunken) 55%, transparent);
 }
 .fm-bubble {
 	background: var(--fm-bubble);
@@ -104,4 +115,8 @@ html.fm-mobile,
 	z-index: -1;
 	pointer-events: none;
 	background: linear-gradient(to bottom, transparent 0, var(--fm-sunken) 48%);
+}
+/* A full-screen page under floating controls: its first line starts clear of them. */
+.fm-under-floating {
+	padding-top: calc(env(safe-area-inset-top) + 4.5rem);
 }

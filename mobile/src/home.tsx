@@ -5,7 +5,7 @@ import { ChevronRight, Laptop, Plus } from "lucide-react";
 import { AddProjectCard } from "@/components/add-project";
 import { HomeEmpty } from "@/components/home-empty";
 import { LogoMark } from "@/components/logo";
-import { NotificationCenter } from "@/components/notification-center";
+import { BellLink } from "./notifications";
 import { projectPath, useProjects } from "@/components/projects/use-projects";
 import type { SessionData } from "@/lib/session";
 import { TopBar } from "./bar";
@@ -63,7 +63,7 @@ export function MobileHome({ user }: { user: SessionData["user"] }) {
 				title="Formal Mind"
 				right={
 					<>
-						<NotificationCenter />
+						<BellLink />
 						<button type="button" onClick={() => navigate("/settings")} aria-label="Settings" className="grid size-9 place-items-center overflow-hidden rounded-full border bg-muted text-[13px] font-medium">
 							{user.picture ? <img src={user.picture} alt="" className="size-full object-cover" /> : (user.name ?? user.nickname ?? "?").slice(0, 1).toUpperCase()}
 						</button>

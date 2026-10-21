@@ -14,6 +14,7 @@ import { SignIn } from "./sign-in";
 const ProjectScreen = lazy(() => import("./project").then((m) => ({ default: m.ProjectScreen })));
 const MacScreen = lazy(() => import("./mac").then((m) => ({ default: m.MacScreen })));
 const SessionScreen = lazy(() => import("./mac").then((m) => ({ default: m.SessionScreen })));
+const NotificationsScreen = lazy(() => import("./notifications").then((m) => ({ default: m.NotificationsScreen })));
 const SettingsScreen = lazy(() => import("./settings").then((m) => ({ default: m.SettingsScreen })));
 
 type User = SessionData["user"];
@@ -45,6 +46,7 @@ function Shell({ user, onSignOut }: { user: User; onSignOut: () => void }) {
 					<Route path="/projects/:owner/:name/code" element={<ProjectScreen />} />
 					<Route path="/mac" element={<MacScreen />} />
 					<Route path="/mac/session" element={<SessionScreen />} />
+					<Route path="/notifications" element={<NotificationsScreen />} />
 					<Route path="/settings" element={<SettingsScreen user={user} onSignOut={onSignOut} />} />
 					<Route path="*" element={<Navigate to="/" replace />} />
 				</Routes>

@@ -71,10 +71,12 @@ export const setNotice = (id: NoticeId, on: boolean) => {
 function notice(e: RelayEvent) {
 	const where = folderName(e.folder);
 	const id = `${e.folder}:${e.run}:${e.kind}:${e.item}:${e.text.slice(0, 40)}`;
-	if (e.kind === "bug" && noticeOn("bug")) notify.error(`Bug filed in ${where}`, { id, description: e.text.split(" — ")[0] });
-	else if (e.kind === "plan" && / proven$/.test(e.text) && noticeOn("proof")) notify.success(`Proof done in ${where}`, { id, description: e.text });
-	else if (e.kind === "done" && /budget reached/.test(e.text) && noticeOn("budget")) notify.warning(`Budget reached in ${where}`, { id, description: e.text });
-	else if (e.kind === "error") notify.error(`Your Mac couldn't do that`, { id, description: e.text });
+	// Opens the session it came from (./notifications.tsx); 0 keeps it out of the toasts, the bell counts it.
+	const opts = { id, duration: 0, action: { label: "Open", event: `fm:go:/mac/session?${new URLSearchParams({ folder: e.folder, run: e.run })}` } };
+	if (e.kind === "bug" && noticeOn("bug")) notify.error(`Bug filed in ${where}`, { ...opts, description: e.text.split(" — ")[0] });
+	else if (e.kind === "plan" && / proven$/.test(e.text) && noticeOn("proof")) notify.success(`Proof done in ${where}`, { ...opts, description: e.text });
+	else if (e.kind === "done" && /budget reached/.test(e.text) && noticeOn("budget")) notify.warning(`Budget reached in ${where}`, { ...opts, description: e.text });
+	else if (e.kind === "error") notify.error(`Your Mac couldn't do that`, { ...opts, description: e.text });
 }
 
 function take(rows: RelayRow[], live: boolean) {

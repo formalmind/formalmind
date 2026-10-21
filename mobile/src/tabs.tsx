@@ -1,15 +1,16 @@
 import { useNavigate } from "react-router";
-import { Bug, Code2, House, MessageCircle, ScanSearch } from "lucide-react";
+import { Bug, Code2, House, ScanSearch } from "lucide-react";
+import { TalkIcon } from "@/desktop/src/swarm-panel";
 import { projectPath } from "@/components/projects/use-projects";
 
 export type Tab = "home" | "code" | "proofs" | "bugs" | "chat";
 
-const TABS: { id: Tab; label: string; icon: typeof Code2 }[] = [
+const TABS: { id: Tab; label: string; icon: React.ComponentType<{ className?: string; strokeWidth?: number }> }[] = [
 	{ id: "home", label: "Home", icon: House },
 	{ id: "code", label: "Code", icon: Code2 },
 	{ id: "proofs", label: "Proofs", icon: ScanSearch },
 	{ id: "bugs", label: "Bugs", icon: Bug },
-	{ id: "chat", label: "Chat", icon: MessageCircle },
+	{ id: "chat", label: "Chat", icon: TalkIcon },
 ];
 
 const LAST = "fm:last-project";

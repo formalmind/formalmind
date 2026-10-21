@@ -1,19 +1,42 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Link, useSearchParams } from "react-router";
-import { ArrowUp, ChevronRight, Folder, Loader2, Play, Square } from "lucide-react";
-import { NotificationCenter } from "@/components/notification-center";
+import { Link, useNavigate, useSearchParams } from "react-router";
+import { useNotifications } from "@/lib/notifications";
+import { ArrowUp, Bell, ChevronRight, Folder, Laptop, Loader2, Play, Settings, Square } from "lucide-react";
+import { BellLink } from "./notifications";
 import { Message, MessageContent } from "@/components/ui/message";
 import { AgentMessage, blocks, Steps, type Ev } from "@/desktop/src/swarm-panel";
-import { TopBar } from "./bar";
+import { FloatingBar, GlassDivider, GlassSegment, TopBar } from "./bar";
 import { hasHistory, macOnline, send, startBudget, useMac, useSession } from "./relay";
 
 const sessionHref = (folder: string, run: string) => `/mac/session?${new URLSearchParams({ folder, run })}`;
 
-export function Offline() {
+/** The chat's floating capsule: notifications (with the unread count) and Settings. */
+export function ChatButtons() {
+	const navigate = useNavigate();
+	const unread = useNotifications().filter((n) => !n.read).length;
+	return (
+		<>
+			<GlassSegment label={unread ? `Notifications, ${unread} unread` : "Notifications"} onClick={() => navigate("/notifications")}>
+				<Bell className="size-5" />
+				{unread ? <span className="absolute right-0.5 top-2 grid h-[17px] min-w-[17px] place-items-center rounded-full bg-red-600 px-1 text-[10px] font-bold text-white">{unread > 99 ? "99+" : unread}</span> : null}
+			</GlassSegment>
+			<GlassDivider />
+			<GlassSegment label="Your Mac" onClick={() => navigate("/mac")}>
+				<Laptop className="size-5" />
+			</GlassSegment>
+			<GlassDivider />
+			<GlassSegment label="Settings" onClick={() => navigate("/settings")}>
+				<Settings className="size-5" />
+			</GlassSegment>
+		</>
+	);
+}
+
+export function Offline({ flush }: { flush?: boolean }) {
 	const m = useMac();
 	if (!m.loaded || macOnline(m)) return null;
 	return (
-		<p className="mx-4 mt-3 rounded-xl border bg-muted/60 px-3 py-2 text-[13px] text-muted-foreground">
+		<p className={`rounded-xl border bg-muted/60 px-3 py-2 text-[13px] text-muted-foreground ${flush ? "" : "mx-4 mt-3"}`}>
 			{m.state ? "Your Mac is offline. Messages wait up to 10 minutes for it; open Formal Mind there to carry on." : "Sign in to Formal Mind on your Mac (Settings → Phone) to follow its swarm here."}
 		</p>
 	);
@@ -25,7 +48,7 @@ export function MacScreen() {
 	const online = macOnline(m);
 	return (
 		<div className="min-h-dvh bg-background">
-			<TopBar back="/" title="Your Mac" sub={!m.loaded ? "Connecting…" : online ? "Online" : "Offline"} right={<NotificationCenter />} />
+			<TopBar back="/" title="Your Mac" sub={!m.loaded ? "Connecting…" : online ? "Online" : "Offline"} right={<BellLink />} />
 			<Offline />
 			<main className="fm-safe-bottom space-y-5 px-4 py-4">
 				{m.state?.folders.length === 0 ? <p className="text-sm text-muted-foreground">No folders on your Mac yet. Add one in Formal Mind there.</p> : null}
@@ -74,9 +97,8 @@ export function SessionScreen() {
 	const session = folderState?.sessions.find((s) => s.run === run);
 	return (
 		<div className="flex h-dvh flex-col bg-background">
-			<TopBar back="/mac" title={session?.title || (run === "swarm" ? "Swarm" : run)} sub={folderState?.name ?? folder.split("/").pop()} right={<NotificationCenter />} />
-			<Offline />
-			<SessionChat folder={folder} run={run} />
+			<FloatingBar back="/mac" title={folderState?.name ?? folder.split("/").pop()} right={<ChatButtons />} />
+			<SessionChat folder={folder} run={run} fullScreen header={session?.title || (run === "swarm" ? "Swarm" : run)} />
 		</div>
 	);
 }
@@ -85,7 +107,7 @@ export function SessionScreen() {
  * One swarm session: what its agents say, and a composer that talks to it; Start and Stop run on the Mac. `aboveTabs`
  * keeps the composer clear of the floating tab bar (the project's Chat tab).
  */
-export function SessionChat({ folder, run, aboveTabs, header }: { folder: string; run: string; aboveTabs?: boolean; header?: React.ReactNode }) {
+export function SessionChat({ folder, run, aboveTabs, header, fullScreen }: { folder: string; run: string; aboveTabs?: boolean; header?: React.ReactNode; fullScreen?: boolean }) {
 	const m = useMac();
 	const events = useSession(folder, run) as Ev[];
 	const folderState = m.state?.folders.find((f) => f.path === folder);
@@ -152,8 +174,10 @@ export function SessionChat({ folder, run, aboveTabs, header }: { folder: string
 					const el = e.currentTarget;
 					atBottom.current = el.scrollHeight - el.scrollTop - el.clientHeight < 80;
 				}}
-				className="min-h-0 flex-1 space-y-5 overflow-y-auto px-4 pb-6 pt-4 text-[16px] leading-relaxed"
+				className={`min-h-0 flex-1 space-y-5 overflow-y-auto px-4 pb-6 text-[16px] leading-relaxed ${fullScreen ? "fm-under-floating" : "pt-4"}`}
 			>
+				{/* In the scroll, so floating controls never cover it. */}
+				<Offline flush />
 				{chat.length === 0 ? <p className="text-[15px] text-muted-foreground">{online ? "Nothing said in this session yet." : "Waiting for your Mac…"}</p> : null}
 				{chat.map((block, i) => (
 					<div key={i}>

@@ -1006,7 +1006,7 @@ export function NavGroup({ name, git, onDebug, mode, onMode, inBar, compact }: {
 }
 
 /** A filled speech bubble with two lines cut out of it: the "Talk to the swarm" mark. */
-function TalkIcon({ className }: { className?: string }) {
+export function TalkIcon({ className }: { className?: string }) {
 	return (
 		<svg viewBox="0 0 16 16" className={className} aria-hidden>
 			<path
