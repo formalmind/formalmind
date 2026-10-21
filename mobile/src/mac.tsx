@@ -5,7 +5,7 @@ import { ArrowUp, Bell, ChevronRight, Folder, Laptop, Loader2, Play, Settings, S
 import { BellLink } from "./notifications";
 import { Message, MessageContent } from "@/components/ui/message";
 import { AgentMessage, blocks, Steps, type Ev } from "@/desktop/src/swarm-panel";
-import { FloatingBar, GlassDivider, GlassSegment, TopBar } from "./bar";
+import { CenterState, FloatingBar, GlassDivider, GlassSegment, TopBar } from "./bar";
 import { hasHistory, macOnline, send, startBudget, useMac, useSession } from "./relay";
 
 const sessionHref = (folder: string, run: string) => `/mac/session?${new URLSearchParams({ folder, run })}`;
@@ -32,6 +32,27 @@ export function ChatButtons() {
 	);
 }
 
+/** Why there's nothing from your Mac, centered: still connecting, never connected, offline, or no folders. Null when
+ * there is something to show. */
+export function MacState() {
+	const m = useMac();
+	const icon = <Laptop className="size-7" strokeWidth={1.6} />;
+	if (!m.loaded) return <CenterState icon={icon} muted="Reaching your Mac." strong="One moment." />;
+	if (!m.state)
+		return (
+			<CenterState
+				icon={icon}
+				muted="The swarm runs on your Mac."
+				strong="Connect it here."
+				body="Open Formal Mind on your Mac and sign in with this account. Keep Settings → Phone on, and its sessions show up here."
+			/>
+		);
+	if (!macOnline(m))
+		return <CenterState icon={icon} muted="Your Mac is offline." strong="Open Formal Mind there." body="Messages you send wait 10 minutes for it. Its sessions so far are below once it's back." />;
+	if (!m.state.folders.length) return <CenterState icon={icon} muted="No folders on your Mac yet." strong="Add one there." body="A folder you add in Formal Mind on your Mac shows up here, with its swarm sessions." />;
+	return null;
+}
+
 export function Offline({ flush }: { flush?: boolean }) {
 	const m = useMac();
 	if (!m.loaded || macOnline(m)) return null;
@@ -49,9 +70,8 @@ export function MacScreen() {
 	return (
 		<div className="min-h-dvh bg-background">
 			<TopBar back="/" title="Your Mac" sub={!m.loaded ? "Connecting…" : online ? "Online" : "Offline"} right={<BellLink />} />
-			<Offline />
+			{!m.state?.folders.length ? <div className="flex min-h-[70dvh] flex-col"><MacState /></div> : <Offline />}
 			<main className="fm-safe-bottom space-y-5 px-4 py-4">
-				{m.state?.folders.length === 0 ? <p className="text-sm text-muted-foreground">No folders on your Mac yet. Add one in Formal Mind there.</p> : null}
 				{m.state?.folders.map((f) => (
 					<section key={f.path}>
 						<h2 className="mb-2 flex items-center gap-1.5 px-1 font-mono text-[11px] font-medium uppercase tracking-wider text-muted-foreground">
@@ -178,7 +198,15 @@ export function SessionChat({ folder, run, aboveTabs, header, fullScreen }: { fo
 			>
 				{/* In the scroll, so floating controls never cover it. */}
 				<Offline flush />
-				{chat.length === 0 ? <p className="text-[15px] text-muted-foreground">{online ? "Nothing said in this session yet." : "Waiting for your Mac…"}</p> : null}
+				{chat.length === 0 ? (
+					<div className="flex min-h-[55dvh] flex-col">
+						{online ? (
+							<CenterState icon={<Laptop className="size-7" strokeWidth={1.6} />} muted={resumable ? "This session is paused." : "A new session."} strong={resumable ? "Resume it below." : "Tell it what to focus on."} body="It runs on your Mac; what its agents say shows here as they work." />
+						) : (
+							<MacState />
+						)}
+					</div>
+				) : null}
 				{chat.map((block, i) => (
 					<div key={i}>
 						{"steps" in block ? (

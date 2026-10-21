@@ -39,17 +39,33 @@ export const GlassDivider = () => <span className="h-6 w-px bg-border" aria-hidd
  * Controls floating over a full-screen page, as Mike's chat has them: a round glass back button on the left, a glass
  * capsule of icon buttons on the right; the page scrolls on underneath.
  */
-export function FloatingBar({ back, title, right }: { back: string | true; title?: React.ReactNode; right?: React.ReactNode }) {
+export function FloatingBar({ back, title, right, left, onLeft, leftLabel }: { back: string | true; title?: React.ReactNode; right?: React.ReactNode; left?: React.ReactNode; onLeft?: () => void; leftLabel?: string }) {
 	const navigate = useNavigate();
 	return (
 		<div className="fm-safe-top fm-floating-fade pointer-events-none fixed inset-x-0 top-0 z-30">
 			<div className="relative flex items-start gap-3 px-4 pt-1.5">
-				<button type="button" onClick={() => (back === true ? navigate(-1) : navigate(back))} aria-label="Back" className="fm-glass pointer-events-auto grid size-[50px] shrink-0 place-items-center rounded-full text-foreground">
-					<ChevronLeft className="size-6" />
+				<button type="button" onClick={() => (onLeft ? onLeft() : back === true ? navigate(-1) : navigate(back))} aria-label={leftLabel ?? "Back"} className="fm-glass pointer-events-auto grid size-[50px] shrink-0 place-items-center rounded-full text-foreground">
+					{left ?? <ChevronLeft className="size-6" />}
 				</button>
 				<div className="min-w-0 flex-1 pt-3.5 text-center">{title ? <span className="fm-glass pointer-events-auto inline-block max-w-full truncate rounded-full px-3 py-1 text-[13px] font-medium">{title}</span> : null}</div>
 				{right ? <div className="fm-glass pointer-events-auto flex shrink-0 items-center rounded-full px-1">{right}</div> : <span className="size-[50px]" />}
 			</div>
+		</div>
+	);
+}
+
+/** A screen with nothing to show yet, as the onboarding draws it: a tile, a muted line over a strong one, a hint. */
+export function CenterState({ icon, muted, strong, body, children }: { icon: React.ReactNode; muted: string; strong: string; body?: React.ReactNode; children?: React.ReactNode }) {
+	return (
+		<div className="flex flex-1 flex-col items-center justify-center px-8 py-10 text-center">
+			<span className="fm-rise grid size-16 place-items-center rounded-2xl border bg-card text-muted-foreground shadow-card">{icon}</span>
+			<h2 className="fm-rise mt-7 font-display text-[34px] leading-[1.08] [animation-delay:60ms]">
+				<span className="text-muted-foreground/70">{muted}</span>
+				<br />
+				{strong}
+			</h2>
+			{body ? <p className="fm-rise mt-4 max-w-xs text-[15px] leading-6 text-muted-foreground [animation-delay:120ms]">{body}</p> : null}
+			{children ? <div className="fm-rise mt-6 [animation-delay:160ms]">{children}</div> : null}
 		</div>
 	);
 }

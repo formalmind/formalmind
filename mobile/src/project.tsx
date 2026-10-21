@@ -1,14 +1,17 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, useSyncExternalStore } from "react";
+import { createPortal } from "react-dom";
 import { useNavigate, useParams, useSearchParams } from "react-router";
-import { ChevronRight, FileCode2, Folder, Laptop, Loader2 } from "lucide-react";
+import { Check, ChevronDown, ChevronRight, FileCode2, Folder, History, Laptop, Loader2, Plus } from "lucide-react";
+import { MarkGithubIcon } from "@primer/octicons-react";
 import { makeGitBridge } from "@/components/projects/git-bridge";
-import { repoOf } from "@/components/projects/use-projects";
+import { projectPath, repoOf, useProjects } from "@/components/projects/use-projects";
 import { BellLink } from "./notifications";
 import { ChatMarkdown } from "@/components/chat-markdown";
 import { cachedTree, syncRepo } from "@/lib/browser-git";
 import { AuditView, BugsView, FileView, type Bug } from "@/desktop/src/swarm-panel";
 import { FloatingBar, TopBar } from "./bar";
-import { ChatButtons, Offline, SessionChat } from "./mac";
+import { SlideDrawer } from "./drawer";
+import { ChatButtons, MacState, SessionChat } from "./mac";
 import { macOnline, useMac } from "./relay";
 import type { RelayFolder } from "@/lib/relay";
 import { rememberProject, TabBar, type Tab } from "./tabs";
@@ -113,6 +116,7 @@ export function ProjectScreen() {
 	const [error, setError] = useState<string | null>(null);
 	const [bugs, setBugs] = useState<Bug[]>([]);
 	const [openBug, setOpenBug] = useState<string | null>(null);
+	const [history, setHistory] = useState(false);
 	useEffect(() => rememberProject(repo), [repo]);
 
 	useEffect(() => {
@@ -151,10 +155,14 @@ export function ProjectScreen() {
 	const openFile = (path: string) => go({ tab: "code", dir: path.split("/").slice(0, -1).join("/"), file: path });
 	const atRoot = tab !== "code" || (!dir && !file);
 
-	return (
+	const page = (
 		<div className="relative flex h-dvh flex-col bg-background">
-			{/* Chat is full screen, its controls floating over it; the other tabs keep the bar. */}
-			{tab === "chat" ? <FloatingBar back="/" right={<ChatButtons />} /> : <TopBar back={atRoot ? "/" : true} title={name} sub={owner} right={<BellLink />} />}
+			{/* Chat is full screen, its controls floating over it (history on the left, as in Mike's); the rest keep the bar. */}
+			{tab === "chat" ? (
+				<FloatingBar back="/" left={<History className="size-[22px]" />} onLeft={() => setHistory(true)} leftLabel="Chat history" right={<ChatButtons />} />
+			) : (
+				<TopBar back={atRoot ? "/" : true} title={<ProjectSwitcher repo={repo} tab={tab} />} sub={owner} right={<BellLink />} />
+			)}
 			{error ? <p className="m-4 rounded-xl border border-red-500/30 bg-red-500/5 p-3 text-sm text-red-700 dark:text-red-400">Couldn&apos;t clone {repo}: {error}</p> : null}
 			<main className="flex min-h-0 flex-1 flex-col">
 				{tab === "code" ? <CodeTab files={files} bridge={bridge} dir={dir} file={file} open={(n) => go(n)} /> : null}
@@ -173,44 +181,129 @@ export function ProjectScreen() {
 			<TabBar active={tab} repo={repo} />
 		</div>
 	);
+	if (tab !== "chat") return page;
+	return (
+		<SlideDrawer open={history} onOpenChange={setHistory} drawer={<SessionHistory repo={repo} onPicked={() => setHistory(false)} />}>
+			{page}
+		</SlideDrawer>
+	);
 }
 
 const folderKey = (repo: string) => `fm:mac-folder:${repo}`;
+const runKey = (repo: string) => `fm:mac-run:${repo}`;
+const read = (key: string) => {
+	try {
+		return localStorage.getItem(key);
+	} catch {
+		return null;
+	}
+};
+const write = (key: string, value: string) => {
+	try {
+		localStorage.setItem(key, value);
+	} catch {
+		/* kept for this visit */
+	}
+	window.dispatchEvent(new Event("fm:mac-pick"));
+};
+/** A remembered choice (the folder, the session), shared by the chat and its history drawer. */
+function useStored(key: string): [string | null, (v: string) => void] {
+	const value = useSyncExternalStore(
+		(fn) => {
+			window.addEventListener("fm:mac-pick", fn);
+			return () => window.removeEventListener("fm:mac-pick", fn);
+		},
+		() => read(key),
+	);
+	return [value, (v) => write(key, v)];
+}
+
+/** The Mac folder that is this repository: picked once, else the one whose origin it is. */
+function useProjectFolder(repo: string) {
+	const m = useMac();
+	const [picked, pick] = useStored(folderKey(repo));
+	const folders = m.state?.folders ?? [];
+	const folder = folders.find((f) => f.path === picked) ?? folders.find((f) => f.repo?.toLowerCase() === repo.toLowerCase());
+	return { m, folders, folder, pick };
+}
+
+/** The session followed: the one you picked, else one working now, else the folder's default session. */
+function useChosenRun(repo: string, folder: RelayFolder | undefined) {
+	const [chosen, pick] = useStored(runKey(repo));
+	const running = folder?.sessions.find((s) => s.running)?.run;
+	const run = chosen ?? running ?? "swarm";
+	// A session that starts working while you follow none is the one you follow from then on.
+	useEffect(() => {
+		if (!chosen && running) pick(running);
+		// eslint-disable-next-line react-hooks/exhaustive-deps
+	}, [running]);
+	return { run, pick };
+}
+
+/** The chat's history drawer: the folder's sessions, newest first, and a new one. */
+function SessionHistory({ repo, onPicked }: { repo: string; onPicked: () => void }) {
+	const { folder } = useProjectFolder(repo);
+	const { run, pick } = useChosenRun(repo, folder);
+	const go = (r: string) => {
+		pick(r);
+		onPicked();
+	};
+	return (
+		<div className="fm-safe-top flex h-full flex-col">
+			<div className="px-5 pb-3 pt-4">
+				<h2 className="truncate font-display text-[28px] leading-tight">{folder?.name ?? repo.split("/")[1]}</h2>
+				<p className="truncate text-[13px] text-muted-foreground">Swarm sessions on your Mac</p>
+			</div>
+			<div className="px-3 pb-2">
+				<button type="button" onClick={() => go(`s-${Date.now().toString(16)}`)} className="flex h-11 w-full items-center gap-2 rounded-full bg-card px-4 text-[15px] font-medium shadow-card active:bg-muted">
+					<Plus className="size-4" /> New session
+				</button>
+			</div>
+			<p className="px-5 pb-1 pt-3 font-mono text-[11px] uppercase tracking-wider text-muted-foreground">History</p>
+			<ul className="min-h-0 flex-1 overflow-y-auto px-2 pb-10">
+				{(folder?.sessions ?? []).map((s) => (
+					<li key={s.run}>
+						<button type="button" onClick={() => go(s.run)} className={`w-full rounded-xl px-3 py-2.5 text-left active:bg-muted ${s.run === run ? "bg-card shadow-card" : ""}`}>
+							<span className="line-clamp-2 block text-[15px]">{s.title || (s.run === "swarm" ? "Swarm" : s.run)}</span>
+							<span className="mt-0.5 block truncate text-[12px] text-muted-foreground">
+								{s.running ? "Running" : s.outcome || "Stopped"} · ${s.spent.toFixed(2)}
+							</span>
+						</button>
+					</li>
+				))}
+				{folder && !folder.sessions.length ? <li className="px-3 py-2 text-[14px] text-muted-foreground">No sessions yet.</li> : null}
+				{!folder ? <li className="px-3 py-2 text-[14px] text-muted-foreground">Your Mac's sessions show here once it's connected.</li> : null}
+			</ul>
+		</div>
+	);
+}
+
 
 /**
  * Chat: the swarm working on this repository on your Mac. The Mac says which GitHub repository each folder is; when
  * none matches (a renamed repository), you pick the folder once and it's remembered.
  */
 function ProjectChat({ repo }: { repo: string }) {
-	const m = useMac();
-	const [picked, setPicked] = useState(() => {
-		try {
-			return localStorage.getItem(folderKey(repo));
-		} catch {
-			return null;
-		}
-	});
-	const folders = m.state?.folders ?? [];
-	const folder = folders.find((f) => f.path === picked) ?? folders.find((f) => f.repo?.toLowerCase() === repo.toLowerCase());
+	const { m, folders, folder, pick } = useProjectFolder(repo);
 	if (!folder) {
+		// No folder yet: why (centered, as the onboarding draws it), or which of the Mac's folders this repository is.
+		if (!folders.length || !macOnline(m)) {
+			return (
+				<div className="fm-under-tabs fm-under-floating flex min-h-0 flex-1 flex-col">
+					<MacState />
+				</div>
+			);
+		}
 		return (
 			<div className="fm-under-tabs fm-under-floating min-h-0 flex-1 overflow-auto">
-				<Offline />
 				<div className="px-4 py-4">
-					<p className="mb-3 text-[14px] text-muted-foreground">{folders.length ? `Which folder on your Mac is ${repo}?` : macOnline(m) ? "No folders on your Mac yet." : "Waiting for your Mac…"}</p>
+					<p className="mb-3 text-[14px] text-muted-foreground">Which folder on your Mac is {repo}?</p>
 					<ul className="divide-y overflow-hidden rounded-2xl border bg-card shadow-card">
 						{folders.map((f) => (
 							<li key={f.path}>
 								<button
 									type="button"
-									onClick={() => {
-										setPicked(f.path);
-										try {
-											localStorage.setItem(folderKey(repo), f.path);
-										} catch {
-											/* asked again next time */
-										}
-									}}
+									onClick={() => pick(f.path)}
 									className="flex w-full items-center gap-3 px-4 py-3 text-left active:bg-muted"
 								>
 									<Laptop className="size-4 shrink-0 text-muted-foreground" />
@@ -230,32 +323,9 @@ function ProjectChat({ repo }: { repo: string }) {
 	return <FolderChat repo={repo} folder={folder} />;
 }
 
-const runKey = (repo: string) => `fm:mac-run:${repo}`;
-
-/** A folder's swarm chat: the session you picked (kept), else one working now, else the folder's default session. */
+/** A folder's swarm chat, on the session followed (useChosenRun); the history drawer or the pill switches it. */
 function FolderChat({ repo, folder }: { repo: string; folder: RelayFolder }) {
-	const [chosen, setChosen] = useState(() => {
-		try {
-			return localStorage.getItem(runKey(repo));
-		} catch {
-			return null;
-		}
-	});
-	const running = folder.sessions.find((s) => s.running)?.run;
-	const run = (chosen && folder.sessions.some((s) => s.run === chosen) ? chosen : null) ?? running ?? "swarm";
-	// A session that starts working while you're here is the one you're following from then on.
-	useEffect(() => {
-		if (!chosen && running) pick(running);
-		// eslint-disable-next-line react-hooks/exhaustive-deps
-	}, [running]);
-	const pick = (next: string) => {
-		setChosen(next);
-		try {
-			localStorage.setItem(runKey(repo), next);
-		} catch {
-			/* kept for this visit */
-		}
-	};
+	const { run, pick } = useChosenRun(repo, folder);
 	const label = (r: string) => {
 		const s = folder.sessions.find((x) => x.run === r);
 		return `${s?.title || (r === "swarm" ? "Swarm" : r)}${s?.running ? " · running" : ""}`;
@@ -280,5 +350,56 @@ function FolderChat({ repo, folder }: { repo: string; folder: RelayFolder }) {
 				}
 			/>
 		</div>
+	);
+}
+
+/** The project's name in the bar, which switches project: your projects drop down under it (same tab), and Add. */
+function ProjectSwitcher({ repo, tab }: { repo: string; tab: Tab }) {
+	const [open, setOpen] = useState(false);
+	const projects = useProjects();
+	const navigate = useNavigate();
+	return (
+		<>
+			<button type="button" onClick={() => setOpen((o) => !o)} aria-expanded={open} className="inline-flex max-w-full items-center gap-1 active:opacity-60">
+				<span className="truncate">{repo.split("/")[1]}</span>
+				<ChevronDown className={`size-4 shrink-0 text-muted-foreground transition-transform ${open ? "rotate-180" : ""}`} />
+			</button>
+			{/* On the page itself: the bar's blur would otherwise hold the fixed menu inside it. */}
+			{open ? createPortal(
+				<>
+					<button type="button" aria-label="Close" onClick={() => setOpen(false)} className="fixed inset-0 z-40 cursor-default" />
+					<div className="fixed left-3 right-3 top-[calc(env(safe-area-inset-top)+3.5rem)] z-50 rounded-2xl border bg-muted/60 p-1.5 shadow-pop backdrop-blur-xl">
+						<p className="flex h-8 items-center px-2.5 font-mono text-[11px] font-medium uppercase tracking-wider text-muted-foreground">Projects</p>
+						<ul className="shadow-card max-h-[60dvh] divide-y overflow-y-auto rounded-xl border bg-card">
+							{projects?.map((p) => (
+								<li key={p.repo}>
+									<button
+										type="button"
+										onClick={() => {
+											setOpen(false);
+											if (p.repo !== repo) navigate(`${projectPath(p.repo)}?tab=${tab}`);
+										}}
+										className="flex w-full items-center gap-3 px-3 py-3 text-left text-[15px] font-normal active:bg-muted"
+									>
+										<MarkGithubIcon size={16} className="shrink-0 text-muted-foreground" />
+										<span className="min-w-0 flex-1">
+											<span className="block truncate font-medium">{p.repo.split("/")[1]}</span>
+											<span className="block truncate text-[12px] text-muted-foreground">{p.repo.split("/")[0]}</span>
+										</span>
+										{p.repo === repo ? <Check className="size-4 text-foreground" /> : null}
+									</button>
+								</li>
+							))}
+							<li>
+								<button type="button" onClick={() => navigate("/")} className="flex w-full items-center gap-3 px-3 py-3 text-left text-[15px] font-normal active:bg-muted">
+									<Plus className="size-4 text-muted-foreground" /> Add a project
+								</button>
+							</li>
+						</ul>
+					</div>
+				</>,
+				document.body,
+			) : null}
+		</>
 	);
 }
