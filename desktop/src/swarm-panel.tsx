@@ -869,7 +869,7 @@ function CoverageView({ data, scripts, onOpenFile }: { data: Formal; scripts: Sc
 	// Library functions are always listed and counted.
 	const shown = data.functions.filter((f) => (filter === "all" || (filter === "modeled" ? ["modeled", "sorry"].includes(fnStatus(f, data.theorems).key) : fnStatus(f, data.theorems).key === filter)));
 	const groups = [
-		{ title: "Called by scripts", fns: shown.filter((f) => f.entry && calledBy(f).length) },
+		{ title: "Functions", fns: shown.filter((f) => f.entry && calledBy(f).length) },
 		{ title: scripts ? "Other entry points" : "Entry points", fns: shown.filter((f) => f.entry && !calledBy(f).length) },
 		{ title: "Internal", fns: shown.filter((f) => !f.entry && !f.dependency) },
 		{ title: "Libraries", fns: shown.filter((f) => !f.entry && f.dependency) },
