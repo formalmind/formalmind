@@ -109,7 +109,7 @@ export function BillingPage() {
 			<main className="mx-auto w-full max-w-4xl space-y-6 px-6 pb-10 pt-2">
 				<section className="rounded-xl border p-5">
 					<p className="text-sm text-muted-foreground">Credit balance</p>
-					<p className="mt-1 font-display text-[40px] font-normal leading-tight tabular-nums">{balance ? usd(balance.cents) : "…"}</p>
+					<p className="mt-1 text-3xl font-semibold tabular-nums">{balance ? usd(balance.cents) : "…"}</p>
 					<p className="mt-2 text-xs text-muted-foreground">
 						Prepaid model usage for your swarm. It pauses for the day once the daily budget is spent.{" "}
 						<Link to="/usage" className="underline underline-offset-2 hover:text-foreground">
