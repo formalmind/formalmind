@@ -10,6 +10,7 @@ import type { SessionData } from "@/lib/session";
 import { macOnline, setStartBudget, startBudget, useMac } from "./relay";
 import { rememberProject } from "./tabs";
 import { SwarmShowcase } from "./showcase";
+import { CoverageCard } from "./proofs";
 
 const KEY = "fm:mobile-setup";
 
@@ -88,28 +89,13 @@ function useCount(run: boolean, ms = 2400) {
 	return n;
 }
 
-const FUNCTIONS = ["transferOwnership", "setExecutor", "swap", "cancelOrder", "matchBook", "redeem", "sweep", "executeOrder"];
-
-/** The coverage bar and the functions it counts: proved as the bar passes them. */
+/** The app's coverage card (the Proofs explorer's), at `value`% of AsyncSwap's 143 functions proved. */
 function Coverage({ value }: { value: number }) {
-	const proved = Math.round((value / 100) * FUNCTIONS.length);
+	const total = 143;
+	const proved = Math.round((value / 100) * total);
 	return (
-		<div className={`${card} p-4`}>
-			<div className="flex items-baseline justify-between">
-				<span className="text-[13px] text-white/50">Functions proved</span>
-				<span className="font-mono text-2xl tabular-nums">{value}%</span>
-			</div>
-			<div className="mt-3 h-2 overflow-hidden rounded-full bg-white/10">
-				<div className="h-full rounded-full bg-emerald-400" style={{ width: `${value}%` }} />
-			</div>
-			<ul className="mt-4 grid grid-cols-2 gap-x-3 gap-y-1.5 font-mono text-[12px]">
-				{FUNCTIONS.map((f, i) => (
-					<li key={f} className={`flex items-center gap-2 transition-colors ${i < proved ? "text-white" : "text-white/35"}`}>
-						<span className={`size-1.5 rounded-full ${i < proved ? "bg-emerald-400" : "bg-white/25"}`} />
-						{f}
-					</li>
-				))}
-			</ul>
+		<div className="dark text-foreground">
+			<CoverageCard contract="AsyncSwap" theorems={Math.round((value / 100) * 876)} proved={proved} notYet={total - proved} opaque={0} />
 		</div>
 	);
 }
@@ -139,6 +125,8 @@ export function Setup({ user, onDone }: { user: SessionData["user"]; onDone: () 
 			navigate(projectPath(repo));
 		} else navigate("/");
 	};
+	// Each step starts in place, whatever the last one scrolled.
+	useEffect(() => window.scrollTo(0, 0), [step]);
 	const counted = useCount(step === 2);
 	const toHundred = useCount(verifying, 3000);
 	const handle = user.nickname ?? user.name ?? "there";

@@ -1,4 +1,6 @@
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import { Plus } from "lucide-react";
+import { HomeEmpty } from "@/components/home-empty";
 import { fnStatus, type Formal } from "@/desktop/src/swarm-panel";
 import { FindingCard } from "./bugs";
 import { MacCardView } from "./home";
@@ -29,18 +31,6 @@ type Page = { muted: string; strong: string; body: string; art: React.ReactNode 
 
 /* The pages show the app itself: real screens (public/onboarding), their edges fading into the page. */
 
-/** A screen of the app; only its bottom fades, into the words below it. */
-export function Shot({ src, className = "", style }: { src: string; className?: string; style?: React.CSSProperties }) {
-	return (
-		<img
-			src={src}
-			alt=""
-			draggable={false}
-			className={`pointer-events-none select-none rounded-[14px] ${className}`}
-			style={{ WebkitMaskImage: "linear-gradient(to bottom, #000 55%, transparent)", maskImage: "linear-gradient(to bottom, #000 55%, transparent)", ...style }}
-		/>
-	);
-}
 
 
 /** One of the app's own cards, centered, in the app's dark colours whatever the phone's theme. */
@@ -103,9 +93,16 @@ const PAGES: Page[] = [
 		strong: "",
 		body: "",
 		art: (
-			<div className="flex flex-col items-center gap-6">
+			<div className="flex w-full flex-col items-center gap-6">
 				<img src="/onboarding/icon.png" alt="Formal Mind" className="size-[84px] drop-shadow-[0_12px_30px_rgb(0_0_0/0.6)]" />
-				<Shot src="/onboarding/home.jpg" className="w-[250px] rounded-[34px]" />
+				{/* Home's empty state itself, its headline cycling through the agents, proofs, bugs and code. */}
+				<div className="dark fm-home pointer-events-none w-full max-w-[320px] select-none rounded-[28px] border border-white/10 bg-background text-foreground shadow-[0_24px_60px_rgb(0_0_0/0.5)]">
+					<HomeEmpty muted="Bugs, proofs and code." strong="Pick a project.">
+						<span className="btn-soft inline-flex h-10 w-full items-center justify-center gap-1.5 text-[14px] font-medium">
+							<Plus className="size-4" /> Add a project
+						</span>
+					</HomeEmpty>
+				</div>
 			</div>
 		),
 	},
@@ -118,6 +115,8 @@ export function Onboarding({ onDone }: { onDone: () => void }) {
 	const last = i === PAGES.length - 1;
 	const next = () => (last ? onDone() : setI(i + 1));
 	const page = PAGES[i];
+	// Each page starts in place, whatever the last one scrolled.
+	useEffect(() => window.scrollTo(0, 0), [i]);
 	return (
 		<main
 			className="fm-safe-top fm-safe-bottom relative flex min-h-dvh flex-col overflow-x-hidden bg-[radial-gradient(ellipse_at_top,#151a24_0%,#08090b_60%)] px-6 pb-8 text-white"
