@@ -141,7 +141,8 @@ function ProjectFolder({ project, open, onOpenChange, pathname, collapsed, onExp
 						<span className="truncate group-data-[collapsible=icon]:hidden">{name}</span>
 						<ChevronRight className={`size-3.5 shrink-0 text-muted-foreground transition-transform duration-150 group-data-[collapsible=icon]:hidden ${open ? "rotate-90" : ""}`} aria-hidden />
 					</CollapsibleTrigger>
-					{/* An imported repository: the branch mark says it comes from git, and opens it on GitHub. */}
+					{project.proofsRepo ? <SwarmMenu repo={project.repo} /> : null}
+					{/* An imported repository: the branch mark (always the right-most) says it comes from git, and opens it on GitHub. */}
 					<a
 						href={`https://github.com/${project.repo}`}
 						target="_blank"
@@ -152,7 +153,6 @@ function ProjectFolder({ project, open, onOpenChange, pathname, collapsed, onExp
 					>
 						<GitBranch className="size-3.5" />
 					</a>
-					{project.proofsRepo ? <SwarmMenu repo={project.repo} /> : null}
 				</div>
 				<CollapsibleContent className="pl-3 group-data-[collapsible=icon]:hidden">
 					{current ? (
