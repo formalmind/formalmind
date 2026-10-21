@@ -4,11 +4,10 @@ import { cachedBytes, cachedFile, cachedTree, freshEnough, syncRepo } from "@/li
 /** Files the Code tab shows as themselves: PDFs in the browser's viewer, images as images. */
 const MIME: Record<string, string> = { pdf: "application/pdf", png: "image/png", jpg: "image/jpeg", jpeg: "image/jpeg", gif: "image/gif", webp: "image/webp", svg: "image/svg+xml", avif: "image/avif", ico: "image/x-icon" };
 
-const NO_AST = "Proofs read the Solidity AST, which the Mac app builds on your computer. Open this repository there to see its proofs.";
-
 /**
  * The folder page's bridge on the website, for an imported repository: everything is read from the browser's git copy
- * (lib/browser-git.ts). Code and Bugs work from the files; the AST-backed Proofs and the local swarm live in the Mac app.
+ * (lib/browser-git.ts). Code and Bugs work from the files; Proofs reads the Solidity AST built in the browser
+ * (lib/browser-ast.ts: formal-ast and solc-js in a Web Worker); the local swarm lives in the Mac app.
  */
 export function makeGitBridge(repo: string): Bridge {
 	const ready = async () => {
@@ -66,8 +65,12 @@ export function makeGitBridge(repo: string): Bridge {
 				case "ast_units":
 				case "ast_slice":
 				case "ast_formal":
-				case "ast_scripts":
-					throw NO_AST;
+				case "ast_scripts": {
+					await ready();
+					// solc and formal-ast load only here, the first time the Proofs tab asks.
+					const { runAst } = await import("@/lib/browser-ast");
+					return (await runAst(repo, { cmd, entry: args?.entry as string | undefined, function: args?.function as string | undefined })) as T;
+				}
 				default:
 					throw `${cmd} runs in the Mac app.`;
 			}

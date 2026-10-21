@@ -1,26 +1,34 @@
 //! Slices: what an agent gets for one unit. A few KB of Markdown cut from the source by `src`, never the AST.
 
+use crate::fs::{Disk, Files};
 use crate::graph::{CallKind, Graph, Id, Src};
 use crate::scope::{Scope, Unit};
 use std::collections::HashMap;
 use std::fmt::Write;
-use std::path::{Path, PathBuf};
+use std::path::Path;
+use std::sync::Arc;
 
 /// Source text by solc file id, read on demand.
 pub struct Sources {
-    root: PathBuf,
+    files: Arc<dyn Files>,
     paths: HashMap<Id, String>,
     text: HashMap<Id, String>,
 }
 
 impl Sources {
+    /// Sources read from a folder on disk.
     pub fn new(root: &Path, g: &Graph) -> Sources {
-        Sources { root: root.to_path_buf(), paths: g.files.values().map(|f| (f.id, f.path.clone())).collect(), text: HashMap::new() }
+        Sources::from_files(Arc::new(Disk(root.to_path_buf())), g)
+    }
+
+    /// Sources read from a project's files (`Project::files`).
+    pub fn from_files(files: Arc<dyn Files>, g: &Graph) -> Sources {
+        Sources { files, paths: g.files.values().map(|f| (f.id, f.path.clone())).collect(), text: HashMap::new() }
     }
 
     fn file(&mut self, id: Id) -> &str {
         if !self.text.contains_key(&id) {
-            let text = self.paths.get(&id).and_then(|p| std::fs::read_to_string(self.root.join(p)).ok()).unwrap_or_default();
+            let text = self.paths.get(&id).and_then(|p| self.files.read(p)).unwrap_or_default();
             self.text.insert(id, text);
         }
         &self.text[&id]

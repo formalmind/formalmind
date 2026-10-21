@@ -10,6 +10,7 @@
     "lint": "eslint .",
     "deploy:cf": "vite build && wrangler deploy",
     "release": "scripts/release.sh",
+    "build:ast-wasm": "scripts/build-ast-wasm.sh",
     "prepare": "git config core.hooksPath .githooks || true",
     "desktop:dev": "cd desktop && tauri dev",
     "desktop:build": "cd desktop && tauri build",

@@ -4,6 +4,7 @@
 //! the entry contract can reach) → [`scope::Unit`]s and clusters (how to split the work) → [`slice::render`] (what an
 //! agent reads). See desktop/AUDIT-ENGINE.md.
 
+pub mod fs;
 pub mod graph;
 pub mod lean;
 pub mod link;
@@ -14,6 +15,17 @@ pub mod solc;
 use anyhow::Result;
 use std::path::Path;
 
+/// Milliseconds since it was made (always 0 in wasm, which has no clock: the website times the work itself).
+#[cfg(not(target_arch = "wasm32"))]
+fn clock() -> impl Fn() -> u64 {
+    let started = std::time::Instant::now();
+    move || started.elapsed().as_millis() as u64
+}
+#[cfg(target_arch = "wasm32")]
+fn clock() -> impl Fn() -> u64 {
+    || 0
+}
+
 /// Everything for one entry file: the graph, its scope and units.
 pub struct Analysis {
     pub project: solc::Project,
@@ -23,19 +35,26 @@ pub struct Analysis {
     pub units: Vec<scope::Unit>,
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 pub fn analyze(root: &Path, entry_file: &str, contract: Option<&str>) -> Result<Analysis> {
     Ok(analyze_full(root, entry_file, contract)?.0)
 }
 
 /// Also returns solc's output, for generators that need the full AST (the Lean model).
+#[cfg(not(target_arch = "wasm32"))]
 pub fn analyze_full(root: &Path, entry_file: &str, contract: Option<&str>) -> Result<(Analysis, serde_json::Value)> {
     let project = solc::Project::load(root)?;
     let output = solc::compile(&project, entry_file)?;
-    let mut graph = graph::Graph::build(&output);
+    Ok((analyze_output(project, entry_file, contract, &output)?, output))
+}
+
+/// The analysis of solc's output for the entry file (compiled from [`solc::input`] by whichever solc).
+pub fn analyze_output(project: solc::Project, entry_file: &str, contract: Option<&str>, output: &serde_json::Value) -> Result<Analysis> {
+    let mut graph = graph::Graph::build(output);
     graph.mark_dependencies(&project.libs);
     let scope = scope::Scope::new(&graph, entry_file, contract)?;
     let units = scope.units(&graph);
-    Ok((Analysis { project, entry_file: entry_file.to_string(), graph, scope, units }, output))
+    Ok(Analysis { project, entry_file: entry_file.to_string(), graph, scope, units })
 }
 
 /// What audit mode shows for one entry contract: units with their footprint and risks, clusters, scope, timing.
@@ -140,7 +159,7 @@ pub fn audit_json(a: &Analysis, ms: u64) -> serde_json::Value {
 
 /// Every unit's slice, by unit name.
 pub fn all_slices(a: &Analysis) -> std::collections::BTreeMap<String, String> {
-    let mut sources = slice::Sources::new(&a.project.root, &a.graph);
+    let mut sources = slice::Sources::from_files(a.project.files.clone(), &a.graph);
     a.units.iter().map(|u| (u.name.clone(), slice::render(&a.graph, &a.scope, u, &mut sources))).collect()
 }
 
@@ -158,28 +177,31 @@ pub struct Theorem {
 
 /// Every theorem in the project's own `.lean` files (dependencies, build output and Lake's packages skipped).
 pub fn theorems(root: &Path) -> Vec<Theorem> {
+    theorems_in(&fs::Disk(root.to_path_buf()))
+}
+
+/// [`theorems`], read from a project's files.
+pub fn theorems_in(files: &dyn fs::Files) -> Vec<Theorem> {
     const SKIP: [&str; 9] = [".git", ".lake", "lib", "dependencies", "node_modules", "out", "cache", "broadcast", "target"];
-    let mut files = vec![];
-    let mut stack = vec![root.to_path_buf()];
+    let mut paths = vec![];
+    let mut stack = vec![String::new()];
     while let Some(dir) = stack.pop() {
-        let Ok(read) = std::fs::read_dir(&dir) else { continue };
-        for e in read.flatten() {
-            let path = e.path();
-            let name = e.file_name().to_string_lossy().into_owned();
-            if path.is_dir() {
+        for (name, is_dir) in files.read_dir(&dir) {
+            let path = if dir.is_empty() { name.clone() } else { format!("{dir}/{name}") };
+            if is_dir {
                 if !SKIP.contains(&name.as_str()) {
                     stack.push(path);
                 }
             } else if name.ends_with(".lean") {
-                files.push(path);
+                paths.push(path);
             }
         }
     }
-    files.sort();
+    // Folder by folder, as paths sort.
+    paths.sort_by(|a, b| a.split('/').cmp(b.split('/')));
     let mut out = vec![];
-    for path in files {
-        let Ok(text) = std::fs::read_to_string(&path) else { continue };
-        let rel = path.strip_prefix(root).unwrap_or(&path).to_string_lossy().into_owned();
+    for rel in paths {
+        let Some(text) = files.read(&rel) else { continue };
         let lines: Vec<&str> = text.lines().collect();
         // A declaration starts at column 0 (after attributes and modifiers); it runs to the next one.
         let starts_decl = |l: &str| {
@@ -213,11 +235,11 @@ pub fn theorems(root: &Path) -> Vec<Theorem> {
 pub fn formal_json(a: &Analysis, output: &serde_json::Value, ms: u64) -> serde_json::Value {
     use serde_json::json;
     let g = &a.graph;
-    let started = std::time::Instant::now();
+    let elapsed = clock();
     let namespace = lean::ident(&g.contracts[&a.scope.entry].name);
     let model = lean::Gen::new(output, g, &a.scope).generate(&namespace);
-    let theorems = theorems(&a.project.root);
-    let mut sources = slice::Sources::new(&a.project.root, g);
+    let theorems = theorems_in(&*a.project.files);
+    let mut sources = slice::Sources::from_files(a.project.files.clone(), g);
     // A theorem covers a function when it names its Lean definition (or, for an opaque one, its `Ext` field).
     let names = |hay: &str, needle: &str| {
         let mut from = 0;
@@ -270,31 +292,43 @@ pub fn formal_json(a: &Analysis, output: &serde_json::Value, ms: u64) -> serde_j
         "ext": model.report.ext.len(),
         "functions": functions,
         "theorems": theorems,
-        "ms": ms + started.elapsed().as_millis() as u64,
+        "ms": ms + elapsed(),
     })
 }
 
 /// The protocol as production uses it: every Foundry script under `script/` (`*.s.sol`), what each deploys and which
 /// of the project's own functions it calls. Those are the entry points; the project's contracts nothing deploys or
 /// calls are out of scope. (Tests only show the code runs; scripts are what will run on chain.)
+#[cfg(not(target_arch = "wasm32"))]
 pub fn script_entries(root: &Path) -> Result<serde_json::Value> {
-    use serde_json::json;
-    use std::collections::{BTreeMap, BTreeSet};
     let project = solc::Project::load(root)?;
+    script_entries_with(&project, |script| solc::compile(&project, script))
+}
+
+/// The Foundry scripts under `script/` (`*.s.sol`), sorted.
+pub fn script_files(files: &dyn fs::Files) -> Vec<String> {
     let mut scripts = vec![];
-    let mut stack = vec![root.join("script")];
+    let mut stack = vec!["script".to_string()];
     while let Some(dir) = stack.pop() {
-        let Ok(read) = std::fs::read_dir(&dir) else { continue };
-        for e in read.flatten() {
-            let p = e.path();
-            if p.is_dir() {
+        for (name, is_dir) in files.read_dir(&dir) {
+            let p = format!("{dir}/{name}");
+            if is_dir {
                 stack.push(p);
-            } else if p.to_string_lossy().ends_with(".s.sol") {
-                scripts.push(p.strip_prefix(root).unwrap_or(&p).to_string_lossy().replace('\\', "/"));
+            } else if p.ends_with(".s.sol") {
+                scripts.push(p);
             }
         }
     }
     scripts.sort();
+    scripts
+}
+
+/// [`script_entries`], with each script's solc output from `compile` (the website compiles them with solc-js, several
+/// scripts in one output).
+pub fn script_entries_with<O: std::borrow::Borrow<serde_json::Value>>(project: &solc::Project, mut compile: impl FnMut(&str) -> Result<O>) -> Result<serde_json::Value> {
+    use serde_json::json;
+    use std::collections::{BTreeMap, BTreeSet};
+    let scripts = script_files(&*project.files);
     // Project code: not a dependency, not a script or test.
     let own = |path: &str| !path.starts_with("script/") && !path.starts_with("test/") && !path.contains("/test/") && !path.ends_with(".t.sol") && !path.ends_with(".s.sol");
     // (contract, function) → the scripts that call it; contract → the scripts that deploy it.
@@ -305,13 +339,13 @@ pub fn script_entries(root: &Path) -> Result<serde_json::Value> {
     let mut reached: BTreeMap<String, String> = BTreeMap::new();
     let mut out = vec![];
     for script in &scripts {
-        let started = std::time::Instant::now();
+        let elapsed = clock();
         let result = (|| -> Result<serde_json::Value> {
-            let output = solc::compile(&project, script)?;
-            let mut g = graph::Graph::build(&output);
+            let output = compile(script)?;
+            let mut g = graph::Graph::build(output.borrow());
             g.mark_dependencies(&project.libs);
             let scope = scope::Scope::new(&g, script, None)?;
-            let mut src = slice::Sources::new(root, &g);
+            let mut src = slice::Sources::from_files(project.files.clone(), &g);
             for c in g.contracts.values() {
                 let file = &g.files[&c.file].path;
                 if !g.dependency_files.contains(&c.file) && own(file) {
@@ -386,7 +420,7 @@ pub fn script_entries(root: &Path) -> Result<serde_json::Value> {
             mine_calls.dedup_by(|a, b| a["contract"] == b["contract"] && a["function"] == b["function"]);
             Ok(json!({ "contract": g.contracts[&scope.entry].name, "deploys": mine_deploys, "calls": mine_calls }))
         })();
-        let ms = started.elapsed().as_millis() as u64;
+        let ms = elapsed();
         out.push(match result {
             Ok(mut v) => {
                 v["file"] = json!(script);

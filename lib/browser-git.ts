@@ -107,3 +107,46 @@ export async function cachedFile(repo: string, path: string): Promise<string | n
 	const bytes = await cachedBytes(repo, path);
 	return bytes ? new TextDecoder().decode(bytes) : null;
 }
+
+/** The last fetched commit, or null when the browser has no copy yet. */
+export async function cachedCommit(repo: string): Promise<string | null> {
+	return latest(await load(), repo);
+}
+
+/** The last fetched commit in full, for the AST (lib/browser-ast.ts): every file, its submodules, and the text of some. */
+export type RepoSnapshot = { commit: string; paths: string[]; gitlinks: { path: string; oid: string }[]; text: Record<string, string> };
+
+/** Folders the AST never reads from the repository's own files (build output, packages). */
+const SNAPSHOT_SKIP = new Set([".git", "node_modules", ".lake", "out", "cache", "broadcast", "target", "dist", ".next"]);
+
+/**
+ * Every file of the last fetched commit (no limit, lib/ and dependencies/ included), its submodules (path and pinned
+ * commit), and the text of the files `want` picks; null when the browser has no copy yet.
+ */
+export async function cachedSnapshot(repo: string, want: (path: string) => boolean): Promise<RepoSnapshot | null> {
+	const k = await load();
+	const oid = await latest(k, repo);
+	if (!oid) return null;
+	const snap: RepoSnapshot = { commit: oid, paths: [], gitlinks: [], text: {} };
+	const decoder = new TextDecoder();
+	await k.git.walk({
+		fs: k.fs,
+		dir: dirOf(repo),
+		trees: [k.git.TREE({ ref: oid })],
+		map: async (path, [entry]) => {
+			if (!entry || path === ".") return true;
+			if (SNAPSHOT_SKIP.has(path.split("/").pop() ?? "")) return null;
+			const type = await entry.type();
+			if (type === "commit") snap.gitlinks.push({ path, oid: await entry.oid() });
+			else if (type === "blob") {
+				snap.paths.push(path);
+				if (want(path)) {
+					const bytes = await entry.content();
+					if (bytes) snap.text[path] = decoder.decode(bytes);
+				}
+			}
+			return true;
+		},
+	});
+	return snap;
+}
