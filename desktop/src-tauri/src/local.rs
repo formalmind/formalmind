@@ -15,6 +15,13 @@ pub struct Config {
     pub repos: std::collections::BTreeMap<String, String>,
 }
 
+impl Config {
+    /// Whether the app may read this folder: one you added, or the folder an imported repository is cloned (mapped) to.
+    pub fn allows(&self, path: &str) -> bool {
+        self.folders.iter().any(|f| f == path) || self.repos.values().any(|f| f == path)
+    }
+}
+
 /// ~/.formalmind (or %USERPROFILE%\.formalmind on Windows).
 pub fn home() -> Result<PathBuf, String> {
     let base = std::env::var_os("HOME").or_else(|| std::env::var_os("USERPROFILE")).ok_or("No home folder")?;
@@ -80,15 +87,15 @@ pub struct Scan {
 const SKIP: [&str; 9] = [".git", "node_modules", "lib", "dependencies", "out", "cache", "target", ".lake", "dist"];
 const LIMIT: usize = 5000;
 
-/// Whether a folder has been added (only those may be read).
+/// Whether a folder has been added or an imported repository maps to it (only those may be read).
 pub fn is_added(path: &str) -> Result<bool, String> {
-    Ok(read()?.folders.iter().any(|f| f == path))
+    Ok(read()?.allows(path))
 }
 
 /// The Solidity and Lean files in a folder that's been added (only those may be read).
 #[tauri::command(async)]
 pub fn folder_scan(path: String) -> Result<Scan, String> {
-    if !read()?.folders.contains(&path) {
+    if !read()?.allows(&path) {
         return Err("Add the folder first".into());
     }
     let root = PathBuf::from(&path);
@@ -138,7 +145,7 @@ const TREE_SKIP: [&str; 12] = [".git", "node_modules", "lib", "dependencies", "o
 /// All files in a folder that's been added, for the sidebar's file tree.
 #[tauri::command(async)]
 pub fn folder_tree(path: String) -> Result<Tree, String> {
-    if !read()?.folders.contains(&path) {
+    if !read()?.allows(&path) {
         return Err("Add the folder first".into());
     }
     let root = PathBuf::from(&path);

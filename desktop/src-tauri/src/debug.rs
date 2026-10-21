@@ -227,7 +227,7 @@ pub fn log(app: &Option<tauri::AppHandle>, folder: &str, line: impl Into<String>
 }
 
 pub async fn open(state: &Debuggers, folder: String, file: String, app: Option<tauri::AppHandle>) -> Result<Opened, String> {
-    if !crate::local::read()?.folders.contains(&folder) {
+    if !crate::local::read()?.allows(&folder) {
         return Err("Add the folder first".into());
     }
     let (tx, jobs) = mpsc::channel::<Job>();
@@ -425,7 +425,7 @@ pub async fn debug_compare(state: tauri::State<'_, Debuggers>, id: u32, other: S
 }
 
 pub async fn compare(state: &Debuggers, id: u32, other: String, contract: String, test: String, slot_map: Option<String>) -> Result<Compared, String> {
-    if !crate::local::read()?.folders.contains(&other) {
+    if !crate::local::read()?.allows(&other) {
         return Err("Add the other folder first".into());
     }
     ask(state, id, move |d| {
