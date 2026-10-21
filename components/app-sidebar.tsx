@@ -1,9 +1,11 @@
 "use client"
 
+import { MarkGithubIcon } from "@primer/octicons-react"
 import { useEffect, useState } from "react";
 import { Link, useLocation, useNavigate } from "react-router";
-import { Folder, FolderOpen, ChevronRight, GitBranch, Plus } from "lucide-react"
-import { SwarmMenu } from "@/components/projects/swarm-control"
+import { Archive, ArchiveRestore, Folder, FolderOpen, ChevronRight, GitBranch, Plus } from "lucide-react"
+import { ProjectContextMenu } from "@/components/projects/swarm-control"
+import { useArchived } from "@/components/folder-menu"
 import {
 	Sidebar,
 	SidebarContent,
@@ -103,7 +105,7 @@ function useRepoTree(repo: string, on: boolean) {
 	return { tree, error }
 }
 
-function ProjectFolder({ project, open, onOpenChange, pathname, collapsed, onExpand }: { project: Project; open: boolean; onOpenChange: (open: boolean) => void; pathname: string; collapsed: boolean; onExpand: () => void }) {
+function ProjectFolder({ project, open, onOpenChange, pathname, collapsed, onExpand, archived, onArchive }: { project: Project; open: boolean; onOpenChange: (open: boolean) => void; pathname: string; collapsed: boolean; onExpand: () => void; archived: boolean; onArchive: (archived: boolean) => void }) {
 	const name = project.repo.split("/")[1] ?? project.repo
 	const navigate = useNavigate()
 	const home = projectPath(project.repo)
@@ -115,7 +117,9 @@ function ProjectFolder({ project, open, onOpenChange, pathname, collapsed, onExp
 
 	return (
 		<Collapsible open={open} onOpenChange={onOpenChange} asChild>
-			<li className="list-none">
+			<li className={`list-none ${archived ? "opacity-60" : ""}`}>
+				<ProjectContextMenu repo={project.repo} swarm={Boolean(project.proofsRepo)} archived={archived} onArchive={onArchive}>
+				{(dots) => (
 				<div className="group/folder flex h-8 items-center rounded-md pr-1 hover:bg-sidebar-accent group-data-[collapsible=icon]:size-8 group-data-[collapsible=icon]:p-0">
 					{/* Collapsed, only the folder shows: a click widens the sidebar with this project open. */}
 					<CollapsibleTrigger
@@ -133,6 +137,8 @@ function ProjectFolder({ project, open, onOpenChange, pathname, collapsed, onExp
 						className={`flex h-8 min-w-0 flex-1 items-center gap-2 px-2 text-left text-sm font-normal outline-none ${pathname === home ? "font-medium text-sidebar-foreground" : "text-sidebar-foreground/90"} focus-visible:ring-2 focus-visible:ring-sidebar-ring`}
 						title={project.repo}
 					>
+						{/* An imported repository, not a folder on disk: the GitHub mark comes before its folder. */}
+						<MarkGithubIcon size={14} className="shrink-0 text-muted-foreground group-data-[collapsible=icon]:hidden" aria-hidden />
 						{/* Closed and open folders cross-fade; hovering lifts the lid a little. */}
 						<span className="fm-folder relative size-4 shrink-0" data-open={open && !collapsed ? "" : undefined} aria-hidden>
 							<Folder className="fm-folder-closed absolute inset-0 size-4" />
@@ -141,7 +147,7 @@ function ProjectFolder({ project, open, onOpenChange, pathname, collapsed, onExp
 						<span className="truncate group-data-[collapsible=icon]:hidden">{name}</span>
 						<ChevronRight className={`size-3.5 shrink-0 text-muted-foreground transition-transform duration-150 group-data-[collapsible=icon]:hidden ${open ? "rotate-90" : ""}`} aria-hidden />
 					</CollapsibleTrigger>
-					{project.proofsRepo ? <SwarmMenu repo={project.repo} /> : null}
+					{dots}
 					{/* An imported repository: the branch mark (always the right-most) says it comes from git, and opens it on GitHub. */}
 					<a
 						href={`https://github.com/${project.repo}`}
@@ -154,6 +160,8 @@ function ProjectFolder({ project, open, onOpenChange, pathname, collapsed, onExp
 						<GitBranch className="size-3.5" />
 					</a>
 				</div>
+				)}
+				</ProjectContextMenu>
 				<CollapsibleContent className="pl-3 group-data-[collapsible=icon]:hidden">
 					{current ? (
 						tree ? (
@@ -177,6 +185,8 @@ function ProjectFolder({ project, open, onOpenChange, pathname, collapsed, onExp
 function Projects({ pathname }: { pathname: string }) {
 	const projects = useProjects()
 	const [open, setOpen] = useOpenFolders()
+	const { archived, setArchived } = useArchived()
+	const [showArchived, setShowArchived] = useState(false)
 	const sidebar = useSidebar()
 	const collapsed = sidebar.state === "collapsed" && !sidebar.isMobile
 	// The folder holding the page you are on opens by itself.
@@ -186,9 +196,11 @@ function Projects({ pathname }: { pathname: string }) {
 	}, [here, open, setOpen])
 
 	if (!projects) return null
+	const shown = projects.filter((p) => showArchived || !archived.includes(p.repo))
+	const hidden = projects.filter((p) => archived.includes(p.repo)).length
 	return (
 		<ul className="mt-2 flex flex-col gap-0.5">
-			{projects.map((p, i) => (
+			{shown.map((p, i) => (
 				<ProjectFolder
 					key={p.repo}
 					project={p}
@@ -201,8 +213,18 @@ function Projects({ pathname }: { pathname: string }) {
 						setOpen(p.repo, true)
 						sidebar.setOpen(true)
 					}}
+					archived={archived.includes(p.repo)}
+					onArchive={(on) => setArchived(p.repo, on)}
 				/>
 			))}
+			{/* Archived projects leave the list; this brings them back into view (right-click one to unarchive). */}
+			{hidden ? (
+				<li className="list-none group-data-[collapsible=icon]:hidden">
+					<button type="button" onClick={() => setShowArchived((v) => !v)} className="px-2 py-1 text-[11px] text-muted-foreground/70 hover:text-foreground">
+						{showArchived ? "Hide archived" : `Archived · ${hidden}`}
+					</button>
+				</li>
+			) : null}
 		</ul>
 	)
 }
@@ -216,6 +238,10 @@ export function AppSidebar({ extra, ...props }: React.ComponentProps<typeof Side
 	// On localhost, the demo folder: a real repository's files when its data has been built.
 	const [demos, setDemos] = useState<DemoData[]>([])
 	const [addHelp, setAddHelp] = useState(false)
+	const { archived, setArchived } = useArchived()
+	const [showArchivedDemos, setShowArchivedDemos] = useState(false)
+	const archivedDemo = (d: DemoData | null) => archived.includes(`demo:${d?.name ?? "sample"}`)
+	const hiddenDemos = (demos.length ? demos : [null]).filter(archivedDemo).length
 	useEffect(() => {
 		if (typeof window !== "undefined" && window.location.hostname === "localhost") void loadDemoRepos().then(setDemos)
 	}, [])
@@ -253,12 +279,20 @@ export function AppSidebar({ extra, ...props }: React.ComponentProps<typeof Side
 							</div>
 						) : null}
 						<ul className="flex flex-col gap-0.5">
-							{(demos.length ? demos : [null]).map((demo, i) => {
+							{(demos.length ? demos : [null]).filter((d) => showArchivedDemos || !archivedDemo(d)).map((demo) => {
 								const params = new URLSearchParams(location.search)
 								const isCurrent = pathname === "/local-demo" && (demo ? (params.get("repo") ?? demos[0]?.name) === demo.name : true)
-								const repoParam = demo && i > 0 ? `?repo=${encodeURIComponent(demo.name)}` : ""
+								const repoParam = demo && demos.indexOf(demo) > 0 ? `?repo=${encodeURIComponent(demo.name)}` : ""
 								return (
-									<TreeFolder key={demo?.path ?? "sample"} name={demo?.name ?? "lending-protocol"} title={demo?.path} href={`/local-demo${repoParam}`} current={isCurrent}>
+									<TreeFolder
+										key={demo?.path ?? "sample"}
+										name={demo?.name ?? "lending-protocol"}
+										title={demo?.path}
+										href={`/local-demo${repoParam}`}
+										current={isCurrent}
+										dim={archivedDemo(demo)}
+										menu={[{ label: archivedDemo(demo) ? "Unarchive" : "Archive", icon: archivedDemo(demo) ? ArchiveRestore : Archive, onSelect: () => setArchived(`demo:${demo?.name ?? "sample"}`, !archivedDemo(demo)) }]}
+									>
 										<FileTree
 											paths={demo?.files ?? DEMO_TREE}
 											selected={isCurrent ? params.get("file") : null}
@@ -275,6 +309,13 @@ export function AppSidebar({ extra, ...props }: React.ComponentProps<typeof Side
 									</TreeFolder>
 								)
 							})}
+							{hiddenDemos ? (
+								<li className="list-none group-data-[collapsible=icon]:hidden">
+									<button type="button" onClick={() => setShowArchivedDemos((v) => !v)} className="px-2 py-1 text-[11px] text-muted-foreground/70 hover:text-foreground">
+										{showArchivedDemos ? "Hide archived" : `Archived · ${hiddenDemos}`}
+									</button>
+								</li>
+							) : null}
 						</ul>
 					</SidebarGroup>
 				) : null}

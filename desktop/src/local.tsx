@@ -4,7 +4,8 @@ import { useCallback, useEffect, useState } from "react";
 import { useLocation, useNavigate, useSearchParams } from "react-router";
 import { invoke } from "@tauri-apps/api/core";
 import { open } from "@tauri-apps/plugin-dialog";
-import { Plus } from "lucide-react";
+import { Archive, ArchiveRestore, Plus, X } from "lucide-react";
+import { useArchived } from "@/components/folder-menu";
 import { listen } from "@tauri-apps/api/event";
 import { apiBase } from "./api";
 import { LocalHeading, TreeFolder } from "@/components/session-folder";
@@ -76,7 +77,7 @@ function runnablesIn(text: string, prefix: "run" | "test"): Runnable[] {
 }
 
 /** A folder in the sidebar: selected, its file tree; a file opens in the canvas's file card. */
-function FolderItem({ path, current, file }: { path: string; current: boolean; file: string | null }) {
+function FolderItem({ path, current, file, archived, onArchive, onRemove }: { path: string; current: boolean; file: string | null; archived: boolean; onArchive: (on: boolean) => void; onRemove: () => void }) {
 	const tree = useTree(path, current);
 	const navigate = useNavigate();
 	const results = useRunResults(path);
@@ -99,7 +100,19 @@ function FolderItem({ path, current, file }: { path: string; current: boolean; f
 	};
 	const [params] = useSearchParams();
 	return (
-		<TreeFolder name={name(path)} title={path} href={href(path)} current={current}>
+		<TreeFolder
+			name={name(path)}
+			title={path}
+			href={href(path)}
+			current={current}
+			dim={archived}
+			menu={[
+				{ label: archived ? "Unarchive" : "Archive", icon: archived ? ArchiveRestore : Archive, onSelect: () => onArchive(!archived) },
+				"separator",
+				// Only the sidebar forgets it; the folder stays on disk.
+				{ label: "Remove from sidebar", icon: X, danger: true, onSelect: onRemove },
+			]}
+		>
 			{tree ? (
 				<FileTree
 					paths={tree.files}
@@ -140,7 +153,10 @@ function FolderItem({ path, current, file }: { path: string; current: boolean; f
 }
 
 export function LocalFolders() {
-	const { folders, add } = useFolders();
+	const { folders, add, remove } = useFolders();
+	const { archived, setArchived } = useArchived();
+	const [showArchived, setShowArchived] = useState(false);
+	const hidden = folders.filter((p) => archived.includes(p)).length;
 	const location = useLocation();
 	const [params] = useSearchParams();
 	const current = location.pathname === "/local" ? params.get("path") : null;
@@ -148,9 +164,24 @@ export function LocalFolders() {
 		<SidebarGroup>
 			<LocalHeading onAdd={() => void add()} />
 			<ul className="flex flex-col gap-0.5">
-				{folders.map((path) => (
-					<FolderItem key={path} path={path} current={current === path} file={current === path ? params.get("file") : null} />
+				{folders.filter((p) => showArchived || !archived.includes(p)).map((path) => (
+					<FolderItem
+						key={path}
+						path={path}
+						current={current === path}
+						file={current === path ? params.get("file") : null}
+						archived={archived.includes(path)}
+						onArchive={(on) => setArchived(path, on)}
+						onRemove={() => void remove(path)}
+					/>
 				))}
+				{hidden ? (
+					<li className="list-none group-data-[collapsible=icon]:hidden">
+						<button type="button" onClick={() => setShowArchived((v) => !v)} className="px-2 py-1 text-[11px] text-muted-foreground/70 hover:text-foreground">
+							{showArchived ? "Hide archived" : `Archived · ${hidden}`}
+						</button>
+					</li>
+				) : null}
 			</ul>
 			<SidebarMenu>
 				{folders.length === 0 ? (

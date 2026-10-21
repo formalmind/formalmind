@@ -1,25 +1,29 @@
 import { useState } from "react";
 import { useNavigate } from "react-router";
 import { Folder, FolderOpen, Plus } from "lucide-react";
+import { FolderMenu, type FolderMenuItem } from "@/components/folder-menu";
 
 /**
  * A project or folder in the sidebar. Selected, it shows its files underneath (`children`, the file tree); its name
  * opens it, and folds the tree when it's already open.
  */
-export function TreeFolder({ name, title, href, current, action, children }: {
+export function TreeFolder({ name, title, href, current, action, menu, dim, children }: {
 	name: string;
 	title?: string;
 	href: string;
 	current: boolean;
 	/** A control on the row's right (shown on hover), like + for a new chat. */
 	action?: React.ReactNode;
+	/** Its ⋯ and right-click options. */
+	menu?: FolderMenuItem[];
+	/** Archived, shown faded. */
+	dim?: boolean;
 	children?: React.ReactNode;
 }) {
 	const [open, setOpen] = useState(true);
 	const navigate = useNavigate();
 	const shown = current && open;
-	return (
-		<li className="list-none">
+	const row = (dots: React.ReactNode) => (
 			<div className={`group/folder flex h-8 items-center rounded-md pr-1 hover:bg-sidebar-accent ${current ? "text-sidebar-foreground" : ""}`}>
 				<button
 					type="button"
@@ -31,8 +35,13 @@ export function TreeFolder({ name, title, href, current, action, children }: {
 					{shown ? <FolderOpen className="size-4 shrink-0" /> : <Folder className="size-4 shrink-0" />}
 					<span className="truncate group-data-[collapsible=icon]:hidden">{name}</span>
 				</button>
+				{dots}
 				{action ? <span className="opacity-0 group-hover/folder:opacity-100 focus-within:opacity-100 group-data-[collapsible=icon]:hidden">{action}</span> : null}
 			</div>
+	);
+	return (
+		<li className={`list-none ${dim ? "opacity-60" : ""}`}>
+			{menu ? <FolderMenu items={menu}>{row}</FolderMenu> : row(null)}
 			{shown && children ? <div className="pl-3 group-data-[collapsible=icon]:hidden">{children}</div> : null}
 		</li>
 	);

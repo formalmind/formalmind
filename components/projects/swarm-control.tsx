@@ -1,7 +1,8 @@
 import { useState } from "react";
 import { Link } from "react-router";
 import { setVimMode, useVimMode } from "@/components/vim-mode";
-import { Gauge, MoreHorizontal, Play, Settings, Square, Wallet } from "lucide-react";
+import { Archive, ArchiveRestore, Gauge, Play, Settings, Square, Wallet } from "lucide-react";
+import { FolderMenu, type FolderMenuItem } from "@/components/folder-menu";
 import { DropdownMenu, DropdownMenuCheckboxItem, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 
 /** A project's swarm, stopped or running: stopping turns its workflow off and cancels runs in flight. */
@@ -42,22 +43,25 @@ function SwarmItems({ repo, control, label }: { repo: string; control: ReturnTyp
 	);
 }
 
-/** The ⋯ on a project in the sidebar. */
-export function SwarmMenu({ repo }: { repo: string }) {
+/** A project's ⋯ and right-click menu in the sidebar: stop or resume its swarm, and archive it (or bring it back). */
+export function ProjectContextMenu({ repo, swarm, archived, onArchive, children }: { repo: string; swarm: boolean; archived: boolean; onArchive: (archived: boolean) => void; children: (dots: React.ReactNode) => React.ReactNode }) {
 	const control = useSwarmControl(repo);
+	const { paused, busy, set } = control;
+	const items: FolderMenuItem[] = [
+		...(swarm
+			? [
+					paused
+						? { label: "Resume swarm", icon: Play, disabled: busy, onSelect: () => void set(false) }
+						: { label: "Stop swarm", icon: Square, iconClassName: "size-2.5 fill-current", danger: true, disabled: busy || paused === null, onSelect: () => void set(true) },
+					"separator" as const,
+				]
+			: []),
+		{ label: archived ? "Unarchive" : "Archive", icon: archived ? ArchiveRestore : Archive, onSelect: () => onArchive(!archived) },
+	];
 	return (
-		<DropdownMenu onOpenChange={(o) => o && void control.load()}>
-			<DropdownMenuTrigger
-				aria-label={`Swarm options for ${repo}`}
-				title="Swarm"
-				className="flex size-6 shrink-0 items-center justify-center rounded-md text-muted-foreground opacity-0 outline-none hover:bg-background hover:text-sidebar-foreground group-hover/folder:opacity-100 focus-visible:opacity-100 data-[state=open]:opacity-100 group-data-[collapsible=icon]:hidden"
-			>
-				<MoreHorizontal className="size-3.5" />
-			</DropdownMenuTrigger>
-			<DropdownMenuContent align="start">
-				<SwarmItems repo={repo} control={control} />
-			</DropdownMenuContent>
-		</DropdownMenu>
+		<FolderMenu items={items} onOpen={swarm ? () => void control.load() : undefined}>
+			{children}
+		</FolderMenu>
 	);
 }
 
