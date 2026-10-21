@@ -22,9 +22,10 @@ function repoOf(text: string): string | null {
  * download) or a remote GitHub repository, imported straight into a project that opens on its code. `onLocal` is the
  * Mac app's picker; `initialRepo` opens the card on Remote with that repository filled in (from the landing page).
  */
-export function AddProjectCard({ onLocal, onCancel, onDone, initialRepo }: { onLocal?: () => Promise<unknown> | void; onCancel?: () => void; onDone?: () => void; initialRepo?: string }) {
+export function AddProjectCard({ onLocal, onCancel, onDone, initialRepo, remoteOnly }: { onLocal?: () => Promise<unknown> | void; onCancel?: () => void; onDone?: () => void; initialRepo?: string; remoteOnly?: boolean }) {
 	const navigate = useNavigate();
-	const [choice, setChoice] = useState<"local" | "remote" | null>(initialRepo !== undefined ? "remote" : null);
+	// `remoteOnly`: where there are no local folders (the phone), it's a GitHub repository straight away.
+	const [choice, setChoice] = useState<"local" | "remote" | null>(initialRepo !== undefined || remoteOnly ? "remote" : null);
 	const [text, setText] = useState(initialRepo ?? "");
 	const [adding, setAdding] = useState<{ busy: boolean; error?: string }>({ busy: false });
 	const repo = repoOf(text);
@@ -58,7 +59,7 @@ export function AddProjectCard({ onLocal, onCancel, onDone, initialRepo }: { onL
 				) : null}
 			</header>
 			<div className="shadow-card space-y-3 rounded-xl border bg-card p-3 text-[13px]">
-				<div className="grid grid-cols-2 gap-2">
+				<div className={remoteOnly ? "hidden" : "grid grid-cols-2 gap-2"}>
 					<button type="button" onClick={() => void local()} className={tile(choice === "local")}>
 						<FolderPlus className="size-5 text-muted-foreground" />
 						<span className="font-medium">Local folder</span>

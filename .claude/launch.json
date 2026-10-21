@@ -32,6 +32,15 @@
         "--no-open"
       ],
       "port": 6006
+    },
+    {
+      "name": "mobile-web",
+      "runtimeExecutable": "sh",
+      "runtimeArgs": [
+        "-c",
+        "cd mobile && VITE_FORMALMIND_API=http://localhost:8787 bunx vite --config vite.config.mts"
+      ],
+      "port": 1421
     }
   ]
 }

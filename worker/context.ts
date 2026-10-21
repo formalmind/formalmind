@@ -6,6 +6,8 @@ export interface Env {
 	FORMALMIND: KV;
 	/** One Durable Object per project (worker/project-do.ts). */
 	PROJECT?: { idFromName(name: string): unknown; get(id: unknown): unknown };
+	/** One Durable Object per person: the swarm relay between the Mac app and the phone (worker/relay-do.ts). */
+	RELAY?: { idFromName(name: string): unknown; get(id: unknown): unknown };
 	[secret: string]: unknown;
 }
 

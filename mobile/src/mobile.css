@@ -1,0 +1,55 @@
+/* The phone: the page fills the screen edge to edge; bars keep clear of the notch and the home indicator. */
+html.fm-mobile,
+.fm-mobile body {
+	height: 100%;
+	overscroll-behavior: none;
+	-webkit-tap-highlight-color: transparent;
+	-webkit-text-size-adjust: 100%;
+}
+.fm-safe-top {
+	padding-top: env(safe-area-inset-top);
+}
+.fm-safe-bottom {
+	padding-bottom: max(env(safe-area-inset-bottom), 8px);
+}
+/* Inputs at 16px, or iOS zooms the page when one is focused. */
+.fm-mobile input,
+.fm-mobile textarea,
+.fm-mobile select {
+	font-size: 16px;
+}
+/* The Mac app's Proofs and Bugs panels float under its tab bar (--fm-top); here they fill the screen above the tabs. */
+.fm-phone-panel {
+	--fm-top: 0.5rem;
+}
+.fm-phone-panel > .absolute {
+	inset: 0.5rem 0.5rem calc(max(env(safe-area-inset-bottom), 8px) + 4.25rem) 0.5rem;
+}
+/* The floating tab bar: frosted glass with a light rim, over whatever scrolls beneath it. */
+.fm-glass {
+	background: color-mix(in srgb, hsl(var(--background)) 62%, transparent);
+	-webkit-backdrop-filter: blur(24px) saturate(180%);
+	backdrop-filter: blur(24px) saturate(180%);
+	border: 1px solid rgb(255 255 255 / 0.55);
+	box-shadow: 0 8px 32px rgb(0 0 0 / 0.12), 0 1px 3px rgb(0 0 0 / 0.08), inset 0 1px 0 rgb(255 255 255 / 0.6);
+}
+.dark .fm-glass {
+	border-color: rgb(255 255 255 / 0.12);
+	box-shadow: 0 8px 32px rgb(0 0 0 / 0.5), inset 0 1px 0 rgb(255 255 255 / 0.08);
+}
+/* Scrolling pages leave room at the end, so the last line can scroll clear of the tab bar. */
+.fm-under-tabs {
+	padding-bottom: calc(max(env(safe-area-inset-bottom), 8px) + 5rem);
+}
+/* A composer over a page with the floating tabs: it sits just above them. */
+.fm-above-tabs {
+	padding-bottom: calc(max(env(safe-area-inset-bottom), 8px) + 4.75rem);
+}
+/* Home's headline, sized for a phone. */
+.fm-home h1.font-display {
+	font-size: 2.6rem;
+}
+.fm-home > div:first-child {
+	padding-top: 3rem;
+	padding-bottom: 2rem;
+}

@@ -147,6 +147,18 @@ struct SwarmEvent {
     spent: f64,
 }
 
+/// An event to the app (the `swarm` event; the relay passes it on to the phone) and to the session's log,
+/// .formal/runs/<run>.jsonl.
+fn emit_event(app: &AppHandle, ev: SwarmEvent) {
+    let log = runs_dir(&ev.folder);
+    let _ = std::fs::create_dir_all(&log);
+    if let Ok(line) = serde_json::to_string(&ev) {
+        use std::io::Write;
+        let _ = std::fs::OpenOptions::new().create(true).append(true).open(log.join(format!("{}.jsonl", ev.run))).and_then(|mut f| writeln!(f, "{line}"));
+    }
+    let _ = app.emit("swarm", ev);
+}
+
 pub(crate) fn token() -> Result<String, String> {
     keyring::Entry::new("team.formal.desktop", "session")
         .and_then(|e| e.get_password())
@@ -591,15 +603,7 @@ impl Turn<'_> {
 
     fn emit(&self, kind: &'static str, role: &str, item: &str, text: String) {
         let spent = *self.swarm.spent.lock().unwrap();
-        let ev = SwarmEvent { folder: self.req.folder.clone(), run: self.run.into(), kind, role: role.into(), item: item.into(), text, spent };
-        // Kept in the folder too: .formal/runs/<run>.jsonl.
-        let log = Path::new(&self.req.folder).join(".formal").join("runs");
-        let _ = std::fs::create_dir_all(&log);
-        if let Ok(line) = serde_json::to_string(&ev) {
-            use std::io::Write;
-            let _ = std::fs::OpenOptions::new().create(true).append(true).open(log.join(format!("{}.jsonl", self.run))).and_then(|mut f| writeln!(f, "{line}"));
-        }
-        let _ = self.app.emit("swarm", ev);
+        emit_event(self.app, SwarmEvent { folder: self.req.folder.clone(), run: self.run.into(), kind, role: role.into(), item: item.into(), text, spent });
     }
 
     async fn session(&self, role: &str, item: &str) -> Result<(String, String), String> {
@@ -1456,15 +1460,19 @@ pub fn swarm_triage(folder: String, path: String, session: Option<String>) -> Re
 }
 
 /// A message to the swarm: queued as an "answer" job (on disk, so a quit can't lose it), answered before the next turn.
+/// It is a `you` event in the session too, so the chat shows it wherever it was sent from (here or the phone).
 #[tauri::command]
-pub fn swarm_say(swarms: State<'_, Swarms>, folder: String, run: String, text: String) -> Result<(), String> {
-    let qf = {
+pub fn swarm_say(app: AppHandle, swarms: State<'_, Swarms>, folder: String, run: String, text: String) -> Result<(), String> {
+    let (qf, spent) = {
         let map = swarms.0.lock().unwrap();
-        map.get(&key(&folder, &run)).ok_or("The swarm isn't running")?.queue.clone()
+        let s = map.get(&key(&folder, &run)).ok_or("The swarm isn't running")?;
+        let spent = *s.spent.lock().unwrap();
+        (s.queue.clone(), spent)
     };
     with_queue(&qf, |q| {
         enqueue(q, "answer", 0, &text, 1, "");
     });
+    emit_event(&app, SwarmEvent { folder, run, kind: "you", role: "you".into(), item: String::new(), text, spent });
     Ok(())
 }
 

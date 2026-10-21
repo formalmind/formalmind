@@ -101,9 +101,12 @@ fn menu(app: &AppHandle) -> tauri::Result<Menu<tauri::Wry>> {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    tauri::Builder::default()
-        // Opening the app again (or a deep link on Windows and Linux) hands off to the running copy: show its window.
-        .plugin(tauri_plugin_single_instance::init(|app, _argv, _cwd| show(app)))
+    let builder = tauri::Builder::default();
+    // Opening the app again (or a deep link on Windows and Linux) hands off to the running copy: show its window.
+    // Not in dev builds, so `tauri dev` runs beside the installed app instead of handing off to it.
+    #[cfg(not(debug_assertions))]
+    let builder = builder.plugin(tauri_plugin_single_instance::init(|app, _argv, _cwd| show(app)));
+    builder
         .menu(menu)
         .on_menu_event(|app, event| match event.id().as_ref() {
             "settings" => {
@@ -125,8 +128,8 @@ pub fn run() {
             #[cfg(any(windows, target_os = "linux"))]
             app.deep_link().register_all()?;
             // Dev builds only: FM_SWARM_AUTOSTART=<added folder> starts the folder's swarm at launch, the same way the
-            // Swarm page's Start does (FM_SWARM_BUDGET, FM_SWARM_MODEL, FM_SWARM_PROVIDER, FM_SWARM_GOAL), so a run
-            // can be driven without clicking.
+            // Swarm page's Start does (FM_SWARM_BUDGET, FM_SWARM_MODEL, FM_SWARM_PROVIDER, FM_SWARM_GOAL,
+            // FM_SWARM_SESSION), so a run can be driven without clicking.
             #[cfg(debug_assertions)]
             if let Ok(folder) = std::env::var("FM_SWARM_AUTOSTART") {
                 let env = |k: &str| std::env::var(k).ok().filter(|v| !v.is_empty());
@@ -137,7 +140,7 @@ pub fn run() {
                     api_base: env("FM_API_BASE").unwrap_or_else(|| "https://formal.team".into()),
                     provider: env("FM_SWARM_PROVIDER"),
                     model: env("FM_SWARM_MODEL"),
-                    session: None,
+                    session: env("FM_SWARM_SESSION"),
                     only_queued: env("FM_SWARM_ONLY_QUEUED").map(|v| v == "1"),
                 };
                 if let Err(e) = swarm::swarm_start(app.handle().clone(), app.state::<swarm::Swarms>(), request) {
@@ -157,6 +160,7 @@ pub fn run() {
             local::folder_scan,
             local::folder_tree,
             local::repo_local,
+            local::folder_repo,
             ast::ast_units,
             ast::ast_slice,
             ast::ast_formal,

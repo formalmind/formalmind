@@ -36,10 +36,13 @@ import * as desktopAuthorize from "@/server/routes/desktop/authorize/route";
 import * as desktopToken from "@/server/routes/desktop/token/route";
 import * as desktopModelSession from "@/server/routes/desktop/model-session/route";
 import * as desktopReport from "@/server/routes/desktop/report/route";
+import * as relayMac from "@/server/routes/relay/mac/route";
+import * as relayClient from "@/server/routes/relay/client/route";
 import * as githubItem from "@/server/routes/github/item/route";
 import * as githubWebhook from "@/server/routes/github/webhook/route";
 
 export { ProjectDO } from "./project-do";
+export { RelayDO } from "./relay-do";
 
 type Handler = (request: Request) => Response | Promise<Response>;
 type RouteModule = Partial<Record<"GET" | "POST" | "PUT" | "DELETE", Handler>>;
@@ -60,6 +63,9 @@ const ROUTES: Record<string, { module: RouteModule; open?: boolean; scope?: Scop
 	"/api/desktop/token": { module: desktopToken, open: true },
 	"/api/desktop/model-session": { module: desktopModelSession },
 	"/api/desktop/report": { module: desktopReport },
+	// The swarm relay (lib/relay.ts): the Mac app publishes its swarm here and takes commands; the phone reads and steers.
+	"/api/relay/mac": { module: relayMac },
+	"/api/relay/client": { module: relayClient },
 	"/api/github/install-status": { module: githubInstallStatus },
 	"/api/github/item": { module: githubItem },
 	"/api/github/webhook": { module: githubWebhook, open: true },
@@ -99,8 +105,11 @@ function wwwAuthenticate(principal: Principal, scope?: Scope): string {
 
 const app = new Hono<{ Bindings: Env }>();
 
-/** The desktop app's webview origins (macOS/Linux, Windows, and its Vite dev server). It authenticates with a bearer token, never cookies. */
-const DESKTOP_ORIGINS = new Set(["tauri://localhost", "http://tauri.localhost", "https://tauri.localhost", "http://localhost:1420"]);
+/**
+ * The apps' webview origins (macOS/iOS/Linux, Windows, and the Mac and iPhone apps' Vite dev servers). They
+ * authenticate with a bearer token, never cookies.
+ */
+const DESKTOP_ORIGINS = new Set(["tauri://localhost", "http://tauri.localhost", "https://tauri.localhost", "http://localhost:1420", "http://localhost:1421"]);
 
 app.use("/api/*", async (c, next) => {
 	const origin = c.req.header("origin");
@@ -111,7 +120,8 @@ app.use("/api/*", async (c, next) => {
 			headers: {
 				"Access-Control-Allow-Origin": origin,
 				"Access-Control-Allow-Methods": "GET, POST, PUT, DELETE",
-				"Access-Control-Allow-Headers": "Authorization, Content-Type",
+				// Authorization and Content-Type, plus what the browser-side git client sends (Git-Protocol).
+				"Access-Control-Allow-Headers": "Authorization, Content-Type, Git-Protocol",
 				"Access-Control-Max-Age": "86400",
 				Vary: "Origin",
 			},

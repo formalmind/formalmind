@@ -244,6 +244,24 @@ fn is_repo(folder: &Path, repo: &str) -> bool {
     })
 }
 
+/// The GitHub repository ("owner/name") an added folder's origin points at, if it is one.
+#[tauri::command(async)]
+pub fn folder_repo(path: String) -> Result<Option<String>, String> {
+    if !read()?.allows(&path) {
+        return Err("Add the folder first".into());
+    }
+    Ok(git(&["remote", "get-url", "origin"], Some(Path::new(&path))).ok().and_then(|url| github_repo(&url)))
+}
+
+/// "owner/name" from a GitHub remote URL (https or ssh, with or without .git).
+fn github_repo(url: &str) -> Option<String> {
+    let url = url.trim().trim_end_matches('/').trim_end_matches(".git");
+    let rest = url.split_once("github.com/").or_else(|| url.split_once("github.com:"))?.1;
+    let mut parts = rest.split('/');
+    let (owner, name) = (parts.next()?, parts.next()?);
+    (parts.next().is_none() && !owner.is_empty() && !name.is_empty()).then(|| format!("{owner}/{name}"))
+}
+
 /// An imported repository on this machine: the folder it is mapped to, else one of your folders that is that
 /// repository, else a shallow clone into ~/.formalmind/repos/<owner>/<name> (with your own git credentials). The
 /// mapping is kept in ~/.formalmind/config.json; our clones fetch the newest commit each time they are opened.
@@ -288,7 +306,7 @@ pub fn repo_local(repo: String) -> Result<String, String> {
 
 #[cfg(test)]
 mod repo_tests {
-    use super::valid_repo;
+    use super::{github_repo, valid_repo};
 
     #[test]
     fn repo_names_stay_in_their_folder() {
@@ -300,5 +318,11 @@ mod repo_tests {
         assert!(!valid_repo("a"));
         assert!(!valid_repo("a/b c"));
     }
-}
 
+    #[test]
+    fn github_repos_from_remotes() {
+        assert_eq!(github_repo("https://github.com/asyncswap/contracts.git").as_deref(), Some("asyncswap/contracts"));
+        assert_eq!(github_repo("git@github.com:a/b").as_deref(), Some("a/b"));
+        assert_eq!(github_repo("https://gitlab.com/a/b"), None);
+    }
+}

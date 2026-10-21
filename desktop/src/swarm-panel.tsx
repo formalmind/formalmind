@@ -34,9 +34,9 @@ export type Bridge = {
 	apiBase: () => string;
 };
 
-type Ev = { folder?: string; run: string; kind: "start" | "status" | "context" | "say" | "tool" | "result" | "you" | "bug" | "plan" | "done"; role: string; item: string; text: string; spent: number };
+export type Ev = { folder?: string; run: string; kind: "start" | "status" | "context" | "say" | "tool" | "result" | "you" | "bug" | "plan" | "done" | "error"; role: string; item: string; text: string; spent: number };
 type Item = { index: number; mark: string; text: string };
-type Bug = { file: string; title: string; body: string };
+export type Bug = { file: string; title: string; body: string };
 type Provider = "formal" | "anthropic" | "openai";
 type Proof = { item: string; files: string[]; summary: string; at: string };
 
@@ -82,7 +82,7 @@ const store = { get: (k: string) => { try { return localStorage.getItem(k); } ca
 type Block = { e: Ev } | { steps: { call: Ev; result?: Ev }[] };
 
 /** The chat as blocks: messages stand alone; a run of tool calls (each with its result) folds into one trace. */
-function blocks(events: Ev[]): Block[] {
+export function blocks(events: Ev[]): Block[] {
 	const out: Block[] = [];
 	for (const e of events) {
 		const last = out.at(-1);
@@ -99,7 +99,7 @@ function blocks(events: Ev[]): Block[] {
 }
 
 /** A run of tool calls: "Used 4 tools", opening to each call and the start of its output. */
-function Steps({ steps, running }: { steps: { call: Ev; result?: Ev }[]; running: boolean }) {
+export function Steps({ steps, running }: { steps: { call: Ev; result?: Ev }[]; running: boolean }) {
 	const one = steps.length === 1 ? steps[0].call.text : null;
 	return (
 		<Trace className="pl-1">
@@ -154,7 +154,7 @@ function ToolOutput({ call, text }: { call: string; text: string }) {
 }
 
 /** One agent's message: who said it (and on which item), then the text flat as Markdown; a bug opens its report. */
-function AgentMessage({ e, onBug }: { e: Ev; onBug: () => void }) {
+export function AgentMessage({ e, onBug }: { e: Ev; onBug: () => void }) {
 	const color = e.kind === "bug" ? "#dc2626" : colorOf(e.role);
 	return (
 		<Message>
@@ -184,7 +184,7 @@ function AgentMessage({ e, onBug }: { e: Ev; onBug: () => void }) {
  * and steer the swarm, the plan, and what each agent says as it works).
  */
 /** A whole file, highlighted by its extension, with a line-number gutter. */
-function FileView({ path, text, big, start = 1, mark, cursor }: { path: string; text: string; big?: boolean; start?: number; mark?: number | null; cursor?: Cursor | null }) {
+export function FileView({ path, text, big, start = 1, mark, cursor }: { path: string; text: string; big?: boolean; start?: number; mark?: number | null; cursor?: Cursor | null }) {
 	const lines = useHighlightedCode(text, EXT[path.split(".").pop() ?? ""] ?? "text");
 	const marked = useRef<HTMLSpanElement | null>(null);
 	useEffect(() => {
@@ -538,7 +538,7 @@ function ReportConfirm({ quote, onGenerate, onCancel }: { quote: ReportQuote; on
  * Bugs: the folder's audit reports (Markdown in its report folders, which the gear sets) and the swarm's findings,
  * each opened on the right.
  */
-function BugsView({ folder, files, invoke, apiBase, bugs, openBug, setOpenBug, withPoc, onOpenFile, reload = 0, onTriage, onFilesChanged }: { folder: string; files: string[]; invoke: Bridge["invoke"]; apiBase: Bridge["apiBase"]; bugs: Bug[]; openBug: string | null; setOpenBug: (f: string | null) => void; withPoc: (body: string) => Promise<string>; onOpenFile: (path: string) => void; reload?: number; onTriage?: (path: string) => Promise<void>; onFilesChanged?: () => void }) {
+export function BugsView({ folder, files, invoke, apiBase, bugs, openBug, setOpenBug, withPoc, onOpenFile, reload = 0, onTriage, onFilesChanged }: { folder: string; files: string[]; invoke: Bridge["invoke"]; apiBase: Bridge["apiBase"]; bugs: Bug[]; openBug: string | null; setOpenBug: (f: string | null) => void; withPoc: (body: string) => Promise<string>; onOpenFile: (path: string) => void; reload?: number; onTriage?: (path: string) => Promise<void>; onFilesChanged?: () => void }) {
 	const dirs = useReportDirs(folder);
 	// Generate report: the findings, Proofs coverage and in-scope code as an AsciiDoc report (and its PDF) in the audit
 	// folder; `generated` ticks so a PDF already open is read again.
@@ -710,8 +710,9 @@ function BugsView({ folder, files, invoke, apiBase, bugs, openBug, setOpenBug, w
 					</button>
 				</div>
 			) : null}
-			<div className="flex min-h-0 flex-1 gap-1">
-				<nav className="flex w-80 shrink-0 flex-col overflow-y-auto rounded-xl border bg-card p-1.5">
+			{/* On a phone the list sits above the report it opens. */}
+			<div className="flex min-h-0 flex-1 gap-1 max-sm:flex-col">
+				<nav className="flex w-80 shrink-0 flex-col overflow-y-auto rounded-xl border bg-card p-1.5 max-sm:max-h-[40%] max-sm:w-full">
 					{findings.length ? (
 						<div className="flex flex-wrap gap-1 px-2 pb-1 pt-2">
 							{(Object.keys(STATUS) as AuditFinding["status"][]).filter((k) => counts[k]).map((k) => {
@@ -1135,8 +1136,9 @@ function CoverageView({ data, scripts, onOpenFile }: { data: Formal; scripts: Sc
 					proved
 				</span>
 			</div>
-			<div className="flex min-h-0 flex-1 gap-1">
-				<nav className="flex w-72 shrink-0 flex-col overflow-hidden rounded-xl border bg-card">
+			{/* On a phone the list sits above the function it opens. */}
+			<div className="flex min-h-0 flex-1 gap-1 max-sm:flex-col">
+				<nav className="flex w-72 shrink-0 flex-col overflow-hidden rounded-xl border bg-card max-sm:max-h-[42%] max-sm:w-full">
 					<div className="flex shrink-0 flex-wrap items-center gap-1 border-b p-1.5">
 						{COVERAGE_FILTERS.map((f) => (
 							<button key={f.id} type="button" onClick={() => setFilter(f.id)} className={`h-6 rounded-md px-2 text-[11px] ${filter === f.id ? "bg-muted font-medium text-foreground" : "text-muted-foreground hover:text-foreground"}`}>
@@ -1240,7 +1242,7 @@ function CoverageView({ data, scripts, onOpenFile }: { data: Formal; scripts: Sc
 }
 
 /** Audit mode: what's been established for the contract picked here, as Lean coverage. */
-function AuditView({ folder, scan, invoke, onOpenFile, reload = 0 }: { folder: string; scan: Scan | null; invoke: Bridge["invoke"]; onOpenFile: (path: string) => void; reload?: number }) {
+export function AuditView({ folder, scan, invoke, onOpenFile, reload = 0 }: { folder: string; scan: Scan | null; invoke: Bridge["invoke"]; onOpenFile: (path: string) => void; reload?: number }) {
 	// Files found to hold no deployable contract (libraries, interfaces, types): left out of the picker once seen.
 	const [noModel, setNoModel] = useState<string[]>([]);
 	const sources = (scan?.solidity ?? []).filter((f) => !f.endsWith(".t.sol") && !f.endsWith(".s.sol") && !noModel.includes(f));
@@ -1793,7 +1795,7 @@ export function SwarmPanel({ folder, name, scan, bridge, session, file: openPath
 		const text = say.trim();
 		if (!text || !run) return;
 		setSay("");
-		setEvents((all) => [...all, { run, kind: "you", role: "you", item: "", text, spent: all.at(-1)?.spent ?? 0 }]);
+		// The app sends it back as a `you` event (desktop/src-tauri/src/swarm.rs), logged with the session.
 		await invoke("swarm_say", { folder, run, text }).catch((e) => setError(String(e)));
 	};
 

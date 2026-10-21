@@ -135,8 +135,18 @@ is logged to `.formal/runs/<run>.jsonl`.
 The Swarm canvas follows the events: the working agent sits on its item saying what it's doing, the Swarm notebook
 lists the current turn's steps, the ledger has a line per turn, and the Proofs page and Bugs read again when an item is proven
 or a finding filed. In dev builds `FM_SWARM_AUTOSTART=<added folder>` starts that folder's swarm at launch (with
-`FM_SWARM_BUDGET`, `FM_SWARM_PROVIDER=anthropic`, `FM_SWARM_MODEL`, `FM_SWARM_GOAL`), for driving a run without clicking.
+`FM_SWARM_BUDGET`, `FM_SWARM_PROVIDER=anthropic`, `FM_SWARM_MODEL`, `FM_SWARM_GOAL`, `FM_SWARM_SESSION`), for driving a run without clicking.
 
+
+## The phone
+
+Signed in, the app relays its swarm through formal.team so Formal Mind for iPhone (`mobile/`) can follow and steer it
+(`src/relay.ts`; Settings → Phone turns it off). Every `swarm` event is posted to `/api/relay/mac` as it happens,
+with the added folders and their sessions; the app long-polls the same route for commands from the phone (a message,
+Start, Stop, a session's history) and runs them as if typed here. The relay is one Durable Object per person
+(`worker/relay-do.ts`, `lib/relay.ts`) holding the recent events and the commands waiting for the Mac (dropped after
+10 minutes). Nothing runs there: the swarm, the files and the tools stay on this Mac. A message sent with `swarm_say`
+is a `you` event in the session and its log, so the chat shows it wherever it was sent from.
 
 ## Formal Mind's report
 

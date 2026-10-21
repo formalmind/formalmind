@@ -33,7 +33,8 @@ function load(): Promise<Kit> {
 				const u = new URL(req.url);
 				const repo = u.pathname.replace(/^\/__git\//, "").replace(/\/(info\/refs|git-upload-pack)$/, "");
 				const op = u.pathname.endsWith("/info/refs") ? "info/refs" : "git-upload-pack";
-				const to = `${location.origin}/api/projects/git?repo=${encodeURIComponent(repo)}&op=${op}${op === "info/refs" ? "&service=git-upload-pack" : ""}`;
+				// Relative, so the apps' fetch (desktop/src/api.ts) sends it to formal.team with their token.
+				const to = `/api/projects/git?repo=${encodeURIComponent(repo)}&op=${op}${op === "info/refs" ? "&service=git-upload-pack" : ""}`;
 				return web.default.request({ ...req, url: to });
 			},
 		};
@@ -43,7 +44,9 @@ function load(): Promise<Kit> {
 }
 
 const dirOf = (repo: string) => `/${repo}`;
-const urlOf = (repo: string) => `${location.origin}/__git/${repo}`;
+// Only a name for git: every request is rewritten to the proxy above. https, because isomorphic-git takes no other
+// scheme (the apps' webviews are tauri://localhost).
+const urlOf = (repo: string) => `https://formal.team/__git/${repo}`;
 
 async function latest(k: Kit, repo: string): Promise<string | null> {
 	return k.git.resolveRef({ fs: k.fs, dir: dirOf(repo), ref: LATEST }).catch(() => null);
