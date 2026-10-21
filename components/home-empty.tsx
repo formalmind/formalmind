@@ -18,8 +18,8 @@ function Parts({ line }: { line: string }) {
 	const [still] = useState(() => typeof window !== "undefined" && window.matchMedia?.("(prefers-reduced-motion: reduce)").matches);
 	useEffect(() => {
 		if (parts.length < 2 || still) return;
-		// Step 0 is the whole line, held a little longer; 1… are the parts.
-		const t = setTimeout(() => setI((n) => (n + 1) % (parts.length + 1)), i === 0 ? 3200 : 2000);
+		// Step 0 is the whole line, held five times as long as each part (1…).
+		const t = setTimeout(() => setI((n) => (n + 1) % (parts.length + 1)), i === 0 ? 10000 : 2000);
 		return () => clearTimeout(t);
 	}, [i, parts.length, still]);
 	if (parts.length < 2) return <>{line}</>;
