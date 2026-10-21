@@ -2,8 +2,10 @@ import { useEffect, useState } from "react";
 import { useNavigate } from "react-router";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { MarkGithubIcon } from "@primer/octicons-react";
-import { ChevronRight, GitCommitHorizontal, Laptop } from "lucide-react";
+import { ChevronRight, Laptop } from "lucide-react";
 import { AddProjectCard } from "@/components/add-project";
+import { ItemPreview } from "@/components/swarm/swarm-canvas";
+import type { SwarmItem } from "@/lib/swarm";
 import { projectPath, useProjects } from "@/components/projects/use-projects";
 import { apiBase } from "@/desktop/src/api";
 import type { SessionData } from "@/lib/session";
@@ -35,6 +37,24 @@ export const setSetUpDone = (on: boolean) => {
 const primary = "w-full rounded-full bg-white px-4 py-3 text-[15px] font-medium text-neutral-950 active:bg-neutral-100 disabled:opacity-50";
 const quiet = "w-full py-2 text-[15px] text-white/50";
 const card = "rounded-2xl border border-white/10 bg-white/[0.05]";
+
+/** What the GitHub app posts: a spec issue from an audit, in the proofs repository (asyncswap/protocol-proofs#30). */
+const BOT_ISSUE: SwarmItem = {
+	repo: "asyncswap/protocol-proofs",
+	number: 30,
+	kind: "issue",
+	title: "audit: executor revocation and scoping in setExecutor / setExecutorWithSig",
+	labels: ["fm:in-progress"],
+	url: "https://github.com/asyncswap/protocol-proofs/issues/30",
+	createdAt: "2026-10-20T07:36:09Z",
+	updatedAt: "2026-10-20T07:36:09Z",
+	author: "formalmind[bot]",
+	authorAvatar: "https://avatars.githubusercontent.com/in/1319020?v=4",
+	excerpt: "Goal. Prove that executor authorization is revocable and scoped: after setExecutor(poolId, executor, false), that executor can no longer fill, cancel or updatePrice that maker's orders on that pool.",
+	comments: 0,
+	merged: false,
+	state: "open",
+};
 
 function Frame({ step, total, onSkip, children }: { step: number; total: number; onSkip?: () => void; children: React.ReactNode }) {
 	return (
@@ -126,7 +146,6 @@ export function Setup({ user, onDone }: { user: SessionData["user"]; onDone: () 
 	};
 	// Each step starts in place, whatever the last one scrolled.
 	useEffect(() => window.scrollTo(0, 0), [step]);
-	const counted = useCount(step === 2);
 	const toHundred = useCount(verifying, 3000);
 	const handle = user.nickname ?? user.name ?? "there";
 
@@ -148,7 +167,7 @@ export function Setup({ user, onDone }: { user: SessionData["user"]; onDone: () 
 				<>
 					{/* The swarm on the Mac: its agents' cursors at work on the plan. */}
 					<div className="fm-rise my-auto py-6">
-						<SwarmShowcase close />
+						<SwarmShowcase />
 					</div>
 					<Headline muted="Run a swarm." strong="Agents do the proving." body="On your Mac, a swarm of agents works through your contracts until every function is proved or the budget is spent. From here you follow it and steer it." />
 					<button type="button" onClick={next} className={`${primary} mt-10`}>Continue</button>
@@ -158,7 +177,7 @@ export function Setup({ user, onDone }: { user: SessionData["user"]; onDone: () 
 			{step === 2 ? (
 				<>
 					<div className="fm-rise my-auto space-y-4 py-6">
-						<Coverage value={counted} />
+						<Coverage value={100} />
 					</div>
 					<Headline muted="From 0 to 100." strong="Every function, proved." body="Coverage is how many of your functions have a checked Lean proof. Each one the swarm proves moves the bar; at 100 the whole contract matches its spec." />
 					<button type="button" onClick={next} className={`${primary} mt-10`}>Continue</button>
@@ -167,14 +186,10 @@ export function Setup({ user, onDone }: { user: SessionData["user"]; onDone: () 
 
 			{step === 3 ? (
 				<>
-					<div className="fm-rise my-auto space-y-2 py-6">
-						{["feat: add matchBook", "fix: round fees down", "refactor: split Router"].map((c, i) => (
-							<div key={c} className={`${card} flex items-center gap-3 p-3 font-mono text-[12px]`} style={{ opacity: 1 - i * 0.25 }}>
-								<GitCommitHorizontal className="size-4 shrink-0 text-white/50" />
-								<span className="min-w-0 flex-1 truncate">{c}</span>
-								<span className="shrink-0 text-emerald-300">spec updated</span>
-							</div>
-						))}
+					<div className="fm-rise my-auto py-6">
+						<div className={`dark ${card} p-4 text-foreground`}>
+							<ItemPreview item={BOT_ISSUE} />
+						</div>
 					</div>
 					<Headline
 						muted="Set up on GitHub."

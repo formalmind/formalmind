@@ -634,8 +634,10 @@ function cloneScene(scene: Scene): Scene {
  * `fill` makes the board fill its parent, scaled to fit both ways and centred, below a strip kept clear
  * for the pinned controls; otherwise it scales to the width. `title` and `actions` are pinned top-left and top-right.
  */
-export function SwarmCanvas({ state, fill = false, contain = false, title, actions, repo, onTalk, local = false, below, side }: {
+export function SwarmCanvas({ state, fill = false, contain = false, title, actions, repo, onTalk, local = false, below, side, pace = 1 }: {
 	state: SwarmState | null;
+	/** How fast the replay plays: 2 is twice as lively (the phone's introduction); 1 is the landing page's pace. */
+	pace?: number;
 	/** A swarm running on this computer (the desktop app): no dispatcher schedule to show. */
 	local?: boolean;
 	/** Fit the board inside its parent's height as well as its width (the landing demo); the replay still plays. */
@@ -739,10 +741,10 @@ export function SwarmCanvas({ state, fill = false, contain = false, title, actio
 
 	useEffect(() => {
 		if (!playing || live) return;
-		const hold = step === 0 ? 1200 : script[step - 1].hold;
+		const hold = (step === 0 ? 1200 : script[step - 1].hold) / pace;
 		const timer = setTimeout(() => setStep((i) => (i >= script.length ? 0 : i + 1)), hold);
 		return () => clearTimeout(timer);
-	}, [playing, step, script, live]);
+	}, [playing, step, script, live, pace]);
 
 	useEffect(() => {
 		// Contained, the frame is sized from the scale, so the space around it is what gets measured.

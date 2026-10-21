@@ -8,6 +8,8 @@ html.fm-mobile,
 	overscroll-behavior: none;
 	-webkit-tap-highlight-color: transparent;
 	-webkit-text-size-adjust: 100%;
+	/* An app, not a page: a double tap never zooms. */
+	touch-action: manipulation;
 }
 .fm-safe-top {
 	padding-top: env(safe-area-inset-top);
