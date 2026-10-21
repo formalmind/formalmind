@@ -37,8 +37,32 @@ pub struct Swarm {
     compact_now: AtomicBool,
 }
 
+/// The running swarms, one per session: several can run at once, in one folder or several. Keyed by `key(folder, run)`.
 #[derive(Default)]
 pub struct Swarms(Mutex<HashMap<String, Arc<Swarm>>>);
+
+/// A running session's key: the same session id ("swarm", the default) exists in every folder.
+fn key(folder: &str, run: &str) -> String {
+    format!("{folder}\n{run}")
+}
+
+/// Plan items a session is working on, so another session in the same folder picks a different one: (folder, item) →
+/// the session's key.
+static CLAIMS: Mutex<Vec<(String, usize, String)>> = Mutex::new(Vec::new());
+
+fn claimed_by_other(folder: &str, item: usize, me: &str) -> bool {
+    CLAIMS.lock().unwrap().iter().any(|(f, i, k)| f == folder && *i == item && k != me)
+}
+
+fn claim(folder: &str, item: usize, me: &str) {
+    let mut c = CLAIMS.lock().unwrap();
+    c.retain(|(_, _, k)| k != me);
+    c.push((folder.to_string(), item, me.to_string()));
+}
+
+fn release(me: &str) {
+    CLAIMS.lock().unwrap().retain(|(_, _, k)| k != me);
+}
 
 #[derive(Deserialize)]
 pub struct SwarmRequest {
@@ -82,6 +106,8 @@ pub fn anthropic_key_status() -> bool {
 
 #[derive(Serialize, Clone)]
 struct SwarmEvent {
+    /// The folder it runs in: sessions in other folders send events too.
+    folder: String,
     run: String,
     /// "start" | "status" | "say" | "tool" | "result" | "you" | "bug" | "plan" | "done"
     kind: &'static str,
@@ -530,7 +556,7 @@ impl Turn<'_> {
 
     fn emit(&self, kind: &'static str, role: &str, item: &str, text: String) {
         let spent = *self.swarm.spent.lock().unwrap();
-        let ev = SwarmEvent { run: self.run.into(), kind, role: role.into(), item: item.into(), text, spent };
+        let ev = SwarmEvent { folder: self.req.folder.clone(), run: self.run.into(), kind, role: role.into(), item: item.into(), text, spent };
         // Kept in the folder too: .formal/runs/<run>.jsonl.
         let log = Path::new(&self.req.folder).join(".formal").join("runs");
         let _ = std::fs::create_dir_all(&log);
@@ -1066,19 +1092,25 @@ async fn run_swarm(turn: &Turn<'_>) -> String {
             return "done: the queued work is finished".into();
         }
         // Next job: an interrupted one first, then your messages, then the rest in order; derive one if the queue is empty.
+        // A plan item another session in this folder is working on is left to it.
+        let me = key(&turn.req.folder, turn.run);
+        let free = |j: &Job| !matches!(j.kind.as_str(), "prove" | "review") || !claimed_by_other(&turn.req.folder, j.item, &me);
         let next = with_queue(&turn.queue, |q| {
-            let pick = q.jobs.iter().position(|j| j.state == "running")
+            let pick = q.jobs.iter().position(|j| j.state == "running" && free(j))
                 .or_else(|| q.jobs.iter().position(|j| j.state == "queued" && j.kind == "answer"))
-                .or_else(|| q.jobs.iter().position(|j| j.state == "queued"));
+                .or_else(|| q.jobs.iter().position(|j| j.state == "queued" && free(j)));
             let idx = match pick {
                 Some(i) => i,
                 None => {
                     let plan = read_plan(&root);
-                    match plan.iter().find(|i| i.mark == " ") {
+                    let open: Vec<_> = plan.iter().filter(|i| i.mark == " ").collect();
+                    match open.iter().find(|i| !claimed_by_other(&turn.req.folder, i.index, &me)) {
                         Some(item) => {
                             let tries = q.jobs.iter().filter(|j| j.kind == "prove" && j.item == item.index).count();
                             enqueue(q, "prove", item.index, &item.text, tries + 1, "");
                         }
+                        // What's left of the plan is being worked in other sessions.
+                        None if !open.is_empty() => return None,
                         None => {
                             enqueue(q, "plan", 0, "", 1, "");
                         }
@@ -1088,9 +1120,14 @@ async fn run_swarm(turn: &Turn<'_>) -> String {
             };
             let resumed = q.jobs[idx].state == "running";
             q.jobs[idx].state = "running".into();
-            (q.jobs[idx].clone(), resumed)
+            Some((q.jobs[idx].clone(), resumed))
         });
-        let (job, resumed) = next;
+        let Some((job, resumed)) = next else {
+            return "done: the rest of the plan is being worked in another session".into();
+        };
+        if matches!(job.kind.as_str(), "prove" | "review") {
+            claim(&turn.req.folder, job.item, &me);
+        }
         *turn.job.lock().unwrap() = Some(job.id);
         let id = job.item.to_string();
         let resume_note = if resumed {
@@ -1294,11 +1331,12 @@ pub fn swarm_start(app: AppHandle, swarms: State<'_, Swarms>, request: SwarmRequ
     } else {
         token()?;
     }
-    if swarms.0.lock().unwrap().values().len() > 0 {
-        return Err("A swarm is already running; stop it first".into());
-    }
-    // One continuous session per folder: every start appends to .formal/runs/swarm.jsonl and the queue carries on.
+    // Each session is one swarm with its own queue and log (.formal/runs/<run>.jsonl); other sessions, here or in other
+    // folders, can run at the same time.
     let run = session_of(&request);
+    if swarms.0.lock().unwrap().contains_key(&key(&request.folder, &run)) {
+        return Err("This session is already running".into());
+    }
     merge_old_sessions(Path::new(&request.folder));
     let qf = queue_file(Path::new(&request.folder), &run);
     let spent = load_queue(&qf).spent;
@@ -1309,7 +1347,7 @@ pub fn swarm_start(app: AppHandle, swarms: State<'_, Swarms>, request: SwarmRequ
         });
     }
     let swarm = Arc::new(Swarm { stop: AtomicBool::new(false), folder: request.folder.clone(), queue: qf.clone(), spent: Mutex::new(spent), budget: Mutex::new(request.budget_usd.max(spent)), compact_now: AtomicBool::new(false) });
-    swarms.0.lock().unwrap().insert(run.clone(), swarm.clone());
+    swarms.0.lock().unwrap().insert(key(&request.folder, &run), swarm.clone());
     let id = run.clone();
     tauri::async_runtime::spawn(async move {
         let client = reqwest::Client::builder().timeout(Duration::from_secs(600)).build().unwrap_or_default();
@@ -1319,14 +1357,16 @@ pub fn swarm_start(app: AppHandle, swarms: State<'_, Swarms>, request: SwarmRequ
         turn.emit("status", "swarm", "", "resuming".into());
         let outcome = run_swarm(&turn).await;
         turn.emit("done", "swarm", "", outcome);
-        app.state::<Swarms>().0.lock().unwrap().remove(&id);
+        let k = key(&request.folder, &id);
+        release(&k);
+        app.state::<Swarms>().0.lock().unwrap().remove(&k);
     });
     Ok(run)
 }
 
 #[tauri::command]
-pub fn swarm_stop(swarms: State<'_, Swarms>, run: String) {
-    if let Some(s) = swarms.0.lock().unwrap().get(&run) {
+pub fn swarm_stop(swarms: State<'_, Swarms>, folder: String, run: String) {
+    if let Some(s) = swarms.0.lock().unwrap().get(&key(&folder, &run)) {
         s.stop.store(true, Ordering::SeqCst);
     }
 }
@@ -1357,10 +1397,10 @@ pub fn swarm_triage(folder: String, path: String, session: Option<String>) -> Re
 
 /// A message to the swarm: queued as an "answer" job (on disk, so a quit can't lose it), answered before the next turn.
 #[tauri::command]
-pub fn swarm_say(swarms: State<'_, Swarms>, run: String, text: String) -> Result<(), String> {
+pub fn swarm_say(swarms: State<'_, Swarms>, folder: String, run: String, text: String) -> Result<(), String> {
     let qf = {
         let map = swarms.0.lock().unwrap();
-        map.get(&run).ok_or("The swarm isn't running")?.queue.clone()
+        map.get(&key(&folder, &run)).ok_or("The swarm isn't running")?.queue.clone()
     };
     with_queue(&qf, |q| {
         enqueue(q, "answer", 0, &text, 1, "");
@@ -1424,9 +1464,10 @@ pub fn swarm_history(folder: String, run: String) -> Result<Vec<Value>, String> 
 /// The app is quitting: stop every swarm and record the pause in its session, so Resume picks up from the plan.
 pub fn pause_all(app: &AppHandle) {
     let swarms = app.state::<Swarms>();
-    for (run, s) in swarms.0.lock().unwrap().iter() {
+    for (k, s) in swarms.0.lock().unwrap().iter() {
         s.stop.store(true, Ordering::SeqCst);
-        let ev = SwarmEvent { run: run.clone(), kind: "done", role: "swarm".into(), item: String::new(), text: "paused: the app quit. Resume to carry on from the plan.".into(), spent: *s.spent.lock().unwrap() };
+        let run = k.rsplit('\n').next().unwrap_or(k);
+        let ev = SwarmEvent { folder: s.folder.clone(), run: run.to_string(), kind: "done", role: "swarm".into(), item: String::new(), text: "paused: the app quit. Resume to carry on from the plan.".into(), spent: *s.spent.lock().unwrap() };
         if let Ok(line) = serde_json::to_string(&ev) {
             use std::io::Write;
             let _ = std::fs::OpenOptions::new().append(true).open(runs_dir(&s.folder).join(format!("{run}.jsonl"))).and_then(|mut f| writeln!(f, "{line}"));
@@ -1436,31 +1477,45 @@ pub fn pause_all(app: &AppHandle) {
 
 /// Raises (or lowers) a running swarm's spending cap.
 #[tauri::command]
-pub fn swarm_set_budget(swarms: State<'_, Swarms>, run: String, usd: f64) -> Result<(), String> {
+pub fn swarm_set_budget(swarms: State<'_, Swarms>, folder: String, run: String, usd: f64) -> Result<(), String> {
     let map = swarms.0.lock().unwrap();
-    let s = map.get(&run).ok_or("The swarm isn't running")?;
+    let s = map.get(&key(&folder, &run)).ok_or("The swarm isn't running")?;
     *s.budget.lock().unwrap() = usd.max(0.0);
     Ok(())
 }
 
 /// Compacts the working agent's conversation before its next step (the Context panel's Compact now).
 #[tauri::command]
-pub fn swarm_compact(swarms: State<'_, Swarms>, run: String) -> Result<(), String> {
+pub fn swarm_compact(swarms: State<'_, Swarms>, folder: String, run: String) -> Result<(), String> {
     let map = swarms.0.lock().unwrap();
-    let s = map.get(&run).ok_or("The swarm isn't running")?;
+    let s = map.get(&key(&folder, &run)).ok_or("The swarm isn't running")?;
     s.compact_now.store(true, Ordering::SeqCst);
     Ok(())
 }
 
-/// The running swarm, if any (so the page can reattach after a reload).
+/// The sessions running in this folder (so the page can reattach after a reload, and mark them in the sessions menu).
 #[tauri::command]
-pub fn swarm_running(swarms: State<'_, Swarms>) -> Option<String> {
-    swarms.0.lock().unwrap().keys().next().cloned()
+pub fn swarm_running(swarms: State<'_, Swarms>, folder: String) -> Vec<String> {
+    let prefix = key(&folder, "");
+    swarms.0.lock().unwrap().keys().filter_map(|k| k.strip_prefix(&prefix).map(String::from)).collect()
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_claimed_item_is_left_to_its_session() {
+        let (a, b) = (key("/f-claims", "swarm"), key("/f-claims", "s-1"));
+        claim("/f-claims", 7, &a);
+        assert!(claimed_by_other("/f-claims", 7, &b));
+        assert!(!claimed_by_other("/f-claims", 7, &a));
+        assert!(!claimed_by_other("/other", 7, &b));
+        claim("/f-claims", 8, &a);
+        assert!(!claimed_by_other("/f-claims", 7, &b), "a session holds one item at a time");
+        release(&a);
+        assert!(!claimed_by_other("/f-claims", 8, &b));
+    }
 
     #[test]
     fn queue_and_transcripts_survive_a_restart() {

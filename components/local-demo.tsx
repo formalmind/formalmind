@@ -122,7 +122,7 @@ const makeDemo = (data: DemoData | null): Bridge => ({
 			swarm_history: sample ? EVENTS : args?.run === SAMPLE_RUN ? SAMPLE_EVENTS : [],
 			swarm_proofs: sample ? PROOFS : {},
 			folder_read: data ? (data.sources[String(args?.path ?? "")] ?? "// Not in the demo data (only the repository's own text files are).\n") : (SOURCES[String(args?.path ?? "")] ?? "// (demo: no contents)\n"),
-			swarm_running: sample ? RUN : null,
+			swarm_running: sample ? [RUN] : [],
 			anthropic_key_status: false,
 			folder_tree: { files: data ? data.files : DEMO_TREE, truncated: false },
 			ast_units: AST_UNITS,

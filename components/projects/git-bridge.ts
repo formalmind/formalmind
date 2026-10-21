@@ -50,14 +50,13 @@ export function makeGitBridge(repo: string): Bridge {
 					return bugs as T;
 				}
 				case "swarm_plan":
+				case "swarm_running":
 				case "swarm_sessions":
 				case "swarm_history":
 					return [] as T;
 				case "swarm_proofs":
 				case "swarm_queue":
 					return {} as T;
-				case "swarm_running":
-					return null as T;
 				case "anthropic_key_status":
 					return false as T;
 				case "lsp_definition":

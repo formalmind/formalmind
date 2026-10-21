@@ -34,7 +34,7 @@ export type Bridge = {
 	apiBase: () => string;
 };
 
-type Ev = { run: string; kind: "status" | "context" | "say" | "tool" | "result" | "you" | "bug" | "plan" | "done"; role: string; item: string; text: string; spent: number };
+type Ev = { folder?: string; run: string; kind: "start" | "status" | "context" | "say" | "tool" | "result" | "you" | "bug" | "plan" | "done"; role: string; item: string; text: string; spent: number };
 type Item = { index: number; mark: string; text: string };
 type Bug = { file: string; title: string; body: string };
 type Provider = "formal" | "anthropic";
@@ -1340,7 +1340,8 @@ function AuditView({ folder, scan, invoke, onOpenFile, reload = 0 }: { folder: s
  */
 export function SwarmPanel({ folder, name, scan, bridge, session, file: openPath, actions, debug, defaultMode, onSwarm }: { folder: string; name: string; scan: Scan | null; bridge: Bridge; session?: string | null; file?: string | null; actions?: React.ReactNode; debug?: (file: string | null, test: string | null, onPick: (file: string) => void) => React.ReactNode; defaultMode?: Mode; onSwarm?: () => void }) {
 	const { invoke, listen, apiBase } = bridge;
-	const [run, setRun] = useState<string | null>(null);
+	// Every session running in this folder: each is its own swarm, and they keep working while you read another.
+	const [runs, setRuns] = useState<string[]>([]);
 	const [events, setEvents] = useState<Ev[]>([]);
 	const [plan, setPlan] = useState<Item[]>([]);
 	const [bugs, setBugs] = useState<Bug[]>([]);
@@ -1616,7 +1617,10 @@ export function SwarmPanel({ folder, name, scan, bridge, session, file: openPath
 		}, 450);
 	};
 	const [viewing, setViewing] = useState<string | null>(null);
-	const runRef = useRef<string | null>(null);
+	// The session you're reading, if it's running (Stop, messages and the budget act on it).
+	const run = viewing && runs.includes(viewing) ? viewing : null;
+	const viewingRef = useRef<string | null>(null);
+	viewingRef.current = viewing;
 	const chat = useRef<HTMLDivElement>(null);
 
 	/**
@@ -1656,17 +1660,19 @@ export function SwarmPanel({ folder, name, scan, bridge, session, file: openPath
 	useEffect(() => {
 		refresh();
 		void invoke<boolean>("anthropic_key_status").then(setHasKey);
-		void invoke<string | null>("swarm_running").then(async (r) => {
-			runRef.current = r;
-			setRun(r);
+		void invoke<string[]>("swarm_running", { folder }).then(async (r) => {
+			setRuns(r);
 			const list = await listSessions();
-			// Reopen where you left off: the running session, else the latest one.
-			const id = r ?? (session === "new" ? undefined : session) ?? list[0]?.run;
+			// Reopen where you left off: the session picked, else a running one, else the latest.
+			const id = (session === "new" ? undefined : session) ?? r[0] ?? list[0]?.run;
 			if (id) load(id);
 		});
 		const off = listen<Ev>("swarm", ({ payload }) => {
-			if (runRef.current && payload.run !== runRef.current) return;
-			setEvents((all) => trim([...all, payload]));
+			// Other folders' sessions send events too.
+			if (payload.folder && payload.folder !== folder) return;
+			if (payload.kind === "start") setRuns((r) => (r.includes(payload.run) ? r : [...r, payload.run]));
+			// The chat shows the session you're reading; the others carry on in the background.
+			if (payload.run === viewingRef.current) setEvents((all) => trim([...all, payload]));
 			if (["plan", "bug", "done"].includes(payload.kind) || (payload.kind === "status" && / is working$/.test(payload.text))) refresh();
 			// A finding recorded from a report shows in Bugs straight away.
 			if (payload.kind === "tool" && payload.text.startsWith("record_finding")) setReload((n) => n + 1);
@@ -1675,7 +1681,7 @@ export function SwarmPanel({ folder, name, scan, bridge, session, file: openPath
 				void invoke<{ files: string[] }>("folder_tree", { path: folder }).then((t) => setTree(t.files), () => {});
 			}
 			if (payload.kind === "done") {
-				setRun(null);
+				setRuns((r) => r.filter((x) => x !== payload.run));
 				void listSessions();
 			}
 		});
@@ -1684,12 +1690,12 @@ export function SwarmPanel({ folder, name, scan, bridge, session, file: openPath
 	}, [folder]);
 	// A session picked in the sidebar; "new" is an empty one that gets its own queue when started.
 	useEffect(() => {
-		if (session === "new" && !run) {
+		if (session === "new") {
 			setViewing(null);
 			setEvents([]);
 			return;
 		}
-		if (session && session !== viewing && !run) load(session);
+		if (session && session !== viewing) load(session);
 		// eslint-disable-next-line react-hooks/exhaustive-deps
 	}, [session]);
 	// Every file in the folder, for the breadcrumbs' menus.
@@ -1744,8 +1750,7 @@ export function SwarmPanel({ folder, name, scan, bridge, session, file: openPath
 		if (fresh) setEvents([]);
 		try {
 			const id = await invoke<string>("swarm_start", { request: { folder, goal: goal.trim() || null, budget_usd: budget, api_base: apiBase(), provider, model, session: fresh ? `s-${Date.now().toString(16)}` : viewing ?? "swarm", only_queued: onlyQueued } });
-			runRef.current = id;
-			setRun(id);
+			setRuns((r) => (r.includes(id) ? r : [...r, id]));
 			setViewing(id);
 			void listSessions();
 		} catch (e) {
@@ -1768,7 +1773,7 @@ export function SwarmPanel({ folder, name, scan, bridge, session, file: openPath
 		if (!text || !run) return;
 		setSay("");
 		setEvents((all) => [...all, { run, kind: "you", role: "you", item: "", text, spent: all.at(-1)?.spent ?? 0 }]);
-		await invoke("swarm_say", { run, text }).catch((e) => setError(String(e)));
+		await invoke("swarm_say", { folder, run, text }).catch((e) => setError(String(e)));
 	};
 
 	const spent = events.at(-1)?.spent ?? 0;
@@ -1922,8 +1927,8 @@ export function SwarmPanel({ folder, name, scan, bridge, session, file: openPath
 							{sessions.map((x, i) => (
 								<DropdownMenuItem key={x.run} onSelect={() => pickSession(x.run)} aria-current={x.run === viewing} className={`text-[13px] ${x.run === viewing ? "bg-accent text-accent-foreground" : ""}`}>
 									<span className="truncate">{x.title || (x.run === "swarm" ? "Main session" : `Session ${sessions.length - i}`)}</span>
-									{x.run === run ? <span className="ml-auto shrink-0 text-[11px] text-muted-foreground">running</span> : null}
-									{x.run === viewing ? <Check className={`size-3.5 shrink-0 ${x.run === run ? "" : "ml-auto"}`} /> : null}
+									{runs.includes(x.run) ? <span className="ml-auto shrink-0 text-[11px] text-muted-foreground">running</span> : null}
+									{x.run === viewing ? <Check className={`size-3.5 shrink-0 ${runs.includes(x.run) ? "" : "ml-auto"}`} /> : null}
 								</DropdownMenuItem>
 							))}
 							<DropdownMenuSeparator />
@@ -1941,7 +1946,7 @@ export function SwarmPanel({ folder, name, scan, bridge, session, file: openPath
 								{ctxPct}%
 							</DropdownMenuTrigger>
 							<DropdownMenuContent align="end" className="w-auto rounded-2xl border-0 bg-transparent p-0 shadow-lg">
-								<ContextPanel role={working.role} color={colorOf(working.role)} use={ctx} onCompact={run ? () => invoke("swarm_compact", { run }) : undefined} />
+								<ContextPanel role={working.role} color={colorOf(working.role)} use={ctx} onCompact={run ? () => invoke("swarm_compact", { folder, run }) : undefined} />
 							</DropdownMenuContent>
 						</DropdownMenu>
 					) : null}
@@ -1957,7 +1962,7 @@ export function SwarmPanel({ folder, name, scan, bridge, session, file: openPath
 								onValueChange={(v) => {
 									setBudget(Number(v));
 									store.set(budgetKey, v);
-									if (run) void invoke("swarm_set_budget", { run, usd: Number(v) });
+									if (run) void invoke("swarm_set_budget", { folder, run, usd: Number(v) });
 								}}
 							>
 								{BUDGETS.map((b) => (
@@ -2039,7 +2044,7 @@ export function SwarmPanel({ folder, name, scan, bridge, session, file: openPath
 							<span className="inline-flex items-center gap-1.5">
 								<span className="inline-flex h-8 items-center gap-1.5 rounded-full bg-secondary px-3 text-[13px] font-medium text-secondary-foreground">{name}</span>
 								{run ? (
-									<button type="button" onClick={() => void invoke("swarm_stop", { run })} title="Stop the swarm" className="inline-flex h-8 items-center gap-1.5 rounded-full px-3 text-[13px] font-medium text-red-600 hover:bg-red-500/10 dark:text-red-400">
+									<button type="button" onClick={() => void invoke("swarm_stop", { folder, run })} title="Stop the swarm" className="inline-flex h-8 items-center gap-1.5 rounded-full px-3 text-[13px] font-medium text-red-600 hover:bg-red-500/10 dark:text-red-400">
 										<Square className="size-2.5 fill-current" />Stop
 									</button>
 								) : (
@@ -2088,7 +2093,7 @@ export function SwarmPanel({ folder, name, scan, bridge, session, file: openPath
 									role={lastContextEv.role}
 									color={colorOf(lastContextEv.role)}
 									use={lastCtx}
-									onCompact={run && contextEv ? () => invoke("swarm_compact", { run }) : undefined}
+									onCompact={run && contextEv ? () => invoke("swarm_compact", { folder, run }) : undefined}
 								/>
 							) : (
 								<p className="text-[13px] text-muted-foreground">Each agent's context window shows here once it replies: what fills it, and how far it is from compacting.</p>
@@ -2288,7 +2293,7 @@ export function SwarmPanel({ folder, name, scan, bridge, session, file: openPath
 						// Queued for the swarm's auditor; a stopped swarm starts just for it (and stops after).
 						onTriage={async (path) => {
 							await invoke("swarm_triage", { folder, path, session: viewing && viewing !== "new" ? viewing : "swarm" });
-							if (!runRef.current) await start(true);
+							if (!run) await start(true);
 						}}
 					/>
 				) : null}
