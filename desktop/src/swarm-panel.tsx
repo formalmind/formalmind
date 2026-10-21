@@ -1,5 +1,5 @@
 import { MarkGithubIcon } from "@primer/octicons-react";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { NvimTerminal } from "./nvim-terminal";
 import { reportError } from "@/lib/report-error";
@@ -718,8 +718,8 @@ function BugsView({ folder, files, invoke, bugs, openBug, setOpenBug, withPoc, o
 export type Mode = "code" | "chat" | "swarm" | "roadmap" | "audit" | "bugs" | "debug";
 
 const MODES: { id: Mode; label: string; icon: typeof Code2 }[] = [
-	{ id: "code", label: "Code", icon: Code2 },
 	{ id: "swarm", label: "Swarm", icon: Network },
+	{ id: "code", label: "Code", icon: Code2 },
 	{ id: "audit", label: "Proofs", icon: ScanSearch },
 	{ id: "bugs", label: "Bugs", icon: Bug },
 ];
@@ -728,19 +728,44 @@ const MODES: { id: Mode; label: string; icon: typeof Code2 }[] = [
  * The page's modes, Debug and then the folder's name, as one macOS-style segmented control. The Mac app shows it in its
  * title bar; the web app centres it at the top of the page.
  */
+/** Where the selected tab's pill last was, so a new page's tabs slide from there instead of jumping. */
+let lastPill: { left: number; width: number } | null = null;
+
 export function NavGroup({ name, git, onDebug, mode, onMode, inBar, compact }: { name: string; git: boolean; onDebug?: () => void; mode: Mode; onMode: (m: Mode) => void; inBar?: boolean; compact?: boolean }) {
-	const seg = "inline-flex shrink-0 items-center gap-1.5 rounded-md px-2.5 text-[12px] font-medium outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring";
+	const seg = "relative z-10 inline-flex shrink-0 items-center gap-1.5 rounded-md px-2.5 text-[12px] font-medium outline-none transition-colors duration-200 focus-visible:ring-2 focus-visible:ring-ring";
 	const h = inBar ? "h-6" : "h-7";
+	// One white pill under the selected tab, sliding between tabs (and across pages) rather than jumping.
+	const box = useRef<HTMLDivElement>(null);
+	const [pill, setPill] = useState(lastPill);
+	const [animate, setAnimate] = useState(false);
+	useLayoutEffect(() => {
+		const el = box.current?.querySelector<HTMLElement>('[role="tab"][aria-selected="true"]');
+		if (!el) return setPill(null);
+		const next = { left: el.offsetLeft, width: el.offsetWidth };
+		lastPill = next;
+		setPill(next);
+		// The first frame places it where it was; the move after that animates.
+		const id = requestAnimationFrame(() => setAnimate(true));
+		return () => cancelAnimationFrame(id);
+	}, [mode, compact, name]);
+	const tab = (on: boolean) => `${seg} ${h} ${on ? "text-foreground" : "text-muted-foreground hover:text-foreground"}`;
 	return (
-		<div role="tablist" aria-label="Mode" className={`pointer-events-auto inline-flex min-w-0 items-center gap-0.5 rounded-lg border bg-muted/90 p-0.5 shadow-sm backdrop-blur ${inBar ? "h-7" : "absolute left-1/2 top-3 z-20 h-8 max-w-[calc(100%-1.5rem)] -translate-x-1/2"}`}>
+		<div ref={box} role="tablist" aria-label="Mode" className={`pointer-events-auto inline-flex min-w-0 items-center gap-0.5 rounded-lg border bg-muted/90 p-0.5 shadow-sm backdrop-blur ${inBar ? "relative h-7" : "absolute left-1/2 top-3 z-20 h-8 max-w-[calc(100%-1.5rem)] -translate-x-1/2"}`}>
+			{pill ? (
+				<span
+					aria-hidden
+					className={`absolute rounded-md bg-background shadow-sm ${h} ${animate ? "transition-[left,width] duration-300 ease-[cubic-bezier(0.22,1,0.36,1)] motion-reduce:transition-none" : ""}`}
+					style={{ left: pill.left, width: pill.width }}
+				/>
+			) : null}
 			{MODES.map(({ id, label, icon: Icon }) => (
-				<button key={id} type="button" role="tab" aria-selected={mode === id} aria-label={label} title={compact ? label : undefined} onClick={() => onMode(id)} className={`${seg} ${h} ${mode === id ? "bg-background text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"}`}>
+				<button key={id} type="button" role="tab" aria-selected={mode === id} aria-label={label} title={compact ? label : undefined} onClick={() => onMode(id)} className={tab(mode === id)}>
 					<Icon className="size-3.5" />
 					{compact ? null : label}
 				</button>
 			))}
 			{onDebug ? (
-				<button type="button" role="tab" aria-selected={mode === "debug"} onClick={onDebug} title="Debug this folder's scripts and tests" className={`${seg} ${h} ${mode === "debug" ? "bg-background text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"}`}>
+				<button type="button" role="tab" aria-selected={mode === "debug"} onClick={onDebug} title="Debug this folder's scripts and tests" className={tab(mode === "debug")}>
 					<Bug className="size-3.5" />
 					{compact ? null : "Debug"}
 				</button>
