@@ -425,6 +425,8 @@ pub fn file_finding(root: &Path, input: &Value, poc: &str, forge: &str) -> Resul
     };
     index = out;
     std::fs::write(&index_path, index).map_err(|e| e.to_string())?;
+    // And in Formal Mind's own audit file, as the report states it.
+    record_internal_finding(root, &id, input, &poc)?;
     let rel = |p: &Path| p.strip_prefix(root).unwrap_or(p).to_string_lossy().replace('\\', "/");
     Ok((id, rel(&report_path)))
 }
@@ -585,5 +587,134 @@ mod audit_json_tests {
         assert_eq!(doc["findings"][0]["severity"], "high");
         assert_eq!(doc["findings"][0]["locations"][0]["line"], 3);
         let _ = std::fs::remove_dir_all(&dir);
+    }
+}
+
+// ---- Formal Mind's own audit: the file its report is generated from ----
+
+/// Formal Mind's audit of the folder in the standard format (`formalmind.audit/v1`, kind internal), in the report
+/// folder. The swarm writes its findings and reviewed properties here as it goes; Generate report adds the coverage
+/// and renders it.
+pub const INTERNAL: &str = "formal-mind.audit.json";
+
+pub fn internal_path(root: &Path) -> PathBuf {
+    report_dir(root).join(INTERNAL)
+}
+
+fn update_internal(root: &Path, f: impl FnOnce(&mut Value)) -> Result<String, String> {
+    let path = internal_path(root);
+    std::fs::create_dir_all(path.parent().unwrap_or(root)).map_err(|e| e.to_string())?;
+    let mut doc = std::fs::read_to_string(&path)
+        .ok()
+        .and_then(|t| serde_json::from_str::<Value>(&t).ok())
+        .filter(|v| v["schema"] == "formalmind.audit/v1")
+        .unwrap_or_else(|| json!({ "schema": "formalmind.audit/v1", "kind": "internal", "title": "", "auditor": "Formal Mind", "findings": [] }));
+    f(&mut doc);
+    save_audit(root, &path, &doc)
+}
+
+/// Adds `entry` to `doc[key]`, or replaces the entry with the same id.
+fn upsert(doc: &mut Value, key: &str, entry: Value) {
+    if !doc[key].is_array() {
+        doc[key] = json!([]);
+    }
+    let list = doc[key].as_array_mut().expect("an array");
+    match list.iter_mut().find(|x| x["id"] == entry["id"]) {
+        Some(x) => *x = entry,
+        None => list.push(entry),
+    }
+}
+
+/// `src/Router.sol:120` (or `src/Router.sol`) as `{ file, line }`.
+fn location_of(s: &str) -> Option<Value> {
+    let s = s.trim().trim_matches('`');
+    let (file, line) = match s.rsplit_once(':') {
+        Some((f, l)) if l.trim().split('-').next().is_some_and(|n| n.parse::<u64>().is_ok()) => (f, l.trim().split('-').next().and_then(|n| n.parse::<u64>().ok())),
+        _ => (s, None),
+    };
+    if !file.ends_with(".sol") {
+        return None;
+    }
+    Some(match line {
+        Some(l) => json!({ "file": file, "line": l }),
+        None => json!({ "file": file }),
+    })
+}
+
+/// A bug the swarm reported, in Formal Mind's audit file: open, with its PoC, in the report's words.
+pub fn record_internal_finding(root: &Path, id: &str, input: &Value, poc: &str) -> Result<String, String> {
+    let s = |k: &str| input[k].as_str().unwrap_or("").trim().to_string();
+    let mut f = json!({
+        "id": id,
+        "title": s("title"),
+        "severity": if s("severity").is_empty() { "medium".to_string() } else { s("severity").to_ascii_lowercase() },
+        "status": "open",
+        "description": s("scenario"),
+        "poc": poc,
+        "tests": [],
+    });
+    if let Some(l) = location_of(&s("location")) {
+        f["locations"] = json!([l]);
+    }
+    for k in ["impact", "recommendation", "evidence"] {
+        if !s(k).is_empty() {
+            f[k] = json!(s(k));
+        }
+    }
+    update_internal(root, |doc| upsert(doc, "findings", f))
+}
+
+/// A property the reviewer approved, in Formal Mind's audit file: `P-<plan item>`, the function, what holds and under
+/// which assumptions (the reviewer's words), the theorems that prove it and the proof's files.
+pub fn record_property(root: &Path, item: usize, item_text: &str, files: &[String], input: &Value) -> Result<String, String> {
+    let statement = input["statement"].as_str().unwrap_or("").trim();
+    if statement.is_empty() {
+        return Err("statement is required: what the proof establishes".into());
+    }
+    let assumptions = input["assumptions"].as_str().unwrap_or("").trim();
+    let description = if assumptions.is_empty() { statement.to_string() } else { format!("{statement}\n\n**Assumptions.** {assumptions}") };
+    let mut p = json!({
+        "id": format!("P-{item:02}"),
+        "title": item_text.split('`').nth(1).unwrap_or(item_text).to_string(),
+        "status": "verified",
+        "description": description,
+        "theorems": input["theorems"].as_array().into_iter().flatten().filter_map(|t| t.as_str()).map(|t| json!({ "name": t })).collect::<Vec<_>>(),
+        "files": files,
+    });
+    if let Some(c) = regex::Regex::new(r"\(((?:src|contracts)/[^):\s]+):(\d+)\)").expect("valid regex").captures(item_text) {
+        p["locations"] = json!([{ "file": &c[1], "line": c[2].parse::<u64>().unwrap_or(0) }]);
+    }
+    update_internal(root, |doc| upsert(doc, "properties", p))
+}
+
+#[cfg(test)]
+mod internal_tests {
+    use super::*;
+
+    #[test]
+    fn the_swarm_writes_its_own_audit() {
+        let root = std::env::temp_dir().join(format!("fm-internal-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(root.join("audit")).unwrap();
+        let bug = json!({ "title": "Fill drains", "severity": "high", "location": "src/R.sol:12", "scenario": "Anyone fills.", "impact": "Funds lost.", "recommendation": "Guard it.", "poc": "test/formal/F.t.sol" });
+        let (id, _) = file_finding(&root, &bug, "test/formal/F.t.sol", "exit 0").unwrap();
+        let item = "`Router.swap` — Router (src/Router.sol:113): payable";
+        let p = json!({ "statement": "It reverts unless the caller owns the order.", "assumptions": "`ext.get` returns what `ext.set` wrote.", "theorems": ["swap_owner"] });
+        record_property(&root, 4, item, &["formal/Refinement/Swarm/RouterSwap.lean".into()], &p).unwrap();
+        // Approving again replaces it.
+        record_property(&root, 4, item, &[], &p).unwrap();
+        assert!(record_property(&root, 5, item, &[], &json!({})).is_err());
+        let doc: Value = serde_json::from_str(&std::fs::read_to_string(internal_path(&root)).unwrap()).unwrap();
+        assert_eq!((doc["kind"].as_str(), doc["findings"][0]["id"].as_str()), (Some("internal"), Some(id.as_str())));
+        let f = &doc["findings"][0];
+        assert_eq!((f["status"].as_str(), f["impact"].as_str(), f["recommendation"].as_str()), (Some("open"), Some("Funds lost."), Some("Guard it.")));
+        assert_eq!(f["locations"][0], json!({ "file": "src/R.sol", "line": 12 }));
+        let props = doc["properties"].as_array().unwrap();
+        assert_eq!(props.len(), 1);
+        assert_eq!((props[0]["id"].as_str(), props[0]["title"].as_str()), (Some("P-04"), Some("Router.swap")));
+        assert_eq!(props[0]["locations"][0], json!({ "file": "src/Router.sol", "line": 113 }));
+        assert!(props[0]["description"].as_str().unwrap().ends_with("**Assumptions.** `ext.get` returns what `ext.set` wrote."));
+        assert_eq!(props[0]["theorems"][0]["name"], "swap_owner");
+        let _ = std::fs::remove_dir_all(&root);
     }
 }

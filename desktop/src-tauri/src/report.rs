@@ -512,8 +512,9 @@ pub fn coverage(f: &Value) -> Value {
     })
 }
 
-/// The properties the swarm proved and its reviewer approved (.formal/proofs.json), as P-01…, with each function's
-/// status and theorems from the coverage.
+/// The properties the swarm proved and its reviewer approved, read back from .formal/proofs.json for folders the
+/// swarm worked on before it wrote them into the audit file itself: `P-<plan item>` (as the reviewer's own entries are
+/// numbered), with each function's status and theorems from the coverage.
 fn properties(root: &Path, coverage: &[Value], theorems: &std::collections::BTreeMap<String, Value>) -> Vec<Value> {
     let Some(proofs) = std::fs::read_to_string(root.join(".formal/proofs.json")).ok().and_then(|t| serde_json::from_str::<Value>(&t).ok()) else { return vec![] };
     let Some(map) = proofs.as_object() else { return vec![] };
@@ -523,8 +524,7 @@ fn properties(root: &Path, coverage: &[Value], theorems: &std::collections::BTre
     let loc = regex::Regex::new(r"\(((?:src|contracts)/[^):\s]+):(\d+)\)").unwrap();
     items
         .into_iter()
-        .enumerate()
-        .map(|(i, (_, p))| {
+        .map(|(k, p)| {
             let item = p["item"].as_str().unwrap_or("");
             let name = item.split('`').nth(1).unwrap_or(item).to_string();
             let row = rows.iter().find(|r| r["function"].as_str() == Some(name.as_str()));
@@ -534,7 +534,7 @@ fn properties(root: &Path, coverage: &[Value], theorems: &std::collections::BTre
                 _ => "unproved",
             };
             let mut x = json!({
-                "id": format!("P-{:02}", i + 1),
+                "id": format!("P-{:02}", k.parse::<u64>().unwrap_or(0)),
                 "title": name,
                 "status": status,
                 "description": clean_summary(p["summary"].as_str().unwrap_or(item)),
@@ -643,13 +643,16 @@ pub fn internal_audit(root: &Path, dirs: &[String], previous: Option<&Value>) ->
     }
 
     let mut findings = swarm_findings(root, dirs, repo.as_deref());
-    // Hand edits survive: fields not derived here, a status set on a swarm bug, findings added by hand.
+    // The file is the source: what the swarm wrote there (and any hand edits) wins. The index only says where a
+    // finding stands now (its status, the evidence, the fix); what's derived fills what the file lacks.
     if let Some(prev) = previous.and_then(|p| p["findings"].as_array()) {
         for old in prev {
             match findings.iter_mut().find(|f| f["id"] == old["id"]) {
                 Some(f) => {
+                    let indexed = !f["id"].as_str().is_some_and(|i| i.starts_with("SB-"));
                     for (k, v) in old.as_object().into_iter().flatten() {
-                        if f[k].is_null() || (k == "status" && f["id"].as_str().is_some_and(|i| i.starts_with("SB-"))) {
+                        let current = indexed && ["status", "evidence", "fix", "tests"].contains(&k.as_str()) && !f[k].is_null();
+                        if !current {
                             f[k] = v.clone();
                         }
                     }
@@ -658,7 +661,34 @@ pub fn internal_audit(root: &Path, dirs: &[String], previous: Option<&Value>) ->
             }
         }
     }
-    let props = properties(root, &cov, &theorems);
+    let rows: Vec<&Value> = cov.iter().flat_map(|c| c["rows"].as_array().into_iter().flatten()).collect();
+    let mut props: Vec<Value> = previous.and_then(|p| p["properties"].as_array()).cloned().unwrap_or_default();
+    for d in properties(root, &cov, &theorems) {
+        if !props.iter().any(|p| p["id"] == d["id"]) {
+            props.push(d);
+        }
+    }
+    for p in props.iter_mut() {
+        // Each theorem where it is, and the function's status as the Proofs page has it now.
+        if let Some(list) = p["theorems"].as_array_mut() {
+            for t in list.iter_mut() {
+                let name = t.as_str().or_else(|| t["name"].as_str()).unwrap_or("").to_string();
+                if let Some(found) = theorems.get(&name).or_else(|| theorems.iter().find(|(k, _)| k.ends_with(&format!(".{name}"))).map(|(_, v)| v)) {
+                    *t = found.clone();
+                } else if t.is_string() {
+                    *t = json!({ "name": name });
+                }
+            }
+        }
+        if let Some(r) = rows.iter().find(|r| r["function"] == p["title"]) {
+            p["status"] = json!(match r["status"].as_str() {
+                Some("proved") => "verified",
+                Some("sorry") => "sorry",
+                _ => "unproved",
+            });
+        }
+    }
+    props.sort_by_key(|p| p["id"].as_str().and_then(|i| i.trim_start_matches("P-").parse::<u64>().ok()).unwrap_or(u64::MAX));
     let total = |k: &str| cov.iter().map(|c| c[k].as_u64().unwrap_or(0)).sum::<u64>();
     let summary = format!(
         "Formal Mind's swarm verified {project} against a Lean 4 model generated from the Solidity compiler's AST: {} of {} functions in scope are proved, with {} reviewed properties. It filed {} finding{}, each with a proof-of-concept test.",
@@ -712,7 +742,7 @@ const FONTS: [(&str, &[u8]); 4] = [
     ("LICENSE.txt", include_bytes!("../report-template/fonts/LICENSE.txt")),
 ];
 /// The internal audit's files in the audit folder: the standard file, and the PDF beside it.
-pub const JSON: &str = "formal-mind.audit.json";
+pub const JSON: &str = crate::swarm_ctx::INTERNAL;
 pub const PDF: &str = "formal-mind.pdf";
 
 // The report's colours: a block's colour says what it is, as in the legends (verification, severity, status).
@@ -1124,7 +1154,10 @@ pub fn generate(root: &Path, dirs: &[String]) -> Result<Generated, String> {
     let audit = dirs.iter().map(|d| root.join(d)).find(|d| d.is_dir()).unwrap_or_else(|| crate::swarm_ctx::report_dir(root));
     std::fs::create_dir_all(&audit).map_err(|e| e.to_string())?;
     let json_path = audit.join(JSON);
-    let previous = std::fs::read_to_string(&json_path).ok().and_then(|t| serde_json::from_str::<Value>(&t).ok()).filter(|v| v["schema"] == "formalmind.audit/v1");
+    // What the swarm wrote (in its report folder, which can differ from the audit folders picked in Settings).
+    let previous = [json_path.clone(), crate::swarm_ctx::internal_path(root)]
+        .iter()
+        .find_map(|p| std::fs::read_to_string(p).ok().and_then(|t| serde_json::from_str::<Value>(&t).ok()).filter(|v| v["schema"] == "formalmind.audit/v1"));
     let (doc, problems) = internal_audit(root, &dirs, previous.as_ref());
     std::fs::write(&json_path, serde_json::to_string_pretty(&doc).map_err(|e| e.to_string())? + "\n").map_err(|e| e.to_string())?;
 
@@ -1248,13 +1281,17 @@ mod tests {
         std::fs::write(root.join("audit/README.md"), INDEX).unwrap();
         std::fs::write(root.join("audit/a.md"), "### [H-01] Fee\n\nBad.\n").unwrap();
         std::fs::write(root.join("audit/formal-mind-swarm.md"), "# x\n\n### [FM-01] Fill drains\n\n**Severity:** high\n**Location:** `src/R.sol:2`\n**PoC:** `test/formal/Fill.t.sol`\n\n#### Scenario\n\nAnyone fills.\n").unwrap();
-        let prev = json!({ "findings": [{ "id": "FM-01", "recommendation": "Guard it." }, { "id": "X-1", "title": "By hand", "severity": "low", "status": "open", "description": "d" }] });
+        let prev = json!({
+            "findings": [{ "id": "FM-01", "description": "The swarm's words.", "status": "fixed", "recommendation": "Guard it." }, { "id": "X-1", "title": "By hand", "severity": "low", "status": "open", "description": "d" }],
+            "properties": [{ "id": "P-03", "title": "R.fill", "status": "verified", "description": "`R.fill` writes `x` and nothing else.", "theorems": ["fill_eq"] }]
+        });
         let (doc, _) = internal_audit(&root, &["audit".into()], Some(&prev));
         assert_eq!(doc["kind"], "internal");
         let f = doc["findings"].as_array().unwrap();
         // Only Formal Mind's findings (and the one added by hand); the external report stays out.
         assert_eq!(f.iter().map(|x| x["id"].as_str().unwrap()).collect::<Vec<_>>(), ["FM-01", "X-1"]);
-        assert_eq!(f[0]["description"], "Anyone fills.");
+        // The swarm's words win; the index says where it stands.
+        assert_eq!((f[0]["description"].as_str(), f[0]["status"].as_str()), (Some("The swarm's words."), Some("open")));
         assert_eq!(f[0]["locations"][0], json!({ "file": "src/R.sol", "line": 2 }));
         assert_eq!(f[0]["poc"], "test/formal/Fill.t.sol");
         assert_eq!(f[0]["recommendation"], "Guard it.");
@@ -1263,6 +1300,8 @@ mod tests {
         assert!(adoc.contains("==== FM-01 Fill drains"));
         assert!(adoc.contains("include::{src-dir}src/R.sol[lines=2..4]"));
         assert!(adoc.contains("*Recommendation:* Guard it."));
+        assert_eq!(doc["properties"][0]["theorems"][0], json!({ "name": "fill_eq" }));
+        assert!(adoc.contains("P-03. `++R.fill++`") && adoc.contains("`++R.fill++` writes `++x++` and nothing else."));
         assert!(!adoc.contains("H-01"));
         let _ = std::fs::remove_dir_all(&root);
     }

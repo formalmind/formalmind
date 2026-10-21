@@ -422,9 +422,9 @@ Be brief; end with one short paragraph saying what you did and what's next.{}",
         if goal.is_empty() { String::new() } else { format!("\n\nThe maintainer's focus: {goal}") }
     );
     let job = match role {
-        "prover" => "Take the plan item you're given and prove it against the generated def named in your task: read the def in the model and the function's slice (call `function` for any callee you need), state the property as a theorem that names the def fully qualified, prove it, and check with `lake build <Module>`. Reuse the project's existing lemmas (search the Lake project for simp lemmas about the monad). If the property is false, that's a bug: show it with a Foundry PoC and call report_bug. Address the reviewer's notes if there are any.",
+        "prover" => "Take the plan item you're given and prove it against the generated def named in your task: read the def in the model and the function's slice (call `function` for any callee you need), state the property as a theorem that names the def fully qualified, prove it, and check with `lake build <Module>`. Reuse the project's existing lemmas (search the Lake project for simp lemmas about the monad). If the property is false, that's a bug: show it with a Foundry PoC and call report_bug, with its scenario, impact and recommendation written as an audit report states them. Address the reviewer's notes if there are any.",
         "auditor" => "You are turning an audit report (attached, or in your task) into the standard audit format (formalmind.audit/v1) that the app shows on its Bugs page. First call record_report once with the report's facts: its title, the auditing firm, the authors, the date (YYYY-MM-DD), the commit and repository it reviewed, the files in scope, and a two-sentence summary. Then call record_finding once per finding, in the report's order, for every finding it lists including informational and gas ones: the report's own ID (H-01, M-2, L-03…; number them F-01, F-02… when it has none), the title, the severity as the report rates it, the full description (the report's words, cleaned of page headers and footers), its impact, its recommendation, the team's response if the report gives one, the locations (repository paths like src/PoolManager.sol with the line when given), the page it starts on, and the status the report gave (reportStatus). Then check the current code for each finding and set `status`: fixed (the issue is gone; say what changed in evidence and name the test that covers it), works as expected (intended, or invalid for this code; say why), acknowledged (accepted, as the report or code says), or open (still there). Use `functions`, `function`, read_file and `forge test --match-path …` for that. Don't fix code or write tests. End with one line: how many findings, and how many of each status.",
-        "reviewer" => "Review the prover's work on the plan item: does the Lean statement really say what the Solidity does (read the def in the generated model and the function's slice, in your task), is it about the generated def rather than a restatement, does it check, is there any sorry/admit/axiom? Then call verdict exactly once: approve, or changes with concrete notes. Do not edit proofs yourself. If you spot a real bug in the contract, say so in your notes; the prover writes the PoC.",
+        "reviewer" => "Review the prover's work on the plan item: does the Lean statement really say what the Solidity does (read the def in the generated model and the function's slice, in your task), is it about the generated def rather than a restatement, does it check, is there any sorry/admit/axiom? Then call verdict exactly once: approve, or changes with concrete notes. When you approve, give `statement` (what the proof establishes, written for the audit report: third person, what holds, never \"no bug found\"), `assumptions` and `theorems`; they go into Formal Mind's audit file as the property. Do not edit proofs yourself. If you spot a real bug in the contract, say so in your notes; the prover writes the PoC.",
         _ => "The maintainer wrote to the swarm. Answer them directly and briefly, using the tools to look things up. If they ask for a change of focus or a new property, update .formal/plan.md accordingly.",
     };
     format!("{common}\n\n{job}")
@@ -460,15 +460,22 @@ fn tools(role: &str) -> Value {
             "page": { "type": "integer" } }), vec!["id", "title", "severity", "status", "description"]) }));
     }
     if role != "reviewer" && role != "auditor" {
-        t.push(json!({ "name": "report_bug", "description": "Report a real bug in the contracts, with its Foundry PoC (already written and passing). The swarm runs the PoC, files the finding in audit/README.md (status Open) and audit/formal-mind-swarm.md, and moves on to the next item.", "input_schema": s(json!({
+        t.push(json!({ "name": "report_bug", "description": "Report a real bug in the contracts, with its Foundry PoC (already written and passing). The swarm runs the PoC, files the finding in audit/README.md (status Open), audit/formal-mind-swarm.md and Formal Mind's audit file (audit/formal-mind.audit.json, which its report is generated from), and moves on to the next item. Write the title, scenario, impact and recommendation as an audit report states a finding: third person, no process talk.", "input_schema": s(json!({
             "title": { "type": "string" }, "severity": { "type": "string", "enum": ["critical", "high", "medium", "low"] },
-            "location": { "type": "string", "description": "file:line" }, "scenario": { "type": "string", "description": "Concrete steps and impact" },
+            "location": { "type": "string", "description": "file:line" }, "scenario": { "type": "string", "description": "What's wrong and the concrete steps that exploit it, as an audit report describes a finding" },
+            "impact": { "type": "string", "description": "What an attacker gains or users lose, as a report states it" },
+            "recommendation": { "type": "string", "description": "How to fix it" },
             "poc": { "type": "string", "description": "The PoC test file under test/, e.g. test/formal/RouterMatchBook.t.sol" },
             "evidence": { "type": "string", "description": "Anything else: the Lean counterexample, the property it breaks" } }), vec!["title", "severity", "location", "scenario", "poc"]) }));
         t.push(json!({ "name": "write_file", "description": "Create or overwrite a file in the folder.", "input_schema": s(json!({ "path": { "type": "string" }, "content": { "type": "string" } }), vec!["path", "content"]) }));
     }
     if role == "reviewer" {
-        t.push(json!({ "name": "verdict", "description": "Your decision on the plan item.", "input_schema": s(json!({ "decision": { "type": "string", "enum": ["approve", "changes"] }, "notes": { "type": "string" } }), vec!["decision"]) }));
+        t.push(json!({ "name": "verdict", "description": "Your decision on the plan item. Approving records the property in Formal Mind's audit file (audit/formal-mind.audit.json), which its report is generated from, so approve with statement, assumptions and theorems.", "input_schema": s(json!({
+            "decision": { "type": "string", "enum": ["approve", "changes"] },
+            "notes": { "type": "string" },
+            "statement": { "type": "string", "description": "Approve only: what the proof establishes about the function, as a report states a verified property: third person, present tense, what holds (e.g. \"`Router.swap` reverts unless the caller owns the order; on success it writes only …\"). Markdown; a bulleted list of the theorems' meanings is fine. No first person, no build or plan talk, and never a statement of what wasn't found." },
+            "assumptions": { "type": "string", "description": "Approve only: what the proof takes as given (e.g. black-box helpers that don't change storage), stated plainly; empty if none" },
+            "theorems": { "type": "array", "items": { "type": "string" }, "description": "Approve only: the names of the theorems that prove it" } }), vec!["decision"]) }));
     }
     Value::Array(t)
 }
@@ -480,6 +487,8 @@ struct Outcome {
     /// Files the agent wrote this turn (the proof, a PoC), folder-relative.
     files: Vec<String>,
     verdict: Option<(bool, String)>,
+    /// What an approving reviewer said holds (statement, assumptions, theorems), for Formal Mind's audit file.
+    property: Option<Value>,
     bug: Option<String>,
 }
 
@@ -771,9 +780,14 @@ impl Turn<'_> {
                         let result = match name {
                             "verdict" => {
                                 let ok = input["decision"].as_str() == Some("approve");
-                                out.verdict = Some((ok, input["notes"].as_str().unwrap_or("").to_string()));
-                                self.emit("tool", role, item, format!("verdict {}", if ok { "approve" } else { "changes" }));
-                                "recorded".to_string()
+                                if ok && input["statement"].as_str().is_none_or(|t| t.trim().is_empty()) {
+                                    "error: approving needs `statement` (what the proof establishes, as the report states it), `assumptions` and `theorems`".to_string()
+                                } else {
+                                    out.verdict = Some((ok, input["notes"].as_str().unwrap_or("").to_string()));
+                                    out.property = ok.then(|| input.clone());
+                                    self.emit("tool", role, item, format!("verdict {}", if ok { "approve" } else { "changes" }));
+                                    "recorded".to_string()
+                                }
                             }
                             // The Solidity comes from formal-ast, not from the files.
                             "functions" | "function" => {
@@ -1169,6 +1183,11 @@ async fn run_swarm(turn: &Turn<'_>) -> String {
                     }
                     (None, Some((true, _))) => {
                         set_mark(&root, job.item, 'x');
+                        if let Some(p) = &out.property {
+                            if let Err(e) = crate::swarm_ctx::record_property(&root, job.item, &job.text, &files, p) {
+                                eprintln!("record_property: {e}");
+                            }
+                        }
                         record_proof(&root, job.item, &job.text, files, &job.notes);
                     }
                     (None, verdict) => {

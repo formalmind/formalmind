@@ -102,12 +102,14 @@ and what they deploy), `audit_json` units are the functions, and `all_slices` is
 3. **The swarm's check** before review: no `sorry`/`admit`/`axiom`/`native_decide`, `lake build` passes, and the
    Proofs page's coverage now counts the def as proved. A failure goes back to the prover with the output (three
    tries, then `- [!]`).
-4. **Reviewer** gets the same brief and gives a verdict: approve marks the item `- [x]` and records the files in
-   `.formal/proofs.json`; changes sends it back to the prover.
+4. **Reviewer** gets the same brief and gives a verdict: approve marks the item `- [x]`, records the files in
+   `.formal/proofs.json`, and writes the property into `audit/formal-mind.audit.json` as `P-<item>` in the report's
+   words (`statement`: what holds; `assumptions`; `theorems`); changes sends it back to the prover.
 5. **report_bug** (prover, assistant) needs a Foundry PoC under `test/` (by convention `test/formal/`). The swarm runs
    it with `forge test --match-path`, adds the finding to `audit/formal-mind-swarm.md` and a row
-   `| FM-NN | Severity | Finding | ⏳ Open | PoC … |` under that report in the audit index (`audit/README.md`), so Bugs
-   lists it with the other audits; the item is marked `- [!]` and the swarm moves on.
+   `| FM-NN | Severity | Finding | ⏳ Open | PoC … |` under that report in the audit index (`audit/README.md`), and the
+   finding (with its impact and recommendation) to `audit/formal-mind.audit.json`, so Bugs lists it; the item is
+   marked `- [!]` and the swarm moves on.
 6. **Messages** you send while it runs are answered by the assistant before the next turn and can change the plan.
 
 **Picking back up.** Each folder has one continuous session. The work is a durable queue in `.formal/queue.json`
@@ -141,8 +143,10 @@ as `<audit folder>/formal-mind.audit.json` in the standard format (`formalmind.a
 `kind: "internal"`): the swarm's findings (its `formal-mind-swarm.md` rows in the index, and `.formal/bugs/`) with
 locations, PoC, evidence and the fix (the commit that added the covering test, and the PR its message names), the
 Proofs coverage of each contract the scripts deploy or call, and the properties the reviewer approved
-(`.formal/proofs.json`) with the theorems that prove them. Fields edited by hand in that file are kept when it is
-generated again. Other audit reports are not part of it; Bugs lists Formal Mind's report and findings apart from them.
+(`.formal/proofs.json`) with the theorems that prove them. The swarm writes its findings and approved properties into that file as it works, in the
+report's words; Generate report keeps what is there (the swarm's text and any hand edits), takes each finding's
+status, evidence and fix from the index, adds the coverage, and derives only what's missing (from older runs'
+`.formal/proofs.json` and index rows). Other audit reports are not part of it; Bugs lists Formal Mind's report and findings apart from them.
 
 The JSON is rendered in Formal Mind's own style (learned from Spearbit and Certora: a black cover with the logo, a
 project scope table linking the repository and commit, colour-coded findings summary and severity matrix, a strip
