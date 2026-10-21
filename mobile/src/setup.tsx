@@ -199,8 +199,8 @@ export function Setup({ user, onDone }: { user: SessionData["user"]; onDone: () 
 				<>
 					{/* One of AsyncSwap's checked theorems, as Proofs shows it. */}
 					<div className="fm-rise my-auto py-6">
-						<div className="dark mx-auto w-full max-w-[330px] text-foreground drop-shadow-[0_24px_50px_rgb(0_0_0/0.5)]">
-							<TheoremCard t={THEOREM} full className="pointer-events-none w-full" />
+						<div className="dark fm-skeleton-strong mx-auto w-full max-w-[330px] text-foreground drop-shadow-[0_24px_50px_rgb(0_0_0/0.5)]">
+							<TheoremCard t={THEOREM} full codeOnly className="pointer-events-none w-full" />
 						</div>
 					</div>
 					<Headline muted="From 0 to 100." strong="Every function, proved." body="Coverage is how many of your functions have a checked Lean proof. Each one the swarm proves moves the bar; at 100 the whole contract matches its spec." />
@@ -228,18 +228,27 @@ export function Setup({ user, onDone }: { user: SessionData["user"]; onDone: () 
 			{step === 4 ? (
 				<>
 					<div className="fm-rise my-auto space-y-4 py-6">
-						<div className="grid grid-cols-5 gap-2">
-							{BUDGETS.map((b) => (
-								<button key={b} type="button" onClick={() => setBudget(b)} className={`h-12 rounded-full border text-[15px] font-medium ${budget === b ? "border-white bg-white text-neutral-950" : "border-white/15 bg-white/[0.05]"}`}>
-									${b}
-								</button>
-							))}
-						</div>
+						{/* Framed as the app's cards are; the amounts not chosen shimmer as skeletons. */}
+						<section className="dark fm-skeleton-strong rounded-2xl border bg-muted/60 p-1.5 text-foreground">
+							<p className="flex h-8 items-center px-2.5 font-mono text-[11px] font-medium uppercase tracking-wider text-muted-foreground">
+								Budget
+								<span className="ml-auto normal-case tracking-normal">per run</span>
+							</p>
+							<div className="shadow-card rounded-xl border bg-card p-3">
+								<div className="grid grid-cols-5 gap-1.5">
+									{BUDGETS.map((b) => (
+										<button key={b} type="button" onClick={() => setBudget(b)} className={`h-10 rounded-full text-[14px] font-medium ${budget === b ? "bg-white text-neutral-950" : "fm-skeleton text-foreground/40"}`}>
+											${b}
+										</button>
+									))}
+								</div>
+								<p className="mt-3 flex items-start gap-2 border-t pt-3 text-[12px] leading-5 text-muted-foreground">
+									<Laptop className="mt-0.5 size-3.5 shrink-0" />
+									{macOnline(mac) ? "Your Mac is online: Start from a project's Chat runs it there with this cap." : "Starts runs on your Mac with this cap. Sign in to Formal Mind there to connect it."}
+								</p>
+							</div>
+						</section>
 						{verifying ? <Coverage value={toHundred} /> : null}
-						<p className="flex items-center gap-2 text-[13px] text-white/50">
-							<Laptop className="size-4" />
-							{macOnline(mac) ? "Your Mac is online: Start from a project's Chat runs it there with this cap." : "Starts run on your Mac with this cap. Sign in to Formal Mind there to connect it."}
-						</p>
 					</div>
 					<Headline muted="Set a budget." strong="Start verifying." body="The swarm stops when it reaches the cap; raise it and resume to carry on. Credits come from your formal.team balance, or your own Anthropic key on the Mac." />
 					<button
