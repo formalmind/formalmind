@@ -3,7 +3,7 @@ import { openUrl } from "@tauri-apps/plugin-opener";
 import { LogoMark } from "@/components/logo";
 import { apiBase, DEFAULT_API, newPollId, pollForToken, setApiBase } from "@/desktop/src/api";
 
-const primary = "w-full rounded-xl bg-white px-4 py-3 text-[15px] font-medium text-neutral-950 shadow-[0_0_0_3px_rgba(96,165,250,0.35)] transition active:bg-neutral-100 disabled:opacity-60";
+const primary = "w-full rounded-full bg-white px-4 py-3 text-[15px] font-medium text-neutral-950 shadow-[0_0_0_3px_rgba(96,165,250,0.35)] transition active:bg-neutral-100 disabled:opacity-60";
 
 /**
  * Sign in with formal.team, as the Mac app does: Safari opens /api/desktop/authorize, which hands the app a one-time

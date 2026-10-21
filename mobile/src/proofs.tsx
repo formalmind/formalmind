@@ -29,11 +29,46 @@ const TONE: Record<string, string> = {
 	opaque: "text-amber-600 dark:text-amber-400",
 };
 
+/** A contract's coverage: how much is proved, as the Proofs explorer opens with it (and the introduction shows). */
+export function CoverageCard({ contract, theorems, proved, notYet, opaque, className = "" }: { contract: string; theorems: number; proved: number; notYet: number; opaque: number; className?: string }) {
+	const total = proved + notYet + opaque;
+	const pct = total ? Math.round((proved / total) * 1000) / 10 : 0;
+	return (
+		<section className={`rounded-2xl border bg-muted/60 p-1.5 ${className}`}>
+			<p className="flex h-8 items-center px-2.5 font-mono text-[11px] font-medium uppercase tracking-wider text-muted-foreground">
+				{contract}
+				<span className="ml-auto normal-case tracking-normal">{theorems} theorems</span>
+			</p>
+			<div className="shadow-card rounded-xl border bg-card p-4">
+				<div className="flex items-end justify-between">
+					<span className="font-display text-[44px] leading-none">{pct}%</span>
+					<span className="pb-1 text-[13px] text-muted-foreground">proved</span>
+				</div>
+				<div className="mt-3 h-2 overflow-hidden rounded-full bg-muted">
+					<div className="h-full rounded-full bg-emerald-500" style={{ width: `${pct}%` }} />
+				</div>
+				<div className="mt-3 grid grid-cols-3 text-center">
+					{[
+						[proved, "proved", TONE.proved],
+						[notYet, "not yet", TONE.modeled],
+						[opaque, "not modeled", TONE.opaque],
+					].map(([n, l, tone]) => (
+						<span key={l as string}>
+							<span className={`block font-mono text-[18px] font-medium ${tone}`}>{n}</span>
+							<span className="text-[11px] text-muted-foreground">{l}</span>
+						</span>
+					))}
+				</div>
+			</div>
+		</section>
+	);
+}
+
 /** A function as a card: its name, where it stands, its kind, its theorems, and the first lines of its Solidity. */
-function FnCard({ f, theorems, onOpen }: { f: FormalFn; theorems: FormalTheorem[]; onOpen: () => void }) {
+export function FnCard({ f, theorems, onOpen, className = "w-[78%] max-w-[300px] shrink-0 snap-start" }: { f: FormalFn; theorems: FormalTheorem[]; onOpen: () => void; className?: string }) {
 	const st = fnStatus(f, theorems);
 	return (
-		<button type="button" onClick={onOpen} className="flex w-[78%] max-w-[300px] shrink-0 snap-start flex-col rounded-2xl border bg-card p-3.5 text-left shadow-card active:scale-[0.98] active:bg-muted/40">
+		<button type="button" onClick={onOpen} className={`flex flex-col rounded-2xl border bg-card p-3.5 text-left shadow-card active:scale-[0.98] active:bg-muted/40 ${className}`}>
 			<span className={`text-[12px] font-medium ${TONE[st.key]}`}>{st.label}</span>
 			<span className="mt-1 truncate font-mono text-[15px] font-medium">{short(f.name)}</span>
 			<span className="truncate text-[12px] text-muted-foreground">
@@ -183,33 +218,7 @@ export function ProofsExplorer({ repo, sources, invoke, onOpenFile }: { repo: st
 
 			{data ? (
 				<>
-					<section className="mx-4 rounded-2xl border bg-muted/60 p-1.5">
-						<p className="flex h-8 items-center px-2.5 font-mono text-[11px] font-medium uppercase tracking-wider text-muted-foreground">
-							{data.contract}
-							<span className="ml-auto normal-case tracking-normal">{data.theorems.length} theorems</span>
-						</p>
-						<div className="shadow-card rounded-xl border bg-card p-4">
-							<div className="flex items-end justify-between">
-								<span className="font-display text-[44px] leading-none">{pct}%</span>
-								<span className="pb-1 text-[13px] text-muted-foreground">proved</span>
-							</div>
-							<div className="mt-3 h-2 overflow-hidden rounded-full bg-muted">
-								<div className="h-full rounded-full bg-emerald-500" style={{ width: `${pct}%` }} />
-							</div>
-							<div className="mt-3 grid grid-cols-3 text-center">
-								{[
-									[proved.length, "proved", TONE.proved],
-									[notProved.length, "not yet", TONE.modeled],
-									[opaque.length, "not modeled", TONE.opaque],
-								].map(([n, l, tone]) => (
-									<span key={l as string}>
-										<span className={`block font-mono text-[18px] font-medium ${tone}`}>{n}</span>
-										<span className="text-[11px] text-muted-foreground">{l}</span>
-									</span>
-								))}
-							</div>
-						</div>
-					</section>
+					<CoverageCard contract={data.contract} theorems={data.theorems.length} proved={proved.length} notYet={notProved.length} opaque={opaque.length} className="mx-4" />
 					<Shelf label="Entry points" count={fns.filter((f) => f.entry).length}>{fns.filter((f) => f.entry).map(card)}</Shelf>
 					<Shelf label="Not proved yet" count={notProved.length}>{notProved.map(card)}</Shelf>
 					<Shelf label="Proved" count={proved.length}>{proved.map(card)}</Shelf>

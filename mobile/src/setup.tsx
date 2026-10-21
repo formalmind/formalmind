@@ -9,7 +9,7 @@ import { apiBase } from "@/desktop/src/api";
 import type { SessionData } from "@/lib/session";
 import { macOnline, setStartBudget, startBudget, useMac } from "./relay";
 import { rememberProject } from "./tabs";
-import { Shot } from "./onboarding";
+import { SwarmShowcase } from "./showcase";
 
 const KEY = "fm:mobile-setup";
 
@@ -31,13 +31,13 @@ export const setSetUpDone = (on: boolean) => {
 	}
 };
 
-const primary = "w-full rounded-xl bg-white px-4 py-3 text-[15px] font-medium text-neutral-950 active:bg-neutral-100 disabled:opacity-50";
+const primary = "w-full rounded-full bg-white px-4 py-3 text-[15px] font-medium text-neutral-950 active:bg-neutral-100 disabled:opacity-50";
 const quiet = "w-full py-2 text-[15px] text-white/50";
 const card = "rounded-2xl border border-white/10 bg-white/[0.05]";
 
 function Frame({ step, total, onSkip, children }: { step: number; total: number; onSkip?: () => void; children: React.ReactNode }) {
 	return (
-		<main className="fm-safe-top fm-safe-bottom relative flex min-h-dvh flex-col bg-[radial-gradient(ellipse_at_top,#151a24_0%,#08090b_60%)] px-6 pb-8 text-white">
+		<main className="fm-safe-top fm-safe-bottom relative flex min-h-dvh flex-col overflow-x-hidden bg-[radial-gradient(ellipse_at_top,#151a24_0%,#08090b_60%)] px-6 pb-8 text-white">
 			<div className="flex h-12 items-center gap-3">
 				<div className="flex flex-1 gap-1" aria-label={`Step ${step + 1} of ${total}`}>
 					{Array.from({ length: total }, (_, i) => (
@@ -164,8 +164,8 @@ export function Setup({ user, onDone }: { user: SessionData["user"]; onDone: () 
 			{step === 1 ? (
 				<>
 					{/* The swarm on the Mac: its agents' cursors at work on the plan. */}
-					<div className="fm-rise -mx-6 my-auto py-6">
-						<Shot src="/onboarding/mac-cursors.jpg" className="w-full rounded-none" />
+					<div className="fm-rise my-auto py-6">
+						<SwarmShowcase close />
 					</div>
 					<Headline muted="Run a swarm." strong="Agents do the proving." body="On your Mac, a swarm of agents works through your contracts until every function is proved or the budget is spent. From here you follow it and steer it." />
 					<button type="button" onClick={next} className={`${primary} mt-10`}>Continue</button>
@@ -211,7 +211,7 @@ export function Setup({ user, onDone }: { user: SessionData["user"]; onDone: () 
 					<div className="fm-rise my-auto space-y-4 py-6">
 						<div className="grid grid-cols-5 gap-2">
 							{BUDGETS.map((b) => (
-								<button key={b} type="button" onClick={() => setBudget(b)} className={`h-12 rounded-xl border text-[15px] font-medium ${budget === b ? "border-white bg-white text-neutral-950" : "border-white/15 bg-white/[0.05]"}`}>
+								<button key={b} type="button" onClick={() => setBudget(b)} className={`h-12 rounded-full border text-[15px] font-medium ${budget === b ? "border-white bg-white text-neutral-950" : "border-white/15 bg-white/[0.05]"}`}>
 									${b}
 								</button>
 							))}

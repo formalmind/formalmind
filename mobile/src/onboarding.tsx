@@ -1,4 +1,9 @@
 import { useRef, useState } from "react";
+import { fnStatus, type Formal } from "@/desktop/src/swarm-panel";
+import { FindingCard } from "./bugs";
+import { MacCardView } from "./home";
+import { CoverageCard, FnCard } from "./proofs";
+import formal from "./fixtures/formal-asyncswap.json";
 
 const KEY = "fm:mobile-intro";
 
@@ -37,39 +42,60 @@ export function Shot({ src, className = "", style }: { src: string; className?: 
 	);
 }
 
-/** The Mac app's corner, zoomed in on the logo, the rest of its UI fading away around it. */
-function MacCorner() {
-	return (
-		<div className="relative h-[300px] w-[340px] overflow-hidden" style={{ WebkitMaskImage: "radial-gradient(ellipse 48% 44% at 50% 50%, #000 30%, transparent 100%)" }}>
-			<img src="/onboarding/mac.jpg" alt="" draggable={false} className="fm-zoom-in pointer-events-none absolute max-w-none select-none" style={{ width: 640, left: 78, top: 80, transformOrigin: "92px 71px" }} />
-		</div>
-	);
+
+/** One of the app's own cards, centered, in the app's dark colours whatever the phone's theme. */
+function Piece({ children }: { children: React.ReactNode }) {
+	return <div className="dark pointer-events-none mx-auto w-full max-w-[320px] select-none text-foreground drop-shadow-[0_24px_50px_rgb(0_0_0/0.5)]">{children}</div>;
 }
+
+const data = formal as unknown as Formal;
+/** A proved entry point from formal-ast's real output for AsyncSwap (./fixtures). */
+const provedFn = data.functions.find((f) => f.entry && fnStatus(f, data.theorems).key === "proved" && f.solidity.split("\n").length > 3) ?? data.functions[0];
 
 const PAGES: Page[] = [
 	{
 		muted: "Formal Mind,",
 		strong: "on your iPhone.",
 		body: "Formal Mind proves Solidity correct: it writes your contracts' behaviour as Lean theorems, proves them, and files the bugs it finds, each with a proof of concept.",
-		art: <MacCorner />,
+		art: (
+			<Piece>
+				<CoverageCard contract="AsyncSwap" theorems={876} proved={95} notYet={33} opaque={15} />
+			</Piece>
+		),
 	},
 	{
 		muted: "Every function, against its spec.",
 		strong: "See what's proved.",
 		body: "Each contract's Lean coverage: which functions are modeled, which are proved, and the theorems that prove them, beside the Solidity.",
-		art: <Shot src="/onboarding/mac-proofs.jpg" className="w-[370px]" />,
+		art: (
+			<Piece>
+				<FnCard f={provedFn} theorems={data.theorems} onOpen={() => {}} className="w-full" />
+			</Piece>
+		),
 	},
 	{
 		muted: "Every finding, with its proof.",
 		strong: "See what's broken.",
 		body: "The bugs from your audits and from the swarm, with their severity, where they stand in the code today, and the Foundry test that shows them.",
-		art: <Shot src="/onboarding/mac-bugs.jpg" className="w-[370px]" />,
+		art: (
+			<Piece>
+				<FindingCard
+					f={{ report: "lee-audit.md", id: "C-01", severity: "Critical", title: "Native escrow commingled in hook balance, so a self-owned native-output order drains it", status: "fixed", statusText: "Fixed", evidence: "", tests: [], index: "" }}
+					onOpen={() => {}}
+					className="w-full"
+				/>
+			</Piece>
+		),
 	},
 	{
 		muted: "The swarm works on your Mac.",
 		strong: "You steer it from here.",
 		body: "Agents prove your functions and hunt bugs on your Mac, where Lean and Foundry run. Follow them, send a message, start or stop, and hear when a proof lands or a bug is filed.",
-		art: <Shot src="/onboarding/mac-swarm.jpg" className="w-[370px]" />,
+		art: (
+			<Piece>
+				<MacCardView status="Online" title="1 session running" hint="Follow and steer it from here" />
+			</Piece>
+		),
 	},
 	{
 		// The last page has no words: the app's icon, and Home as you'll find it.
@@ -94,7 +120,7 @@ export function Onboarding({ onDone }: { onDone: () => void }) {
 	const page = PAGES[i];
 	return (
 		<main
-			className="fm-safe-top fm-safe-bottom relative flex min-h-dvh flex-col bg-[radial-gradient(ellipse_at_top,#151a24_0%,#08090b_60%)] px-6 pb-8 text-white"
+			className="fm-safe-top fm-safe-bottom relative flex min-h-dvh flex-col overflow-x-hidden bg-[radial-gradient(ellipse_at_top,#151a24_0%,#08090b_60%)] px-6 pb-8 text-white"
 			onTouchStart={(e) => (start.current = e.touches[0].clientX)}
 			onTouchEnd={(e) => {
 				const dx = e.changedTouches[0].clientX - (start.current ?? e.changedTouches[0].clientX);
@@ -127,7 +153,7 @@ export function Onboarding({ onDone }: { onDone: () => void }) {
 					<button key={n} type="button" onClick={() => setI(n)} aria-label={`Page ${n + 1}`} className={`h-1.5 rounded-full transition-all duration-300 ${n === i ? "w-6 bg-white" : "w-1.5 bg-white/25"}`} />
 				))}
 			</div>
-			<button type="button" onClick={next} className="mt-6 w-full rounded-xl bg-white px-4 py-3 text-[15px] font-medium text-neutral-950 active:bg-neutral-100">
+			<button type="button" onClick={next} className="mt-6 w-full rounded-full bg-white px-4 py-3 text-[15px] font-medium text-neutral-950 active:bg-neutral-100">
 				{last ? "Get started" : "Continue"}
 			</button>
 		</main>

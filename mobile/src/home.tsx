@@ -32,17 +32,28 @@ function MacCard() {
 	const online = macOnline(m);
 	const running = m.state?.folders.reduce((n, f) => n + f.sessions.filter((s) => s.running).length, 0) ?? 0;
 	return (
-		<FrameCard label="Your Mac" aside={online ? "Online" : m.loaded ? "Offline" : null}>
-			<Link to="/mac" className="flex items-center gap-3 px-3 py-3 active:bg-muted">
+		<Link to="/mac" className="block active:opacity-80">
+			<MacCardView
+				status={online ? "Online" : m.loaded ? "Offline" : null}
+				title={running ? `${running} session${running === 1 ? "" : "s"} running` : "Nothing running"}
+				hint={!m.loaded ? <Skeleton className="mt-1 h-3 w-40" /> : online ? "Follow and steer it from here" : m.state ? "Open Formal Mind on your Mac" : "Sign in to the Mac app to connect it"}
+			/>
+		</Link>
+	);
+}
+
+/** The Your Mac card as Home draws it (the introduction shows it too). */
+export function MacCardView({ status, title, hint }: { status: string | null; title: string; hint: React.ReactNode }) {
+	return (
+		<FrameCard label="Your Mac" aside={status}>
+			<div className="flex items-center gap-3 px-3 py-3">
 				<Laptop className="size-5 shrink-0 text-muted-foreground" />
 				<span className="min-w-0 flex-1">
-					<span className="block font-medium">{running ? `${running} session${running === 1 ? "" : "s"} running` : "Nothing running"}</span>
-					<span className="block truncate text-[13px] text-muted-foreground">
-						{!m.loaded ? <Skeleton className="mt-1 h-3 w-40" /> : online ? "Follow and steer it from here" : m.state ? "Open Formal Mind on your Mac" : "Sign in to the Mac app to connect it"}
-					</span>
+					<span className="block font-medium">{title}</span>
+					<span className="block truncate text-[13px] text-muted-foreground">{hint}</span>
 				</span>
 				<ChevronRight className="size-4 text-muted-foreground" />
-			</Link>
+			</div>
 		</FrameCard>
 	);
 }

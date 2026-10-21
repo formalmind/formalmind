@@ -27,9 +27,9 @@ function Chip({ className, children }: { className: string; children: React.Reac
 }
 
 /** A finding as a card: its id and severity, the title, where it stands. */
-function FindingCard({ f, onOpen }: { f: AuditFinding; onOpen: () => void }) {
+export function FindingCard({ f, onOpen, className = "w-[78%] max-w-[300px] shrink-0 snap-start" }: { f: AuditFinding; onOpen: () => void; className?: string }) {
 	return (
-		<button type="button" onClick={onOpen} className="flex h-[168px] w-[78%] max-w-[300px] shrink-0 snap-start flex-col rounded-2xl border bg-card p-3.5 text-left shadow-card active:scale-[0.98] active:bg-muted/40">
+		<button type="button" onClick={onOpen} className={`flex h-[168px] flex-col rounded-2xl border bg-card p-3.5 text-left shadow-card active:scale-[0.98] active:bg-muted/40 ${className}`}>
 			<span className="flex items-center gap-2">
 				<span className={`font-mono text-[13px] font-semibold ${STATUS[f.status].text}`}>{f.id}</span>
 				{f.severity ? <Chip className={SEVERITY[sevKey(f.severity)] ?? "border-border bg-muted text-muted-foreground"}>{f.severity}</Chip> : null}
