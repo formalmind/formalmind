@@ -114,15 +114,43 @@ and what they deploy), `audit_json` units are the functions, and `all_slices` is
    marked `- [!]` and the swarm moves on.
 6. **Messages** you send while it runs are answered by the assistant before the next turn and can change the plan.
 
+**The rebuild cycle** checks the proofs against the Solidity the other way round: can the contracts be rebuilt from
+what is proved? It starts when the plan is done (once per new set of proofs, up to five cycles), or from Bugs →
+**Rebuild** (`swarm_rebuild`; a stopped swarm runs just that). Its state is `.formal/cycle.json` (cycle number, phase,
+each contract's progress, the maintainer's decisions); nothing goes through GitHub.
+
+1. **Rebuilder** writes the contract under `rebuild/` from the Lean alone: the spec, the generated model and the
+   refinement theorems. It never reads the draft: its tools refuse `src/`, `test/`, `script/` and anything outside
+   the Lake project, `rebuild/` and `dependencies/`/`lib/` (symlinks included), and it has no `functions`/`function`.
+   `rebuild/` is a Foundry project of its own (the swarm writes its `foundry.toml` and a `remappings.txt` with only the
+   dependencies' remappings), so `forge build --root rebuild`, the only forge it may run, never compiles the draft.
+   Every guess goes in `rebuild/README.md` under "What the proofs did not determine".
+2. **The swarm's check** before comparison: `rebuild/src/` declares the contract, no import leads out of `rebuild/`,
+   the README has its list, and `forge build --root rebuild` and `forge test --root rebuild` pass (three tries).
+3. **Editor** reads the draft (through formal-ast), the rebuild and the proofs side by side and calls
+   `record_difference` for each difference, classified: **gap** (the draft does what the spec doesn't state: the
+   missing theorem joins the plan as `- [ ] spec gap D-NN …`, and a fix in its own words goes back to the rebuilder),
+   **improvement** or **divergence** (a question for the maintainer, which the assistant puts in the chat), or **bug**
+   (in the draft: a PoC and `report_bug`, so it lands in `audit/formal-mind.audit.json` like any finding; in the
+   rebuild: a fix). Differences are the `rebuild` section of that file (docs/audit-format.md).
+4. **Polish**: fixes go back to the rebuilder (two rounds per contract), and the editor compares again and closes
+   what is resolved. When you answer a question, the assistant calls `record_decision` (and can send the rebuilder a
+   change). When every contract is through, the cycle closes with a summary and a confidence (low while a gap or a bug
+   is open, medium once they agree; the rebuild's own spec, S′, isn't written locally yet).
+
+Bugs lists the differences under "Rebuild from the proofs", and Generate report adds a "Rebuild from the Proofs"
+chapter. A headless run of the cycle (when the installed app keeps a dev build from starting):
+`FM_FOLDER=… FM_REBUILD=FeeVault FM_SWARM_PROVIDER=anthropic cargo test --lib -- --ignored rebuild_run --nocapture`.
+
 **Picking back up.** Each folder has one continuous session. The work is a durable queue in `.formal/queue.json`
-(plan, prove item N, review item N, answer you): a job is marked running before its agent starts and done when it
+(plan, prove item N, review item N, answer you, rebuild and compare a contract): a job is marked running before its agent starts and done when it
 ends, and every step of the agent's conversation is saved to `.formal/jobs/<job>.json`. Quit any time; on the next
 start an interrupted job continues the same conversation (prompt caching keeps that cheap), your unanswered messages
 are still queued, and finished work is never redone. Spend is the session's running total; the cap in the chat header
 can be raised to keep going.
 
 **Nothing goes through GitHub.** The swarm's state is the folder's: plan and progress in `.formal/`, proofs in
-`formal/`, findings in `audit/` with PoC tests under `test/`. It opens no issues or PRs, sets no labels, comments
+`formal/`, the rebuild in `rebuild/`, findings in `audit/` with PoC tests under `test/`. It opens no issues or PRs, sets no labels, comments
 nowhere and pushes nothing; its tools can't run git. Activity shows in the app (the Swarm canvas, the plan card, the
 Proofs and Bugs pages), and the canvas links nowhere outside it.
 

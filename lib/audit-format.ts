@@ -51,6 +51,43 @@ export type AuditProperty = {
 	files?: string[];
 };
 
+/** A difference the rebuild cycle's editor found between the code and the rebuild from the proofs. */
+export type AuditDifference = {
+	id: string;
+	cycle: number;
+	contract: string;
+	/** gap: the code does what the spec doesn't state; improvement: the rebuild is simpler or safer; divergence: neither is clearly right; bug: a theorem or invariant breaks. */
+	class: "gap" | "improvement" | "divergence" | "bug";
+	/** asked: a question with the maintainer; fixing: sent to the rebuilder. */
+	status: "open" | "asked" | "fixing" | "decided" | "closed";
+	title: string;
+	description: string;
+	draft?: AuditLocation[];
+	rebuild?: AuditLocation[];
+	/** A gap: the theorem the spec is missing; otherwise the Lean it bears on. */
+	theorem?: string;
+	/** What the rebuild should do, citing the Lean. */
+	fix?: string;
+	question?: string;
+	recommendation?: string;
+	decision?: string;
+	/** A bug in the code: the finding's id in this file. */
+	finding?: string;
+};
+
+/** The rebuild cycle: the contracts rebuilt from the proofs alone (under rebuild/) and how they compare with the code. */
+export type AuditRebuild = {
+	cycle: number;
+	phase: "rebuild" | "compare" | "polish" | "close" | "rest";
+	contracts?: { contract: string; draft: string; rebuild: string[]; state: "queued" | "rebuilt" | "polish" | "agreed" | "compared" | "blocked" }[];
+	tests?: string[];
+	/** What the proofs did not determine, in the rebuilder's words. */
+	undetermined?: string[];
+	summary?: string;
+	confidence?: "low" | "medium" | "high";
+	differences: AuditDifference[];
+};
+
 export type AuditDoc = {
 	schema: "formalmind.audit/v1";
 	kind: "external" | "internal";
@@ -69,6 +106,8 @@ export type AuditDoc = {
 	coverage?: AuditCoverage[];
 	/** Internal audits: the properties proved and reviewed. */
 	properties?: AuditProperty[];
+	/** Internal audits: the rebuild cycle. */
+	rebuild?: AuditRebuild;
 };
 
 /** `docs/audits/Spearbit.pdf` → `docs/audits/Spearbit.audit.json`. */

@@ -716,6 +716,10 @@ pub fn internal_audit(root: &Path, dirs: &[String], previous: Option<&Value>) ->
     if let Some(r) = repo {
         doc["repository"] = json!(r);
     }
+    // The rebuild cycle's section is the swarm's (its editor's differences, the cycle's state): kept as it is.
+    if let Some(r) = previous.map(|p| &p["rebuild"]).filter(|r| r.is_object()) {
+        doc["rebuild"] = r.clone();
+    }
     if let Some(prev) = previous {
         for k in ["authors", "summary", "title"] {
             if prev[k].is_string() || prev[k].is_array() {
@@ -991,6 +995,8 @@ pub fn render(root: &Path, doc: &Value, src_dir: &str) -> String {
         }
     }
 
+    a.push_str(&rebuild_chapter(&doc["rebuild"], &at));
+
     if !coverage.is_empty() {
         a.push_str("[appendix]\n[[function-coverage]]\n== Function Coverage\n\n");
         for c in &coverage {
@@ -1005,6 +1011,97 @@ pub fn render(root: &Path, doc: &Value, src_dir: &str) -> String {
                 a.push_str(&format!("{} {} {}\n", cell(None, &code_span(s(r, "function"))), cell(Some(col), l), cell(None, &r["theorems"].as_array().map(|t| t.len()).unwrap_or(0).to_string())));
             }
             a.push_str("|===\n\n");
+        }
+    }
+    a
+}
+
+const CLASSES: [(&str, &str, &str); 4] = [("gap", "Gap", AMBER), ("improvement", "Improvement", GREEN), ("divergence", "Divergence", BLUE), ("bug", "Bug", "#F4C7C3")];
+
+fn difference_status(s: &str) -> (&'static str, &'static str) {
+    match s {
+        "closed" => ("Resolved", GREEN),
+        "decided" => ("Decided", GREEN),
+        "fixing" => ("Fix in the rebuild", BLUE),
+        "asked" => ("Question for the maintainer", "#FFF2CC"),
+        _ => ("Open", "#F4C7C3"),
+    }
+}
+
+/// The rebuild cycle's chapter: the contracts rebuilt from the proofs alone, what the proofs left open, and every
+/// difference the editor found between the code and the rebuild, by class. Empty when the cycle hasn't run.
+fn rebuild_chapter(rb: &Value, at: &dyn Fn(&str, Option<u64>) -> String) -> String {
+    let diffs: Vec<&Value> = rb["differences"].as_array().into_iter().flatten().collect();
+    let contracts: Vec<&Value> = rb["contracts"].as_array().into_iter().flatten().collect();
+    if diffs.is_empty() && contracts.is_empty() {
+        return String::new();
+    }
+    let loc = |v: &Value| v.as_array().and_then(|l| l.first()).map(|l| at(s(l, "file"), l["line"].as_u64()));
+    let mut a = String::from("== Rebuild from the Proofs\n\nTo test whether the proofs say enough, Formal Mind's rebuilder wrote the contracts again from the Lean specification and the generated model alone, without seeing the Solidity, and its editor compared the rebuild with the code entry point by entry point. Each difference has a class: a *gap* is behaviour of the code that the specification does not state, an *improvement* is a simpler or safer rebuild that still satisfies the specification, a *divergence* is a difference where neither side is clearly right, and a *bug* breaks a theorem or an invariant. Gaps become theorems for the specification and fixes for the rebuild; improvements and divergences are put to the maintainer as questions.\n\n");
+    if !s(rb, "summary").is_empty() {
+        a.push_str(&format!("{}{}\n\n", inline(s(rb, "summary")), if s(rb, "confidence").is_empty() { String::new() } else { format!(" Confidence: *{}*.", s(rb, "confidence")) }));
+    } else if let Some(n) = rb["cycle"].as_u64() {
+        a.push_str(&format!("Cycle {n} is in progress (phase: {}).\n\n", s(rb, "phase")));
+    }
+    if !contracts.is_empty() {
+        a.push_str("=== Contracts Rebuilt\n\n[%header,cols=\"2,3,4,2\"]\n|===\n| Contract | Code | Rebuild | State\n");
+        for c in &contracts {
+            let files: Vec<String> = c["rebuild"].as_array().into_iter().flatten().filter_map(|f| f.as_str()).map(|f| at(f, None)).collect();
+            let state = match s(c, "state") {
+                "agreed" => "Agrees",
+                "compared" => "Compared",
+                "blocked" => "Couldn't be rebuilt",
+                "polish" => "Being polished",
+                "rebuilt" => "Rebuilt",
+                _ => "Queued",
+            };
+            a.push_str(&format!("| `{}` | {} | {} | {state}\n", s(c, "contract"), if s(c, "draft").is_empty() { "—".into() } else { at(s(c, "draft"), None) }, if files.is_empty() { "—".into() } else { files.join(" +\n") }));
+        }
+        a.push_str("|===\n\n");
+    }
+    let open: Vec<&str> = rb["undetermined"].as_array().into_iter().flatten().filter_map(|x| x.as_str()).collect();
+    if !open.is_empty() {
+        a.push_str("=== What the Proofs Did Not Determine\n\nThe rebuilder's own list of the choices the specification left open, each made as simply as it could:\n\n");
+        for l in open {
+            a.push_str(&format!("* {}\n", inline(l)));
+        }
+        a.push('\n');
+    }
+    if diffs.is_empty() {
+        a.push_str("The editor found no difference in behaviour between the code and the rebuild.\n\n");
+        return a;
+    }
+    a.push_str("=== Differences\n\n[%header%footer,cols=\"3,2,2,2\"]\n|===\n");
+    a.push_str(&[head("Class"), head("Found"), head("Resolved"), head("Open")].join(" "));
+    a.push('\n');
+    let resolved = |d: &Value| matches!(s(d, "status"), "closed" | "decided");
+    for (key, label, color) in CLASSES {
+        let of: Vec<&&Value> = diffs.iter().filter(|d| s(d, "class") == key).collect();
+        let r = of.iter().filter(|d| resolved(d)).count();
+        a.push_str(&[cell(Some(color), label), cell(None, &of.len().to_string()), cell(None, &r.to_string()), cell(None, &(of.len() - r).to_string())].join(" "));
+        a.push('\n');
+    }
+    let r = diffs.iter().filter(|d| resolved(d)).count();
+    a.push_str(&[head("Total"), head(&diffs.len().to_string()), head(&r.to_string()), head(&(diffs.len() - r).to_string())].join(" "));
+    a.push_str("\n|===\n\n");
+    for d in &diffs {
+        let (cl, cc) = CLASSES.iter().find(|c| c.0 == s(d, "class")).map(|c| (c.1, c.2)).unwrap_or(("Difference", GRAY));
+        let (st, sc) = difference_status(s(d, "status"));
+        a.push_str(&format!("[[{}]]\n==== {} {}\n\n[cols=\"1,1,1\"]\n|===\n", anchor(s(d, "id")).replace("finding-", "difference-"), s(d, "id"), inline(s(d, "title"))));
+        a.push_str(&[cell(Some(cc), &format!("Class: *{cl}*")), cell(Some(sc), &format!("Status: *{st}*")), cell(None, &format!("Contract: `{}` · cycle {}", s(d, "contract"), d["cycle"]))].join(" "));
+        a.push_str("\n|===\n\n");
+        let places: Vec<String> = [("Code", loc(&d["draft"])), ("Rebuild", loc(&d["rebuild"]))].into_iter().filter_map(|(l, p)| p.map(|p| format!("{l}: {p}"))).collect();
+        if !places.is_empty() {
+            a.push_str(&format!("*Context:* {}\n\n", places.join(" · ")));
+        }
+        a.push_str(&format!("*Description:* {}\n\n", md_to_adoc(s(d, "description")).trim_start()));
+        for (k, l) in [("theorem", if s(d, "class") == "gap" { "Missing theorem" } else { "Specification" }), ("fix", "Fix in the rebuild"), ("question", "Question for the maintainer"), ("recommendation", "Recommendation"), ("decision", "Decision")] {
+            if !s(d, k).is_empty() {
+                a.push_str(&format!("*{l}:* {}\n\n", md_to_adoc(s(d, k)).trim_start()));
+            }
+        }
+        if !s(d, "finding").is_empty() {
+            a.push_str(&format!("*Finding:* <<{},{}>>\n\n", anchor(s(d, "finding")), s(d, "finding")));
         }
     }
     a
@@ -1256,6 +1353,37 @@ mod tests {
         assert_eq!(affirm("A.\n\nNo bug turned up.\n\nB."), "A.\n\nB.");
         assert_eq!(affirm("I found no bug in this function, so I wrote no PoC. Next."), "Next.");
         assert_eq!(affirm("This item found no bug, but it doesn't prove the function is safe overall."), "These proofs cover the behaviour above; they don't establish that the function is safe overall.");
+    }
+
+    #[test]
+    fn the_rebuild_cycle_has_its_chapter() {
+        let root = std::env::temp_dir().join(format!("fm-report-rebuild-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(root.join("audit")).unwrap();
+        let rebuild = json!({
+            "cycle": 1, "phase": "rest", "summary": "Cycle 1 rebuilt Vault from the proofs.", "confidence": "low",
+            "contracts": [{ "contract": "Vault", "draft": "src/Vault.sol", "rebuild": ["rebuild/src/Vault.sol"], "state": "compared" }],
+            "undetermined": ["The `Swept` event's fields."],
+            "differences": [
+                { "id": "D-01", "cycle": 1, "contract": "Vault", "class": "gap", "status": "fixing", "title": "Sweep has no owner check", "description": "The code restricts `sweep`.", "draft": [{ "file": "src/Vault.sol", "line": 12 }], "theorem": "sweep_owner", "fix": "Only the owner sweeps." },
+                { "id": "D-02", "cycle": 1, "contract": "Vault", "class": "bug", "status": "open", "title": "Fee rounds up", "description": "d", "finding": "FM-01" }
+            ]
+        });
+        // Generate report keeps the swarm's section as it is.
+        let prev = json!({ "schema": "formalmind.audit/v1", "kind": "internal", "title": "", "findings": [], "rebuild": rebuild });
+        let (doc, _) = internal_audit(&root, &[], Some(&prev));
+        assert_eq!(doc["rebuild"], rebuild);
+        let a = render(&root, &doc, "../../");
+        let ch = &a[a.find("== Rebuild from the Proofs").unwrap()..];
+        assert!(ch.contains("Cycle 1 rebuilt Vault from the proofs. Confidence: *low*."));
+        assert!(ch.contains("| `Vault` | `src/Vault.sol` | `rebuild/src/Vault.sol` | Compared"));
+        assert!(ch.contains("* The `++Swept++` event's fields."));
+        assert!(ch.contains("[[difference-d-01]]\n==== D-01 Sweep has no owner check"));
+        assert!(ch.contains("Class: *Gap*") && ch.contains("Status: *Fix in the rebuild*") && ch.contains("*Missing theorem:* sweep_owner"));
+        assert!(ch.contains("*Finding:* <<finding-fm-01,FM-01>>"));
+        // No cycle, no chapter.
+        assert!(!render(&root, &json!({ "findings": [] }), "../../").contains("Rebuild from the Proofs"));
+        let _ = std::fs::remove_dir_all(&root);
     }
 
     #[test]

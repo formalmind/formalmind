@@ -4,14 +4,14 @@ import { createPortal } from "react-dom";
 import { NvimTerminal } from "./nvim-terminal";
 import { reportError } from "@/lib/report-error";
 import { JsonTree } from "./json-tree";
-import { Bug, Check, ChevronDown, Code2, Copy, FileCode2, FileDown, Network, Play, Plus, ScanSearch, Square, WandSparkles, Wrench } from "lucide-react";
+import { Bug, Check, ChevronDown, Code2, Copy, FileCode2, FileDown, GitCompare, Network, Play, Plus, ScanSearch, Square, WandSparkles, Wrench } from "lucide-react";
 
 // The project roadmap (GitHub Projects-style), the same view the web app had on its own page.
 import { motion as vimMotion, search as vimSearch, setVimMode, useVimMode, type Cursor } from "@/components/vim-mode";
 import { useSearchParams } from "react-router";
 import { ChatComposer } from "@/components/chat-composer";
 import { useReportDirs } from "@/lib/report-dirs";
-import { auditJsonPath, parseAuditDoc, type AuditDoc, type AuditFindingDoc } from "@/lib/audit-format";
+import { auditJsonPath, parseAuditDoc, type AuditDifference, type AuditDoc, type AuditFindingDoc, type AuditRebuild } from "@/lib/audit-format";
 import { readEntryPoints, setMainEntryPoint } from "@/lib/entry-points";
 import { ChatScrubber } from "./chat-scrubber";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuRadioGroup, DropdownMenuRadioItem, DropdownMenuSeparator, DropdownMenuSub, DropdownMenuSubContent, DropdownMenuSubTrigger, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
@@ -378,6 +378,15 @@ const STATUS: Record<AuditFinding["status"], { label: string; dot: string; chip:
 	open: { label: "Open", dot: "bg-red-500", chip: "border-red-500/30 bg-red-500/10 text-red-700 dark:text-red-400" },
 };
 
+/** The rebuild cycle's classes of difference, and where each one stands. */
+const DIFF_CLASS: Record<AuditDifference["class"], { label: string; chip: string; hint: string }> = {
+	gap: { label: "Gap", chip: "border-amber-500/30 bg-amber-500/10 text-amber-700 dark:text-amber-400", hint: "The code does something the proofs don't state" },
+	improvement: { label: "Improvement", chip: "border-emerald-500/30 bg-emerald-500/10 text-emerald-700 dark:text-emerald-400", hint: "The rebuild is simpler or safer and still satisfies the proofs" },
+	divergence: { label: "Divergence", chip: "border-sky-500/30 bg-sky-500/10 text-sky-700 dark:text-sky-400", hint: "They differ and neither is clearly right" },
+	bug: { label: "Bug", chip: "border-red-500/30 bg-red-500/10 text-red-700 dark:text-red-400", hint: "A theorem or an invariant breaks" },
+};
+const DIFF_STATUS: Record<AuditDifference["status"], string> = { open: "Open", asked: "Question for you", fixing: "Fix in the rebuild", decided: "Decided", closed: "Resolved" };
+
 /** Every finding in an audit index (audit/README.md and the like), with its status and the tests its evidence names. */
 function parseAuditIndex(text: string, index: string): AuditFinding[] {
 	const out: AuditFinding[] = [];
@@ -493,7 +502,7 @@ type GeneratedReport = { json: string; adoc: string; pdf: string | null; note: s
  * Bugs: the folder's audit reports (Markdown in its report folders, which the gear sets) and the swarm's findings,
  * each opened on the right.
  */
-function BugsView({ folder, files, invoke, bugs, openBug, setOpenBug, withPoc, onOpenFile, reload = 0, onTriage, onFilesChanged }: { folder: string; files: string[]; invoke: Bridge["invoke"]; bugs: Bug[]; openBug: string | null; setOpenBug: (f: string | null) => void; withPoc: (body: string) => Promise<string>; onOpenFile: (path: string) => void; reload?: number; onTriage?: (path: string) => Promise<void>; onFilesChanged?: () => void }) {
+function BugsView({ folder, files, invoke, bugs, openBug, setOpenBug, withPoc, onOpenFile, reload = 0, onTriage, onRebuild, onFilesChanged }: { folder: string; files: string[]; invoke: Bridge["invoke"]; bugs: Bug[]; openBug: string | null; setOpenBug: (f: string | null) => void; withPoc: (body: string) => Promise<string>; onOpenFile: (path: string) => void; reload?: number; onTriage?: (path: string) => Promise<void>; onRebuild?: () => Promise<string[]>; onFilesChanged?: () => void }) {
 	const dirs = useReportDirs(folder);
 	// Generate report: the findings, Proofs coverage and in-scope code as an AsciiDoc report (and its PDF) in the audit
 	// folder; `generated` ticks so a PDF already open is read again.
@@ -518,6 +527,9 @@ function BugsView({ folder, files, invoke, bugs, openBug, setOpenBug, withPoc, o
 	const indexes = inDirs.filter((f) => /(^|\/)(readme|index)\.md$/i.test(f));
 	const reports = inDirs.filter((f) => !indexes.includes(f));
 	const [findings, setFindings] = useState<AuditFinding[]>([]);
+	// The rebuild cycle, from Formal Mind's own file: the contracts rebuilt from the proofs and the editor's differences.
+	const [rebuild, setRebuild] = useState<AuditRebuild | null>(null);
+	const [rebuilding, setRebuilding] = useState<string | null>(null);
 	useEffect(() => {
 		let gone = false;
 		// The standard files: one next to each report (read even before the file tree lists them), and any others.
@@ -528,6 +540,7 @@ function BugsView({ folder, files, invoke, bugs, openBug, setOpenBug, withPoc, o
 				invoke<string>("folder_read", { folder, path: f }).then(
 					(t) => {
 						const doc = parseAuditDoc(t);
+						if (doc?.kind === "internal" && doc.rebuild && !gone) setRebuild(doc.rebuild);
 						return doc ? findingsOfDoc(doc, f) : [];
 					},
 					() => [] as AuditFinding[],
@@ -576,7 +589,7 @@ function BugsView({ folder, files, invoke, bugs, openBug, setOpenBug, withPoc, o
 	// Reading a report into the index: the paths queued for the auditor this visit, and why one couldn't be.
 	const [triaging, setTriaging] = useState<Record<string, string>>({});
 	// What's open: a picked report or finding; with nothing picked, the first report, else the first finding.
-	const selected = reportPath || picked ? null : (bugs.find((b) => b.file === openBug) ?? (reports.length || findings.length ? null : bugs[0]));
+	const selected = reportPath || picked || openBug?.startsWith("diff:") ? null : (bugs.find((b) => b.file === openBug) ?? (reports.length || findings.length ? null : bugs[0]));
 	const showing = picked ? null : reportPath ? `report:${reportPath}` : selected ? null : reports[0] && !findings.length ? `report:${reports[0]}` : null;
 	const showingPath = showing?.slice(7) ?? null;
 	useEffect(() => {
@@ -595,6 +608,8 @@ function BugsView({ folder, files, invoke, bugs, openBug, setOpenBug, withPoc, o
 		);
 	}, [folder, showingPath, invoke, generated]);
 	const facts = selected ? bugFacts(selected.body) : null;
+	const diffs = rebuild?.differences ?? [];
+	const diffPicked = openBug?.startsWith("diff:") ? (diffs.find((d) => `diff:${d.id}` === openBug) ?? null) : null;
 	const head = "px-2 pb-1 pt-2 font-mono text-[10px] uppercase tracking-wider text-muted-foreground";
 	const reportItem = (r: string) => (
 		<li key={r}>
@@ -691,6 +706,42 @@ function BugsView({ folder, files, invoke, bugs, openBug, setOpenBug, withPoc, o
 						{fmReports.length === 0 ? <li className="px-2 py-1 text-[12px] text-muted-foreground">No report yet. Generate report writes one from the swarm's findings and proofs.</li> : null}
 					</ul>
 					{fmGroups.map(findingGroup)}
+					<div className="flex items-center gap-1 px-2 pb-0.5 pt-2">
+						<p className="font-mono text-[10px] text-muted-foreground" title="The rebuilder wrote the contracts again from the Lean proofs alone, without seeing the code; the editor compared the two">
+							Rebuild from the proofs{rebuild ? ` · cycle ${rebuild.cycle} · ${rebuild.phase === "rest" ? "closed" : rebuild.phase}` : ""}
+						</p>
+						{onRebuild ? (
+							<button
+								type="button"
+								disabled={rebuilding === "Queuing…"}
+								onClick={() => {
+									setRebuilding("Queuing…");
+									void onRebuild().then(
+										(names) => setRebuilding(names.length ? `Rebuilding ${names.join(", ")} from the proofs; the editor's differences land here` : "Every contract is already in the running cycle"),
+										(e) => setRebuilding(String(e)),
+									);
+								}}
+								title="Rebuild the contracts in scope from the Lean proofs alone (under rebuild/), then compare them with the code: every difference lands here as a gap, improvement, divergence or bug"
+								className="ml-auto inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-[11px] text-muted-foreground hover:bg-muted hover:text-foreground disabled:opacity-60"
+							>
+								<GitCompare className="size-3" />
+								Rebuild
+							</button>
+						) : null}
+					</div>
+					{rebuilding ? <p className="px-2 pb-1 text-[11px] text-muted-foreground">{rebuilding}</p> : null}
+					<ul className="space-y-0.5">
+						{diffs.map((d) => (
+							<li key={d.id}>
+								<button type="button" onClick={() => setOpenBug(`diff:${d.id}`)} title={`${DIFF_CLASS[d.class]?.label ?? d.class} · ${DIFF_STATUS[d.status] ?? d.status}`} className={`flex w-full items-start gap-2 rounded-lg px-2 py-1.5 text-left transition-colors ${diffPicked?.id === d.id ? "bg-muted" : "hover:bg-muted/60"}`}>
+									<span className="w-9 shrink-0 font-mono text-[11px] leading-5 text-muted-foreground">{d.id}</span>
+									<span className="min-w-0 flex-1 text-[12.5px] leading-5">{d.title.replace(/`/g, "")}</span>
+									<span className={`mt-0.5 shrink-0 rounded-md border px-1.5 py-px text-[10px] font-medium ${DIFF_CLASS[d.class]?.chip ?? "border-border"} ${d.status === "closed" || d.status === "decided" ? "opacity-50" : ""}`}>{DIFF_CLASS[d.class]?.label ?? d.class}</span>
+								</button>
+							</li>
+						))}
+						{diffs.length === 0 ? <li className="px-2 py-1 text-[12px] text-muted-foreground">{rebuild ? "No difference found yet." : "Not run yet. Rebuild writes the contracts again from the proofs alone and compares them with the code."}</li> : null}
+					</ul>
 					<p className="px-2 pb-0.5 pt-2 font-mono text-[10px] text-muted-foreground">Swarm findings · {bugs.length}</p>
 					<ul className="space-y-1">
 						{bugs.map((b) => {
@@ -718,7 +769,64 @@ function BugsView({ folder, files, invoke, bugs, openBug, setOpenBug, withPoc, o
 					{otherGroups.map(findingGroup)}
 			</nav>
 			<div className="flex min-w-0 flex-1 flex-col">
-			{picked ? (
+			{diffPicked ? (
+				<DetailCard label={`Rebuild cycle ${diffPicked.cycle} · ${diffPicked.contract} · ${diffPicked.id}`}>
+					<h2 className="text-[17px] font-semibold leading-snug">{diffPicked.title.replace(/`/g, "")}</h2>
+					<div className="mt-3 flex flex-wrap items-center gap-2 text-[12px]">
+						<span title={DIFF_CLASS[diffPicked.class]?.hint} className={`inline-flex h-7 items-center rounded-lg border px-2.5 font-medium ${DIFF_CLASS[diffPicked.class]?.chip ?? "border-border"}`}>{DIFF_CLASS[diffPicked.class]?.label ?? diffPicked.class}</span>
+						<span className="inline-flex h-7 items-center rounded-lg border px-2.5">{DIFF_STATUS[diffPicked.status] ?? diffPicked.status}</span>
+						{[...(diffPicked.draft ?? []).map((l) => ({ l, side: "Code" })), ...(diffPicked.rebuild ?? []).map((l) => ({ l, side: "Rebuild" }))].map(({ l, side }) => (
+							<button key={`${side}${l.file}:${l.line ?? ""}`} type="button" onClick={() => onOpenFile(l.file)} title={`${side}: open in Code`} className="inline-flex h-7 items-center gap-1.5 rounded-lg border bg-background px-2.5 font-mono hover:bg-muted">
+								<FileCode2 className="size-3.5 text-muted-foreground" />
+								{l.file}
+								{l.line ? `:${l.line}` : ""}
+							</button>
+						))}
+					</div>
+					<div className="mt-4 space-y-4">
+						{(
+							[
+								["Description", diffPicked.description],
+								[diffPicked.class === "gap" ? "Missing theorem" : "Specification", diffPicked.theorem],
+								["Fix in the rebuild", diffPicked.fix],
+								["Question for you", diffPicked.question],
+								["Recommendation", diffPicked.recommendation],
+								["Your decision", diffPicked.decision],
+							] as const
+						).map(([label, text]) =>
+							text ? (
+								<div key={label} className="prose prose-sm max-w-none dark:prose-invert">
+									<p className="font-mono text-[10px] uppercase tracking-wider text-muted-foreground">{label}</p>
+									<ChatMarkdown>{text}</ChatMarkdown>
+								</div>
+							) : null,
+						)}
+						{diffPicked.finding
+							? (() => {
+									const f = findings.find((x) => x.id === diffPicked.finding && isFormalMind(x.report));
+									return (
+										<button type="button" disabled={!f} onClick={() => f && setOpenBug(findingKey(f))} className="inline-flex h-7 items-center gap-1.5 rounded-lg border bg-background px-2.5 text-[12px] hover:bg-muted disabled:opacity-60">
+											<Bug className="size-3.5 text-muted-foreground" />
+											Filed as {diffPicked.finding}
+										</button>
+									);
+								})()
+							: null}
+						{diffPicked.status === "asked" ? <p className="text-[12px] text-muted-foreground">Answer in the swarm's chat; the assistant records your decision.</p> : null}
+					</div>
+					{rebuild?.undetermined?.length ? (
+						<div className="mt-6 border-t pt-4">
+							<p className="font-mono text-[10px] uppercase tracking-wider text-muted-foreground">What the proofs did not determine · the rebuilder's list</p>
+							<ul className="mt-1 list-disc space-y-0.5 pl-5 text-[12.5px]">
+								{rebuild.undetermined.map((l) => (
+									<li key={l}>{l}</li>
+								))}
+							</ul>
+						</div>
+					) : null}
+					{rebuild?.summary ? <p className="mt-5 text-[11px] text-muted-foreground">{rebuild.summary}{rebuild.confidence ? ` Confidence: ${rebuild.confidence}.` : ""}</p> : null}
+				</DetailCard>
+			) : picked ? (
 				<DetailCard label={`${picked.report} · ${picked.id}`}>
 					<h2 className="text-[17px] font-semibold leading-snug">{picked.title.replace(/`/g, "")}</h2>
 					<div className="mt-3 flex flex-wrap items-center gap-2 text-[12px]">
@@ -1555,7 +1663,7 @@ export function SwarmPanel({ folder, name, scan, bridge, session, file: openPath
 			setEvents((all) => [...all.slice(-600), payload]);
 			if (["plan", "bug", "done"].includes(payload.kind) || (payload.kind === "status" && / is working$/.test(payload.text))) refresh();
 			// A finding recorded from a report shows in Bugs straight away.
-			if (payload.kind === "tool" && payload.text.startsWith("record_finding")) setReload((n) => n + 1);
+			if (payload.kind === "tool" && /^record_(finding|difference|decision)/.test(payload.text)) setReload((n) => n + 1);
 			if (["plan", "bug", "done"].includes(payload.kind)) {
 				setReload((n) => n + 1);
 				void invoke<{ files: string[] }>("folder_tree", { path: folder }).then((t) => setTree(t.files), () => {});
@@ -2160,6 +2268,12 @@ export function SwarmPanel({ folder, name, scan, bridge, session, file: openPath
 						onTriage={async (path) => {
 							await invoke("swarm_triage", { folder, path, session: viewing && viewing !== "new" ? viewing : "swarm" });
 							if (!runRef.current) await start(true);
+						}}
+						// The rebuild cycle for the contracts in scope; a stopped swarm starts just for it (and stops after).
+						onRebuild={async () => {
+							const names = await invoke<string[]>("swarm_rebuild", { folder, contracts: null, session: viewing && viewing !== "new" ? viewing : "swarm" });
+							if (!runRef.current) await start(true);
+							return names;
 						}}
 					/>
 				) : null}

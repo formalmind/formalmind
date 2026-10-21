@@ -124,6 +124,7 @@ pub fn run() {
             swarm::swarm_stop,
             swarm::swarm_say,
             swarm::swarm_triage,
+            swarm::swarm_rebuild,
             swarm::swarm_running,
             swarm::swarm_suggest,
             swarm::swarm_plan,

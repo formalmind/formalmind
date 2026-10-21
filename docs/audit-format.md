@@ -32,6 +32,7 @@ Types: [`lib/audit-format.ts`](../lib/audit-format.ts). Writers: `record_report`
 | `findings` | Finding[] | in the report's order |
 | `coverage` | Coverage[] | internal audits: the Proofs coverage of each contract in scope |
 | `properties` | Property[] | internal audits: the properties proved and reviewed |
+| `rebuild` | Rebuild | internal audits: the rebuild cycle (the contracts rebuilt from the proofs alone, compared with the code) |
 
 ## Finding
 
@@ -71,6 +72,40 @@ Types: [`lib/audit-format.ts`](../lib/audit-format.ts). Writers: `record_report`
 | `description` | string (Markdown) | what was proved, required |
 | `theorems` | `{ name, file?, line?, sorry? }[]` | the theorems that prove it, each where it is |
 | `files` | string[] | the proof files |
+
+## Rebuild
+
+The rebuild cycle's state and findings, written by the local swarm as it works (`sync_rebuild` and
+`record_difference` in `desktop/src-tauri/src/swarm_ctx.rs`). Its rebuilder writes the contracts again under
+`rebuild/` from the Lean proofs and the generated model alone, never reading the code; its editor compares the two.
+
+| Field | Type | |
+|---|---|---|
+| `cycle` | number | the current cycle, from 1 |
+| `phase` | `rebuild` \| `compare` \| `polish` \| `close` \| `rest` | |
+| `contracts` | `{ contract, draft, rebuild, state }[]` | `draft`: the code's file; `rebuild`: the rebuild's files; `state`: `queued` \| `rebuilt` \| `polish` \| `agreed` \| `compared` \| `blocked` |
+| `tests` | string[] | the rebuild's tests (`rebuild/test/…`) |
+| `undetermined` | string[] | what the proofs did not determine: the rebuilder's own list of the choices the spec left open |
+| `summary`, `confidence` | string, `low` \| `medium` \| `high` | the last closed cycle's summary |
+| `differences` | Difference[] | every cycle's |
+
+## Difference
+
+| Field | Type | |
+|---|---|---|
+| `id` | string | `D-01`…, unique in the file |
+| `cycle` | number | the cycle that found it |
+| `contract` | string | |
+| `class` | `gap` \| `improvement` \| `divergence` \| `bug` | **gap**: the code does something the spec doesn't state; **improvement**: the rebuild is simpler or safer and still satisfies the spec; **divergence**: neither is clearly right; **bug**: one side breaks a theorem or an invariant |
+| `status` | `open` \| `asked` \| `fixing` \| `decided` \| `closed` | `asked`: a question with the maintainer; `fixing`: sent to the rebuilder |
+| `title` | string | |
+| `description` | string (Markdown) | required |
+| `draft`, `rebuild` | `{ file, line? }[]` | where in the code, and in the rebuild |
+| `theorem` | string | a gap: the theorem the spec is missing; otherwise the Lean it bears on |
+| `fix` | string | a gap, or a bug in the rebuild: what the rebuild should do, citing the Lean |
+| `question`, `recommendation` | string | an improvement or a divergence: the question put to the maintainer |
+| `decision` | string | the maintainer's answer |
+| `finding` | string | a bug in the code: the finding's `id` in this file |
 
 ## Example
 

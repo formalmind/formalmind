@@ -601,7 +601,7 @@ pub fn internal_path(root: &Path) -> PathBuf {
     report_dir(root).join(INTERNAL)
 }
 
-fn update_internal(root: &Path, f: impl FnOnce(&mut Value)) -> Result<String, String> {
+pub(crate) fn update_internal(root: &Path, f: impl FnOnce(&mut Value)) -> Result<String, String> {
     let path = internal_path(root);
     std::fs::create_dir_all(path.parent().unwrap_or(root)).map_err(|e| e.to_string())?;
     let mut doc = std::fs::read_to_string(&path)
@@ -715,6 +715,519 @@ mod internal_tests {
         assert_eq!(props[0]["locations"][0], json!({ "file": "src/Router.sol", "line": 113 }));
         assert!(props[0]["description"].as_str().unwrap().ends_with("**Assumptions.** `ext.get` returns what `ext.set` wrote."));
         assert_eq!(props[0]["theorems"][0]["name"], "swap_owner");
+        let _ = std::fs::remove_dir_all(&root);
+    }
+}
+
+// ---- the rebuild cycle: the protocol rebuilt from the proofs alone, compared with the draft ----
+//
+// The rebuilder writes `rebuild/` (its own Foundry project) from the Lake project alone: the spec, the generated model
+// and the refinement theorems. It never reads the draft (`src/`, `test/`, `script/`); its tools refuse to. The editor
+// then holds the draft and the rebuild side by side and classifies every difference as a gap, an improvement, a
+// divergence or a bug. The cycle's state (number, phase, each contract's progress, the maintainer's decisions) is
+// `.formal/cycle.json`; the differences are the `rebuild` section of Formal Mind's audit file, which Bugs and the
+// report show.
+
+pub const REBUILD_DIR: &str = "rebuild";
+
+#[derive(serde::Serialize, serde::Deserialize, Clone, Default, Debug, PartialEq)]
+pub struct CycleContract {
+    pub name: String,
+    /// The draft's file (for the editor; the rebuilder is never told).
+    #[serde(default)]
+    pub draft: String,
+    /// "queued" (to rebuild) | "rebuilt" (to compare) | "polish" (sent back to the rebuilder) | "agreed" (no open
+    /// difference) | "compared" (compared; differences wait on the maintainer or the spec) | "blocked"
+    pub state: String,
+    /// Polish rounds so far in this cycle.
+    #[serde(default)]
+    pub polish: u32,
+}
+
+#[derive(serde::Serialize, serde::Deserialize, Clone, Default, Debug)]
+pub struct Cycle {
+    /// The cycle's number, from 1; 0 before the first.
+    #[serde(default)]
+    pub n: u32,
+    /// "rebuild" | "compare" | "polish" | "close" | "rest"
+    #[serde(default)]
+    pub phase: String,
+    #[serde(default)]
+    pub contracts: Vec<CycleContract>,
+    /// What the maintainer decided, through the assistant: `{ id, contract, decision, at }`.
+    #[serde(default)]
+    pub decisions: Vec<Value>,
+    /// Proved plan items when the cycle started: a later cycle starts only once more are proved.
+    #[serde(default)]
+    pub proved: usize,
+    /// Each closed cycle's summary: `{ n, closed, summary, confidence }`.
+    #[serde(default)]
+    pub history: Vec<Value>,
+}
+
+impl Cycle {
+    /// The phase the contracts' states put the cycle in.
+    pub fn phase_now(&self) -> &'static str {
+        let any = |s: &str| self.contracts.iter().any(|c| c.state == s);
+        if self.contracts.is_empty() {
+            "rest"
+        } else if any("queued") {
+            "rebuild"
+        } else if any("polish") {
+            "polish"
+        } else if any("rebuilt") {
+            "compare"
+        } else if self.phase == "rest" {
+            "rest"
+        } else {
+            "close"
+        }
+    }
+
+    pub fn contract_mut(&mut self, name: &str) -> Option<&mut CycleContract> {
+        self.contracts.iter_mut().find(|c| c.name == name)
+    }
+}
+
+pub fn cycle_path(root: &Path) -> PathBuf {
+    root.join(".formal").join("cycle.json")
+}
+
+pub fn load_cycle(root: &Path) -> Cycle {
+    std::fs::read_to_string(cycle_path(root)).ok().and_then(|t| serde_json::from_str(&t).ok()).unwrap_or_default()
+}
+
+pub fn save_cycle(root: &Path, c: &Cycle) {
+    let path = cycle_path(root);
+    let _ = std::fs::create_dir_all(path.parent().unwrap_or(root));
+    let _ = std::fs::write(&path, serde_json::to_string_pretty(c).unwrap_or_default() + "\n");
+}
+
+/// Queues `contracts` (name, draft file) for rebuilding: into the running cycle, or a new one when the last has
+/// closed. Returns the names newly queued (the ones already in the running cycle are left as they are).
+pub fn start_cycle(root: &Path, contracts: &[(String, String)], proved: usize) -> (Cycle, Vec<String>) {
+    let mut c = load_cycle(root);
+    if c.n == 0 || c.phase == "rest" {
+        c.n += 1;
+        c.contracts.clear();
+        c.proved = proved;
+    }
+    let mut queued = vec![];
+    for (name, draft) in contracts {
+        if c.contracts.iter().any(|x| &x.name == name) {
+            continue;
+        }
+        c.contracts.push(CycleContract { name: name.clone(), draft: draft.clone(), state: "queued".into(), polish: 0 });
+        queued.push(name.clone());
+    }
+    c.phase = c.phase_now().into();
+    save_cycle(root, &c);
+    (c, queued)
+}
+
+/// A path relative to the folder, `/`-separated, after resolving symlinks where it exists.
+fn rel_real(root: &Path, p: &Path) -> String {
+    // The nearest part that exists, resolved, and the rest as written.
+    let base_of = p.ancestors().find(|a| a.exists()).unwrap_or(root);
+    let rest = p.strip_prefix(base_of).unwrap_or(Path::new(""));
+    let real = base_of.canonicalize().map(|b| b.join(rest)).unwrap_or_else(|_| p.to_path_buf());
+    let base = root.canonicalize().unwrap_or_else(|_| root.to_path_buf());
+    real.strip_prefix(&base).unwrap_or(&real).to_string_lossy().replace('\\', "/")
+}
+
+/// What the rebuilder may read: the Lake project (the spec, the generated model, the refinement theorems), the rebuild
+/// itself, and third-party dependencies (interfaces such as v4-core's). Never the draft: `src/`, `test/`, `script/`
+/// or anything else in the folder.
+pub fn rebuild_may_read(root: &Path, rel: &str) -> Result<PathBuf, String> {
+    let p = crate::executor::inside(root, rel)?;
+    let r = rel_real(root, &p);
+    let lake = lake_dir(root).map(|d| rel_real(root, &d)).unwrap_or_default();
+    let under = |dir: &str| !dir.is_empty() && (r == dir || r.starts_with(&format!("{dir}/")));
+    let draft = ["src", "test", "script", "contracts"].iter().any(|d| under(d));
+    let ok = !draft && (under(REBUILD_DIR) || under("dependencies") || under("lib") || under(&lake) || r.ends_with(".lean") || r == "FORMAL_MIND.md");
+    if ok {
+        Ok(p)
+    } else {
+        Err(format!("{rel} is not yours to read: the rebuild comes from the proofs alone (the Lake project {}/, rebuild/ and dependencies/)", if lake.is_empty() { "." } else { &lake }))
+    }
+}
+
+/// What the rebuilder may write: its own files under rebuild/ (the Foundry setup there is the swarm's).
+pub fn rebuild_may_write(root: &Path, rel: &str) -> Result<(), String> {
+    let p = crate::executor::inside(root, rel)?;
+    let r = p.strip_prefix(root).map(|x| x.to_string_lossy().replace('\\', "/")).unwrap_or_default();
+    if !r.starts_with(&format!("{REBUILD_DIR}/")) {
+        return Err(format!("{rel}: the rebuilder writes only under {REBUILD_DIR}/"));
+    }
+    if ["rebuild/foundry.toml", "rebuild/remappings.txt"].contains(&r.as_str()) || r.starts_with("rebuild/out/") || r.starts_with("rebuild/cache/") {
+        return Err(format!("{r} is the swarm's (it keeps the rebuild's Foundry setup)"));
+    }
+    if p.exists() && !rel_real(root, &p).starts_with(&format!("{REBUILD_DIR}/")) {
+        return Err(format!("{rel} leads out of {REBUILD_DIR}/"));
+    }
+    Ok(())
+}
+
+/// What the rebuilder may run: forge in the rebuild's own project (`--root rebuild`), which never compiles the draft.
+pub fn rebuild_may_run(command: &str) -> Result<(), String> {
+    let argv: Vec<&str> = command.split_whitespace().collect();
+    let rooted = argv.windows(2).any(|w| w[0] == "--root" && w[1].trim_end_matches('/') == REBUILD_DIR) || argv.iter().any(|a| a.trim_end_matches('/') == "--root=rebuild");
+    let bad = argv.iter().find(|a| a.contains("..") || a.starts_with('/') || ["--contracts", "--lib-paths", "--remappings", "--config-path", "-C"].iter().any(|f| a.starts_with(f)));
+    match (argv.as_slice(), rooted, bad) {
+        (["forge", "build" | "test", ..], true, None) => Ok(()),
+        (_, _, Some(b)) => Err(format!("`{b}` isn't allowed here: the rebuild is built on its own, with `--root rebuild`")),
+        _ => Err("The rebuilder runs only `forge build --root rebuild [args]` and `forge test --root rebuild [args]`".into()),
+    }
+}
+
+/// Sets up rebuild/ as a Foundry project of its own: the folder's compiler settings, and remappings to the folder's
+/// dependencies only (a remapping into the draft, like `@app/=src/`, is left out).
+pub fn prepare_rebuild(root: &Path) -> Result<(), String> {
+    let dir = root.join(REBUILD_DIR);
+    for d in ["src", "test"] {
+        std::fs::create_dir_all(dir.join(d)).map_err(|e| e.to_string())?;
+    }
+    let toml = std::fs::read_to_string(root.join("foundry.toml")).unwrap_or_default();
+    let keep = regex::Regex::new(r"(?m)^\s*(solc_version|solc|evm_version|optimizer|optimizer_runs|via_ir)\s*=.*$").expect("valid regex");
+    let mut settings: Vec<String> = vec![];
+    for m in keep.find_iter(&toml) {
+        let line = m.as_str().trim().to_string();
+        let key = line.split('=').next().unwrap_or("").trim().to_string();
+        if !settings.iter().any(|s| s.split('=').next().unwrap_or("").trim() == key) {
+            settings.push(line);
+        }
+    }
+    let libs: Vec<String> = ["dependencies", "lib"].iter().filter(|d| root.join(d).is_dir()).map(|d| format!("\"../{d}\"")).collect();
+    let out = format!(
+        "# Written by Formal Mind: the rebuild is a Foundry project of its own, so `forge --root rebuild` never compiles the draft.\n[profile.default]\nsrc = \"src\"\ntest = \"test\"\nout = \"out\"\nlibs = [{}]\n{}\n",
+        libs.join(", "),
+        settings.join("\n")
+    );
+    std::fs::write(dir.join("foundry.toml"), out).map_err(|e| e.to_string())?;
+    let remaps = std::fs::read_to_string(root.join("remappings.txt")).unwrap_or_default();
+    let mapped: Vec<String> = remaps
+        .lines()
+        .filter_map(|l| {
+            let (from, to) = l.trim().split_once('=')?;
+            let to = to.trim().trim_start_matches("./");
+            (to.starts_with("dependencies/") || to.starts_with("lib/")).then(|| format!("{}=../{to}", from.trim()))
+        })
+        .collect();
+    std::fs::write(dir.join("remappings.txt"), mapped.join("\n") + "\n").map_err(|e| e.to_string())?;
+    if !dir.join(".gitignore").exists() {
+        std::fs::write(dir.join(".gitignore"), "out/\ncache/\n").map_err(|e| e.to_string())?;
+    }
+    Ok(())
+}
+
+/// The rebuild's Solidity files (sources and tests), folder-relative.
+pub fn rebuild_files(root: &Path) -> Vec<String> {
+    crate::executor::list_files(root, REBUILD_DIR).map(|l| l.lines().filter(|f| f.ends_with(".sol")).map(String::from).collect()).unwrap_or_default()
+}
+
+/// An import in the rebuild that leads out of it (a relative path past rebuild/, or an absolute one): the rebuild must
+/// stand on the proofs and its dependencies, never on the draft's code.
+pub fn rebuild_escape(root: &Path) -> Option<String> {
+    let re = regex::Regex::new(r#"import\s+(?:[^"';]*\s+from\s+)?["']([^"']+)["']"#).expect("valid regex");
+    for f in rebuild_files(root) {
+        let text = std::fs::read_to_string(root.join(&f)).unwrap_or_default();
+        for c in re.captures_iter(&text) {
+            let path = &c[1];
+            if path.starts_with('/') {
+                return Some(format!("{f} imports {path}"));
+            }
+            if path.starts_with('.') {
+                // Resolved by hand: the dir of the file, then each part.
+                let mut parts: Vec<&str> = f.split('/').collect();
+                parts.pop();
+                for seg in path.split('/') {
+                    match seg {
+                        "." | "" => {}
+                        ".." => {
+                            parts.pop();
+                        }
+                        s => parts.push(s),
+                    }
+                }
+                if parts.first() != Some(&REBUILD_DIR) {
+                    return Some(format!("{f} imports {path}, outside {REBUILD_DIR}/"));
+                }
+            }
+        }
+    }
+    None
+}
+
+/// The rebuild's own list of what the proofs left open: the bullets under the README's "What the proofs did not
+/// determine" heading.
+pub fn undetermined(root: &Path) -> Option<Vec<String>> {
+    let text = std::fs::read_to_string(root.join(REBUILD_DIR).join("README.md")).ok()?;
+    let mut lines = text.lines().skip_while(|l| !(l.starts_with('#') && l.to_ascii_lowercase().contains("did not determine")));
+    lines.next()?;
+    Some(lines.take_while(|l| !l.starts_with('#')).filter_map(|l| l.trim_start().strip_prefix("- ").or_else(|| l.trim_start().strip_prefix("* "))).map(|l| l.trim().to_string()).filter(|l| !l.is_empty()).collect())
+}
+
+/// The internal audit as it is now (empty when there is none).
+pub fn internal_doc(root: &Path) -> Value {
+    std::fs::read_to_string(internal_path(root)).ok().and_then(|t| serde_json::from_str::<Value>(&t).ok()).filter(|v| v["schema"] == "formalmind.audit/v1").unwrap_or_else(|| json!({}))
+}
+
+/// The differences the editor recorded, every cycle's.
+pub fn differences(root: &Path) -> Vec<Value> {
+    internal_doc(root)["rebuild"]["differences"].as_array().cloned().unwrap_or_default()
+}
+
+pub const CLASSES: [&str; 4] = ["gap", "improvement", "divergence", "bug"];
+/// "open" (found) | "asked" (a question with the maintainer) | "fixing" (sent to the rebuilder) | "decided" (the
+/// maintainer answered) | "closed" (resolved: the rebuild or the spec now agrees, or nothing is left to do)
+pub const DIFF_STATUSES: [&str; 5] = ["open", "asked", "fixing", "decided", "closed"];
+
+/// Writes the cycle's state into the audit file's `rebuild` section: the cycle, its phase, each contract with its
+/// rebuild files and what the proofs left open, and (once closed) the summary.
+pub fn sync_rebuild(root: &Path, c: &Cycle) -> Result<String, String> {
+    let files = rebuild_files(root);
+    let open = undetermined(root).unwrap_or_default();
+    update_internal(root, |doc| {
+        if !doc["rebuild"].is_object() {
+            doc["rebuild"] = json!({ "differences": [] });
+        }
+        let r = &mut doc["rebuild"];
+        r["cycle"] = json!(c.n);
+        r["phase"] = json!(c.phase);
+        r["contracts"] = json!(c
+            .contracts
+            .iter()
+            .map(|k| {
+                let re = regex::Regex::new(&format!(r"\b(contract|library|interface)\s+{}\b", regex::escape(&k.name))).expect("valid regex");
+                let own: Vec<&String> = files.iter().filter(|f| f.starts_with("rebuild/src/") && std::fs::read_to_string(root.join(f)).is_ok_and(|t| re.is_match(&t))).collect();
+                json!({ "contract": k.name, "draft": k.draft, "rebuild": own, "state": k.state })
+            })
+            .collect::<Vec<_>>());
+        r["tests"] = json!(files.iter().filter(|f| f.starts_with("rebuild/test/")).collect::<Vec<_>>());
+        r["undetermined"] = json!(open);
+        if let Some(h) = c.history.last().filter(|h| h["n"] == c.n) {
+            r["summary"] = h["summary"].clone();
+            r["confidence"] = h["confidence"].clone();
+        }
+    })
+}
+
+/// One difference the editor found (or an update to one, by id): its class, what differs, where in the draft and in
+/// the rebuild, the Lean it bears on, and what follows from its class (a fix for the rebuild, a question for the
+/// maintainer, or the finding a bug was filed as). Returns the difference as recorded.
+pub fn record_difference(root: &Path, cycle: u32, contract: &str, input: &Value) -> Result<Value, String> {
+    let s = |k: &str| input[k].as_str().unwrap_or("").trim().to_string();
+    let doc = internal_doc(root);
+    let all = doc["rebuild"]["differences"].as_array().cloned().unwrap_or_default();
+    let earlier = (!s("id").is_empty()).then(|| all.iter().find(|d| d["id"].as_str() == Some(s("id").as_str())).cloned()).flatten();
+    if !s("id").is_empty() && earlier.is_none() {
+        return Err(format!("no difference {}; leave id out to record a new one", s("id")));
+    }
+    let mut d = earlier.clone().unwrap_or_else(|| {
+        let n = all.iter().filter_map(|d| d["id"].as_str()?.strip_prefix("D-")?.parse::<u32>().ok()).max().unwrap_or(0) + 1;
+        json!({ "id": format!("D-{n:02}"), "cycle": cycle, "contract": contract, "status": "open" })
+    });
+    for k in ["class", "title", "description", "theorem", "fix", "question", "recommendation", "finding", "status"] {
+        if !s(k).is_empty() {
+            d[k] = json!(if k == "class" || k == "status" { s(k).to_ascii_lowercase() } else { s(k) });
+        }
+    }
+    for (k, side) in [("draft", "draft"), ("rebuild", "rebuild")] {
+        if let Some(l) = location_of(&s(k)) {
+            d[side] = json!([l]);
+        }
+    }
+    let class = d["class"].as_str().unwrap_or("").to_string();
+    if !CLASSES.contains(&class.as_str()) {
+        return Err("class must be gap, improvement, divergence or bug".into());
+    }
+    if d["title"].as_str().is_none_or(|t| t.trim().is_empty()) || d["description"].as_str().is_none_or(|t| t.trim().is_empty()) {
+        return Err("title and description are required".into());
+    }
+    let status = d["status"].as_str().unwrap_or("open").to_string();
+    if !DIFF_STATUSES.contains(&status.as_str()) {
+        return Err(format!("status must be one of {}", DIFF_STATUSES.join(", ")));
+    }
+    let has = |k: &str| d[k].as_str().is_some_and(|t| !t.trim().is_empty());
+    if status != "closed" {
+        match class.as_str() {
+            "gap" if !has("fix") => return Err("a gap needs `fix`: what the rebuild should do, in your words, citing the Lean it should satisfy (never the draft's code), and `theorem`: the theorem the spec is missing".into()),
+            "improvement" | "divergence" if !has("question") && status != "decided" => return Err("an improvement or a divergence needs `question`: one question for the maintainer, answerable in a line, your recommendation first".into()),
+            "bug" if !has("finding") && !has("fix") => return Err("a bug in the draft is filed with report_bug first (with its PoC): pass its id as `finding`; a bug in the rebuild needs `fix`".into()),
+            _ => {}
+        }
+    }
+    if let Some(f) = d["finding"].as_str().filter(|f| !f.is_empty()) {
+        if !doc["findings"].as_array().is_some_and(|l| l.iter().any(|x| x["id"].as_str() == Some(f))) {
+            return Err(format!("no finding {f} in Formal Mind's audit file; file it with report_bug first"));
+        }
+    }
+    // A question goes to the maintainer once.
+    if earlier.is_none() && matches!(class.as_str(), "improvement" | "divergence") && status == "open" {
+        d["status"] = json!("asked");
+    }
+    let out = d.clone();
+    update_internal(root, |doc| {
+        if !doc["rebuild"].is_object() {
+            doc["rebuild"] = json!({ "differences": [] });
+        }
+        upsert(&mut doc["rebuild"], "differences", d);
+    })?;
+    Ok(out)
+}
+
+/// Changes one difference in place (a decision, a status the swarm moves it to).
+pub fn update_difference(root: &Path, id: &str, f: impl FnOnce(&mut Value)) -> Result<Value, String> {
+    let mut found = None;
+    update_internal(root, |doc| {
+        if let Some(d) = doc["rebuild"]["differences"].as_array_mut().and_then(|l| l.iter_mut().find(|d| d["id"].as_str() == Some(id))) {
+            f(d);
+            found = Some(d.clone());
+        }
+    })?;
+    found.ok_or_else(|| format!("no difference {id}"))
+}
+
+/// How sure the cycle is, as the rebuild cycle states it: low while a gap or a bug is open, medium once draft and
+/// rebuild agree (the rebuild's own spec, S′, isn't written by the local swarm yet).
+pub fn confidence(diffs: &[Value], n: u32) -> &'static str {
+    let open = diffs.iter().filter(|d| d["cycle"] == n).any(|d| matches!(d["class"].as_str(), Some("gap" | "bug")) && !matches!(d["status"].as_str(), Some("closed" | "decided")));
+    if open { "low" } else { "medium" }
+}
+
+/// The cycle's close summary: the differences found by class and where they stand.
+pub fn cycle_summary(diffs: &[Value], c: &Cycle) -> String {
+    let of: Vec<&Value> = diffs.iter().filter(|d| d["cycle"] == c.n).collect();
+    let count = |class: &str| of.iter().filter(|d| d["class"] == class).count();
+    let closed = of.iter().filter(|d| matches!(d["status"].as_str(), Some("closed" | "decided"))).count();
+    let waiting = of.iter().filter(|d| d["status"] == "asked").count();
+    let names: Vec<&str> = c.contracts.iter().map(|k| k.name.as_str()).collect();
+    format!(
+        "Cycle {} rebuilt {} from the proofs and compared {} with the draft: {} difference{} ({} gap{}, {} improvement{}, {} divergence{}, {} bug{}); {closed} resolved, {waiting} waiting on the maintainer.",
+        c.n,
+        names.join(", "),
+        if names.len() == 1 { "it" } else { "them" },
+        of.len(),
+        if of.len() == 1 { "" } else { "s" },
+        count("gap"),
+        if count("gap") == 1 { "" } else { "s" },
+        count("improvement"),
+        if count("improvement") == 1 { "" } else { "s" },
+        count("divergence"),
+        if count("divergence") == 1 { "" } else { "s" },
+        count("bug"),
+        if count("bug") == 1 { "" } else { "s" },
+    )
+}
+
+#[cfg(test)]
+mod cycle_tests {
+    use super::*;
+
+    fn folder(tag: &str) -> PathBuf {
+        let root = std::env::temp_dir().join(format!("fm-cycle-{tag}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        for d in ["src", "test", "formal/Generated", "dependencies/v4-core/src", "audit"] {
+            std::fs::create_dir_all(root.join(d)).unwrap();
+        }
+        std::fs::write(root.join("formal/lakefile.toml"), "name = \"Formal\"\n").unwrap();
+        std::fs::write(root.join("formal/Generated/Vault.lean"), "def Vault.collect := 1\n").unwrap();
+        std::fs::write(root.join("src/Vault.sol"), "contract Vault {}\n").unwrap();
+        std::fs::write(root.join("foundry.toml"), "[profile.default]\nsrc = \"src\"\nsolc_version = \"0.8.26\"\noptimizer = true\n").unwrap();
+        std::fs::write(root.join("remappings.txt"), "@app/=src/\nv4-core/=dependencies/v4-core/src\nforge-std/=lib/forge-std/src/\n").unwrap();
+        root
+    }
+
+    #[test]
+    fn the_rebuilder_never_sees_the_draft() {
+        let root = folder("read");
+        assert!(rebuild_may_read(&root, "formal/Generated/Vault.lean").is_ok());
+        assert!(rebuild_may_read(&root, "formal").is_ok());
+        assert!(rebuild_may_read(&root, "dependencies/v4-core/src").is_ok());
+        assert!(rebuild_may_read(&root, "rebuild/src/Vault.sol").is_ok());
+        for bad in ["src/Vault.sol", "./src/Vault.sol", "test/X.t.sol", "script/Deploy.s.sol", "foundry.toml", "formal/../src/Vault.sol", "audit/README.md"] {
+            assert!(rebuild_may_read(&root, bad).is_err(), "{bad}");
+        }
+        // A symlink in the rebuild that points at the draft leads nowhere.
+        std::fs::create_dir_all(root.join("rebuild")).unwrap();
+        #[cfg(unix)]
+        {
+            std::os::unix::fs::symlink(root.join("src"), root.join("rebuild/draft")).unwrap();
+            assert!(rebuild_may_read(&root, "rebuild/draft/Vault.sol").is_err());
+            assert!(rebuild_may_write(&root, "rebuild/draft/Vault.sol").is_err());
+        }
+        assert!(rebuild_may_write(&root, "rebuild/src/Vault.sol").is_ok());
+        assert!(rebuild_may_write(&root, "rebuild/foundry.toml").is_err());
+        assert!(rebuild_may_write(&root, "src/Vault.sol").is_err());
+        assert!(rebuild_may_write(&root, "formal/Spec.lean").is_err());
+        assert!(rebuild_may_run("forge test --root rebuild -vv").is_ok());
+        assert!(rebuild_may_run("forge build --sizes --root=rebuild").is_ok());
+        assert!(rebuild_may_run("forge build").is_err());
+        assert!(rebuild_may_run("forge test --root rebuild --match-path ../test/X.t.sol").is_err());
+        assert!(rebuild_may_run("forge build --root rebuild --contracts src").is_err());
+        assert!(rebuild_may_run("lake build").is_err());
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn the_rebuild_is_its_own_project() {
+        let root = folder("prep");
+        prepare_rebuild(&root).unwrap();
+        let toml = std::fs::read_to_string(root.join("rebuild/foundry.toml")).unwrap();
+        assert!(toml.contains("libs = [\"../dependencies\"]") && toml.contains("solc_version = \"0.8.26\"") && toml.contains("optimizer = true"));
+        let remaps = std::fs::read_to_string(root.join("rebuild/remappings.txt")).unwrap();
+        assert_eq!(remaps, "v4-core/=../dependencies/v4-core/src\nforge-std/=../lib/forge-std/src/\n");
+        std::fs::write(root.join("rebuild/src/Vault.sol"), "import {X} from \"v4-core/X.sol\";\nimport \"./Lib.sol\";\ncontract Vault {}\n").unwrap();
+        assert_eq!(rebuild_escape(&root), None);
+        std::fs::write(root.join("rebuild/src/Vault.sol"), "import {Vault as V} from \"../../src/Vault.sol\";\n").unwrap();
+        assert!(rebuild_escape(&root).unwrap().contains("outside rebuild/"));
+        std::fs::write(root.join("rebuild/README.md"), "# Rebuild\n\n## What the proofs did not determine\n\n- The event names.\n- Who may call `sweep`.\n\n## Tests\n- x\n").unwrap();
+        assert_eq!(undetermined(&root).unwrap(), vec!["The event names.", "Who may call `sweep`."]);
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn differences_are_classified_into_the_audit() {
+        let root = folder("diff");
+        let (c, queued) = start_cycle(&root, &[("Vault".into(), "src/Vault.sol".into())], 3);
+        assert_eq!((c.n, c.phase.as_str(), queued.len()), (1, "rebuild", 1));
+        // Queuing again in the running cycle adds nothing.
+        assert!(start_cycle(&root, &[("Vault".into(), "src/Vault.sol".into())], 3).1.is_empty());
+        let gap = json!({ "class": "gap", "title": "Sweep has no owner check", "description": "The draft restricts `sweep` to the owner; no theorem says so.", "draft": "src/Vault.sol:12", "rebuild": "rebuild/src/Vault.sol:30", "theorem": "sweep reverts unless msg.sender = owner", "fix": "Only the owner may sweep (AsyncSwapSpec/Admin.lean)." });
+        let d = record_difference(&root, 1, "Vault", &gap).unwrap();
+        assert_eq!((d["id"].as_str(), d["status"].as_str()), (Some("D-01"), Some("open")));
+        assert_eq!(d["draft"][0], json!({ "file": "src/Vault.sol", "line": 12 }));
+        // Each class needs what follows from it.
+        assert!(record_difference(&root, 1, "Vault", &json!({ "class": "gap", "title": "t", "description": "d" })).is_err());
+        assert!(record_difference(&root, 1, "Vault", &json!({ "class": "divergence", "title": "t", "description": "d" })).is_err());
+        assert!(record_difference(&root, 1, "Vault", &json!({ "class": "bug", "title": "t", "description": "d", "finding": "FM-09" })).is_err());
+        assert!(record_difference(&root, 1, "Vault", &json!({ "class": "typo", "title": "t", "description": "d" })).is_err());
+        let q = record_difference(&root, 1, "Vault", &json!({ "class": "improvement", "title": "One step", "description": "The rebuild collects in one call.", "question": "Take the one-call collect? Recommended: yes." })).unwrap();
+        assert_eq!((q["id"].as_str(), q["status"].as_str()), (Some("D-02"), Some("asked")));
+        // An update by id keeps what it doesn't restate.
+        let closed = record_difference(&root, 1, "Vault", &json!({ "id": "D-01", "status": "closed" })).unwrap();
+        assert_eq!((closed["status"].as_str(), closed["class"].as_str()), (Some("closed"), Some("gap")));
+        update_difference(&root, "D-02", |d| {
+            d["status"] = json!("decided");
+            d["decision"] = json!("Yes.");
+        })
+        .unwrap();
+        let all = differences(&root);
+        assert_eq!(all.len(), 2);
+        assert_eq!(confidence(&all, 1), "medium");
+        let mut c = load_cycle(&root);
+        c.contract_mut("Vault").unwrap().state = "agreed".into();
+        assert_eq!(c.phase_now(), "close");
+        c.history.push(json!({ "n": 1, "summary": cycle_summary(&all, &c), "confidence": "medium" }));
+        c.phase = "rest".into();
+        save_cycle(&root, &c);
+        sync_rebuild(&root, &c).unwrap();
+        let doc = internal_doc(&root);
+        assert_eq!((doc["rebuild"]["cycle"].as_u64(), doc["rebuild"]["phase"].as_str()), (Some(1), Some("rest")));
+        assert!(doc["rebuild"]["summary"].as_str().unwrap().contains("2 differences (1 gap, 1 improvement, 0 divergences, 0 bugs); 2 resolved"));
+        assert_eq!(doc["rebuild"]["differences"].as_array().unwrap().len(), 2);
+        // The next start opens cycle 2.
+        assert_eq!(start_cycle(&root, &[("Vault".into(), "src/Vault.sol".into())], 5).0.n, 2);
         let _ = std::fs::remove_dir_all(&root);
     }
 }

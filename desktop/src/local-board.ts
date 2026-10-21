@@ -3,9 +3,9 @@ import type { SwarmCost, SwarmItem, SwarmNote, SwarmRole, SwarmState } from "@/l
 type Ev = { kind: string; role: string; item: string; text: string; spent: number };
 type Item = { index: number; mark: string; text: string };
 
-const ROLES: SwarmRole[] = ["planner", "prover", "reviewer", "assistant"];
+const ROLES: SwarmRole[] = ["planner", "prover", "reviewer", "rebuilder", "editor", "assistant"];
 /** The ledger's names for the roles (its rows are coloured by them). */
-const COST_NAME: Record<string, string> = { planner: "plan", prover: "prove", reviewer: "review", assistant: "assistant" };
+const COST_NAME: Record<string, string> = { planner: "plan", prover: "prove", reviewer: "review", rebuilder: "rebuild", editor: "editor", assistant: "assistant" };
 
 /** One agent turn in the session's events: from its first status to the next turn's. */
 type Turn = { role: SwarmRole; item: string; tools: string[]; now: string | null; startSpent: number; endSpent: number };
@@ -65,7 +65,7 @@ export function localBoard(folder: string, plan: Item[], events: Ev[], running: 
 	// The current turn's notebook entry: its tool calls ticked off, then what it is doing now.
 	const note: SwarmNote | null = current
 		? {
-				repo, role: current.role, ref: at, runId: 1, title: current.role === "planner" ? "Plan" : at ? `Item ${at}` : current.role,
+				repo, role: current.role, ref: at, runId: 1, title: current.role === "planner" ? "Plan" : at ? `Item ${at}` : current.item || current.role,
 				tasks: [...current.tools.slice(-7).map((text) => ({ text, done: true, dropped: false })), { text: current.now ?? "thinking", done: false, dropped: false }],
 				verified: null, left: null, next: null, createdAt: now, updatedAt: now, url: "",
 			}
