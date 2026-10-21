@@ -76,7 +76,7 @@ export function NavUser() {
 						</SidebarMenuButton>
 					</DropdownMenuTrigger>
 					<DropdownMenuContent
-						className="w-[--radix-dropdown-menu-trigger-width] min-w-52 rounded-lg [&_[role=menuitem]]:py-1 [&_[role=menuitem]]:text-[13px] [&_[role=menuitem]_svg]:size-3.5 [&_[role=separator]]:my-0.5"
+						className="w-[--radix-dropdown-menu-trigger-width] min-w-52 rounded-lg [&_[role=menuitem]]:py-1 [&_[role=menuitem]]:text-[13px] [&_[role=menuitem]]:text-muted-foreground [&_[role=menuitem]:focus]:text-foreground/80 [&_[role=menuitem]_svg]:size-3.5 [&_[role=separator]]:my-0.5"
 						side={isMobile ? "bottom" : "right"}
 						align="end"
 						sideOffset={4}
