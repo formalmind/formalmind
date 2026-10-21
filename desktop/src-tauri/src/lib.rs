@@ -11,6 +11,7 @@ mod swarm;
 mod swarm_ctx;
 mod local;
 mod lsp;
+mod openai;
 mod report;
 mod term;
 
@@ -179,6 +180,8 @@ pub fn run() {
             swarm::swarm_bugs,
             swarm::anthropic_key_set,
             swarm::anthropic_key_status,
+            swarm::openai_key_set,
+            swarm::openai_key_status,
             swarm::swarm_sessions,
             swarm::swarm_history,
             swarm::swarm_proofs,

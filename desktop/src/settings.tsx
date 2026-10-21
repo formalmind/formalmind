@@ -8,7 +8,7 @@ import { setVimMode, useVimMode } from "@/components/vim-mode";
 import { AuditFolders, EntryPoints } from "@/components/audit-folders";
 import { useFolders } from "./local";
 
-type Provider = "formal" | "anthropic";
+type Provider = "formal" | "anthropic" | "openai";
 const read = (k: string) => {
 	try {
 		return localStorage.getItem(k);
@@ -24,6 +24,40 @@ const Section = ({ title, children }: { title: string; children: React.ReactNode
 	</section>
 );
 
+/** One provider's API key: saved in the macOS keychain, or forgotten. */
+function ApiKey({ vendor, name, placeholder, onSaved }: { vendor: "anthropic" | "openai"; name: string; placeholder: string; onSaved: () => void }) {
+	const [hasKey, setHasKey] = useState(false);
+	const [key, setKey] = useState("");
+	useEffect(() => void invoke<boolean>(`${vendor}_key_status`).then(setHasKey), [vendor]);
+	return (
+		<div className="flex items-center justify-between gap-4 border-t pt-3">
+			<span>
+				<span className="font-medium">{name} API key</span>
+				<span className="block text-xs text-muted-foreground">{hasKey ? "Saved in your macOS keychain." : "Not set. Kept in your macOS keychain when you save it."}</span>
+			</span>
+			{hasKey ? (
+				<button type="button" onClick={() => void invoke(`${vendor}_key_set`, { key: "" }).then(() => setHasKey(false))} className="btn-soft h-8 px-3 text-sm">Forget key</button>
+			) : (
+				<form
+					className="flex gap-1.5"
+					onSubmit={(e) => {
+						e.preventDefault();
+						if (!key.trim()) return;
+						void invoke(`${vendor}_key_set`, { key }).then(() => {
+							setKey("");
+							setHasKey(true);
+							onSaved();
+						});
+					}}
+				>
+					<input type="password" value={key} onChange={(e) => setKey(e.target.value)} placeholder={placeholder} className="h-8 w-56 rounded-lg border bg-transparent px-2 text-sm" />
+					<button type="submit" disabled={!key.trim()} className="btn-dark h-8 px-3 text-sm disabled:opacity-50">Save</button>
+				</form>
+			)}
+		</div>
+	);
+}
+
 /** The page's subsections, in menu order under their group labels. `?section=` picks one, so a reload or a link lands on it. */
 const SECTIONS = [
 	{ id: "models", title: "Models", icon: Sparkles, group: "This computer" },
@@ -35,11 +69,12 @@ const SECTIONS = [
 const GROUPS = [...new Set(SECTIONS.map((s) => s.group))];
 type SectionId = (typeof SECTIONS)[number]["id"];
 
-/** The desktop app's settings: how agents reach Claude (and your key), and which server the app talks to. */
+/** The desktop app's settings: how agents reach a model (and your keys), and which server the app talks to. */
 export function SettingsPage() {
-	const [provider, setProvider] = useState<Provider>(read("fm:provider") === "anthropic" ? "anthropic" : "formal");
-	const [hasKey, setHasKey] = useState(false);
-	const [key, setKey] = useState("");
+	const [provider, setProvider] = useState<Provider>(() => {
+		const p = read("fm:provider");
+		return p === "anthropic" || p === "openai" ? p : "formal";
+	});
 	const [base, setBase] = useState(apiBase());
 	const [saved, setSaved] = useState<string | null>(null);
 	const [params, setParams] = useSearchParams();
@@ -49,7 +84,6 @@ export function SettingsPage() {
 	const { folders } = useFolders();
 	const [repos, setRepos] = useState<Record<string, string>>({});
 	useEffect(() => void invoke<{ repos?: Record<string, string> }>("config_get").then((c) => setRepos(c.repos ?? {}), () => {}), []);
-	useEffect(() => void invoke<boolean>("anthropic_key_status").then(setHasKey), []);
 
 	const pick = (p: Provider) => {
 		setProvider(p);
@@ -99,39 +133,17 @@ export function SettingsPage() {
 					{section === "models" ? <Section title="Models">
 						<label className="flex items-center justify-between gap-4">
 							<span>
-								<span className="font-medium">Run agents on Claude via</span>
-								<span className="block text-xs text-muted-foreground">Credits are metered by formal.team and shown in Billing. Your own key goes straight to Anthropic.</span>
+								<span className="font-medium">Run agents via</span>
+								<span className="block text-xs text-muted-foreground">Credits run Claude, metered by formal.team and shown in Billing. Your own key goes straight to Anthropic (Claude) or OpenAI (GPT-5).</span>
 							</span>
 							<select value={provider} onChange={(e) => pick(e.target.value as Provider)} className="h-8 rounded-lg border bg-background px-2 text-sm">
 								<option value="formal">formal.team credits</option>
 								<option value="anthropic">My Anthropic key</option>
+								<option value="openai">My OpenAI key</option>
 							</select>
 						</label>
-						<div className="flex items-center justify-between gap-4 border-t pt-3">
-							<span>
-								<span className="font-medium">Anthropic API key</span>
-								<span className="block text-xs text-muted-foreground">{hasKey ? "Saved in your macOS keychain." : "Not set. Kept in your macOS keychain when you save it."}</span>
-							</span>
-							{hasKey ? (
-								<button type="button" onClick={() => void invoke("anthropic_key_set", { key: "" }).then(() => setHasKey(false))} className="btn-soft h-8 px-3 text-sm">Forget key</button>
-							) : (
-								<form
-									className="flex gap-1.5"
-									onSubmit={(e) => {
-										e.preventDefault();
-										if (!key.trim()) return;
-										void invoke("anthropic_key_set", { key }).then(() => {
-											setKey("");
-											setHasKey(true);
-											flash("Key saved");
-										});
-									}}
-								>
-									<input type="password" value={key} onChange={(e) => setKey(e.target.value)} placeholder="sk-ant-…" className="h-8 w-56 rounded-lg border bg-transparent px-2 text-sm" />
-									<button type="submit" disabled={!key.trim()} className="btn-dark h-8 px-3 text-sm disabled:opacity-50">Save</button>
-								</form>
-							)}
-						</div>
+						<ApiKey vendor="anthropic" name="Anthropic" placeholder="sk-ant-…" onSaved={() => flash("Key saved")} />
+						<ApiKey vendor="openai" name="OpenAI" placeholder="sk-…" onSaved={() => flash("Key saved")} />
 					</Section> : null}
 					{section === "entry-points" ? <Section title="Entry points">
 						<p className="text-xs text-muted-foreground">The contracts Proofs models for each folder; the first opens by default. Picking a contract on the Proofs page makes it the first.</p>

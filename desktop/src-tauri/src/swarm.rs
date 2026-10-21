@@ -94,6 +94,28 @@ fn anthropic_entry() -> Result<keyring::Entry, String> {
     keyring::Entry::new("team.formal.desktop", "anthropic").map_err(|e| e.to_string())
 }
 
+fn openai_entry() -> Result<keyring::Entry, String> {
+    keyring::Entry::new("team.formal.desktop", "openai").map_err(|e| e.to_string())
+}
+
+/// Saves your OpenAI API key in the keychain (empty clears it).
+#[tauri::command]
+pub fn openai_key_set(key: String) -> Result<(), String> {
+    let entry = openai_entry()?;
+    if key.trim().is_empty() {
+        return match entry.delete_credential() {
+            Ok(()) | Err(keyring::Error::NoEntry) => Ok(()),
+            Err(e) => Err(e.to_string()),
+        };
+    }
+    entry.set_password(key.trim()).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub fn openai_key_status() -> bool {
+    openai_entry().and_then(|e| e.get_password().map_err(|e| e.to_string())).is_ok()
+}
+
 /// Saves your Anthropic API key in the keychain (empty clears it).
 #[tauri::command]
 pub fn anthropic_key_set(key: String) -> Result<(), String> {
@@ -138,6 +160,8 @@ fn now_ms() -> u128 {
 /// Dollars for one call at the model's list price (input, output, cache reads per million; writes 1.25x input).
 fn cost(model: &str, usage: &Value) -> f64 {
     let (inp, out, read) = match model {
+        "gpt-5-mini" => (0.25, 2.0, 0.025),
+        m if m.starts_with("gpt-5") => (1.25, 10.0, 0.125),
         m if m.contains("haiku") => (0.1, 0.5, 0.01),
         m if m.contains("sonnet") => (2.0, 10.0, 0.2),
         _ => (4.0, 20.0, 0.2),
@@ -165,9 +189,9 @@ const COMPACTION_BETA: &str = "compact-2026-09-04";
 const COMPACT_AT: f64 = 0.75;
 const KEEP_STEPS: usize = 3;
 
-/// The context window of the models the swarm uses (Opus, Sonnet and Haiku 5.5 all take 1M tokens).
-fn context_window(_model: &str) -> u64 {
-    1_000_000
+/// The context window of the models the swarm uses (Opus, Sonnet and Haiku 5.5 all take 1M tokens; GPT-5 400k).
+fn context_window(model: &str) -> u64 {
+    if model.starts_with("gpt-") { 400_000 } else { 1_000_000 }
 }
 
 /// Tokens the next request will carry: this reply's whole input (cached or not) plus the reply itself.
@@ -230,6 +254,9 @@ fn splice(messages: &[Value], cut: usize, summary: Value, task: &Value) -> Vec<V
 const SUMMARY_INSTRUCTIONS: &str = "Summarize this agent's work so far for the agent itself, which continues the job from your summary and the few most recent steps that follow it. Keep: the task and the plan item or report it is about; every file written or changed and what it now holds; the commands run and their results (which `lake build` or `forge test` runs passed or failed, and the errors that matter); findings recorded or bugs reported, with their IDs and statuses; what was tried and didn't work; and what is left to do next. Be specific: names of defs, theorems, lemmas, files, line numbers. Do not call tools; respond with the summary text only.";
 
 fn model_of(req: &SwarmRequest) -> &str {
+    if req.provider.as_deref() == Some("openai") {
+        return req.model.as_deref().filter(|m| crate::openai::MODELS.contains(m)).unwrap_or(crate::openai::MODELS[0]);
+    }
     match req.model.as_deref() {
         Some(m @ ("claude-opus-5-5" | "claude-sonnet-5-5" | "claude-haiku-5-5")) => m,
         _ => DEFAULT_MODEL,
@@ -607,6 +634,10 @@ async fn model_access(client: &reqwest::Client, folder_path: &str, api_base: &st
             let key = anthropic_entry()?.get_password().map_err(|_| "Add your Anthropic key first".to_string())?;
             return Ok((key, "https://api.anthropic.com".into()));
         }
+        if provider == Some("openai") {
+            let key = openai_entry()?.get_password().map_err(|_| "Add your OpenAI key first".to_string())?;
+            return Ok((key, "https://api.openai.com".into()));
+        }
         let folder = Path::new(folder_path).file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default();
         let res = client
             .post(format!("{api_base}/api/desktop/model-session"))
@@ -641,6 +672,12 @@ impl Turn<'_> {
 
     /// POST /v1/messages; the compaction beta goes along when the request asks for a summary or carries one.
     async fn call(&self, key: &str, base: &str, body: &Value) -> Result<(u16, Value), String> {
+        if self.req.provider.as_deref() == Some("openai") {
+            let res = self.client.post(format!("{base}/v1/chat/completions")).bearer_auth(key).json(&crate::openai::request(body)).send().await.map_err(|e| e.to_string())?;
+            let status = res.status().as_u16();
+            let reply: Value = res.json().await.map_err(|e| e.to_string())?;
+            return Ok((status, crate::openai::reply(&reply, body.get("compaction").is_some())));
+        }
         let mut req = self.client.post(format!("{base}/v1/messages")).header("x-api-key", key).header("anthropic-version", "2023-06-01");
         if body.get("compaction").is_some() || body["messages"].as_array().is_some_and(|m| has_compaction(m)) {
             req = req.header("anthropic-beta", COMPACTION_BETA);
@@ -667,6 +704,10 @@ impl Turn<'_> {
 
     /// /v1/messages/count_tokens for a request body (free, not metered); None when the count fails.
     async fn count(&self, key: &str, base: &str, body: &Value) -> Option<u64> {
+        // OpenAI has no free token count; the Context card fills in from the replies' usage instead.
+        if self.req.provider.as_deref() == Some("openai") {
+            return None;
+        }
         let mut req = self.client.post(format!("{base}/v1/messages/count_tokens")).header("x-api-key", key).header("anthropic-version", "2023-06-01");
         if body["messages"].as_array().is_some_and(|m| has_compaction(m)) {
             req = req.header("anthropic-beta", COMPACTION_BETA);
@@ -1336,6 +1377,8 @@ pub fn swarm_start(app: AppHandle, swarms: State<'_, Swarms>, request: SwarmRequ
     }
     if request.provider.as_deref() == Some("anthropic") {
         anthropic_entry()?.get_password().map_err(|_| "Add your Anthropic key first".to_string())?;
+    } else if request.provider.as_deref() == Some("openai") {
+        openai_entry()?.get_password().map_err(|_| "Add your OpenAI key first".to_string())?;
     } else {
         token()?;
     }
@@ -1689,14 +1732,22 @@ mod tests {
 pub async fn swarm_suggest(folder: String, api_base: String, provider: Option<String>, run: String, transcript: String) -> Result<String, String> {
     let client = reqwest::Client::builder().timeout(Duration::from_secs(60)).build().unwrap_or_default();
     let (key, base) = model_access(&client, &folder, &api_base, provider.as_deref(), &run, "assistant", "suggest").await?;
-    let body = json!({
+    let openai = provider.as_deref() == Some("openai");
+    let mut body = json!({
         "model": "claude-haiku-5-5", "max_tokens": 400,
         "system": "You draft the user's next message to a swarm of agents (planner, prover, reviewer) proving a codebase correct. Reply to what the agents last asked or reported, as the user, in one to three plain sentences. Output only the message.",
         "messages": [{ "role": "user", "content": format!("The chat so far:\n{transcript}\n\nDraft my next message.") }],
     });
-    let res = client.post(format!("{base}/v1/messages")).header("x-api-key", &key).header("anthropic-version", "2023-06-01").json(&body).send().await.map_err(|e| e.to_string())?;
+    let res = if openai {
+        body["model"] = json!("gpt-5-mini");
+        client.post(format!("{base}/v1/chat/completions")).bearer_auth(&key).json(&crate::openai::request(&body)).send().await
+    } else {
+        client.post(format!("{base}/v1/messages")).header("x-api-key", &key).header("anthropic-version", "2023-06-01").json(&body).send().await
+    }
+    .map_err(|e| e.to_string())?;
     let status = res.status();
     let reply: Value = res.json().await.map_err(|e| e.to_string())?;
+    let reply = if openai { crate::openai::reply(&reply, false) } else { reply };
     if !status.is_success() {
         return Err(reply["error"]["message"].as_str().unwrap_or("The model call failed").to_string());
     }

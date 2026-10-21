@@ -37,7 +37,7 @@ export type Bridge = {
 type Ev = { folder?: string; run: string; kind: "start" | "status" | "context" | "say" | "tool" | "result" | "you" | "bug" | "plan" | "done"; role: string; item: string; text: string; spent: number };
 type Item = { index: number; mark: string; text: string };
 type Bug = { file: string; title: string; body: string };
-type Provider = "formal" | "anthropic";
+type Provider = "formal" | "anthropic" | "openai";
 type Proof = { item: string; files: string[]; summary: string; at: string };
 
 /** Copies text (or what `get` resolves to), showing a tick for a moment. */
@@ -69,6 +69,11 @@ const MODELS = [
 	{ value: "claude-opus-5-5", label: "Claude Opus 5.5" },
 	{ value: "claude-sonnet-5-5", label: "Claude Sonnet 5.5" },
 	{ value: "claude-haiku-5-5", label: "Claude Haiku 5.5" },
+];
+/** With your OpenAI key (Settings → Models), these instead. */
+const OPENAI_MODELS = [
+	{ value: "gpt-5", label: "GPT-5" },
+	{ value: "gpt-5-mini", label: "GPT-5 mini" },
 ];
 const colorOf = (role: string) => (ROLE_COLORS as Record<string, string>)[role] ?? "hsl(var(--muted-foreground))";
 const store = { get: (k: string) => { try { return localStorage.getItem(k); } catch { return null; } }, set: (k: string, v: string) => { try { localStorage.setItem(k, v); } catch { /* not kept */ } } };
@@ -1356,7 +1361,14 @@ export function SwarmPanel({ folder, name, scan, bridge, session, file: openPath
 	const [model, setModel] = useState(() => store.get("fm:model") ?? MODELS[0].value);
 	
 	// Set in Settings (desktop/src/settings.tsx).
-	const [provider] = useState<Provider>(() => (store.get("fm:provider") === "anthropic" ? "anthropic" : "formal"));
+	const [provider] = useState<Provider>(() => {
+		const p = store.get("fm:provider");
+		return p === "anthropic" || p === "openai" ? p : "formal";
+	});
+	// The models for how the agents are run: GPT on your OpenAI key, Claude otherwise.
+	const models = provider === "openai" ? OPENAI_MODELS : MODELS;
+	const pickedModel = models.some((m) => m.value === model) ? model : models[0].value;
+	const ownKey = provider === "anthropic" ? "Anthropic" : provider === "openai" ? "OpenAI" : null;
 	const [hasKey, setHasKey] = useState(false);
 	const [sessions, setSessions] = useState<Session[]>([]);
 	const [proofs, setProofs] = useState<Record<string, Proof>>({});
@@ -1656,7 +1668,7 @@ export function SwarmPanel({ folder, name, scan, bridge, session, file: openPath
 
 	useEffect(() => {
 		refresh();
-		void invoke<boolean>("anthropic_key_status").then(setHasKey);
+		void invoke<boolean>(provider === "openai" ? "openai_key_status" : "anthropic_key_status").then(setHasKey);
 		void invoke<string[]>("swarm_running", { folder }).then(async (r) => {
 			setRuns(r);
 			const list = await listSessions();
@@ -1746,7 +1758,7 @@ export function SwarmPanel({ folder, name, scan, bridge, session, file: openPath
 		const fresh = session === "new" && !viewing;
 		if (fresh) setEvents([]);
 		try {
-			const id = await invoke<string>("swarm_start", { request: { folder, goal: goal.trim() || null, budget_usd: budget, api_base: apiBase(), provider, model, session: fresh ? `s-${Date.now().toString(16)}` : viewing ?? "swarm", only_queued: onlyQueued } });
+			const id = await invoke<string>("swarm_start", { request: { folder, goal: goal.trim() || null, budget_usd: budget, api_base: apiBase(), provider, model: pickedModel, session: fresh ? `s-${Date.now().toString(16)}` : viewing ?? "swarm", only_queued: onlyQueued } });
 			setRuns((r) => (r.includes(id) ? r : [...r, id]));
 			setViewing(id);
 			void listSessions();
@@ -2026,8 +2038,8 @@ export function SwarmPanel({ folder, name, scan, bridge, session, file: openPath
 						onStop={() => {}}
 						isLoading={false}
 						modelPicker={{
-							value: model,
-							options: MODELS,
+							value: pickedModel,
+							options: models,
 							disabled: Boolean(run),
 							onChange: (m) => {
 								setModel(m);
@@ -2035,9 +2047,8 @@ export function SwarmPanel({ folder, name, scan, bridge, session, file: openPath
 							},
 						}}
 						placeholder={run ? "Talk to the agents: a question, a new focus, an idea to check…" : "What should the swarm focus on? (optional) ↑ starts it"}
-						// The composer's top left: the project this chat talks to, and the run control beside it (Stop while it
-						// runs; Start, or Resume with plan items left, when it doesn't).
-						// Start (or Stop) first, then the folder it runs on.
+						// The composer's top left: the run control (Stop while it runs; Start, or Resume with plan items left,
+						// when it doesn't), then the project this chat talks to.
 						context={
 							<span className="inline-flex items-center gap-1.5">
 								{run ? (
@@ -2045,7 +2056,7 @@ export function SwarmPanel({ folder, name, scan, bridge, session, file: openPath
 										<Square className="size-2.5 fill-current" />Stop
 									</button>
 								) : (
-									<button type="button" onClick={() => void start()} disabled={provider === "anthropic" && !hasKey} title={provider === "anthropic" && !hasKey ? "Add your Anthropic key in Settings first" : "Start the swarm"} className="btn-dark inline-flex h-8 items-center gap-1.5 px-3 text-[13px] disabled:opacity-50">
+									<button type="button" onClick={() => void start()} disabled={Boolean(ownKey) && !hasKey} title={ownKey && !hasKey ? `Add your ${ownKey} key in Settings first` : "Start the swarm"} className="btn-dark inline-flex h-8 items-center gap-1.5 px-3 text-[13px] disabled:opacity-50">
 										<Play className="size-3" />{plan.some((i) => i.mark === " ") ? "Resume" : "Start"}
 									</button>
 								)}
