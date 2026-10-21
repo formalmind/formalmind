@@ -3,10 +3,11 @@
 import { Link } from "react-router";
 import { LogoMark } from "@/components/logo";
 import { MarkGithubIcon } from "@primer/octicons-react";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Loader2, Lock } from "lucide-react";
 import { SwarmCanvas } from "@/components/swarm/swarm-canvas";
 import { SetupPreview } from "./setup-preview";
+import { PANEL_TOP, PEEK, TakeoverAgents, usePhase } from "./takeover";
 import { readDraft, usePlan } from "./use-plan";
 import { EXAMPLE_REPOS } from "@/lib/plan";
 
@@ -72,9 +73,22 @@ export function Landing({ signedIn }: { signedIn: boolean }) {
 	const home = `/?add=${repo ? encodeURIComponent(repo) : "1"}`;
 	const startHref = signedIn ? home : `/auth/login?returnTo=${encodeURIComponent(home)}`;
 
+	// Planning a repository hands the page over to the agents (takeover.tsx): they drag the hero away and pull the
+	// plan up to fill the screen. A plan resumed from an earlier visit shows in place instead.
+	const [phase, setPhase] = usePhase();
+	const heroRef = useRef<HTMLElement>(null);
+	const [heroBox, setHeroBox] = useState<DOMRect | null>(null);
+	const takeover = phase !== "idle";
+	const gone = takeover && phase !== "enter";
 	const run = (value: string) => {
 		setInput(value);
 		start(value);
+		setHeroBox(heroRef.current?.getBoundingClientRect() ?? null);
+		setPhase("enter");
+	};
+	const close = () => {
+		setPhase("idle");
+		reset();
 	};
 
 	return (
@@ -107,7 +121,11 @@ export function Landing({ signedIn }: { signedIn: boolean }) {
 			</header>
 
 			<main onScroll={(e) => setScrolled(e.currentTarget.scrollTop > 8)} className="flex min-h-0 flex-1 flex-col overflow-y-auto pt-16">
-				<section className="mx-auto w-full max-w-6xl shrink-0 px-4 pb-10 pt-16 text-center sm:px-6 sm:pt-24">
+				<section
+					ref={heroRef}
+					className="mx-auto w-full max-w-6xl shrink-0 px-4 pb-10 pt-16 text-center sm:px-6 sm:pt-24"
+					style={{ transform: gone ? "translateY(-110vh)" : undefined, transition: "transform 800ms cubic-bezier(0.55,0,0.85,0.35)" }}
+				>
 					<h1 className="mx-auto max-w-2xl text-balance text-[34px] font-medium leading-10 tracking-[-1px] sm:text-5xl sm:leading-[1.1] sm:tracking-[-1.5px]">
 						<span className="block text-neutral-400 dark:text-neutral-500">A Swarm of Agents</span>
 						<span className="block text-neutral-600 dark:text-neutral-300">Verifying Ethereum</span>
@@ -164,9 +182,9 @@ export function Landing({ signedIn }: { signedIn: boolean }) {
 				</section>
 
 				{/* The demo takes the width (up to the board's own 1200px) and its height follows; the page scrolls. */}
-				<section className="mx-auto w-full max-w-[1248px] px-4 pb-6 sm:px-6">
+				<section className={`mx-auto w-full max-w-[1248px] px-4 pb-6 transition-opacity duration-300 sm:px-6 ${gone ? "pointer-events-none opacity-0" : ""}`}>
 					{/* A plan that failed before anything arrived leaves the demo in place, with the error above. */}
-					{repo && !(error && !plan) ? (
+					{repo && !takeover && !(error && !plan) ? (
 						<div aria-live="polite">
 							<SetupPreview repo={repo} plan={plan} done={done} failed={Boolean(error)} startHref={startHref} />
 						</div>
@@ -175,7 +193,7 @@ export function Landing({ signedIn }: { signedIn: boolean }) {
 					)}
 				</section>
 
-				<footer className="mt-8 w-full shrink-0 border-t">
+				<footer className={`mt-8 w-full shrink-0 border-t transition-opacity duration-300 ${gone ? "pointer-events-none opacity-0" : ""}`}>
 					<div className="mx-auto grid w-full max-w-6xl grid-cols-2 gap-8 px-4 py-10 text-sm sm:grid-cols-4 sm:px-6">
 						<div className="col-span-2 sm:col-span-1">
 							<Link to="/welcome" className="flex items-center gap-2 font-semibold tracking-tight">
@@ -202,6 +220,22 @@ export function Landing({ signedIn }: { signedIn: boolean }) {
 					<div className="mx-auto w-full max-w-6xl px-4 pb-8 text-xs text-muted-foreground sm:px-6">© {new Date().getFullYear()} Formal Mind</div>
 				</footer>
 			</main>
+			{takeover && repo ? (
+				<>
+					{/* The plan's panel: hidden below, peeking at the bottom while the agents come for it, then pulled up to fill the screen. */}
+					<div
+						className="fixed inset-x-3 bottom-3 z-40 flex"
+						style={{
+							top: PANEL_TOP,
+							transform: phase === "enter" ? "translateY(100vh)" : phase === "drag" || phase === "grab" ? `translateY(calc(100vh - ${PEEK + PANEL_TOP}px))` : "none",
+							transition: "transform 700ms cubic-bezier(0.22,1,0.36,1)",
+						}}
+					>
+						<SetupPreview repo={repo} plan={plan} done={done} failed={Boolean(error)} startHref={startHref} fill onClose={close} />
+					</div>
+					<TakeoverAgents phase={phase} hero={heroBox} />
+				</>
+			) : null}
 
 
 		</div>
