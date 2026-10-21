@@ -1030,7 +1030,9 @@ fn difference_status(s: &str) -> (&'static str, &'static str) {
 
 /// The rebuild cycle's chapter: the contracts rebuilt from the proofs alone, what the proofs left open, and every
 /// difference the editor found between the code and the rebuild, by class. Empty when the cycle hasn't run.
-fn rebuild_chapter(rb: &Value, at: &dyn Fn(&str, Option<u64>) -> String) -> String {
+fn rebuild_chapter(rb: &Value, link: &dyn Fn(&str, Option<u64>) -> String) -> String {
+    // The rebuild is the swarm's working copy, not part of the audited commit: its paths aren't linked.
+    let at = |file: &str, line: Option<u64>| if file.starts_with("rebuild/") { format!("`{file}{}`", line.map(|l| format!("#L{l}")).unwrap_or_default()) } else { link(file, line) };
     let diffs: Vec<&Value> = rb["differences"].as_array().into_iter().flatten().collect();
     let contracts: Vec<&Value> = rb["contracts"].as_array().into_iter().flatten().collect();
     if diffs.is_empty() && contracts.is_empty() {
