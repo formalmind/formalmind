@@ -129,7 +129,7 @@ function FindingDetail({ f, folder, reports, invoke, onBack, onOpenFile }: { f: 
  */
 export function BugsExplorer({ repo, files, invoke, onOpenFile }: { repo: string; files: string[] | null; invoke: Bridge["invoke"]; onOpenFile: (path: string) => void }) {
 	const dirs = useReportDirs(repo);
-	const { reports, findings } = useAuditFindings(repo, files ?? [], invoke, dirs);
+	const { reports, findings, loaded } = useAuditFindings(repo, files ?? [], invoke, dirs);
 	const [open, setOpen] = useState<AuditFinding | null>(null);
 	const [only, setOnly] = useState<AuditFinding["status"] | null>(null);
 	const shown = only ? findings.filter((f) => f.status === only) : findings;
@@ -138,6 +138,13 @@ export function BugsExplorer({ repo, files, invoke, onOpenFile }: { repo: string
 	const groups = [...new Set(shown.map((f) => f.report))]
 		.sort((a, b) => Number(/formal-mind/i.test(b)) - Number(/formal-mind/i.test(a)))
 		.map((r) => ({ report: r, items: shown.filter((f) => f.report === r) }));
+	// Until the reports are read, the whole page is skeletons: no count of 0 before the findings arrive.
+	if (!files || !loaded)
+		return (
+			<div className="fm-under-tabs min-h-0 flex-1 overflow-y-auto pb-4 pt-3">
+				<ShelvesSkeleton />
+			</div>
+		);
 	return (
 		<div className="fm-under-tabs min-h-0 flex-1 space-y-6 overflow-y-auto pb-4 pt-3">
 			<section className="mx-4 rounded-2xl border bg-muted/60 p-1.5">
@@ -171,8 +178,7 @@ export function BugsExplorer({ repo, files, invoke, onOpenFile }: { repo: string
 						</button>
 					))}
 			</div>
-			{!files ? <ShelvesSkeleton /> : null}
-			{files && !findings.length && !reports.length ? <p className="px-4 text-[15px] text-muted-foreground">No audit reports or findings in this repository yet. The swarm files them here, each with a proof of concept.</p> : null}
+			{!findings.length && !reports.length ? <p className="px-4 text-[15px] text-muted-foreground">No audit reports or findings in this repository yet. The swarm files them here, each with a proof of concept.</p> : null}
 			{groups.map((g) => (
 				<Shelf key={g.report} label={reportName(g.report)} aside={g.items.length}>
 					{g.items.map((f) => (

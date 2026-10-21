@@ -549,6 +549,9 @@ export function useAuditFindings(folder: string, files: string[], invoke: Bridge
 	const indexes = inDirs.filter((f) => /(^|\/)(readme|index)\.md$/i.test(f));
 	const reports = inDirs.filter((f) => !indexes.includes(f));
 	const [findings, setFindings] = useState<AuditFinding[]>([]);
+	// Which reading the findings are from, so `loaded` turns false again while a new one runs.
+	const key = [folder, indexes.join("|"), reports.join("|"), reload].join("\n");
+	const [loadedKey, setLoadedKey] = useState<string | null>(null);
 	useEffect(() => {
 		let gone = false;
 		// The standard files: one next to each report (read even before the file tree lists them), and any others.
@@ -570,6 +573,7 @@ export function useAuditFindings(folder: string, files: string[], invoke: Bridge
 			const flat = all.flat();
 			const inDoc = new Set(flat.filter((f) => f.doc && isFormalMind(f.report)).map((f) => f.id));
 			setFindings(flat.filter((f) => f.doc || !isFormalMind(f.report) || !inDoc.has(f.id)));
+			setLoadedKey(key);
 		});
 		return () => {
 			gone = true;
@@ -577,7 +581,7 @@ export function useAuditFindings(folder: string, files: string[], invoke: Bridge
 		// `reload` ticks when the swarm files a finding in the index.
 		// eslint-disable-next-line react-hooks/exhaustive-deps
 	}, [folder, indexes.join("|"), reports.join("|"), invoke, reload]);
-	return { reports, indexes, findings };
+	return { reports, indexes, findings, loaded: loadedKey === key };
 }
 
 export function BugsView({ folder, files, invoke, apiBase, bugs, openBug, setOpenBug, withPoc, onOpenFile, reload = 0, onTriage, onFilesChanged }: { folder: string; files: string[]; invoke: Bridge["invoke"]; apiBase: Bridge["apiBase"]; bugs: Bug[]; openBug: string | null; setOpenBug: (f: string | null) => void; withPoc: (body: string) => Promise<string>; onOpenFile: (path: string) => void; reload?: number; onTriage?: (path: string) => Promise<void>; onFilesChanged?: () => void }) {
