@@ -114,7 +114,7 @@ export function App() {
 					{user ? (
 						<Route element={<SignedInLayout user={user} />}>
 							{/* Home is an empty screen with the next step; the swarm canvas lives at /swarm. */}
-							<Route path="/" element={<Title text="Formal Mind"><HomeEmpty muted="Bugs, proofs and code." strong="Pick a project to start." hint={<>Choose one in the sidebar, or <Link to="/onboarding?new=1" className="underline underline-offset-2">add one</Link>. The Mac app also opens folders on your computer.</>} /></Title>} />
+							<Route path="/" element={<Title text="Formal Mind"><HomeEmpty muted="Bugs, proofs and code." strong="Pick a project to start." hint={<>Choose one in the sidebar, or <Link to="/onboarding?new=1" className="underline underline-offset-2">add one</Link>.</>} /></Title>} />
 							<Route path="/swarm" element={<Title text="Swarm · Formal Mind"><SwarmWorkspace repo={SWARM_REPO} /></Title>} />
 							<Route path="/swarm/chat" element={<Title text="Ask the swarm · Formal Mind"><SwarmChatPage /></Title>} />
 							<Route path="/roadmap" element={<Title text="Roadmap · Formal Mind"><FirstProject page="roadmap" /></Title>} />
