@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { apiBase, DEFAULT_API, setApiBase } from "./api";
 import { setVimMode, useVimMode } from "@/components/vim-mode";
-import { readReportDirs, saveReportDirs } from "@/lib/report-dirs";
+import { AuditFolders } from "@/components/audit-folders";
 import { useFolders } from "./local";
 
 type Provider = "formal" | "anthropic";
@@ -21,30 +21,6 @@ const Section = ({ title, children }: { title: string; children: React.ReactNode
 	</section>
 );
 
-/** One project's audit folders: saved on Enter or when the field loses focus. */
-function AuditFolders({ folder }: { folder: string }) {
-	const [text, setText] = useState(() => readReportDirs(folder).join(", "));
-	const [saved, setSaved] = useState(false);
-	const save = () => {
-		setText(saveReportDirs(folder, text).join(", "));
-		setSaved(true);
-		setTimeout(() => setSaved(false), 1500);
-	};
-	return (
-		<form
-			className="flex items-center gap-3"
-			onSubmit={(e) => {
-				e.preventDefault();
-				save();
-			}}
-		>
-			<span className="w-40 shrink-0 truncate font-medium" title={folder}>{folder.split("/").pop()}</span>
-			<input value={text} onChange={(e) => setText(e.target.value)} onBlur={save} placeholder="audit, audits, reports" className="h-8 min-w-0 flex-1 rounded-md border bg-background px-2 font-mono text-[12px] outline-none focus:border-neutral-300 dark:focus:border-neutral-600" />
-			<span className={`w-10 text-xs text-emerald-600 transition-opacity ${saved ? "opacity-100" : "opacity-0"}`}>Saved</span>
-		</form>
-	);
-}
-
 /** The desktop app's settings: how agents reach Claude (and your key), and which server the app talks to. */
 export function SettingsPage() {
 	const [provider, setProvider] = useState<Provider>(read("fm:provider") === "anthropic" ? "anthropic" : "formal");
@@ -54,6 +30,8 @@ export function SettingsPage() {
 	const [saved, setSaved] = useState<string | null>(null);
 	const vim = useVimMode();
 	const { folders } = useFolders();
+	const [repos, setRepos] = useState<Record<string, string>>({});
+	useEffect(() => void invoke<{ repos?: Record<string, string> }>("config_get").then((c) => setRepos(c.repos ?? {}), () => {}), []);
 	useEffect(() => void invoke<boolean>("anthropic_key_status").then(setHasKey), []);
 
 	const pick = (p: Provider) => {
@@ -120,10 +98,16 @@ export function SettingsPage() {
 			</Section>
 			<Section title="Audit folders">
 				<p className="text-xs text-muted-foreground">Where each project's audit reports are read from for Bugs, relative to the project. Separate several with commas.</p>
-				{folders.length === 0 ? <p className="text-xs text-muted-foreground">Add a folder in the sidebar first.</p> : null}
+				{folders.length + Object.keys(repos).length === 0 ? <p className="text-xs text-muted-foreground">Add a folder or import a repository in the sidebar first.</p> : null}
 				{folders.map((f) => (
 					<AuditFolders key={f} folder={f} />
 				))}
+				{/* Imported repositories, by the folder they are cloned (or mapped) to on this machine. */}
+				{Object.entries(repos)
+					.filter(([, path]) => !folders.includes(path))
+					.map(([repo, path]) => (
+						<AuditFolders key={path} folder={path} label={repo} />
+					))}
 			</Section>
 			<Section title="Server">
 				<label className="flex items-center justify-between gap-4">

@@ -10,6 +10,7 @@ import {
 	LogOut,
 	Monitor,
 	Moon,
+	Settings,
 	Sun,
 } from "lucide-react"
 import { useTheme } from "next-themes"
@@ -97,6 +98,12 @@ export function NavUser() {
 						</DropdownMenuLabel>
 						<DropdownMenuSeparator />
 						<DropdownMenuGroup>
+							<DropdownMenuItem asChild>
+								<Link to="/settings">
+									<Settings />
+									Settings
+								</Link>
+							</DropdownMenuItem>
 							<DropdownMenuItem asChild>
 								<Link to="/usage">
 									<Gauge />
