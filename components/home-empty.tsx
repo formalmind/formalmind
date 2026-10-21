@@ -1,16 +1,18 @@
 import { useEffect, useState, type ReactNode } from "react";
-import { Bug, Code2, ScanSearch, type LucideIcon } from "lucide-react";
+import { Bug, Code2, Network, ScanSearch, type LucideIcon } from "lucide-react";
 
-/** The app's three parts, drawn with their tab icons where the headline names them. */
-const PART_ICONS: Record<string, LucideIcon> = { bugs: Bug, proofs: ScanSearch, code: Code2 };
+/** The app's parts, with their tab icons: the agents (the Swarm tab), then the three the headline names. */
+const PART_ICONS: Record<string, LucideIcon> = { agents: Network, bugs: Bug, proofs: ScanSearch, code: Code2 };
 
-/** The muted line's parts, in the order it names them: those with an icon. */
-const partsOf = (line: string) => (line.match(/\w+/g) ?? []).filter((w) => PART_ICONS[w.toLowerCase()]);
+/** The parts a line cycles through: the agents, then those it names, in its order (none when it names fewer than two). */
+const partsOf = (line: string) => {
+	const named = (line.match(/\w+/g) ?? []).filter((w) => PART_ICONS[w.toLowerCase()]);
+	return named.length < 2 ? [] : ["agents", ...named];
+};
 
 /**
- * A line naming the parts ("Bugs, proofs and code.") cycles: the whole line, then each part alone with its icon, then
- * the whole line again, each rising in as the last goes; any other line is shown as it is. With reduced
- * motion, the whole line stays.
+ * A line naming the parts ("Bugs, proofs and code.") cycles: the whole line, then each part's icon alone (the agents
+ * first), then the whole line again, each rising in as the last goes; any other line is shown as it is. With reduced motion, the line stays.
  */
 function Parts({ line }: { line: string }) {
 	const parts = partsOf(line);
@@ -18,27 +20,16 @@ function Parts({ line }: { line: string }) {
 	const [still] = useState(() => typeof window !== "undefined" && window.matchMedia?.("(prefers-reduced-motion: reduce)").matches);
 	useEffect(() => {
 		if (parts.length < 2 || still) return;
-		// Step 0 is the whole line, held five times as long as each part (1…).
+		// Step 0 is the whole line, held five times as long as each icon (1…).
 		const t = setTimeout(() => setI((n) => (n + 1) % (parts.length + 1)), i === 0 ? 10000 : 2000);
 		return () => clearTimeout(t);
 	}, [i, parts.length, still]);
-	if (parts.length < 2) return <>{line}</>;
-	const word = (w: string) => {
-		const Icon = PART_ICONS[w.toLowerCase()];
-		return (
-			<>
-				<Icon className="mr-[0.14em] inline-block size-[0.8em] align-[-0.08em]" strokeWidth={1.75} aria-hidden />
-				{w}
-			</>
-		);
-	};
-	// The whole line is plain words; only a part shown alone carries its icon.
-	if (still) return <>{line}</>;
-	if (i === 0) return <span key="whole" className="fm-swap inline-block">{line}</span>;
-	const w = parts[i - 1];
+	if (parts.length < 2 || still || i === 0) return <span key="whole" className={still ? "" : "fm-swap inline-block"}>{line}</span>;
+	const Icon = PART_ICONS[parts[i - 1].toLowerCase()];
 	return (
-		<span key={i} className="fm-swap inline-block" aria-label={line}>
-			{word(w[0].toUpperCase() + w.slice(1))}.
+		// The line's height stays, so the strong line below doesn't move.
+		<span key={i} className="fm-swap inline-block" role="img" aria-label={parts[i - 1]}>
+			<Icon className="inline-block size-[0.9em] align-[-0.12em]" strokeWidth={1.5} />
 		</span>
 	);
 }
