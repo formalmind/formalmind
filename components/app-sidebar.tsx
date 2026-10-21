@@ -270,11 +270,11 @@ export function AppSidebar({ extra, ...props }: React.ComponentProps<typeof Side
 					<SidebarMenu>
 						{/* Your projects: a quiet heading, and + to add one (like a section header). The roadmap is a tab of each. */}
 						<li className="flex h-7 items-center justify-between pl-2 pr-1 text-xs font-medium text-sidebar-foreground/60 group-data-[collapsible=icon]:justify-center group-data-[collapsible=icon]:p-0">
-							<span className="group-data-[collapsible=icon]:hidden">Projects</span>
+							<span className="group-data-[collapsible=icon]:hidden">Import</span>
 							<Link
 								to="/onboarding?new=1"
-								aria-label="New project"
-								title="New project"
+								aria-label="Import a repository"
+								title="Import a repository"
 								className="icon-anim-host flex size-6 items-center justify-center rounded-md text-sidebar-foreground/60 outline-none hover:bg-sidebar-accent hover:text-sidebar-foreground focus-visible:ring-2 focus-visible:ring-sidebar-ring"
 							>
 								<Plus className="icon-anim-plus size-4" />
