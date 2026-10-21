@@ -83,19 +83,24 @@ fn env_var(folder: &Path, key: &str) -> Option<String> {
 }
 
 fn anvil() -> PathBuf {
-    let home = std::env::var("HOME").unwrap_or_default();
-    [format!("{home}/.foundry/bin/anvil"), "/opt/homebrew/bin/anvil".into(), "/usr/local/bin/anvil".into()]
-        .into_iter()
-        .map(PathBuf::from)
-        .find(|p| p.exists())
-        .unwrap_or_else(|| "anvil".into())
+    crate::platform::find_tool("anvil")
 }
 
 /// Stops the process only if it's still anvil (a pid can be reused after a restart).
 fn kill_anvil(pid: u32) {
-    let out = Command::new("ps").args(["-p", &pid.to_string(), "-o", "comm="]).output();
-    if out.is_ok_and(|o| String::from_utf8_lossy(&o.stdout).contains("anvil")) {
-        let _ = Command::new("kill").arg(pid.to_string()).status();
+    #[cfg(windows)]
+    {
+        let out = Command::new("tasklist").args(["/FI", &format!("PID eq {pid}"), "/NH"]).output();
+        if out.is_ok_and(|o| String::from_utf8_lossy(&o.stdout).to_ascii_lowercase().contains("anvil")) {
+            let _ = Command::new("taskkill").args(["/PID", &pid.to_string(), "/F"]).status();
+        }
+    }
+    #[cfg(not(windows))]
+    {
+        let out = Command::new("ps").args(["-p", &pid.to_string(), "-o", "comm="]).output();
+        if out.is_ok_and(|o| String::from_utf8_lossy(&o.stdout).contains("anvil")) {
+            let _ = Command::new("kill").arg(pid.to_string()).status();
+        }
     }
 }
 

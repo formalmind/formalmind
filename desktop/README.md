@@ -161,3 +161,15 @@ notation legend, coverage and properties) to `.formal/report/formal-mind.adoc` w
 (`brew install asciidoctor`; Solidity highlighting uses Pygments, which needs python3). Without it, the JSON is still
 written and Bugs says how to install it. Try it with
 `FM_FOLDER=… cargo test -- --ignored report_of_a_folder --nocapture`.
+
+
+## Platforms
+
+- **macOS**: one universal app (Apple Silicon and Intel), built and notarized by `scripts/release.sh` on a Mac.
+  `scripts/fetch-nvim.sh` merges Neovim's arm64 and x86_64 builds with `lipo` and signs them.
+- **Windows**: built on GitHub Actions (`.github/workflows/desktop-windows.yml`) from the release's tag once the Mac
+  release is published, or by hand with *Run workflow* and a tag. It needs the repository secret
+  `TAURI_SIGNING_PRIVATE_KEY` (the update key) for in-app updates. The installer isn't code-signed yet, so SmartScreen
+  warns on first run; signing it (e.g. Azure Trusted Signing, configured with `bundle.windows.signCommand`) is still
+  to do. Tools are found where their installers put them (`src-tauri/src/platform.rs`: `~/.elan/bin`, `~/.foundry/bin`,
+  `~/.cargo/bin`, Scoop, Chocolatey); logs go to `~/.formalmind/logs`; the Code tab's terminal uses ConPTY.

@@ -1113,9 +1113,14 @@ fn code_block(path: &str, a: usize, b: usize, linked: bool, what: Option<&str>) 
 
 /// asciidoctor-pdf: where Homebrew puts it, on PATH as a login shell sees it, or in RubyGems' user bin.
 fn asciidoctor_pdf() -> Option<PathBuf> {
-    let home = std::env::var("HOME").unwrap_or_default();
-    let mut found = ["/opt/homebrew/bin/asciidoctor-pdf", "/usr/local/bin/asciidoctor-pdf"].into_iter().map(PathBuf::from).find(|p| p.exists());
-    if found.is_none() {
+    let home = crate::platform::home();
+    // Windows: RubyGems installs a .bat beside ruby (on PATH, or in the tool folders).
+    let name = if cfg!(windows) { "asciidoctor-pdf.bat" } else { "asciidoctor-pdf" };
+    let mut found = crate::platform::tool_dirs().into_iter().map(|d| d.join(name)).find(|p| p.exists());
+    if found.is_none() && cfg!(windows) {
+        found = std::env::split_paths(&std::env::var_os("PATH").unwrap_or_default()).map(|d| d.join(name)).find(|p| p.exists());
+    }
+    if found.is_none() && cfg!(unix) {
         let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/zsh".into());
         found = std::process::Command::new(shell)
             .args(["-lc", "command -v asciidoctor-pdf"])
@@ -1126,7 +1131,7 @@ fn asciidoctor_pdf() -> Option<PathBuf> {
             .filter(|p| p.is_file());
     }
     found.or_else(|| {
-        let gems = PathBuf::from(&home).join(".gem/ruby");
+        let gems = home.join(".gem/ruby");
         std::fs::read_dir(gems).ok()?.flatten().map(|e| e.path().join("bin/asciidoctor-pdf")).find(|p| p.exists())
     })
 }
@@ -1189,7 +1194,7 @@ pub fn generate(root: &Path, dirs: &[String]) -> Result<Generated, String> {
     let run = cmd
         .current_dir(&out_dir)
         // Homebrew's Ruby, for a GUI app whose PATH lacks it.
-        .env("PATH", format!("{}:/opt/homebrew/bin:/usr/local/bin:{}", bin.parent().map(|p| p.display().to_string()).unwrap_or_default(), std::env::var("PATH").unwrap_or_default()))
+        .env("PATH", crate::platform::tool_path(bin.parent().map(Path::to_path_buf)))
         .args(["--failure-level", "ERROR", "-o"])
         .arg(&pdf)
         .arg("formal-mind.adoc")

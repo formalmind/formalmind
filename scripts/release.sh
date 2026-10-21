@@ -41,9 +41,11 @@ fi
 echo "release: building $TAG"
 # A mounted Formal Mind image (or one left from a failed build) makes the .dmg step fail with "Resource busy".
 for v in /Volumes/dmg.* "/Volumes/Formal Mind"; do [ -d "$v" ] && diskutil eject force "$v" >/dev/null 2>&1 || true; done
-PATH="$PWD/scripts/shims:$PATH" TAURI_SIGNING_PRIVATE_KEY="$(cat "$KEY")" TAURI_SIGNING_PRIVATE_KEY_PASSWORD="" bun run desktop:build
+# One universal app for Apple Silicon and Intel Macs (the bundled Neovim is made universal by fetch-nvim.sh).
+rustup target add aarch64-apple-darwin x86_64-apple-darwin >/dev/null
+(cd desktop && PATH="$PWD/../scripts/shims:$PATH" TAURI_SIGNING_PRIVATE_KEY="$(cat "$KEY")" TAURI_SIGNING_PRIVATE_KEY_PASSWORD="" bunx tauri build --target universal-apple-darwin)
 
-BUNDLE=desktop/src-tauri/target/release/bundle
+BUNDLE=desktop/src-tauri/target/universal-apple-darwin/release/bundle
 DMG=$(ls -t "$BUNDLE"/dmg/*"$VERSION"*.dmg | head -1)
 APP="$BUNDLE/macos/Formal Mind.app"
 xcrun notarytool submit "$DMG" --keychain-profile formalmind --wait
@@ -62,7 +64,9 @@ jq -n \
   --arg signature "$(cat "$OUT/Formal-Mind-mac.app.tar.gz.sig")" \
   --arg url "https://github.com/$REPO/releases/download/$TAG/Formal-Mind-mac.app.tar.gz" \
   '{version: $version, notes: $notes, pub_date: $pub_date,
-    platforms: {"darwin-aarch64": {signature: $signature, url: $url}}}' > "$OUT/latest.json"
+    platforms: {"darwin-aarch64": {signature: $signature, url: $url}, "darwin-x86_64": {signature: $signature, url: $url}}}' > "$OUT/latest.json"
+# The Windows installer is built by .github/workflows/desktop-windows.yml once this release is out; it adds itself to
+# latest.json then.
 
 # A release must point at a commit GitHub has. Run from the pre-push hook, this one isn't there yet: push it first
 # (SKIP_RELEASE stops the hook from running again); the hook's own push then has nothing left to send.

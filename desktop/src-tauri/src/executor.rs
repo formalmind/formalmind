@@ -42,13 +42,9 @@ pub(crate) fn clip(mut s: String) -> String {
     s
 }
 
-/// Where `lake` and `forge` usually live; apps started from the Dock don't get the shell's PATH.
-fn tool_path() -> String {
-    let home = std::env::var("HOME").unwrap_or_default();
-    let extra = [format!("{home}/.elan/bin"), format!("{home}/.foundry/bin"), "/opt/homebrew/bin".into(), "/usr/local/bin".into()];
-    let current = std::env::var("PATH").unwrap_or_default();
-    let sep = if cfg!(windows) { ";" } else { ":" };
-    format!("{}{sep}{current}", extra.join(sep))
+/// Where `lake` and `forge` usually live; apps started from the Dock or the Start menu don't get the shell's PATH.
+fn tool_path() -> std::ffi::OsString {
+    crate::platform::tool_path(None)
 }
 
 pub(crate) async fn run_command(root: &Path, command: &str) -> Result<String, String> {

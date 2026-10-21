@@ -12,6 +12,7 @@ mod swarm_ctx;
 mod local;
 mod lsp;
 mod openai;
+mod platform;
 mod report;
 mod term;
 
@@ -79,13 +80,16 @@ fn quit(app: &AppHandle) {
     let _ = app.set_activation_policy(tauri::ActivationPolicy::Accessory);
 }
 
-/// The standard menus, with Settings… (⌘,) in the app menu and our own Quit (⌘Q) in place of the system one.
+/// The standard menus, with Settings… (⌘, / Ctrl+,) in the app menu (File on Windows and Linux) and our own Quit in place
+/// of the system one.
 fn menu(app: &AppHandle) -> tauri::Result<Menu<tauri::Wry>> {
     let menu = Menu::default(app)?;
     if let Some(MenuItemKind::Submenu(app_menu)) = menu.items()?.into_iter().next() {
         let settings = MenuItem::with_id(app, "settings", "Settings…", true, Some("CmdOrCtrl+,"))?;
-        app_menu.insert(&settings, 2)?;
-        app_menu.insert(&PredefinedMenuItem::separator(app)?, 3)?;
+        // macOS: after About and its separator. Elsewhere the first menu is File: Settings goes first.
+        let at = if cfg!(target_os = "macos") { 2 } else { 0 };
+        app_menu.insert(&settings, at)?;
+        app_menu.insert(&PredefinedMenuItem::separator(app)?, at + 1)?;
         let n = app_menu.items()?.len();
         if n > 0 {
             app_menu.remove_at(n - 1)?;

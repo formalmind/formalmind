@@ -10,6 +10,7 @@ import { SetupPreview } from "./setup-preview";
 import { PANEL_TOP, PEEK, TakeoverAgents, usePhase } from "./takeover";
 import { readDraft, usePlan } from "./use-plan";
 import { EXAMPLE_REPOS } from "@/lib/plan";
+import { desktopDownload, MAC_DOWNLOAD } from "@/lib/downloads";
 
 const EXAMPLES = EXAMPLE_REPOS;
 
@@ -43,8 +44,13 @@ const FOOTER = [
 	},
 ];
 
-/** The latest desktop build, published as a GitHub release asset with a fixed name. */
-const MAC_DOWNLOAD = "https://github.com/formalmind/formalmind/releases/latest/download/Formal-Mind-mac.dmg";
+function WindowsMark() {
+	return (
+		<svg viewBox="0 0 448 512" className="size-3.5 -translate-y-px" fill="currentColor" aria-hidden>
+			<path d="M0 93.7l183.6-25.3v177.4H0V93.7zm0 324.6l183.6 25.3V268.4H0v149.9zm203.8 28L448 480V268.4H203.8v177.9zm0-380.6v180.1H448V32L203.8 65.7z" />
+		</svg>
+	);
+}
 
 function AppleMark() {
 	return (
@@ -75,6 +81,9 @@ export function Landing({ signedIn }: { signedIn: boolean }) {
 
 	// Planning a repository hands the page over to the agents (takeover.tsx): they drag the hero away and pull the
 	// plan up to fill the screen. A plan resumed from an earlier visit shows in place instead.
+	// The desktop app for this visitor's computer (the latest release's universal Mac app, or the Windows installer).
+	const [download, setDownload] = useState(() => ({ os: "mac" as "mac" | "windows", href: MAC_DOWNLOAD, label: "Download for Mac" }));
+	useEffect(() => setDownload(desktopDownload()), []);
 	const [phase, setPhase] = usePhase();
 	const heroRef = useRef<HTMLElement>(null);
 	const [heroBox, setHeroBox] = useState<DOMRect | null>(null);
@@ -112,9 +121,9 @@ export function Landing({ signedIn }: { signedIn: boolean }) {
 					<a href={signedIn ? "/" : startHref} className="btn-soft h-9 px-4">
 						{signedIn ? "Open the app" : "Get started"}
 					</a>
-					<a href={MAC_DOWNLOAD} className="btn-dark hidden h-9 gap-2 px-4 sm:inline-flex">
-						<AppleMark />
-						Download for Mac
+					<a href={download.href} className="btn-dark hidden h-9 gap-2 px-4 sm:inline-flex">
+						{download.os === "windows" ? <WindowsMark /> : <AppleMark />}
+						{download.label}
 					</a>
 				</nav>
 				</div>

@@ -28,11 +28,7 @@ fn servers() -> &'static Mutex<HashMap<String, Arc<Server>>> {
 
 /// Apps opened from Finder don't get the shell's PATH, so look where cargo and Homebrew install it first.
 fn binary() -> PathBuf {
-    let home = std::env::var_os("HOME").map(PathBuf::from).unwrap_or_default();
-    [home.join(".cargo/bin/solidity-language-server"), "/opt/homebrew/bin/solidity-language-server".into(), "/usr/local/bin/solidity-language-server".into()]
-        .into_iter()
-        .find(|p| p.exists())
-        .unwrap_or_else(|| "solidity-language-server".into())
+    crate::platform::find_tool("solidity-language-server")
 }
 
 fn send(stdin: &Mutex<ChildStdin>, msg: &Value) -> Result<(), String> {

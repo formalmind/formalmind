@@ -1,0 +1,75 @@
+# The Windows build of the desktop app. scripts/release.sh publishes desktop-v<version> from a Mac (the universal Mac
+# app); this then builds the Windows installer from the same tag, attaches it to that release as
+# Formal-Mind-windows-setup.exe, and adds windows-x86_64 to its latest.json so installed Windows apps update too.
+#
+# Secrets: TAURI_SIGNING_PRIVATE_KEY (the contents of ~/.tauri/formalmind.key, the same update key the Mac release
+# signs with). Without it the installer is still built and attached, but latest.json isn't touched.
+# Code signing (SmartScreen) isn't set up yet: see desktop/README.md.
+name: desktop-windows
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Release tag to build, e.g. desktop-v0.1.39"
+        required: true
+
+permissions:
+  contents: write
+
+jobs:
+  windows:
+    if: github.event_name == 'workflow_dispatch' || startsWith(github.event.release.tag_name, 'desktop-v')
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: bash
+    env:
+      TAG: ${{ github.event.release.tag_name || inputs.tag }}
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.release.tag_name || inputs.tag }}
+
+      - uses: oven-sh/setup-bun@v2
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: desktop/src-tauri
+
+      - run: bun install --frozen-lockfile
+
+      - name: Build the installer
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ""
+        run: |
+          cd desktop
+          if [ -n "$TAURI_SIGNING_PRIVATE_KEY" ]; then
+            bunx tauri build --bundles nsis
+          else
+            echo "::warning::TAURI_SIGNING_PRIVATE_KEY isn't set: building without update signatures"
+            bunx tauri build --bundles nsis --config '{"bundle":{"createUpdaterArtifacts":false}}'
+          fi
+
+      - name: Attach it to the release
+        run: |
+          dir=desktop/src-tauri/target/release/bundle/nsis
+          exe=$(ls "$dir"/*-setup.exe | head -1)
+          mkdir -p out
+          cp "$exe" out/Formal-Mind-windows-setup.exe
+          gh release upload "$TAG" out/Formal-Mind-windows-setup.exe --clobber
+          if [ -f "$exe.sig" ]; then
+            # The updater installs the signed setup.exe itself; latest.json gets its URL and signature.
+            gh release download "$TAG" -p latest.json -D out --clobber
+            jq --arg signature "$(cat "$exe.sig")" \
+               --arg url "https://github.com/${{ github.repository }}/releases/download/$TAG/Formal-Mind-windows-setup.exe" \
+               '.platforms["windows-x86_64"] = {signature: $signature, url: $url}' out/latest.json > out/latest.next.json
+            mv out/latest.next.json out/latest.json
+            gh release upload "$TAG" out/latest.json --clobber
+          fi

@@ -5,8 +5,8 @@ import { MarkGithubIcon } from "@primer/octicons-react";
 import { ArrowRight, FolderPlus, Loader2 } from "lucide-react";
 import { projectPath, refreshProjects } from "@/components/projects/use-projects";
 import { inDesktop } from "@/lib/open-web";
+import { desktopDownload } from "@/lib/downloads";
 
-export const MAC_DOWNLOAD = "https://github.com/formalmind/formalmind/releases/latest/download/Formal-Mind-mac.dmg";
 
 /** Opens the Add a project popup from anywhere (the sidebar's +, the project picker): `AddProjectHost` shows it. */
 export const openAddProject = () => window.dispatchEvent(new Event("fm:add-project"));
@@ -62,7 +62,7 @@ export function AddProjectCard({ onLocal, onCancel, onDone, initialRepo }: { onL
 					<button type="button" onClick={() => void local()} className={tile(choice === "local")}>
 						<FolderPlus className="size-5 text-muted-foreground" />
 						<span className="font-medium">Local folder</span>
-						<span className="text-[12px] text-muted-foreground">A repository on this Mac.</span>
+						<span className="text-[12px] text-muted-foreground">A repository on this computer.</span>
 					</button>
 					<button type="button" onClick={() => setChoice("remote")} className={tile(choice === "remote")}>
 						<MarkGithubIcon size={20} className="text-muted-foreground" />
@@ -72,9 +72,9 @@ export function AddProjectCard({ onLocal, onCancel, onDone, initialRepo }: { onL
 				</div>
 				{choice === "local" && !(onLocal && inDesktop()) ? (
 					<p className="px-1 text-[12px] text-muted-foreground">
-						Local folders open in the Mac app.{" "}
-						<a href={MAC_DOWNLOAD} className="text-foreground underline underline-offset-2">
-							Download for Mac
+						Local folders open in the desktop app.{" "}
+						<a href={desktopDownload().href} className="text-foreground underline underline-offset-2">
+							{desktopDownload().label}
 						</a>
 					</p>
 				) : null}

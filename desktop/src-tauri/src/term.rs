@@ -24,13 +24,12 @@ fn terms() -> &'static Mutex<HashMap<u32, Term>> {
 /// The bundled nvim and its runtime (Resources/nvim), or one installed on the machine.
 fn nvim(app: &AppHandle) -> (PathBuf, Option<PathBuf>) {
     if let Ok(res) = app.path().resource_dir() {
-        let bin = res.join("nvim/bin/nvim");
+        let bin = res.join("nvim/bin").join(crate::platform::exe("nvim"));
         if bin.exists() {
             return (bin, Some(res.join("nvim/share/nvim/runtime")));
         }
     }
-    let found = ["/opt/homebrew/bin/nvim", "/usr/local/bin/nvim"].into_iter().map(PathBuf::from).find(|p| p.exists());
-    (found.unwrap_or_else(|| "nvim".into()), None)
+    (crate::platform::find_tool("nvim"), None)
 }
 
 /// Starts Neovim on a file (relative to the folder) in a terminal of this size; returns the terminal's id.
@@ -51,9 +50,7 @@ pub fn term_start(app: AppHandle, folder: String, path: Option<String>, line: Op
     }
     cmd.cwd(&folder);
     // A real terminal: full colour, and the PATH a shell would have (apps opened from Finder get a short one).
-    let home = std::env::var("HOME").unwrap_or_default();
-    let base = std::env::var("PATH").unwrap_or_default();
-    cmd.env("PATH", format!("{home}/.cargo/bin:/opt/homebrew/bin:/usr/local/bin:{base}"));
+    cmd.env("PATH", crate::platform::tool_path(None));
     cmd.env("TERM", "xterm-256color");
     cmd.env("COLORTERM", "truecolor");
     cmd.env("LANG", std::env::var("LANG").unwrap_or_else(|_| "en_US.UTF-8".into()));
