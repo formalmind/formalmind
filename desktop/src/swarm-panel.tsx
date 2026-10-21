@@ -1057,9 +1057,10 @@ function CoverageView({ data, scripts, onOpenFile }: { data: Formal; scripts: Sc
 					</div>
 				</nav>
 				{current && status ? (
-					<section className="flex min-w-0 flex-1 flex-col overflow-hidden rounded-xl border bg-card">
+					<section className="flex min-w-0 flex-1 flex-col overflow-hidden rounded-xl border bg-card" style={{ containerType: "inline-size" }}>
 						<header className="flex shrink-0 flex-wrap items-center gap-2 border-b px-3 py-2">
-							<span className="font-mono text-[13px] font-medium">{current.name}</span>
+							{/* A narrow pane keeps the status and the place; the name is already picked in the list. */}
+							<span className="font-mono text-[13px] font-medium [@container(max-width:560px)]:hidden">{current.name}</span>
 							<span className={`inline-flex items-center gap-1.5 rounded-full bg-muted px-2 py-0.5 text-[11px] ${status.text}`}>
 								<span className={`size-1.5 rounded-full ${status.dot}`} />
 								{status.label}
