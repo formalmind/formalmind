@@ -2,8 +2,9 @@ import { useEffect, useState } from "react";
 import { useNavigate } from "react-router";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { MarkGithubIcon } from "@primer/octicons-react";
-import { ChevronRight, Laptop } from "lucide-react";
+import { ChevronRight, Laptop, Plus } from "lucide-react";
 import { AddProjectCard } from "@/components/add-project";
+import { HomeEmpty } from "@/components/home-empty";
 import { APP_INSTALL_URL } from "@/components/onboarding/steps";
 import { projectPath, useProjects } from "@/components/projects/use-projects";
 import type { SessionData } from "@/lib/session";
@@ -234,35 +235,39 @@ export function Setup({ user, onDone }: { user: SessionData["user"]; onDone: () 
 
 			{step === 5 ? (
 				<>
-					<Headline muted="Select a project." strong="Start with one." body="Pick one of your projects, or add a repository from GitHub." />
-					<div className="fm-rise mt-6 flex-1 space-y-3 overflow-y-auto">
-						{projects?.map((p) => (
-							<button key={p.repo} type="button" onClick={() => finish(p.repo)} className={`${card} flex w-full items-center gap-3 p-3.5 text-left active:bg-white/10`}>
-								<MarkGithubIcon size={18} className="shrink-0 text-white/60" />
-								<span className="min-w-0 flex-1">
-									<span className="block truncate font-medium">{p.repo.split("/")[1]}</span>
-									<span className="block truncate text-[12px] text-white/50">{p.repo.split("/")[0]}</span>
-								</span>
-								<ChevronRight className="size-4 text-white/40" />
-							</button>
-						))}
-						{adding || projects?.length === 0 ? (
-							<div className="text-foreground">
-								{/* The card opens the new project itself. */}
-								<AddProjectCard
-									remoteOnly
-									onCancel={projects?.length ? () => setAdding(false) : undefined}
-									onDone={() => {
-										setSetUpDone(true);
-										onDone();
-									}}
-								/>
-							</div>
-						) : (
-							<button type="button" onClick={() => setAdding(true)} className={`${card} w-full p-3.5 text-[15px] text-white/70 active:bg-white/10`}>
-								Add a repository
-							</button>
-						)}
+					{/* Home's own empty state, centered as on the introduction's last page: pick a project there. */}
+					<div className="fm-rise my-auto py-6">
+						<div className="dark fm-home mx-auto w-full max-w-[340px] rounded-[28px] border border-white/10 bg-background text-foreground shadow-[0_24px_60px_rgb(0_0_0/0.5)]">
+							<HomeEmpty muted="Bugs, proofs and code." strong={projects?.length === 0 ? "Open a repository." : "Pick a project."}>
+								<div className="w-full space-y-2">
+									{projects?.map((p) => (
+										<button key={p.repo} type="button" onClick={() => finish(p.repo)} className="btn-soft flex h-11 w-full items-center gap-2.5 px-3.5 text-left text-[14px]">
+											<MarkGithubIcon size={16} className="shrink-0 text-muted-foreground" />
+											<span className="min-w-0 flex-1 truncate">
+												<span className="font-light text-muted-foreground">{p.repo.split("/")[0]}/</span>
+												<span className="font-semibold">{p.repo.split("/")[1]}</span>
+											</span>
+											<ChevronRight className="size-4 text-muted-foreground" />
+										</button>
+									))}
+									{adding || projects?.length === 0 ? (
+										// The card opens the new project itself.
+										<AddProjectCard
+											remoteOnly
+											onCancel={projects?.length ? () => setAdding(false) : undefined}
+											onDone={() => {
+												setSetUpDone(true);
+												onDone();
+											}}
+										/>
+									) : (
+										<button type="button" onClick={() => setAdding(true)} className="btn-soft inline-flex h-10 w-full items-center justify-center gap-1.5 text-[14px] font-medium">
+											<Plus className="size-4" /> Add a project
+										</button>
+									)}
+								</div>
+							</HomeEmpty>
+						</div>
 					</div>
 					<button type="button" onClick={() => finish()} className={`${quiet} mt-4`}>Go to Home</button>
 				</>
