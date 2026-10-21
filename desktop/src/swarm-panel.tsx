@@ -11,6 +11,7 @@ import { motion as vimMotion, search as vimSearch, setVimMode, useVimMode, type 
 import { useSearchParams } from "react-router";
 import { ChatComposer } from "@/components/chat-composer";
 import { useReportDirs } from "@/lib/report-dirs";
+import { auditJsonPath, parseAuditDoc, type AuditDoc, type AuditFindingDoc } from "@/lib/audit-format";
 import { readEntryPoints, setMainEntryPoint } from "@/lib/entry-points";
 import { ChatScrubber } from "./chat-scrubber";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuRadioGroup, DropdownMenuRadioItem, DropdownMenuSeparator, DropdownMenuSub, DropdownMenuSubContent, DropdownMenuSubTrigger, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
@@ -344,7 +345,25 @@ function DetailCard({ label, action, bare, children }: { label: string; action?:
 
 /** Bug reports: a list on the left, the selected report on the right with its facts as chips. */
 /** A finding from an audit index: a row of a "| ID | Severity | Finding | Status | Evidence |" table under its report's heading. */
-type AuditFinding = { report: string; id: string; severity: string; title: string; status: "fixed" | "works" | "acknowledged" | "rejected" | "open"; statusText: string; evidence: string; tests: string[]; index: string };
+type AuditFinding = { report: string; id: string; severity: string; title: string; status: "fixed" | "works" | "acknowledged" | "rejected" | "open"; statusText: string; evidence: string; tests: string[]; index: string; detail?: AuditFindingDoc; doc?: AuditDoc };
+
+/** A report's findings in the standard format, as the Bugs list shows them. */
+function findingsOfDoc(doc: AuditDoc, path: string): AuditFinding[] {
+	const name = doc.source?.split("/").pop() ?? doc.title;
+	return doc.findings.map((f) => ({
+		report: name,
+		id: f.id,
+		severity: f.severity ? f.severity[0].toUpperCase() + f.severity.slice(1) : "—",
+		title: f.title,
+		status: f.status === "works as expected" ? "works" : f.status,
+		statusText: f.status === "works as expected" ? "Works as expected" : f.status[0].toUpperCase() + f.status.slice(1),
+		evidence: f.evidence ?? "",
+		tests: [...new Set([...(f.tests ?? []), ...(f.poc ? [f.poc] : []), ...((f.evidence ?? "").match(/test\/[\w/.-]+\.t\.sol/g) ?? [])])],
+		index: path,
+		detail: f,
+		doc,
+	}));
+}
 
 const STATUS: Record<AuditFinding["status"], { label: string; dot: string; chip: string }> = {
 	fixed: { label: "Fixed", dot: "bg-emerald-500", chip: "border-emerald-500/30 bg-emerald-500/10 text-emerald-700 dark:text-emerald-400" },
@@ -475,13 +494,26 @@ function BugsView({ folder, files, invoke, bugs, openBug, setOpenBug, withPoc, o
 	const [findings, setFindings] = useState<AuditFinding[]>([]);
 	useEffect(() => {
 		let gone = false;
-		void Promise.all(indexes.map((f) => invoke<string>("folder_read", { folder, path: f }).then((t) => parseAuditIndex(t, f), () => [] as AuditFinding[]))).then((all) => !gone && setFindings(all.flat()));
+		// The standard files: one next to each report (read even before the file tree lists them), and any others.
+		const docs = [...new Set([...reports.map(auditJsonPath), ...files.filter((f) => f.endsWith(".audit.json") && dirs.some((d) => f.startsWith(`${d.replace(/\/+$/, "")}/`)))])];
+		void Promise.all([
+			...indexes.map((f) => invoke<string>("folder_read", { folder, path: f }).then((t) => parseAuditIndex(t, f), () => [] as AuditFinding[])),
+			...docs.map((f) =>
+				invoke<string>("folder_read", { folder, path: f }).then(
+					(t) => {
+						const doc = parseAuditDoc(t);
+						return doc ? findingsOfDoc(doc, f) : [];
+					},
+					() => [] as AuditFinding[],
+				),
+			),
+		]).then((all) => !gone && setFindings(all.flat()));
 		return () => {
 			gone = true;
 		};
 		// `reload` ticks when the swarm files a finding in the index.
 		// eslint-disable-next-line react-hooks/exhaustive-deps
-	}, [folder, indexes.join("|"), invoke, reload]);
+	}, [folder, indexes.join("|"), reports.join("|"), invoke, reload]);
 	const findingKey = (f: AuditFinding) => `audit:${f.report}#${f.id}#${f.title}`;
 	// With nothing picked, the first finding opens.
 	const picked = openBug?.startsWith("audit:") ? (findings.find((f) => findingKey(f) === openBug) ?? null) : !openBug && findings.length ? findings[0] : null;
@@ -644,6 +676,38 @@ function BugsView({ folder, files, invoke, bugs, openBug, setOpenBug, withPoc, o
 							</button>
 						) : null}
 					</div>
+					{picked.detail ? (
+						// The finding as the standard file holds it: the report's words, then where it stands now.
+						<div className="mt-4 space-y-4">
+							{picked.detail.locations?.length ? (
+								<div className="flex flex-wrap gap-1.5">
+									{picked.detail.locations.map((l) => (
+										<button key={`${l.file}:${l.line ?? ""}`} type="button" onClick={() => onOpenFile(l.file)} title="Open in Code" className="inline-flex h-6 items-center gap-1 rounded-md border bg-background px-2 font-mono text-[11px] hover:bg-muted">
+											<FileCode2 className="size-3 text-muted-foreground" />
+											{l.file}
+											{l.line ? `:${l.line}` : ""}
+										</button>
+									))}
+								</div>
+							) : null}
+							{(
+								[
+									["Description", picked.detail.description],
+									["Impact", picked.detail.impact],
+									["Recommendation", picked.detail.recommendation],
+									["Team response", picked.detail.response],
+								] as const
+							).map(([label, text]) =>
+								text ? (
+									<div key={label} className="prose prose-sm max-w-none dark:prose-invert">
+										<p className="font-mono text-[10px] uppercase tracking-wider text-muted-foreground">{label}</p>
+										<ChatMarkdown>{text}</ChatMarkdown>
+									</div>
+								) : null,
+							)}
+							{picked.detail.reportStatus ? <p className="text-[12px] text-muted-foreground">The report says: {picked.detail.reportStatus}</p> : null}
+						</div>
+					) : null}
 					{picked.evidence ? (
 						<div className="prose prose-sm mt-4 max-w-none dark:prose-invert">
 							<p className="font-mono text-[10px] uppercase tracking-wider text-muted-foreground">Status evidence</p>
@@ -664,6 +728,7 @@ function BugsView({ folder, files, invoke, bugs, openBug, setOpenBug, withPoc, o
 							<p className="mt-1 text-[12px] text-muted-foreground">No test named in the evidence.</p>
 						)}
 					</div>
+					{picked.detail ? null : (
 					<div className="mt-6 border-t pt-4">
 						<p className="font-mono text-[10px] uppercase tracking-wider text-muted-foreground">In the report{pickedReport ? ` · ${pickedReport}` : ""}</p>
 						{!pickedReport ? (
@@ -680,7 +745,11 @@ function BugsView({ folder, files, invoke, bugs, openBug, setOpenBug, withPoc, o
 							<p className="mt-1 text-[12px] text-muted-foreground">Reading…</p>
 						)}
 					</div>
-					<p className="mt-5 text-[11px] text-muted-foreground">From {picked.index}</p>
+					)}
+					<p className="mt-5 text-[11px] text-muted-foreground">
+						From {picked.index}
+						{picked.doc ? ` · ${[picked.doc.auditor, picked.doc.date, picked.detail?.page ? `page ${picked.detail.page}` : ""].filter(Boolean).join(" · ")}` : ""}
+					</p>
 				</DetailCard>
 			) : showing ? (
 				<DetailCard

@@ -485,104 +485,99 @@ mod tests {
     }
 }
 
-/// The index's word for a status the auditor gives.
-fn status_cell(status: &str) -> &'static str {
-    match status.trim().to_ascii_lowercase().as_str() {
-        "fixed" => "✅ Fixed",
-        "works as expected" | "works-as-expected" | "intended" => "🟢 Works as expected",
-        "acknowledged" => "📝 Acknowledged",
-        "rejected" | "invalid" => "❌ Rejected",
-        _ => "⏳ Open",
-    }
+/// Where a report's findings are kept in the standard format (`formalmind.audit/v1`, docs/audit-format.md): next to
+/// the report, `<name>.audit.json` (`audits/Spearbit.pdf` → `audits/Spearbit.audit.json`).
+pub fn audit_json_path(root: &Path, report: &str) -> PathBuf {
+    let p = root.join(report);
+    let stem = p.file_stem().map(|s| s.to_string_lossy().to_string()).unwrap_or_else(|| "report".into());
+    p.with_file_name(format!("{stem}.audit.json"))
 }
 
-/// Records one finding of a report (a PDF or Markdown audit) in the index next to it, `<report folder>/README.md`,
-/// under the report's heading: a new row, or the same ID's row replaced, so reading a report again updates it.
-pub fn record_finding(root: &Path, report: &str, input: &Value) -> Result<String, String> {
-    let report_path = root.join(report);
-    let dir = report_path.parent().ok_or("bad report path")?.to_path_buf();
-    let name = report_path.file_name().map(|n| n.to_string_lossy().to_string()).ok_or("bad report path")?;
-    let index_path = dir.join("README.md");
-    let s = |k: &str| input[k].as_str().unwrap_or("").trim().to_string();
-    let id = cell(&s("id"));
+fn load_audit(path: &Path, report: &str) -> Value {
+    std::fs::read_to_string(path)
+        .ok()
+        .and_then(|t| serde_json::from_str::<Value>(&t).ok())
+        .filter(|v| v["schema"] == "formalmind.audit/v1")
+        .unwrap_or_else(|| json!({ "schema": "formalmind.audit/v1", "kind": "external", "title": "", "source": report, "findings": [] }))
+}
+
+fn save_audit(root: &Path, path: &Path, doc: &Value) -> Result<String, String> {
+    let text = serde_json::to_string_pretty(doc).map_err(|e| e.to_string())?;
+    std::fs::write(path, text + "\n").map_err(|e| e.to_string())?;
+    Ok(path.strip_prefix(root).unwrap_or(path).to_string_lossy().replace('\\', "/"))
+}
+
+/// The report's own facts (title, auditor, date, commit, scope…), merged into its `.audit.json`.
+pub fn record_report(root: &Path, report: &str, input: &Value) -> Result<String, String> {
+    let path = audit_json_path(root, report);
+    let mut doc = load_audit(&path, report);
+    for k in ["title", "auditor", "authors", "date", "commit", "repository", "scope", "summary", "kind"] {
+        if !input[k].is_null() {
+            doc[k] = input[k].clone();
+        }
+    }
+    doc["source"] = json!(report);
+    save_audit(root, &path, &doc)
+}
+
+/// One finding in the standard format, added to the report's `.audit.json` or replacing the same ID's entry.
+pub fn record_finding_json(root: &Path, report: &str, input: &Value) -> Result<String, String> {
+    let id = input["id"].as_str().unwrap_or("").trim().to_string();
     if id.is_empty() {
         return Err("id is required (the report's own ID for the finding, e.g. H-01)".into());
     }
-    let severity = {
-        let v = s("severity");
-        let mut c = v.chars();
-        c.next().map(|f| f.to_uppercase().collect::<String>() + c.as_str()).unwrap_or_else(|| "—".into())
-    };
-    let row = format!("| {id} | {} | {} | {} | {} |", cell(&severity), cell(&s("title")), status_cell(&s("status")), cell(&s("evidence")));
-    let index = std::fs::read_to_string(&index_path).unwrap_or_else(|_| "# Audits\n\nSecurity reports and the status of every finding.\n".into());
-    let mut lines: Vec<String> = index.lines().map(String::from).collect();
-    let heading = format!("## {name}");
-    let is_heading = |l: &str| l.trim() == heading || l.trim() == format!("## [{name}]({name})");
-    if let Some(h) = lines.iter().position(|l| is_heading(l)) {
-        let mut at = h + 1;
-        let mut last_row = None;
-        let mut same = None;
-        while at < lines.len() && !lines[at].starts_with("## ") {
-            let l = lines[at].trim_start();
-            if l.starts_with('|') {
-                last_row = Some(at);
-                if l.trim_start_matches('|').split('|').next().map(str::trim) == Some(id.as_str()) {
-                    same = Some(at);
-                }
-            }
-            at += 1;
+    let path = audit_json_path(root, report);
+    let mut doc = load_audit(&path, report);
+    let mut f = json!({});
+    for k in ["id", "title", "severity", "status", "reportStatus", "locations", "description", "impact", "recommendation", "response", "evidence", "tests", "poc", "page"] {
+        if !input[k].is_null() {
+            f[k] = input[k].clone();
         }
-        match (same, last_row) {
-            (Some(r), _) => lines[r] = row,
-            (None, Some(r)) => lines.insert(r + 1, row),
-            (None, None) => {
-                lines.insert(h + 1, String::new());
-                lines.insert(h + 2, "| ID | Severity | Finding | Status | Evidence |".into());
-                lines.insert(h + 3, "|----|----------|---------|--------|----------|".into());
-                lines.insert(h + 4, row);
-            }
-        }
-    } else {
-        // A report seen for the first time: listed in the index's report table when it has one, then its own section.
-        if let Some(head) = lines.iter().position(|x| x.trim_start().starts_with("| Report")) {
-            let mut end = head + 1;
-            while end < lines.len() && lines[end].trim_start().starts_with('|') {
-                end += 1;
-            }
-            let cols = lines[head].matches('|').count().saturating_sub(1);
-            let mut cells = vec![format!("[{name}]({name})"), s("date"), s("author"), s("scope")];
-            cells.resize(cols.max(1), String::new());
-            lines.insert(end, format!("| {} |", cells.join(" | ")));
-        }
-        let text = lines.join("\n").trim_end().to_string();
-        lines = format!("{text}\n\n{heading}\n\n| ID | Severity | Finding | Status | Evidence |\n|----|----------|---------|--------|----------|\n{row}").lines().map(String::from).collect();
     }
-    std::fs::write(&index_path, lines.join("\n") + "\n").map_err(|e| e.to_string())?;
-    let rel = index_path.strip_prefix(root).unwrap_or(&index_path).to_string_lossy().replace('\\', "/");
-    Ok(rel)
+    f["id"] = json!(id);
+    if let Some(s) = f["severity"].as_str() {
+        f["severity"] = json!(s.trim().to_ascii_lowercase());
+    }
+    if let Some(s) = f["status"].as_str() {
+        f["status"] = json!(match s.trim().to_ascii_lowercase().as_str() {
+            "fixed" => "fixed",
+            "works as expected" | "works-as-expected" | "intended" => "works as expected",
+            "acknowledged" => "acknowledged",
+            "rejected" | "invalid" => "rejected",
+            _ => "open",
+        });
+    }
+    let list = doc["findings"].as_array_mut().ok_or("bad audit file")?;
+    match list.iter_mut().find(|x| x["id"].as_str() == Some(id.as_str())) {
+        Some(x) => *x = f,
+        None => list.push(f),
+    }
+    save_audit(root, &path, &doc)
 }
 
 #[cfg(test)]
-mod record_tests {
-    use super::record_finding;
+mod audit_json_tests {
+    use super::{audit_json_path, record_finding_json, record_report};
     use serde_json::json;
 
     #[test]
-    fn findings_upsert_under_the_report() {
-        let dir = std::env::temp_dir().join(format!("fm-record-{}", std::process::id()));
+    fn findings_land_in_the_standard_file() {
+        let dir = std::env::temp_dir().join(format!("fm-audit-json-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(dir.join("docs/audits")).unwrap();
-        let r = "docs/audits/ABDK.pdf";
-        let idx = record_finding(&dir, r, &json!({ "id": "H-01", "severity": "high", "title": "Reentrancy | in fill", "status": "open", "evidence": "no guard" })).unwrap();
-        assert_eq!(idx, "docs/audits/README.md");
-        record_finding(&dir, r, &json!({ "id": "L-02", "severity": "low", "title": "Typo", "status": "acknowledged", "evidence": "" })).unwrap();
-        record_finding(&dir, r, &json!({ "id": "H-01", "severity": "high", "title": "Reentrancy | in fill", "status": "fixed", "evidence": "`test/X.t.sol`" })).unwrap();
-        let text = std::fs::read_to_string(dir.join(idx)).unwrap();
-        assert!(text.contains("## ABDK.pdf"));
-        assert!(text.contains("| H-01 | High | Reentrancy \\| in fill | ✅ Fixed | `test/X.t.sol` |"));
-        assert!(text.contains("| L-02 | Low | Typo | 📝 Acknowledged |  |"));
-        assert_eq!(text.matches("| H-01 |").count(), 1);
+        let r = "docs/audits/Spearbit core.pdf";
+        assert!(audit_json_path(&dir, r).ends_with("docs/audits/Spearbit core.audit.json"));
+        record_report(&dir, r, &json!({ "title": "Uniswap v4-core Security Review", "auditor": "Spearbit", "date": "2024-05-01" })).unwrap();
+        record_finding_json(&dir, r, &json!({ "id": "H-1", "title": "A", "severity": "High", "status": "Open", "description": "d" })).unwrap();
+        let p = record_finding_json(&dir, r, &json!({ "id": "H-1", "title": "A", "severity": "high", "status": "fixed", "description": "d2", "locations": [{ "file": "src/X.sol", "line": 3 }] })).unwrap();
+        let doc: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(dir.join(p)).unwrap()).unwrap();
+        assert_eq!(doc["schema"], "formalmind.audit/v1");
+        assert_eq!(doc["auditor"], "Spearbit");
+        assert_eq!(doc["source"], r);
+        assert_eq!(doc["findings"].as_array().unwrap().len(), 1);
+        assert_eq!(doc["findings"][0]["status"], "fixed");
+        assert_eq!(doc["findings"][0]["severity"], "high");
+        assert_eq!(doc["findings"][0]["locations"][0]["line"], 3);
         let _ = std::fs::remove_dir_all(&dir);
     }
 }
-

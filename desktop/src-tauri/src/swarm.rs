@@ -423,7 +423,7 @@ Be brief; end with one short paragraph saying what you did and what's next.{}",
     );
     let job = match role {
         "prover" => "Take the plan item you're given and prove it against the generated def named in your task: read the def in the model and the function's slice (call `function` for any callee you need), state the property as a theorem that names the def fully qualified, prove it, and check with `lake build <Module>`. Reuse the project's existing lemmas (search the Lake project for simp lemmas about the monad). If the property is false, that's a bug: show it with a Foundry PoC and call report_bug. Address the reviewer's notes if there are any.",
-        "auditor" => "You are reading an audit report (attached, or in your task) and recording every finding it lists in the folder's audit index, with where it stands now. For each finding: take the report's own ID (H-01, M-2, L-03…; if it has none, number them in order as F-01, F-02…), its severity and a short title. Then check the current code: read the affected function (`functions`, `function`), the files around it, and the tests under test/ that cover it (run `forge test --match-path …` to confirm when a regression test exists). Decide the status: fixed (the code no longer has the issue; say what changed and name the test that covers it), works as expected (the behaviour is intended or the finding is invalid for this code; say why), acknowledged (real but accepted, as the report or code comments say), or open (still there). Call record_finding once per finding, with evidence a reader can check (the file:line, the test). Record every finding, even informational ones; don't fix code or write tests. End with one line: how many findings, and how many of each status.",
+        "auditor" => "You are turning an audit report (attached, or in your task) into the standard audit format (formalmind.audit/v1) that the app shows on its Bugs page. First call record_report once with the report's facts: its title, the auditing firm, the authors, the date (YYYY-MM-DD), the commit and repository it reviewed, the files in scope, and a two-sentence summary. Then call record_finding once per finding, in the report's order, for every finding it lists including informational and gas ones: the report's own ID (H-01, M-2, L-03…; number them F-01, F-02… when it has none), the title, the severity as the report rates it, the full description (the report's words, cleaned of page headers and footers), its impact, its recommendation, the team's response if the report gives one, the locations (repository paths like src/PoolManager.sol with the line when given), the page it starts on, and the status the report gave (reportStatus). Then check the current code for each finding and set `status`: fixed (the issue is gone; say what changed in evidence and name the test that covers it), works as expected (intended, or invalid for this code; say why), acknowledged (accepted, as the report or code says), or open (still there). Use `functions`, `function`, read_file and `forge test --match-path …` for that. Don't fix code or write tests. End with one line: how many findings, and how many of each status.",
         "reviewer" => "Review the prover's work on the plan item: does the Lean statement really say what the Solidity does (read the def in the generated model and the function's slice, in your task), is it about the generated def rather than a restatement, does it check, is there any sorry/admit/axiom? Then call verdict exactly once: approve, or changes with concrete notes. Do not edit proofs yourself. If you spot a real bug in the contract, say so in your notes; the prover writes the PoC.",
         _ => "The maintainer wrote to the swarm. Answer them directly and briefly, using the tools to look things up. If they ask for a change of focus or a new property, update .formal/plan.md accordingly.",
     };
@@ -440,12 +440,24 @@ fn tools(role: &str) -> Value {
         json!({ "name": "run", "description": "Run `lake build`, `lake env lean <file>`, `lake exe cache get`, `lake init|new <Name>`, `forge build` or `forge test [args]` in the folder. Returns exit code and output.", "input_schema": s(json!({ "command": { "type": "string" } }), vec!["command"]) }),
     ];
     if role == "auditor" {
-        t.push(json!({ "name": "record_finding", "description": "Record one of the report's findings in the audit index next to the report, with its status in the current code. Calling it again with the same id updates that finding.", "input_schema": s(json!({
+        t.push(json!({ "name": "record_report", "description": "Record the report's own facts in its standard audit file (formalmind.audit/v1, next to the report). Call once, first.", "input_schema": s(json!({
+            "title": { "type": "string" }, "auditor": { "type": "string", "description": "The auditing firm or person" },
+            "authors": { "type": "array", "items": { "type": "string" } }, "date": { "type": "string", "description": "YYYY-MM-DD" },
+            "commit": { "type": "string" }, "repository": { "type": "string" },
+            "scope": { "type": "array", "items": { "type": "string" }, "description": "Files in scope, as repository paths" },
+            "summary": { "type": "string" } }), vec!["title"]) }));
+        t.push(json!({ "name": "record_finding", "description": "Record one of the report's findings in its standard audit file, with its status in the current code. Calling it again with the same id replaces that finding.", "input_schema": s(json!({
             "id": { "type": "string", "description": "The report's own ID, e.g. H-01" },
-            "severity": { "type": "string", "description": "As the report rates it: critical, high, medium, low, informational…" },
             "title": { "type": "string" },
-            "status": { "type": "string", "enum": ["fixed", "works as expected", "acknowledged", "open"] },
-            "evidence": { "type": "string", "description": "Why: what changed (file:line) and the test that covers it, or why it is intended" } }), vec!["id", "severity", "title", "status", "evidence"]) }));
+            "severity": { "type": "string", "enum": ["critical", "high", "medium", "low", "informational", "gas"] },
+            "status": { "type": "string", "enum": ["fixed", "works as expected", "acknowledged", "open"], "description": "Where it stands in the current code" },
+            "reportStatus": { "type": "string", "description": "The status the report itself gave, e.g. Fixed in PR #123, Acknowledged" },
+            "locations": { "type": "array", "items": { "type": "object", "properties": { "file": { "type": "string" }, "line": { "type": "integer" } }, "required": ["file"], "additionalProperties": false } },
+            "description": { "type": "string" }, "impact": { "type": "string" }, "recommendation": { "type": "string" },
+            "response": { "type": "string", "description": "The team's response in the report" },
+            "evidence": { "type": "string", "description": "Why this status: what changed (file:line) and the test that covers it, or why it is intended" },
+            "tests": { "type": "array", "items": { "type": "string" } },
+            "page": { "type": "integer" } }), vec!["id", "title", "severity", "status", "description"]) }));
     }
     if role != "reviewer" && role != "auditor" {
         t.push(json!({ "name": "report_bug", "description": "Report a real bug in the contracts, with its Foundry PoC (already written and passing). The swarm runs the PoC, files the finding in audit/README.md (status Open) and audit/formal-mind-swarm.md, and moves on to the next item.", "input_schema": s(json!({
@@ -783,11 +795,17 @@ impl Turn<'_> {
                                 self.emit("result", role, item, r.chars().take(500).collect());
                                 r
                             }
+                            "record_report" => {
+                                let job = *self.job.lock().unwrap();
+                                let report = with_queue(&self.queue, |q| q.jobs.iter().find(|j| Some(j.id) == job).map(|j| j.text.clone())).unwrap_or_default();
+                                self.emit("tool", role, item, format!("record_report {}", input["title"].as_str().unwrap_or("")));
+                                crate::swarm_ctx::record_report(&root, &report, input).map(|p| format!("recorded in {p}")).unwrap_or_else(|e| format!("error: {e}"))
+                            }
                             "record_finding" => {
                                 // The report is the job's text: its path in the folder.
                                 let job = *self.job.lock().unwrap();
                                 let report = with_queue(&self.queue, |q| q.jobs.iter().find(|j| Some(j.id) == job).map(|j| j.text.clone())).unwrap_or_default();
-                                let r = crate::swarm_ctx::record_finding(&root, &report, input);
+                                let r = crate::swarm_ctx::record_finding_json(&root, &report, input);
                                 let label = format!("{} {} · {}", input["id"].as_str().unwrap_or(""), input["title"].as_str().unwrap_or(""), input["status"].as_str().unwrap_or(""));
                                 self.emit("tool", role, item, format!("record_finding {label}"));
                                 r.map(|idx| format!("recorded in {idx}")).unwrap_or_else(|e| format!("error: {e}"))
@@ -1050,7 +1068,7 @@ async fn run_swarm(turn: &Turn<'_>) -> String {
             "triage" => {
                 let report = job.text.clone();
                 turn.emit("status", "auditor", "report", format!("reading {report}"));
-                let task = format!("The audit report {report} is attached. Record every finding it lists, each with its status in the current code.{resume_note}");
+                let task = format!("The audit report {report} is attached. Record it and every finding it lists in the standard format, each with its status in the current code.{resume_note}");
                 let content = match inside(&root, &report).and_then(|p| std::fs::read(&p).map_err(|e| e.to_string())) {
                     Ok(bytes) if report.to_ascii_lowercase().ends_with(".pdf") => json!([
                         { "type": "document", "source": { "type": "base64", "media_type": "application/pdf", "data": base64(&bytes) }, "title": report },
