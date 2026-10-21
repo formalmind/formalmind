@@ -1863,7 +1863,7 @@ export function SwarmPanel({ folder, name, scan, bridge, session, file: openPath
 			{/* Talk to the agents: floats on the right of the Swarm canvas, the Plan's counterpart on the left. */}
 			{mode === "swarm" ? (
 				chatOpen ? (
-					<aside className="pointer-events-auto absolute bottom-3 right-3 top-[calc(var(--fm-top)+0.75rem)] z-20 flex w-[min(26rem,calc(100%-1.5rem))] flex-col overflow-hidden rounded-2xl border bg-muted/80 p-1 shadow-pop backdrop-blur">
+					<aside className="pointer-events-auto absolute bottom-3 right-3 top-[calc(max(var(--fm-top),2.75rem)+0.75rem)] z-20 flex w-[min(26rem,calc(100%-1.5rem))] flex-col overflow-hidden rounded-2xl border bg-muted/80 p-1 shadow-pop backdrop-blur">
 						{chatPanel}
 					</aside>
 				) : (
