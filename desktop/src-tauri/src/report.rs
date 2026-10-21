@@ -1205,11 +1205,50 @@ pub fn generate(root: &Path, dirs: &[String]) -> Result<Generated, String> {
     Ok(out)
 }
 
+/// What a report is charged for: the repository (`owner/name` from origin, else the folder's name) and its HEAD commit.
+fn billed(root: &Path) -> Result<(String, String), String> {
+    let commit = git(root, &["rev-parse", "HEAD"]).ok_or("The report is for a commit: make the folder a git repository with at least one commit.")?;
+    let repo = git(root, &["remote", "get-url", "origin"]).and_then(|r| web_url(&r)).as_deref().and_then(repo_name).unwrap_or_else(|| root.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default());
+    Ok((repo, commit))
+}
+
+/// Asks formal.team about the report for this folder's commit: the price, whether it's paid for, and the balance.
+/// With `charge` it takes the charge from credits (once per repository and commit; a commit paid for before is free).
+async fn account(folder: &str, api_base: &str, charge: bool) -> Result<Value, String> {
+    let (repo, commit) = billed(Path::new(folder))?;
+    let res = reqwest::Client::new()
+        .post(format!("{api_base}/api/desktop/report"))
+        .bearer_auth(crate::swarm::token()?)
+        .json(&json!({ "repo": repo, "commit": commit, "charge": charge }))
+        .send()
+        .await
+        .map_err(|e| e.to_string())?;
+    let status = res.status();
+    let mut body: Value = res.json().await.unwrap_or(json!({}));
+    if !status.is_success() {
+        return Err(body["error"].as_str().unwrap_or("formal.team couldn't charge for the report").to_string());
+    }
+    body["repo"] = json!(repo);
+    body["commit"] = json!(commit);
+    Ok(body)
+}
+
+/// The confirm step's numbers: `{ price_cents, paid, balance_cents, repo, commit }`.
 #[tauri::command]
-pub async fn report_generate(folder: String, dirs: Vec<String>) -> Result<Generated, String> {
+pub async fn report_quote(folder: String, api_base: String) -> Result<Value, String> {
     if !crate::local::is_added(&folder)? {
         return Err("Add the folder first".into());
     }
+    account(&folder, &api_base, false).await
+}
+
+/// Charges for the report (see `account`), then builds it. Generating again for the same commit is free.
+#[tauri::command]
+pub async fn report_generate(folder: String, dirs: Vec<String>, api_base: String) -> Result<Generated, String> {
+    if !crate::local::is_added(&folder)? {
+        return Err("Add the folder first".into());
+    }
+    account(&folder, &api_base, true).await?;
     tauri::async_runtime::spawn_blocking(move || generate(Path::new(&folder), &dirs)).await.map_err(|e| e.to_string())?
 }
 

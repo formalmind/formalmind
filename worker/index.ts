@@ -35,6 +35,7 @@ import * as usage from "@/server/routes/usage/route";
 import * as desktopAuthorize from "@/server/routes/desktop/authorize/route";
 import * as desktopToken from "@/server/routes/desktop/token/route";
 import * as desktopModelSession from "@/server/routes/desktop/model-session/route";
+import * as desktopReport from "@/server/routes/desktop/report/route";
 import * as githubItem from "@/server/routes/github/item/route";
 import * as githubWebhook from "@/server/routes/github/webhook/route";
 
@@ -58,6 +59,7 @@ const ROUTES: Record<string, { module: RouteModule; open?: boolean; scope?: Scop
 	"/api/desktop/authorize": { module: desktopAuthorize, open: true },
 	"/api/desktop/token": { module: desktopToken, open: true },
 	"/api/desktop/model-session": { module: desktopModelSession },
+	"/api/desktop/report": { module: desktopReport },
 	"/api/github/install-status": { module: githubInstallStatus },
 	"/api/github/item": { module: githubItem },
 	"/api/github/webhook": { module: githubWebhook, open: true },

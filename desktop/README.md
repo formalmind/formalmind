@@ -140,7 +140,10 @@ or a finding filed. In dev builds `FM_SWARM_AUTOSTART=<added folder>` starts tha
 
 ## Formal Mind's report
 
-Bugs → **Generate report** (`report_generate`, `src-tauri/src/report.rs`) writes Formal Mind's assessment of the folder
+Bugs → **Generate report** costs $150 from formal.team credits, once per repository and commit: the app first asks
+(`report_quote`, showing the balance before and after), and `report_generate` takes the charge
+(`/api/desktop/report`, ref `report:<repo>@<commit>`) before building. Generating again for a commit already paid for is
+free. It (`src-tauri/src/report.rs`) writes Formal Mind's assessment of the folder
 as `<audit folder>/formal-mind.audit.json` in the standard format (`formalmind.audit/v1`, docs/audit-format.md, with
 `kind: "internal"`): the swarm's findings (its `formal-mind-swarm.md` rows in the index, and `.formal/bugs/`) with
 locations, PoC, evidence and the fix (the commit that added the covering test, and the PR its message names), the

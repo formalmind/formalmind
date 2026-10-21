@@ -33,6 +33,13 @@ function historyLines(entries: CreditEntry[]): Line[] {
 			lines.push({ key: e.ref, at: e.at, cents: e.cents, label: e.ref.startsWith("adjust:") ? "Credit adjustment" : "Credits added", href: stripe });
 			continue;
 		}
+		// Formal Mind's audit report: report:<repo>@<commit>.
+		if (e.ref.startsWith("report:")) {
+			const [repo, commit = ""] = e.ref.slice("report:".length).split("@");
+			const github = repo.includes("/");
+			lines.push({ key: e.ref, at: e.at, cents: e.cents, label: "Audit report", repo, item: { text: commit.slice(0, 7), href: github ? `https://github.com/${repo}/commit/${commit}` : "" } });
+			continue;
+		}
 		// A spend's ref is <proofs repo>:<run>[:<job>:<issue or PR>]:<call>.
 		const [repo, run, role = "", ref = ""] = e.ref.split(":");
 		const key = `${repo}:${run}:${role}:${ref}`;

@@ -7,7 +7,7 @@
  */
 import { kv } from "@/lib/kv";
 
-export { DEPOSITS_USD } from "@/lib/billing-plans";
+export { DEPOSITS_USD, REPORT_USD } from "@/lib/billing-plans";
 
 const MIN_USD = 10;
 const MAX_USD = 1_000;
@@ -131,4 +131,9 @@ export async function recordSpend(sub: string, cents: number, ref: string, token
 	if (!(cents > 0)) return;
 	const entry: CreditEntry = { at: new Date().toISOString(), cents: -Math.round(cents * 1000) / 1000, kind: "spend", ref, ...(tokens ? { tokens } : {}) };
 	await (await kv()).put(`${creditPrefix(sub)}spend:${ref}`, JSON.stringify(entry), { metadata: entry });
+}
+
+/** Whether a spend with this ref is already on the account (a report paid for once is free to generate again). */
+export async function hasSpend(sub: string, ref: string) {
+	return (await (await kv()).get(`${creditPrefix(sub)}spend:${ref}`)) !== null;
 }

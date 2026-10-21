@@ -13,6 +13,7 @@ import { ChatComposer } from "@/components/chat-composer";
 import { useReportDirs } from "@/lib/report-dirs";
 import { auditJsonPath, parseAuditDoc, type AuditDoc, type AuditFindingDoc } from "@/lib/audit-format";
 import { readEntryPoints, setMainEntryPoint } from "@/lib/entry-points";
+import { openOnWeb } from "@/lib/open-web";
 import { ChatScrubber } from "./chat-scrubber";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuRadioGroup, DropdownMenuRadioItem, DropdownMenuSeparator, DropdownMenuSub, DropdownMenuSubContent, DropdownMenuSubTrigger, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { ChatMarkdown } from "@/components/chat-markdown";
@@ -490,20 +491,70 @@ function PocView({ folder, invoke, path, fns, onOpenFile }: { folder: string; in
 /** What `report_generate` wrote: Formal Mind's audit file, its AsciiDoc, the PDF when asciidoctor-pdf made one, and why not otherwise. */
 type GeneratedReport = { json: string; adoc: string; pdf: string | null; note: string | null; findings: number; warnings: string[] };
 
+type ReportQuote = { price_cents: number; paid: boolean; balance_cents: number; repo: string; commit: string };
+
+/** Generate report's confirm step: what it's for, what it costs from credits, and the balance after. */
+function ReportConfirm({ quote, onGenerate, onCancel }: { quote: ReportQuote; onGenerate: () => void; onCancel: () => void }) {
+	const usd = (c: number) => `$${(c / 100).toFixed(2).replace(/\.00$/, "")}`;
+	const short = (c: number) => usd(Math.max(0, c));
+	const enough = quote.paid || quote.balance_cents >= quote.price_cents;
+	return (
+		<div className="mx-1 mb-1 flex flex-wrap items-center gap-x-3 gap-y-2 rounded-xl border bg-card px-3 py-2 text-[12px]">
+			<div className="min-w-0 flex-1">
+				<p>
+					Formal Mind's report for <span className="font-medium">{quote.repo}</span> at <span className="font-mono">{quote.commit.slice(0, 7)}</span>
+				</p>
+				<p className="text-muted-foreground">
+					{quote.paid
+						? "Already paid for this commit: generating it again is free."
+						: enough
+							? `${usd(quote.price_cents)} from your credits, once for this commit. Balance ${short(quote.balance_cents)} → ${short(quote.balance_cents - quote.price_cents)}.`
+							: `It costs ${usd(quote.price_cents)} and your balance is ${short(quote.balance_cents)}.`}
+				</p>
+			</div>
+			<button type="button" onClick={onCancel} className="h-7 rounded-lg px-2 text-muted-foreground hover:bg-muted hover:text-foreground">
+				Cancel
+			</button>
+			{enough ? (
+				<button type="button" onClick={onGenerate} className="h-7 rounded-lg bg-foreground px-2.5 font-medium text-background hover:opacity-90">
+					{quote.paid ? "Generate" : `Generate · ${usd(quote.price_cents)}`}
+				</button>
+			) : (
+				<button type="button" onClick={() => openOnWeb("/billing")} className="h-7 rounded-lg bg-foreground px-2.5 font-medium text-background hover:opacity-90">
+					Add credits
+				</button>
+			)}
+		</div>
+	);
+}
+
 /**
  * Bugs: the folder's audit reports (Markdown in its report folders, which the gear sets) and the swarm's findings,
  * each opened on the right.
  */
-function BugsView({ folder, files, invoke, bugs, openBug, setOpenBug, withPoc, onOpenFile, reload = 0, onTriage, onFilesChanged }: { folder: string; files: string[]; invoke: Bridge["invoke"]; bugs: Bug[]; openBug: string | null; setOpenBug: (f: string | null) => void; withPoc: (body: string) => Promise<string>; onOpenFile: (path: string) => void; reload?: number; onTriage?: (path: string) => Promise<void>; onFilesChanged?: () => void }) {
+function BugsView({ folder, files, invoke, apiBase, bugs, openBug, setOpenBug, withPoc, onOpenFile, reload = 0, onTriage, onFilesChanged }: { folder: string; files: string[]; invoke: Bridge["invoke"]; apiBase: Bridge["apiBase"]; bugs: Bug[]; openBug: string | null; setOpenBug: (f: string | null) => void; withPoc: (body: string) => Promise<string>; onOpenFile: (path: string) => void; reload?: number; onTriage?: (path: string) => Promise<void>; onFilesChanged?: () => void }) {
 	const dirs = useReportDirs(folder);
 	// Generate report: the findings, Proofs coverage and in-scope code as an AsciiDoc report (and its PDF) in the audit
 	// folder; `generated` ticks so a PDF already open is read again.
 	const [generating, setGenerating] = useState<{ busy: boolean; note?: string } | null>(null);
 	const [generated, setGenerated] = useState(0);
+	// The confirm step: the report costs credits once per repository and commit, so ask first with the numbers.
+	const [quote, setQuote] = useState<ReportQuote | "loading" | null>(null);
+	const ask = async () => {
+		setGenerating(null);
+		setQuote("loading");
+		try {
+			setQuote(await invoke<ReportQuote>("report_quote", { folder, apiBase: apiBase() }));
+		} catch (e) {
+			setQuote(null);
+			setGenerating({ busy: false, note: `Couldn't price the report: ${e}` });
+		}
+	};
 	const generate = async () => {
+		setQuote(null);
 		setGenerating({ busy: true });
 		try {
-			const g = await invoke<GeneratedReport>("report_generate", { folder, dirs });
+			const g = await invoke<GeneratedReport>("report_generate", { folder, dirs, apiBase: apiBase() });
 			onFilesChanged?.();
 			setGenerated((n) => n + 1);
 			if (g.pdf) {
@@ -636,14 +687,15 @@ function BugsView({ folder, files, invoke, bugs, openBug, setOpenBug, withPoc, o
 				<button
 					type="button"
 					disabled={generating?.busy}
-					onClick={() => void generate()}
+					onClick={() => void ask()}
 					title="Write Formal Mind's report of this folder (formal-mind.audit.json, and a PDF with asciidoctor-pdf) from the swarm's findings, the Proofs coverage and the reviewed proofs, into the audit folder"
 					className="inline-flex h-7 items-center gap-1.5 rounded-lg px-2 text-[12px] text-muted-foreground hover:bg-background hover:text-foreground disabled:opacity-60"
 				>
 					<FileDown className="size-3.5" />
-					{generating?.busy ? "Generating…" : "Generate report"}
+					{generating?.busy ? "Generating…" : quote === "loading" ? "Pricing…" : "Generate report"}
 				</button>
 			</div>
+			{quote && quote !== "loading" ? <ReportConfirm quote={quote} onGenerate={() => void generate()} onCancel={() => setQuote(null)} /> : null}
 			{generating?.note ? (
 				<div className="mx-1 mb-1 flex items-start gap-2 rounded-xl border bg-card px-3 py-2 text-[12px]">
 					<p className="min-w-0 flex-1 whitespace-pre-wrap">{generating.note}</p>
@@ -2222,6 +2274,7 @@ export function SwarmPanel({ folder, name, scan, bridge, session, file: openPath
 						folder={folder}
 						files={tree}
 						invoke={invoke}
+						apiBase={apiBase}
 						bugs={bugs}
 						openBug={openBug}
 						setOpenBug={setOpenBug}

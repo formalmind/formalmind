@@ -91,7 +91,7 @@ struct SwarmEvent {
     spent: f64,
 }
 
-fn token() -> Result<String, String> {
+pub(crate) fn token() -> Result<String, String> {
     keyring::Entry::new("team.formal.desktop", "session")
         .and_then(|e| e.get_password())
         .map_err(|_| "Sign in to Formal Mind first".to_string())
