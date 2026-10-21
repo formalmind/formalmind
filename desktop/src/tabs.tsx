@@ -50,6 +50,18 @@ export function TabBar() {
 	const { toggleSidebar } = useSidebar();
 	const [state, setState] = useState(load);
 	const here = location.pathname + location.search;
+	// A page with its own tab group (a folder's modes and name) fills the slot; that group is then its tab, so the
+	// active tab isn't drawn a second time.
+	const [grouped, setGrouped] = useState(false);
+	useEffect(() => {
+		const slot = document.getElementById("fm-titlebar-slot");
+		if (!slot) return;
+		const look = () => setGrouped(slot.childElementCount > 0);
+		look();
+		const mo = new MutationObserver(look);
+		mo.observe(slot, { childList: true });
+		return () => mo.disconnect();
+	}, []);
 
 	// The page changed (sidebar link, in-page link): the active tab is now there.
 	useEffect(() => {
@@ -118,6 +130,7 @@ export function TabBar() {
 				{state.tabs.map((tab) => {
 					const { title, icon: Icon } = describe(tab.path);
 					const active = tab.id === state.active;
+					if (active && grouped) return null;
 					return (
 						<div
 							key={tab.id}
