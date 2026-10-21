@@ -2037,9 +2037,9 @@ export function SwarmPanel({ folder, name, scan, bridge, session, file: openPath
 						placeholder={run ? "Talk to the agents: a question, a new focus, an idea to check…" : "What should the swarm focus on? (optional) ↑ starts it"}
 						// The composer's top left: the project this chat talks to, and the run control beside it (Stop while it
 						// runs; Start, or Resume with plan items left, when it doesn't).
+						// Start (or Stop) first, then the folder it runs on.
 						context={
 							<span className="inline-flex items-center gap-1.5">
-								<span className="inline-flex h-8 items-center gap-1.5 rounded-full bg-secondary px-3 text-[13px] font-medium text-secondary-foreground">{name}</span>
 								{run ? (
 									<button type="button" onClick={() => void invoke("swarm_stop", { folder, run })} title="Stop the swarm" className="inline-flex h-8 items-center gap-1.5 rounded-full px-3 text-[13px] font-medium text-red-600 hover:bg-red-500/10 dark:text-red-400">
 										<Square className="size-2.5 fill-current" />Stop
@@ -2049,6 +2049,7 @@ export function SwarmPanel({ folder, name, scan, bridge, session, file: openPath
 										<Play className="size-3" />{plan.some((i) => i.mark === " ") ? "Resume" : "Start"}
 									</button>
 								)}
+								<span className="inline-flex h-8 items-center gap-1.5 rounded-full bg-secondary px-3 text-[13px] font-medium text-secondary-foreground">{name}</span>
 							</span>
 						}
 						extra={run ? (
