@@ -962,7 +962,6 @@ function CoverageView({ data, scripts, onOpenFile }: { data: Formal; scripts: Sc
 								<p className="flex items-center gap-2 px-2 pb-0.5 pt-1.5 font-mono text-[10px] uppercase tracking-wider text-muted-foreground">
 										<span className="truncate">{g.title}</span>
 										<span className="ml-auto w-16 shrink-0 text-right">Theorems</span>
-										{g.fns.some((f) => calledBy(f).length) ? <span className="w-14 shrink-0 text-right">Scripts</span> : null}
 									</p>
 								{g.fns.map((f) => {
 									const st = fnStatus(f, data.theorems);
@@ -977,11 +976,6 @@ function CoverageView({ data, scripts, onOpenFile }: { data: Formal; scripts: Sc
 											<span className={`size-2 shrink-0 rounded-full ${st.dot}`} />
 											<span className="truncate">{f.name.split(".").slice(-1)[0]}</span>
 											<span className="ml-auto w-16 shrink-0 text-right text-[10px]">{f.theorems.length || null}</span>
-											{g.fns.some((x) => calledBy(x).length) ? (
-												<span className="w-14 shrink-0 text-right">
-													{calledBy(f).length ? <span className="rounded bg-muted px-1 font-sans text-[10px] text-muted-foreground" title={calledBy(f).join("\n")}>{calledBy(f).length} script{calledBy(f).length > 1 ? "s" : ""}</span> : null}
-												</span>
-											) : null}
 										</button>
 									);
 								})}
