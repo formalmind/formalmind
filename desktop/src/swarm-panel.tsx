@@ -1313,6 +1313,51 @@ export function SwarmPanel({ folder, name, scan, bridge, session, file: openPath
 		store.set("fm:chat-open", open ? "1" : "0");
 		setSeen(agentMessages);
 	};
+	// The chat's size, dragged from its left edge, top edge or top-left corner (it is anchored bottom-right). Width and
+	// height in px; null height is the default (most of the canvas's height). Kept across launches.
+	const [chatSize, setChatSize] = useState<{ w: number; h: number | null }>(() => {
+		try {
+			const v = JSON.parse(store.get("fm:chat-size") ?? "null");
+			if (v && typeof v.w === "number") return { w: v.w, h: typeof v.h === "number" ? v.h : null };
+		} catch {
+			/* the default */
+		}
+		return { w: 416, h: null };
+	});
+	const [resizing, setResizing] = useState(false);
+	const chatBox = useRef<HTMLElement>(null);
+	const startResize = (e: React.PointerEvent, edges: { x: boolean; y: boolean }) => {
+		e.preventDefault();
+		e.stopPropagation();
+		const box = chatBox.current?.getBoundingClientRect();
+		const bounds = chatBox.current?.parentElement?.getBoundingClientRect();
+		if (!box || !bounds) return;
+		const start = { x: e.clientX, y: e.clientY, w: box.width, h: box.height };
+		// Room to grow: up to the canvas's left edge and the strip under the top bar, keeping the margins.
+		const maxW = bounds.width - 24;
+		const maxH = box.bottom - bounds.top - 56;
+		let last = chatSize;
+		setResizing(true);
+		const move = (ev: PointerEvent) => {
+			last = {
+				w: edges.x ? Math.round(Math.min(maxW, Math.max(320, start.w + start.x - ev.clientX))) : chatSize.w,
+				h: edges.y ? Math.round(Math.min(maxH, Math.max(260, start.h + start.y - ev.clientY))) : chatSize.h,
+			};
+			setChatSize(last);
+		};
+		const up = () => {
+			window.removeEventListener("pointermove", move);
+			window.removeEventListener("pointerup", up);
+			setResizing(false);
+			store.set("fm:chat-size", JSON.stringify(last));
+		};
+		window.addEventListener("pointermove", move);
+		window.addEventListener("pointerup", up);
+	};
+	const resetChatSize = () => {
+		setChatSize({ w: 416, h: null });
+		store.set("fm:chat-size", JSON.stringify({ w: 416, h: null }));
+	};
 	// Markdown files open rendered; the toggle shows their source (the choice is kept).
 	const [mdSource, setMdSource] = useState(() => store.get("fm:md-view") === "source");
 	// JSON files open as a collapsible tree; Raw shows the file as it is.
@@ -1612,7 +1657,12 @@ export function SwarmPanel({ folder, name, scan, bridge, session, file: openPath
 		next.set("run", run);
 		setParams(next);
 	};
+	// New messages scroll the chat down only while you're at the bottom (or just sent one): scrolled up to read, it
+	// stays where you are.
+	const atBottom = useRef(true);
 	useEffect(() => {
+		const last = events.at(-1);
+		if (!atBottom.current && last?.kind !== "you") return;
 		// Braces matter: scrollTo returns a Promise in newer browsers, and an effect must return nothing or a cleanup.
 		chat.current?.scrollTo({ top: chat.current.scrollHeight });
 	}, [events]);
@@ -1860,7 +1910,14 @@ export function SwarmPanel({ folder, name, scan, bridge, session, file: openPath
 							: { label: b.e.kind === "you" ? "You" : `${b.e.role[0]?.toUpperCase() ?? ""}${b.e.role.slice(1)}${b.e.item ? ` · item ${b.e.item}` : ""}`, text: b.e.text },
 					)}
 				/>
-				<div ref={chat} className="min-h-0 flex-1 space-y-3 overflow-y-auto py-3 pl-6 pr-3 text-[13px]">
+				<div
+					ref={chat}
+					onScroll={(e) => {
+						const el = e.currentTarget;
+						atBottom.current = el.scrollHeight - el.scrollTop - el.clientHeight < 48;
+					}}
+					className="min-h-0 flex-1 space-y-3 overflow-y-auto py-3 pl-6 pr-3 text-[13px]"
+				>
 					{shown.length === 0 && !run ? <p className="text-muted-foreground">Talk to the agents here. Before a run, what you write is the swarm's focus and ↑ starts it; while it runs, they read your messages before their next turn.</p> : null}
 					{blocks(shown).map((block, i) => (
 						<div key={i} data-msg={i}>
@@ -2179,17 +2236,34 @@ export function SwarmPanel({ folder, name, scan, bridge, session, file: openPath
 					{/* One shape that morphs: the panel shrinks into the round button at the corner it is anchored to, and
 					    grows back out of it. The chat inside keeps its size and fades, so nothing reflows mid-way. */}
 					<aside
-						className={`pointer-events-auto absolute bottom-3 right-3 z-20 overflow-hidden border shadow-pop backdrop-blur transition-[width,height,border-radius,background-color] duration-300 ease-[cubic-bezier(0.22,1,0.36,1)] motion-reduce:transition-none ${chatOpen ? "rounded-2xl bg-muted/80" : "cursor-pointer rounded-[24px] border-transparent bg-foreground hover:opacity-90"}`}
-						style={{ width: chatOpen ? "min(26rem, calc(100% - 1.5rem))" : 48, height: chatOpen ? "calc(100% - max(var(--fm-top), 2.75rem) - 4rem)" : 48 }}
+						ref={chatBox}
+						className={`pointer-events-auto absolute bottom-3 right-3 z-20 overflow-hidden border shadow-pop backdrop-blur ${resizing ? "" : "transition-[width,height,border-radius,background-color] duration-300 ease-[cubic-bezier(0.22,1,0.36,1)]"} motion-reduce:transition-none ${chatOpen ? "rounded-2xl bg-muted/80" : "cursor-pointer rounded-[24px] border-transparent bg-foreground hover:opacity-90"}`}
+						style={{
+							width: chatOpen ? `min(${chatSize.w}px, calc(100% - 1.5rem))` : 48,
+							height: chatOpen ? (chatSize.h ? `min(${chatSize.h}px, calc(100% - max(var(--fm-top), 2.75rem) - 1rem))` : "calc(100% - max(var(--fm-top), 2.75rem) - 4rem)") : 48,
+						}}
 						onClick={chatOpen ? undefined : () => toggleChat(true)}
 					>
 						<div
 							className={`absolute bottom-1 right-1 flex flex-col transition-opacity duration-200 ${chatOpen ? "opacity-100 delay-100" : "pointer-events-none opacity-0"}`}
-							style={{ width: "calc(min(26rem, 100vw - 1.5rem) - 0.5rem - 2px)", height: "calc(100vh - max(var(--fm-top), 2.75rem) - 4.5rem - 2px)", maxHeight: "calc(100% - 0.5rem)" }}
+							style={{
+								width: `calc(min(${chatSize.w}px, 100vw - 1.5rem) - 0.5rem - 2px)`,
+								height: chatSize.h ? `calc(${chatSize.h}px - 0.5rem - 2px)` : "calc(100vh - max(var(--fm-top), 2.75rem) - 4.5rem - 2px)",
+								maxHeight: "calc(100% - 0.5rem)",
+							}}
 							aria-hidden={!chatOpen}
 						>
 							{chatPanel}
 						</div>
+						{/* Drag to resize: the left edge (width), the top edge (height), the top-left corner (both).
+						    Double-click one to go back to the default size. */}
+						{chatOpen ? (
+							<>
+								<div onPointerDown={(e) => startResize(e, { x: true, y: false })} onDoubleClick={resetChatSize} title="Drag to resize" className="absolute bottom-3 left-0 top-3 z-10 w-1.5 cursor-ew-resize" />
+								<div onPointerDown={(e) => startResize(e, { x: false, y: true })} onDoubleClick={resetChatSize} title="Drag to resize" className="absolute left-3 right-3 top-0 z-10 h-1.5 cursor-ns-resize" />
+								<div onPointerDown={(e) => startResize(e, { x: true, y: true })} onDoubleClick={resetChatSize} title="Drag to resize" className="absolute left-0 top-0 z-10 size-3 cursor-nwse-resize" />
+							</>
+						) : null}
 						<button
 							type="button"
 							tabIndex={chatOpen ? -1 : 0}
