@@ -879,7 +879,8 @@ function CoverageView({ data, scripts, onOpenFile }: { data: Formal; scripts: Sc
 	].filter((g) => g.fns.length);
 	const [picked, setPicked] = useState<string | null>(null);
 	const current = data.functions.find((f) => f.name === picked) ?? groups[0]?.fns[0] ?? null;
-	const own = data.functions.filter((f) => !f.dependency);
+	// The counts cover what the list shows: with "libraries" ticked, library functions and their proofs count too.
+	const own = data.functions.filter((f) => deps || !f.dependency);
 	const proved = own.filter((f) => fnStatus(f, data.theorems).key === "proved").length;
 	const inLean = own.filter((f) => !f.why).length;
 	const status = current ? fnStatus(current, data.theorems) : null;
