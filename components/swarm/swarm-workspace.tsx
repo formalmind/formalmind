@@ -214,8 +214,7 @@ export function SwarmWorkspace({ repo, only }: { repo: string; only?: string }) 
 					className="absolute inset-2 z-30 flex flex-col overflow-hidden rounded-2xl border bg-background animate-in fade-in-0 slide-in-from-right-4 duration-200 motion-reduce:animate-none md:static md:inset-auto md:my-3 md:mr-3 md:w-[400px] md:shrink-0"
 				>
 					<div className="flex h-12 shrink-0 items-center gap-2 px-4">
-						{talkTo === "swarm" ? null : <span className="size-2.5 rounded-full" style={{ backgroundColor: ROLE_COLORS[talkTo] }} />}
-						<h2 className={`flex-1 text-sm font-semibold ${talkTo === "swarm" ? "" : "capitalize"}`}>{talkTo === "swarm" ? "Ask the swarm" : talkTo}</h2>
+						<h2 className={`flex-1 text-sm font-semibold ${talkTo === "swarm" ? "" : "capitalize"}`} style={talkTo === "swarm" ? undefined : { color: ROLE_COLORS[talkTo] }}>{talkTo === "swarm" ? "Ask the swarm" : talkTo}</h2>
 						<button type="button" onClick={() => setTalkTo(null)} aria-label="Close" className="flex size-7 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-muted hover:text-foreground">
 							<X className="size-4" />
 						</button>

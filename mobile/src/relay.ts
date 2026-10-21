@@ -43,13 +43,37 @@ export const hasHistory = (folder: string, run: string) => sessions.get(sessionK
 
 const folderName = (folder: string) => folder.split(/[\\/]/).filter(Boolean).pop() ?? folder;
 
+/** The notifications you can turn off in Settings. */
+export const NOTICES = [
+	{ id: "proof", label: "Proof done", sub: "An item is proven and reviewed" },
+	{ id: "bug", label: "Bug filed", sub: "A finding with its proof of concept" },
+	{ id: "budget", label: "Budget reached", sub: "A session spent its cap and stopped" },
+] as const;
+export type NoticeId = (typeof NOTICES)[number]["id"];
+
+export const noticeOn = (id: NoticeId) => {
+	try {
+		return localStorage.getItem(`fm:notify:${id}`) !== "0";
+	} catch {
+		return true;
+	}
+};
+
+export const setNotice = (id: NoticeId, on: boolean) => {
+	try {
+		localStorage.setItem(`fm:notify:${id}`, on ? "1" : "0");
+	} catch {
+		/* this visit only */
+	}
+};
+
 /** What a new event tells you, if it is one of the ones worth a notification. */
 function notice(e: RelayEvent) {
 	const where = folderName(e.folder);
 	const id = `${e.folder}:${e.run}:${e.kind}:${e.item}:${e.text.slice(0, 40)}`;
-	if (e.kind === "bug") notify.error(`Bug filed in ${where}`, { id, description: e.text.split(" — ")[0] });
-	else if (e.kind === "plan" && / proven$/.test(e.text)) notify.success(`Proof done in ${where}`, { id, description: e.text });
-	else if (e.kind === "done" && /budget reached/.test(e.text)) notify.warning(`Budget reached in ${where}`, { id, description: e.text });
+	if (e.kind === "bug" && noticeOn("bug")) notify.error(`Bug filed in ${where}`, { id, description: e.text.split(" — ")[0] });
+	else if (e.kind === "plan" && / proven$/.test(e.text) && noticeOn("proof")) notify.success(`Proof done in ${where}`, { id, description: e.text });
+	else if (e.kind === "done" && /budget reached/.test(e.text) && noticeOn("budget")) notify.warning(`Budget reached in ${where}`, { id, description: e.text });
 	else if (e.kind === "error") notify.error(`Your Mac couldn't do that`, { id, description: e.text });
 }
 
@@ -111,3 +135,20 @@ export async function send(command: RelayCommand) {
 	const res = await fetch("/api/relay/client", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(command) });
 	if (!res.ok) throw new Error(((await res.json().catch(() => ({}))) as { error?: string }).error ?? `Couldn't reach your Mac (${res.status}).`);
 }
+
+/** The spending cap a Start from the phone asks for (picked during setup); the Mac's own cap when unset. */
+export const startBudget = (): number | undefined => {
+	try {
+		return Number(localStorage.getItem("fm:start-budget")) || undefined;
+	} catch {
+		return undefined;
+	}
+};
+
+export const setStartBudget = (usd: number) => {
+	try {
+		localStorage.setItem("fm:start-budget", String(usd));
+	} catch {
+		/* the Mac's own cap applies */
+	}
+};

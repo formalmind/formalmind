@@ -1653,8 +1653,7 @@ function TurnChip({ turn }: { turn: SwarmRole | null }) {
 		>
 			<span className="text-muted-foreground">Turn</span>
 			{turn ? (
-				<span className="inline-flex items-center gap-1.5 font-medium">
-					<span className="size-2 rounded-full" style={{ backgroundColor: ROLE_COLORS[turn] }} />
+				<span className="font-medium" style={{ color: ROLE_COLORS[turn] }}>
 					{turn}
 				</span>
 			) : <span className="text-muted-foreground">between turns</span>}

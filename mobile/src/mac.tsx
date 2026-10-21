@@ -5,7 +5,7 @@ import { NotificationCenter } from "@/components/notification-center";
 import { Message, MessageContent } from "@/components/ui/message";
 import { AgentMessage, blocks, Steps, type Ev } from "@/desktop/src/swarm-panel";
 import { TopBar } from "./bar";
-import { hasHistory, macOnline, send, useMac, useSession } from "./relay";
+import { hasHistory, macOnline, send, startBudget, useMac, useSession } from "./relay";
 
 const sessionHref = (folder: string, run: string) => `/mac/session?${new URLSearchParams({ folder, run })}`;
 
@@ -108,6 +108,8 @@ export function SessionChat({ folder, run, aboveTabs, header }: { folder: string
 	const chat = useMemo(() => blocks(events.filter((e) => !["status", "context", "start", "history"].includes(e.kind))), [events]);
 	const working = running ? [...events].reverse().find((e) => e.kind === "status" && e.role !== "swarm") : undefined;
 	const spent = events.at(-1)?.spent ?? session?.spent ?? 0;
+	// A session with work behind it resumes where it stopped (paused, the budget reached, or the app quit).
+	const resumable = !running && (spent > 0 || events.length > 0);
 
 	const scroller = useRef<HTMLDivElement>(null);
 	const atBottom = useRef(true);
@@ -126,7 +128,10 @@ export function SessionChat({ folder, run, aboveTabs, header }: { folder: string
 				setText("");
 				atBottom.current = true;
 			} else if (kind === "start") {
-				await send({ type: "start", folder, run, goal: text.trim() || undefined });
+				// Resuming carries on this session's queue on the Mac; the cap goes above what it has spent, or a session that
+				// reached its budget would stop again at once.
+				const cap = startBudget() ?? 5;
+				await send({ type: "start", folder, run, goal: text.trim() || undefined, budget: resumable ? Math.ceil(spent + cap) : cap });
 				setText("");
 			} else await send({ type: "stop", folder, run });
 		} catch (e) {
@@ -139,7 +144,6 @@ export function SessionChat({ folder, run, aboveTabs, header }: { folder: string
 	return (
 		<>
 			<div className="flex shrink-0 items-center gap-2 border-b px-4 py-2">
-				<span className={`size-2 shrink-0 rounded-full ${running ? "animate-pulse bg-emerald-500" : "bg-muted-foreground/30"}`} />
 				<span className="min-w-0 flex-1 truncate text-[13px] text-muted-foreground">
 					{header ?? (running ? "Running" : "Stopped")}
 				</span>
@@ -152,7 +156,7 @@ export function SessionChat({ folder, run, aboveTabs, header }: { folder: string
 					</button>
 				) : (
 					<button type="button" disabled={!!busy || !online} onClick={() => void act("start")} className="btn-dark inline-flex h-8 items-center gap-1.5 px-3 text-[13px] disabled:opacity-50">
-						{busy === "start" ? <Loader2 className="size-3.5 animate-spin" /> : <Play className="size-3.5 fill-current" />} Start
+						{busy === "start" ? <Loader2 className="size-3.5 animate-spin" /> : <Play className="size-3.5 fill-current" />} {resumable ? "Resume" : "Start"}
 					</button>
 				)}
 			</div>
@@ -201,10 +205,10 @@ export function SessionChat({ folder, run, aboveTabs, header }: { folder: string
 						value={text}
 						onChange={(e) => setText(e.target.value)}
 						rows={1}
-						placeholder={running ? "Message the swarm" : "What should it focus on? (optional)"}
+						placeholder={running ? "Message the swarm" : resumable ? "Anything to tell it as it resumes? (optional)" : "What should it focus on? (optional)"}
 						className="max-h-32 min-h-[36px] flex-1 resize-none bg-transparent py-1.5 outline-none placeholder:text-muted-foreground"
 					/>
-					<button type="submit" disabled={!!busy || !online || (running && !text.trim())} aria-label={running ? "Send" : "Start the swarm"} className="grid size-9 shrink-0 place-items-center rounded-full bg-foreground text-background disabled:opacity-40">
+					<button type="submit" disabled={!!busy || !online || (running && !text.trim())} aria-label={running ? "Send" : resumable ? "Resume the swarm" : "Start the swarm"} className="grid size-9 shrink-0 place-items-center rounded-full bg-foreground text-background disabled:opacity-40">
 						{busy === "send" ? <Loader2 className="size-4 animate-spin" /> : running ? <ArrowUp className="size-4" /> : <Play className="size-4 fill-current" />}
 					</button>
 				</div>

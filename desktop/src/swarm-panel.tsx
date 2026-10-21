@@ -159,8 +159,8 @@ export function AgentMessage({ e, onBug }: { e: Ev; onBug: () => void }) {
 	return (
 		<Message>
 			<MessageContent className="gap-1">
+				{/* The name in its colour says who it is. */}
 				<MessageHeader className="gap-1.5 px-0 capitalize" style={{ color }}>
-					<span className="size-1.5 rounded-full" style={{ background: color }} />
 					{e.kind === "bug" ? "bug reported" : e.role}
 					{/^\d+$/.test(e.item) ? <span className="font-normal normal-case text-muted-foreground">· item {e.item}</span> : null}
 				</MessageHeader>
@@ -1878,8 +1878,9 @@ export function SwarmPanel({ folder, name, scan, bridge, session, file: openPath
 												<span className={i.mark === "x" ? "text-muted-foreground" : ""}>{i.text}</span>
 												{working && working.item === String(i.index) && activity ? (
 													<span className="mt-0.5 flex items-center gap-1.5 truncate text-[11px] text-muted-foreground" title={activity.text}>
-														<span className="size-1.5 shrink-0 animate-pulse rounded-full" style={{ backgroundColor: colorOf(working.role) }} />
-														<span className="truncate">{working.role} · {activity.text}</span>
+														<span className="truncate">
+															<span className="font-medium" style={{ color: colorOf(working.role) }}>{working.role}</span> · {activity.text}
+														</span>
 													</span>
 												) : null}
 												{named(i.text).length ? (

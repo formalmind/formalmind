@@ -364,8 +364,7 @@ export function UsagePage() {
 										<li key={`${c.createdAt}-${i}`} className="grid h-11 grid-cols-[8.5rem_1fr_5rem] items-center gap-4 px-4">
 											<span className="font-mono text-[11px] text-muted-foreground tabular-nums">{localTime(c.createdAt)}</span>
 											<span className="flex min-w-0 items-center gap-2 truncate">
-												<span className="inline-flex shrink-0 items-center gap-1.5 rounded-full bg-muted px-2 py-0.5 text-[11px] capitalize">
-													<span className="size-1.5 rounded-full" style={{ background: roleColor(c.role) }} />
+												<span className="inline-flex shrink-0 items-center rounded-full bg-muted px-2 py-0.5 text-[11px] font-medium capitalize" style={{ color: roleColor(c.role) }}>
 													{c.role}
 												</span>
 												{c.ref ? <RefCard repo={c.repo} ref_={c.ref} /> : null}

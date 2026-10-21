@@ -1,7 +1,7 @@
 import { useState } from "react";
-import { Link } from "react-router";
+import { Link, useNavigate } from "react-router";
 import { MarkGithubIcon } from "@primer/octicons-react";
-import { ChevronRight, LogOut, Laptop, Plus } from "lucide-react";
+import { ChevronRight, Laptop, Plus } from "lucide-react";
 import { AddProjectCard } from "@/components/add-project";
 import { HomeEmpty } from "@/components/home-empty";
 import { LogoMark } from "@/components/logo";
@@ -40,10 +40,10 @@ function MacCard() {
  * Home: the empty state the Mac app and the website open on (the headline and the next step: add a repository), then
  * your projects and the swarm on your Mac.
  */
-export function MobileHome({ user, onSignOut }: { user: SessionData["user"]; onSignOut: () => void }) {
+export function MobileHome({ user }: { user: SessionData["user"] }) {
 	const projects = useProjects();
 	const [adding, setAdding] = useState(false);
-	const [menu, setMenu] = useState(false);
+	const navigate = useNavigate();
 	const none = projects?.length === 0;
 	return (
 		<div className="flex min-h-dvh flex-col bg-background">
@@ -53,21 +53,13 @@ export function MobileHome({ user, onSignOut }: { user: SessionData["user"]; onS
 				right={
 					<>
 						<NotificationCenter />
-						<button type="button" onClick={() => setMenu((v) => !v)} aria-label="Account" className="grid size-9 place-items-center overflow-hidden rounded-full border bg-muted text-[13px] font-medium">
+						<button type="button" onClick={() => navigate("/settings")} aria-label="Settings" className="grid size-9 place-items-center overflow-hidden rounded-full border bg-muted text-[13px] font-medium">
 							{user.picture ? <img src={user.picture} alt="" className="size-full object-cover" /> : (user.name ?? user.nickname ?? "?").slice(0, 1).toUpperCase()}
 						</button>
 					</>
 				}
 			/>
-			{menu ? (
-				<div className="absolute right-3 top-[calc(env(safe-area-inset-top)+3.25rem)] z-40 w-56 rounded-xl border bg-popover p-1 shadow-pop">
-					<p className="truncate px-3 py-2 text-[13px] text-muted-foreground">{user.name ?? user.nickname}</p>
-					<button type="button" onClick={onSignOut} className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm active:bg-muted">
-						<LogOut className="size-4" /> Sign out
-					</button>
-				</div>
-			) : null}
-			<main className="fm-home fm-under-tabs flex flex-1 flex-col" onClick={() => setMenu(false)}>
+			<main className="fm-home fm-under-tabs flex flex-1 flex-col">
 				<HomeEmpty muted="Bugs, proofs and code." strong={none ? "Open a repository." : "Pick a project."}>
 					{none || adding ? (
 						<AddProjectCard remoteOnly onCancel={none ? undefined : () => setAdding(false)} onDone={() => setAdding(false)} />
