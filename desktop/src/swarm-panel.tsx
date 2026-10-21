@@ -328,7 +328,7 @@ function bugFacts(body: string) {
 	return { severity, file: location?.[1] ?? null, line: location?.[2] ?? null, poc, rest };
 }
 
-const SEVERITY: Record<string, string> = {
+export const SEVERITY: Record<string, string> = {
 	critical: "border-red-600/40 bg-red-600/10 text-red-700 dark:text-red-400",
 	high: "border-red-500/40 bg-red-500/10 text-red-700 dark:text-red-400",
 	medium: "border-amber-500/40 bg-amber-500/10 text-amber-700 dark:text-amber-400",
@@ -352,7 +352,7 @@ function DetailCard({ label, action, bare, children }: { label: string; action?:
 
 /** Bug reports: a list on the left, the selected report on the right with its facts as chips. */
 /** A finding from an audit index: a row of a "| ID | Severity | Finding | Status | Evidence |" table under its report's heading. */
-type AuditFinding = { report: string; id: string; severity: string; title: string; status: "fixed" | "works" | "acknowledged" | "rejected" | "open"; statusText: string; evidence: string; tests: string[]; index: string; detail?: AuditFindingDoc; doc?: AuditDoc };
+export type AuditFinding = { report: string; id: string; severity: string; title: string; status: "fixed" | "works" | "acknowledged" | "rejected" | "open"; statusText: string; evidence: string; tests: string[]; index: string; detail?: AuditFindingDoc; doc?: AuditDoc };
 
 /** Formal Mind's own report and findings: its `formal-mind.audit.json` (and the PDF made from it), and the swarm's
  * `formal-mind-swarm.md` rows in an index. Bugs lists them apart from the other audit reports. */
@@ -378,7 +378,7 @@ function findingsOfDoc(doc: AuditDoc, path: string): AuditFinding[] {
 }
 
 // `text` colours a finding's ID in the list by its status (the list has no dots).
-const STATUS: Record<AuditFinding["status"], { label: string; dot: string; chip: string; text: string }> = {
+export const STATUS: Record<AuditFinding["status"], { label: string; dot: string; chip: string; text: string }> = {
 	fixed: { label: "Fixed", dot: "bg-emerald-500", text: "text-emerald-600 dark:text-emerald-400", chip: "border-emerald-500/30 bg-emerald-500/10 text-emerald-700 dark:text-emerald-400" },
 	works: { label: "Works as expected", dot: "bg-sky-500", text: "text-sky-600 dark:text-sky-400", chip: "border-sky-500/30 bg-sky-500/10 text-sky-700 dark:text-sky-400" },
 	acknowledged: { label: "Acknowledged", dot: "bg-amber-500", text: "text-amber-600 dark:text-amber-400", chip: "border-amber-500/30 bg-amber-500/10 text-amber-700 dark:text-amber-400" },
@@ -431,7 +431,7 @@ function parseAuditIndex(text: string, index: string): AuditFinding[] {
 }
 
 /** A finding's own section of its report: from its `### [ID] …` heading (or one naming its title) to the next heading at that level or above. */
-function findingSection(report: string, id: string, title: string): string | null {
+export function findingSection(report: string, id: string, title: string): string | null {
 	const lines = report.split("\n");
 	const clean = (t: string) => t.replace(/[`*_]/g, "").toLowerCase();
 	const words = clean(title).split(/\W+/).filter((w) => w.length > 3).slice(0, 4);
@@ -538,39 +538,12 @@ function ReportConfirm({ quote, onGenerate, onCancel }: { quote: ReportQuote; on
  * Bugs: the folder's audit reports (Markdown in its report folders, which the gear sets) and the swarm's findings,
  * each opened on the right.
  */
-export function BugsView({ folder, files, invoke, apiBase, bugs, openBug, setOpenBug, withPoc, onOpenFile, reload = 0, onTriage, onFilesChanged }: { folder: string; files: string[]; invoke: Bridge["invoke"]; apiBase: Bridge["apiBase"]; bugs: Bug[]; openBug: string | null; setOpenBug: (f: string | null) => void; withPoc: (body: string) => Promise<string>; onOpenFile: (path: string) => void; reload?: number; onTriage?: (path: string) => Promise<void>; onFilesChanged?: () => void }) {
-	const dirs = useReportDirs(folder);
-	// Generate report: the findings, Proofs coverage and in-scope code as an AsciiDoc report (and its PDF) in the audit
-	// folder; `generated` ticks so a PDF already open is read again.
-	const [generating, setGenerating] = useState<{ busy: boolean; note?: string } | null>(null);
-	const [generated, setGenerated] = useState(0);
-	// The confirm step: the report costs credits once per repository and commit, so ask first with the numbers.
-	const [quote, setQuote] = useState<ReportQuote | "loading" | null>(null);
-	const ask = async () => {
-		setGenerating(null);
-		setQuote("loading");
-		try {
-			setQuote(await invoke<ReportQuote>("report_quote", { folder, apiBase: apiBase() }));
-		} catch (e) {
-			setQuote(null);
-			setGenerating({ busy: false, note: `Couldn't price the report: ${e}` });
-		}
-	};
-	const generate = async () => {
-		setQuote(null);
-		setGenerating({ busy: true });
-		try {
-			const g = await invoke<GeneratedReport>("report_generate", { folder, dirs, apiBase: apiBase() });
-			onFilesChanged?.();
-			setGenerated((n) => n + 1);
-			if (g.pdf) {
-				setOpenBug(`report:${g.pdf}`);
-				setGenerating(null);
-			} else setGenerating({ busy: false, note: `Wrote ${g.json} (${g.findings} findings). ${g.note ?? ""}` });
-		} catch (e) {
-			setGenerating({ busy: false, note: `Couldn't generate the report: ${e}` });
-		}
-	};
+/**
+ * The audit findings of a folder's report folders (`dirs`): each index's rows (README.md / INDEX.md) and each
+ * standard audit file, with Formal Mind's own rows shown once. The reports are the other files there. Bugs on the Mac
+ * and the web, and the phone's Bugs, read them this way.
+ */
+export function useAuditFindings(folder: string, files: string[], invoke: Bridge["invoke"], dirs: string[], reload = 0) {
 	const inDirs = files.filter((f) => /\.(md|markdown|txt|pdf)$/i.test(f) && dirs.some((d) => f.startsWith(`${d.replace(/\/+$/, "")}/`))).sort();
 	// An index (README.md / INDEX.md in a report folder) lists every finding with its status; the rest are reports.
 	const indexes = inDirs.filter((f) => /(^|\/)(readme|index)\.md$/i.test(f));
@@ -604,6 +577,43 @@ export function BugsView({ folder, files, invoke, apiBase, bugs, openBug, setOpe
 		// `reload` ticks when the swarm files a finding in the index.
 		// eslint-disable-next-line react-hooks/exhaustive-deps
 	}, [folder, indexes.join("|"), reports.join("|"), invoke, reload]);
+	return { reports, indexes, findings };
+}
+
+export function BugsView({ folder, files, invoke, apiBase, bugs, openBug, setOpenBug, withPoc, onOpenFile, reload = 0, onTriage, onFilesChanged }: { folder: string; files: string[]; invoke: Bridge["invoke"]; apiBase: Bridge["apiBase"]; bugs: Bug[]; openBug: string | null; setOpenBug: (f: string | null) => void; withPoc: (body: string) => Promise<string>; onOpenFile: (path: string) => void; reload?: number; onTriage?: (path: string) => Promise<void>; onFilesChanged?: () => void }) {
+	const dirs = useReportDirs(folder);
+	// Generate report: the findings, Proofs coverage and in-scope code as an AsciiDoc report (and its PDF) in the audit
+	// folder; `generated` ticks so a PDF already open is read again.
+	const [generating, setGenerating] = useState<{ busy: boolean; note?: string } | null>(null);
+	const [generated, setGenerated] = useState(0);
+	// The confirm step: the report costs credits once per repository and commit, so ask first with the numbers.
+	const [quote, setQuote] = useState<ReportQuote | "loading" | null>(null);
+	const ask = async () => {
+		setGenerating(null);
+		setQuote("loading");
+		try {
+			setQuote(await invoke<ReportQuote>("report_quote", { folder, apiBase: apiBase() }));
+		} catch (e) {
+			setQuote(null);
+			setGenerating({ busy: false, note: `Couldn't price the report: ${e}` });
+		}
+	};
+	const generate = async () => {
+		setQuote(null);
+		setGenerating({ busy: true });
+		try {
+			const g = await invoke<GeneratedReport>("report_generate", { folder, dirs, apiBase: apiBase() });
+			onFilesChanged?.();
+			setGenerated((n) => n + 1);
+			if (g.pdf) {
+				setOpenBug(`report:${g.pdf}`);
+				setGenerating(null);
+			} else setGenerating({ busy: false, note: `Wrote ${g.json} (${g.findings} findings). ${g.note ?? ""}` });
+		} catch (e) {
+			setGenerating({ busy: false, note: `Couldn't generate the report: ${e}` });
+		}
+	};
+	const { reports, indexes, findings } = useAuditFindings(folder, files, invoke, dirs, reload);
 	const findingKey = (f: AuditFinding) => `audit:${f.report}#${f.id}#${f.title}`;
 	// With nothing picked, the first finding opens.
 	const picked = openBug?.startsWith("audit:") ? (findings.find((f) => findingKey(f) === openBug) ?? null) : !openBug && findings.length ? findings[0] : null;
@@ -1053,7 +1063,7 @@ type AstUnits = {
 	scopeFiles?: { path: string; inScope: boolean; dependency: boolean; imports: number }[];
 };
 
-type FormalFn = {
+export type FormalFn = {
 	name: string;
 	kind: string;
 	visibility: string;
@@ -1069,16 +1079,16 @@ type FormalFn = {
 	why: string | null;
 	theorems: number[];
 };
-type FormalTheorem = { name: string; file: string; line: number; sorry: boolean; text: string };
-type Scripts = {
+export type FormalTheorem = { name: string; file: string; line: number; sorry: boolean; text: string };
+export type Scripts = {
 	scripts: { file: string; contract?: string; deploys?: string[]; calls?: { contract: string; function: string; line: number }[]; error?: string; ms: number }[];
 	entryPoints: { contract: string; function: string; file: string; scripts: string[] }[];
 	contracts: { name: string; file: string; kind: string; inScope: boolean; deployedBy: string[]; via: string | null }[];
 };
-type Formal = { contract: string; namespace: string; modelLines: number; translated: number; opaque: number; ext: number; functions: FormalFn[]; theorems: FormalTheorem[]; ms: number };
+export type Formal = { contract: string; namespace: string; modelLines: number; translated: number; opaque: number; ext: number; functions: FormalFn[]; theorems: FormalTheorem[]; ms: number };
 
 /** Where a function stands: proved by a finished theorem, modeled in Lean, or left opaque (and why). */
-function fnStatus(f: FormalFn, theorems: FormalTheorem[]) {
+export function fnStatus(f: FormalFn, theorems: FormalTheorem[]) {
 	if (f.why) return { key: "opaque", label: "Not modeled", dot: "bg-amber-500", text: "text-amber-700 dark:text-amber-400" } as const;
 	const by = f.theorems.map((i) => theorems[i]);
 	if (by.some((t) => !t.sorry)) return { key: "proved", label: "Proved", dot: "bg-emerald-500", text: "text-emerald-700 dark:text-emerald-400" } as const;

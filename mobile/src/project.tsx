@@ -1,14 +1,17 @@
 import { useEffect, useMemo, useState, useSyncExternalStore } from "react";
 import { createPortal } from "react-dom";
 import { useNavigate, useParams, useSearchParams } from "react-router";
-import { Check, ChevronDown, ChevronRight, FileCode2, Folder, History, Laptop, Loader2, Plus } from "lucide-react";
+import { Check, ChevronDown, ChevronRight, FileCode2, Folder, History, Laptop, Loader2, Plus, Settings } from "lucide-react";
+import { useAuth } from "@/components/auth-context";
 import { MarkGithubIcon } from "@primer/octicons-react";
 import { makeGitBridge } from "@/components/projects/git-bridge";
 import { projectPath, repoOf, useProjects } from "@/components/projects/use-projects";
 import { BellLink } from "./notifications";
 import { ChatMarkdown } from "@/components/chat-markdown";
 import { cachedTree, syncRepo } from "@/lib/browser-git";
-import { AuditView, BugsView, FileView, type Bug } from "@/desktop/src/swarm-panel";
+import { FileView } from "@/desktop/src/swarm-panel";
+import { ProofsExplorer } from "./proofs";
+import { BugsExplorer } from "./bugs";
 import { FloatingBar, TopBar } from "./bar";
 import { SlideDrawer } from "./drawer";
 import { ChatButtons, MacState, SessionChat } from "./mac";
@@ -114,8 +117,6 @@ export function ProjectScreen() {
 	const bridge = useMemo(() => makeGitBridge(repo), [repo]);
 	const [files, setFiles] = useState<string[] | null>(null);
 	const [error, setError] = useState<string | null>(null);
-	const [bugs, setBugs] = useState<Bug[]>([]);
-	const [openBug, setOpenBug] = useState<string | null>(null);
 	const [history, setHistory] = useState(false);
 	useEffect(() => rememberProject(repo), [repo]);
 
@@ -133,7 +134,6 @@ export function ProjectScreen() {
 			});
 			if (fresh && live) setFiles(fresh.files);
 		})();
-		void bridge.invoke<Bug[]>("swarm_bugs").then((b) => live && setBugs(b), () => {});
 		return () => {
 			live = false;
 		};
@@ -166,17 +166,9 @@ export function ProjectScreen() {
 			{error ? <p className="m-4 rounded-xl border border-red-500/30 bg-red-500/5 p-3 text-sm text-red-700 dark:text-red-400">Couldn&apos;t clone {repo}: {error}</p> : null}
 			<main className="flex min-h-0 flex-1 flex-col">
 				{tab === "code" ? <CodeTab files={files} bridge={bridge} dir={dir} file={file} open={(n) => go(n)} /> : null}
-				{tab === "proofs" ? (
-					<div className="fm-phone-panel flex min-h-0 flex-1 flex-col overflow-hidden">
-						<AuditView folder={repo} scan={scan} invoke={bridge.invoke} onOpenFile={openFile} />
-					</div>
-				) : null}
+				{tab === "proofs" ? <ProofsExplorer repo={repo} sources={scan?.solidity ?? null} invoke={bridge.invoke} onOpenFile={openFile} /> : null}
 				{tab === "chat" ? <ProjectChat repo={repo} /> : null}
-				{tab === "bugs" ? (
-					<div className="fm-phone-panel relative min-h-0 flex-1 overflow-auto">
-						<BugsView folder={repo} files={files ?? []} invoke={bridge.invoke} apiBase={bridge.apiBase} bugs={bugs} openBug={openBug} setOpenBug={setOpenBug} withPoc={async (body) => body} onOpenFile={openFile} />
-					</div>
-				) : null}
+				{tab === "bugs" ? <BugsExplorer repo={repo} files={files} invoke={bridge.invoke} onOpenFile={openFile} /> : null}
 			</main>
 			<TabBar active={tab} repo={repo} />
 		</div>
@@ -242,6 +234,8 @@ function useChosenRun(repo: string, folder: RelayFolder | undefined) {
 
 /** The chat's history drawer: the folder's sessions, newest first, and a new one. */
 function SessionHistory({ repo, onPicked }: { repo: string; onPicked: () => void }) {
+	const { user } = useAuth();
+	const navigate = useNavigate();
 	const { folder } = useProjectFolder(repo);
 	const { run, pick } = useChosenRun(repo, folder);
 	const go = (r: string) => {
@@ -263,17 +257,29 @@ function SessionHistory({ repo, onPicked }: { repo: string; onPicked: () => void
 			<ul className="min-h-0 flex-1 overflow-y-auto px-2 pb-10">
 				{(folder?.sessions ?? []).map((s) => (
 					<li key={s.run}>
-						<button type="button" onClick={() => go(s.run)} className={`w-full rounded-xl px-3 py-2.5 text-left active:bg-muted ${s.run === run ? "bg-card shadow-card" : ""}`}>
-							<span className="line-clamp-2 block text-[15px]">{s.title || (s.run === "swarm" ? "Swarm" : s.run)}</span>
-							<span className="mt-0.5 block truncate text-[12px] text-muted-foreground">
-								{s.running ? "Running" : s.outcome || "Stopped"} · ${s.spent.toFixed(2)}
-							</span>
+						{/* One line each, as a chat history: the title, and what it spent. */}
+						<button type="button" onClick={() => go(s.run)} className={`flex h-11 w-full items-center gap-3 rounded-xl px-3 text-left active:bg-muted ${s.run === run ? "bg-card shadow-card" : ""}`}>
+							<span className={`min-w-0 flex-1 truncate text-[15px] ${s.running ? "font-medium" : ""}`}>{s.title || (s.run === "swarm" ? "Swarm" : s.run)}</span>
+							<span className={`shrink-0 font-mono text-[12px] ${s.running ? "text-emerald-600 dark:text-emerald-400" : "text-muted-foreground"}`}>{s.running ? "running" : `$${s.spent.toFixed(2)}`}</span>
 						</button>
 					</li>
 				))}
 				{folder && !folder.sessions.length ? <li className="px-3 py-2 text-[14px] text-muted-foreground">No sessions yet.</li> : null}
 				{!folder ? <li className="px-3 py-2 text-[14px] text-muted-foreground">Your Mac's sessions show here once it's connected.</li> : null}
 			</ul>
+			{/* You, and Settings, at the foot of the drawer. */}
+			<div className="fm-safe-bottom flex items-center gap-3 border-t px-4 pt-3">
+				<span className="grid size-9 shrink-0 place-items-center overflow-hidden rounded-full border bg-muted text-[14px] font-medium">
+					{user.picture ? <img src={user.picture} alt="" className="size-full object-cover" /> : (user.name ?? user.nickname ?? "?").slice(0, 1).toUpperCase()}
+				</span>
+				<span className="min-w-0 flex-1">
+					<span className="block truncate text-[15px] font-medium">{user.name ?? user.nickname}</span>
+					{user.nickname ? <span className="block truncate text-[12px] text-muted-foreground">@{user.nickname}</span> : null}
+				</span>
+				<button type="button" onClick={() => navigate("/settings")} aria-label="Settings" className="grid size-10 place-items-center rounded-full bg-card shadow-card active:bg-muted">
+					<Settings className="size-5" />
+				</button>
+			</div>
 		</div>
 	);
 }
