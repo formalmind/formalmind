@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { Link, useLocation, useNavigate } from "react-router";
-import { BookOpen, Folder, FolderOpen, ChevronRight, MessagesSquare, Plus } from "lucide-react"
+import { Folder, FolderOpen, ChevronRight, MessagesSquare, Plus } from "lucide-react"
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
 import { SwarmMenu } from "@/components/projects/swarm-control"
 import {
@@ -31,9 +31,8 @@ import { projectPath, useProjectChats, useProjects, useWorkingChats, type Projec
 /** `anim` names the hover animation in globals.css (icon-anim-*). */
 type NavItem = { title: string; url: string; icon: React.ElementType; anim?: string }
 
-const FOOTER: NavItem[] = [
-	{ title: "Get started", url: "/github", icon: BookOpen, anim: "book" },
-]
+/** Links pinned above the account in the footer (none for now; the /github guide stays reachable by URL). */
+const FOOTER: NavItem[] = []
 
 function NavLink({ item, active }: { item: NavItem; active: boolean }) {
 	return (
