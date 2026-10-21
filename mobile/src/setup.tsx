@@ -60,13 +60,14 @@ function Frame({ step, total, onSkip, children }: { step: number; total: number;
 	return (
 		<main className="fm-safe-top fm-safe-bottom relative flex min-h-dvh flex-col overflow-x-hidden bg-[radial-gradient(ellipse_at_top,#151a24_0%,#08090b_60%)] px-6 pb-8 text-white">
 			<div className="flex h-12 items-center gap-3">
-				<div className="flex flex-1 gap-1" aria-label={`Step ${step + 1} of ${total}`}>
+				{/* The introduction's dots: the current step drawn long. */}
+				<div className="flex flex-1 gap-1.5" aria-label={`Step ${step + 1} of ${total}`}>
 					{Array.from({ length: total }, (_, i) => (
-						<span key={i} className={`h-1 flex-1 rounded-full ${i <= step ? "bg-white" : "bg-white/15"}`} />
+						<span key={i} className={`h-1.5 rounded-full transition-all duration-300 ${i === step ? "w-6 bg-white" : "w-1.5 bg-white/25"}`} />
 					))}
 				</div>
 				{onSkip ? (
-					<button type="button" onClick={onSkip} className="text-[15px] text-white/50">
+					<button type="button" onClick={onSkip} className="px-2 text-[15px] text-white/50">
 						Skip
 					</button>
 				) : null}
