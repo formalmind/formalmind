@@ -1559,11 +1559,16 @@ export function SwarmPanel({ folder, name, scan, bridge, session, file: openPath
 							</DropdownMenuRadioGroup>
 						</DropdownMenuContent>
 					</DropdownMenu>
+					{/* Stop while it runs; Start (or Resume, with plan items left) when it doesn't. */}
 					{run ? (
 						<button type="button" onClick={() => void invoke("swarm_stop", { run })} title="Stop the swarm" className="inline-flex h-7 shrink-0 items-center gap-1 rounded-md border bg-background px-2 text-[11px] text-foreground hover:bg-muted">
 							<Square className="size-3" />Stop
 						</button>
-					) : null}
+					) : (
+						<button type="button" onClick={() => void start()} disabled={provider === "anthropic" && !hasKey} title={provider === "anthropic" && !hasKey ? "Add your Anthropic key in Settings first" : "Start the swarm"} className="btn-dark inline-flex h-7 shrink-0 items-center gap-1 px-2.5 text-[11px] disabled:opacity-50">
+							<Play className="size-3" />{plan.some((i) => i.mark === " ") ? "Resume" : "Start"}
+						</button>
+					)}
 					<button type="button" onClick={() => toggleChat(false)} title="Hide the chat" aria-label="Hide the chat" className="inline-flex size-7 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-background hover:text-foreground">
 						<ChevronDown className="size-3.5" />
 					</button>
@@ -1623,11 +1628,6 @@ export function SwarmPanel({ folder, name, scan, bridge, session, file: openPath
 							</button>
 						) : null}
 					/>
-					{run ? null : (
-						<div className="flex flex-wrap items-center gap-1.5 px-1 text-xs">
-							<button type="button" onClick={() => void start()} disabled={provider === "anthropic" && !hasKey} className="btn-dark ml-auto h-7 gap-1.5 px-3 disabled:opacity-50"><Play className="size-3" />{plan.some((i) => i.mark === " ") ? "Resume" : "Start"}</button>
-						</div>
-					)}
 				</div>
 				</div>
 		</>

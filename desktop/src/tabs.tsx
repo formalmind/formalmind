@@ -112,6 +112,8 @@ export function TabBar() {
 				<PanelLeft className="size-4" />
 			</button>
 			<div className="mx-1 h-4 w-px shrink-0 bg-border" />
+			{/* A page's own controls (its modes and the folder's name) come first, left of the window tabs. */}
+			<div id="fm-titlebar-slot" className="mr-1 flex min-w-0 shrink-0 items-center empty:hidden" />
 			<div data-tauri-drag-region className="flex min-w-0 flex-1 items-center gap-1 overflow-hidden">
 				{state.tabs.map((tab) => {
 					const { title, icon: Icon } = describe(tab.path);
@@ -142,8 +144,6 @@ export function TabBar() {
 					<Plus className="size-4" />
 				</button>
 			</div>
-			{/* A page's own controls (a folder's name, Debug and modes) render here. */}
-			<div id="fm-titlebar-slot" className="flex min-w-0 shrink items-center" />
 			{/* Refresh, settings and the bell stay here on every page; the canvases leave them to the tab bar. */}
 			<button type="button" onClick={() => window.dispatchEvent(new Event("fm:refresh"))} title="Refresh" className="grid size-7 shrink-0 place-items-center rounded-md text-muted-foreground hover:bg-sidebar-accent hover:text-foreground">
 				<RefreshCw className="size-4" />
