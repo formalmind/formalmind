@@ -1,3 +1,4 @@
+import { parseRepo } from "@/lib/plan";
 import { projectRepo } from "@/server/routes/projects/tree/route";
 
 /**
@@ -14,16 +15,24 @@ async function proxy(request: Request) {
 	if (op !== "info/refs" && op !== "git-upload-pack") return Response.json({ error: "Only fetching is allowed." }, { status: 400 });
 	if (op === "info/refs" && url.searchParams.get("service") !== "git-upload-pack") return Response.json({ error: "Only fetching is allowed." }, { status: 400 });
 	const t = await projectRepo(url.searchParams.get("repo"));
-	if ("error" in t) return t.error as Response;
-
-	// The App's installation token reads private repositories too; git takes it as the password for x-access-token.
-	const { token } = (await t.octokit.auth({ type: "installation" })) as { token: string };
-	const headers = new Headers({ Authorization: `Basic ${btoa(`x-access-token:${token}`)}`, "User-Agent": "git/formal.team" });
+	let owner: string, name: string, token: string | null = null;
+	if ("error" in t) {
+		// One of your projects the App isn't installed on: fetched without a token, which public repositories allow.
+		const repo = (t.error as Response).status === 409 ? parseRepo(url.searchParams.get("repo") ?? "") : null;
+		if (!repo) return t.error as Response;
+		[owner, name] = repo.split("/");
+	} else {
+		({ owner, name } = t);
+		// The App's installation token reads private repositories too; git takes it as the password for x-access-token.
+		({ token } = (await t.octokit.auth({ type: "installation" })) as { token: string });
+	}
+	const headers = new Headers({ "User-Agent": "git/formal.team" });
+	if (token) headers.set("Authorization", `Basic ${btoa(`x-access-token:${token}`)}`);
 	for (const h of ["content-type", "accept", "git-protocol"]) {
 		const v = request.headers.get(h);
 		if (v) headers.set(h, v);
 	}
-	const target = `https://github.com/${t.owner}/${t.name}.git/${op}${op === "info/refs" ? "?service=git-upload-pack" : ""}`;
+	const target = `https://github.com/${owner}/${name}.git/${op}${op === "info/refs" ? "?service=git-upload-pack" : ""}`;
 	const res = await fetch(target, { method: request.method, headers, body: request.method === "POST" ? request.body : undefined });
 	// Streamed straight through: a pack can be large, and nothing here needs to read it.
 	return new Response(res.body, {

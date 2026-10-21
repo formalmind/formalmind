@@ -149,7 +149,8 @@ function ProjectFolder({ project, open, onOpenChange, pathname, collapsed, onExp
 	// Selected (any page of the project), its files show underneath.
 	const location = useLocation()
 	// In the Mac app the repository opens as its folder on disk, so its files list whenever it is unfolded.
-	const { tree, error, path } = useRepoTree(project.repo, (source ? true : pathname === home || pathname.startsWith(`${home}/`)) && open, source)
+	// Any unfolded repository lists its files (from the browser's git copy, or from disk in the Mac app).
+	const { tree, error, path } = useRepoTree(project.repo, open, source)
 	const here = source?.current()
 	const current = source ? Boolean(path && here?.path === path) : pathname === home || pathname.startsWith(`${home}/`)
 	const file = source ? (current ? (here?.file ?? null) : null) : pathname === projectPath(project.repo, "file") ? new URLSearchParams(location.search).get("path") : null
@@ -204,7 +205,7 @@ function ProjectFolder({ project, open, onOpenChange, pathname, collapsed, onExp
 				)}
 				</ProjectContextMenu>
 				<CollapsibleContent className="pl-3 group-data-[collapsible=icon]:hidden">
-					{current || (source && open) ? (
+					{open ? (
 						tree ? (
 							<FileTree
 								paths={tree.files}
