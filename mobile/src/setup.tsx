@@ -235,9 +235,9 @@ export function Setup({ user, onDone }: { user: SessionData["user"]; onDone: () 
 
 			{step === 5 ? (
 				<>
-					{/* Home's own empty state, centered as on the introduction's last page: pick a project there. */}
+					{/* Home's own empty state, centered on setup's background: pick a project there. */}
 					<div className="fm-rise my-auto py-6">
-						<div className="dark fm-home mx-auto w-full max-w-[340px] rounded-[28px] border border-white/10 bg-background text-foreground shadow-[0_24px_60px_rgb(0_0_0/0.5)]">
+						<div className="dark fm-home mx-auto w-full max-w-[360px] text-foreground">
 							<HomeEmpty muted="Bugs, proofs and code." strong={projects?.length === 0 ? "Open a repository." : "Pick a project."}>
 								<div className="w-full space-y-2">
 									{projects?.map((p) => (
