@@ -212,5 +212,5 @@ export function FirstProject({ page = "" }: { page?: string }) {
 	const projects = useProjects();
 	if (projects === null) return <Loading />;
 	const first = projects[0];
-	return first ? <Navigate to={projectPath(first.repo, page)} replace /> : <Navigate to="/onboarding?new=1" replace />;
+	return first ? <Navigate to={projectPath(first.repo, page)} replace /> : <Navigate to="/?add=1" replace />;
 }

@@ -20,7 +20,7 @@ const FOOTER = [
 	{
 		title: "Product",
 		links: [
-			{ label: "Get started", href: "/onboarding" },
+			{ label: "Get started", href: "/auth/login?returnTo=%2F%3Fadd%3D1" },
 			{ label: "Documentation", href: "/documentation/get-started" },
 			{ label: "GitHub App", href: "https://github.com/apps/formalmind" },
 		],
@@ -68,7 +68,9 @@ export function Landing({ signedIn }: { signedIn: boolean }) {
 	}, []);
 	// Once a repository is being planned the box locks, so the next step is the setup below; Change unlocks it.
 	const locked = Boolean(repo) && !(error && !plan);
-	const startHref = signedIn ? "/onboarding" : "/auth/login?returnTo=%2Fonboarding";
+	// Started from here, the app opens on Add a project (with the repository planned here, if any), after sign-in.
+	const home = `/?add=${repo ? encodeURIComponent(repo) : "1"}`;
+	const startHref = signedIn ? home : `/auth/login?returnTo=${encodeURIComponent(home)}`;
 
 	const run = (value: string) => {
 		setInput(value);

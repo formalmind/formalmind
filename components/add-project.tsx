@@ -2,7 +2,8 @@ import { useEffect, useState } from "react";
 import { createPortal } from "react-dom";
 import { useNavigate } from "react-router";
 import { MarkGithubIcon } from "@primer/octicons-react";
-import { ArrowRight, FolderPlus } from "lucide-react";
+import { ArrowRight, FolderPlus, Loader2 } from "lucide-react";
+import { projectPath, refreshProjects } from "@/components/projects/use-projects";
 import { inDesktop } from "@/lib/open-web";
 
 export const MAC_DOWNLOAD = "https://github.com/formalmind/formalmind/releases/latest/download/Formal-Mind-mac.dmg";
@@ -18,13 +19,27 @@ function repoOf(text: string): string | null {
 
 /**
  * Adding a project: a local folder (the Mac app's folder picker; on the web, where there is none, the Mac app's
- * download) or a remote GitHub repository (it goes on to be planned and set up). `onLocal` is the Mac app's picker.
+ * download) or a remote GitHub repository, imported straight into a project that opens on its code. `onLocal` is the
+ * Mac app's picker; `initialRepo` opens the card on Remote with that repository filled in (from the landing page).
  */
-export function AddProjectCard({ onLocal, onCancel, onDone }: { onLocal?: () => Promise<unknown> | void; onCancel?: () => void; onDone?: () => void }) {
+export function AddProjectCard({ onLocal, onCancel, onDone, initialRepo }: { onLocal?: () => Promise<unknown> | void; onCancel?: () => void; onDone?: () => void; initialRepo?: string }) {
 	const navigate = useNavigate();
-	const [choice, setChoice] = useState<"local" | "remote" | null>(null);
-	const [text, setText] = useState("");
+	const [choice, setChoice] = useState<"local" | "remote" | null>(initialRepo !== undefined ? "remote" : null);
+	const [text, setText] = useState(initialRepo ?? "");
+	const [adding, setAdding] = useState<{ busy: boolean; error?: string }>({ busy: false });
 	const repo = repoOf(text);
+	const importRepo = async () => {
+		if (!repo) return;
+		setAdding({ busy: true });
+		const res = await fetch("/api/projects", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ repo }) }).catch(() => null);
+		const body = ((await res?.json().catch(() => null)) ?? {}) as { repo?: string; error?: string };
+		if (!res?.ok || !body.repo) return setAdding({ busy: false, error: body.error ?? "Couldn't add it. Try again." });
+		refreshProjects();
+		setAdding({ busy: false });
+		// The project opens on its code (the Mac app's project page is its code).
+		navigate(inDesktop() ? projectPath(body.repo) : projectPath(body.repo, "code"));
+		onDone?.();
+	};
 	const local = async () => {
 		setChoice("local");
 		if (!onLocal || !inDesktop()) return;
@@ -67,18 +82,22 @@ export function AddProjectCard({ onLocal, onCancel, onDone }: { onLocal?: () => 
 					<form
 						onSubmit={(e) => {
 							e.preventDefault();
-							if (!repo) return;
-							navigate(`/onboarding?repo=${encodeURIComponent(repo)}`);
-							onDone?.();
+							void importRepo();
 						}}
 						className="flex items-center gap-2 rounded-full border bg-background p-1 pl-3.5 focus-within:border-foreground/30"
 					>
 						<MarkGithubIcon size={14} className="shrink-0 text-muted-foreground" />
 						<input autoFocus value={text} onChange={(e) => setText(e.target.value)} placeholder="github.com/owner/repo" aria-label="GitHub repository" className="min-w-0 flex-1 bg-transparent outline-none placeholder:text-muted-foreground" />
-						<button type="submit" disabled={!repo} className="btn-dark inline-flex h-7 items-center gap-1 px-3 text-[12px] disabled:opacity-50">
-							Add <ArrowRight className="size-3.5" />
+						<button type="submit" disabled={!repo || adding.busy} className="btn-dark inline-flex h-7 items-center gap-1 px-3 text-[12px] disabled:opacity-50">
+							{adding.busy ? <Loader2 className="size-3.5 animate-spin" /> : null}
+							Add {adding.busy ? null : <ArrowRight className="size-3.5" />}
 						</button>
 					</form>
+				) : null}
+				{choice === "remote" && adding.error ? (
+					<p role="alert" className="px-1 text-[12px] text-red-600 dark:text-red-400">
+						{adding.error}
+					</p>
 				) : null}
 			</div>
 		</section>
