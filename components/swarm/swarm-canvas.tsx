@@ -1262,8 +1262,22 @@ export function SwarmCanvas({ state, fill = false, contain = false, title, actio
 				<ItemHoverCard {...hover} onEnter={keepHover} onLeave={hideHover} />
 			) : null}
 			{title ? <div className="absolute left-3 top-3 flex min-w-0 max-w-[calc(100%-14rem)] items-center gap-2">{title}</div> : null}
-			{/* The canvas tools sit at the top right, before the page's own actions. */}
-			<div className="absolute right-3 top-3 z-10 flex items-center gap-2">
+			{/* Top right: the page's actions (settings, notifications), and the canvas tools under them. */}
+			<div className="absolute right-3 top-3 z-10 flex flex-col items-end gap-2">
+			<div className="flex items-center gap-2">
+			{actions}
+			{fill || local ? null : (
+				<button
+					type="button"
+					onClick={() => setPlaying((p) => !p)}
+					className="inline-flex size-8 items-center justify-center rounded-full border bg-background/90 text-muted-foreground shadow-sm backdrop-blur transition-colors hover:text-foreground"
+					aria-label={playing ? "Pause replay" : "Play replay"}
+					title={playing ? "Pause replay" : "Play replay"}
+				>
+					{playing ? <Pause className="size-3.5" /> : <Play className="size-3.5" />}
+				</button>
+			)}
+			</div>
 			{fill ? (
 				<div data-canvas-ui className="z-10 flex h-8 items-center rounded-full border bg-background/90 text-muted-foreground shadow-sm backdrop-blur">
 					<button
@@ -1298,18 +1312,6 @@ export function SwarmCanvas({ state, fill = false, contain = false, title, actio
 					</button>
 				</div>
 			) : null}
-			{actions}
-			{fill || local ? null : (
-				<button
-					type="button"
-					onClick={() => setPlaying((p) => !p)}
-					className="inline-flex size-8 items-center justify-center rounded-full border bg-background/90 text-muted-foreground shadow-sm backdrop-blur transition-colors hover:text-foreground"
-					aria-label={playing ? "Pause replay" : "Play replay"}
-					title={playing ? "Pause replay" : "Play replay"}
-				>
-					{playing ? <Pause className="size-3.5" /> : <Play className="size-3.5" />}
-				</button>
-			)}
 			</div>
 		</div>
 		</div>

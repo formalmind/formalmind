@@ -4,12 +4,13 @@ import { createPortal } from "react-dom";
 import { NvimTerminal } from "./nvim-terminal";
 import { reportError } from "@/lib/report-error";
 import { JsonTree } from "./json-tree";
-import { Bug, Check, ChevronDown, Code2, Copy, FileCode2, MessageSquare, Network, Play, Plus, ScanSearch, Settings, Square, WandSparkles, Wrench } from "lucide-react";
+import { Bug, Check, ChevronDown, Code2, Copy, FileCode2, Network, Play, Plus, ScanSearch, Square, WandSparkles, Wrench } from "lucide-react";
 
 // The project roadmap (GitHub Projects-style), the same view the web app had on its own page.
 import { motion as vimMotion, search as vimSearch, setVimMode, useVimMode, type Cursor } from "@/components/vim-mode";
 import { useSearchParams } from "react-router";
 import { ChatComposer } from "@/components/chat-composer";
+import { useReportDirs } from "@/lib/report-dirs";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuRadioGroup, DropdownMenuRadioItem, DropdownMenuSeparator, DropdownMenuSub, DropdownMenuSubContent, DropdownMenuSubTrigger, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { ChatMarkdown } from "@/components/chat-markdown";
 import { CodeBlock, CodeBlockContent } from "@/components/ui/code-block";
@@ -324,29 +325,6 @@ const SEVERITY: Record<string, string> = {
 };
 
 /** Bug reports: a list on the left, the selected report on the right with its facts as chips. */
-/** The folders a folder's audit reports are read from, kept per folder (set in Bugs). */
-const DEFAULT_REPORT_DIRS = ["audit", "audits", "reports"];
-function useReportDirs(folder: string) {
-	const key = `fm:report-dirs:${folder}`;
-	const [dirs, setDirs] = useState<string[]>(() => {
-		try {
-			const saved = JSON.parse(localStorage.getItem(key) ?? "null");
-			return Array.isArray(saved) ? saved : DEFAULT_REPORT_DIRS;
-		} catch {
-			return DEFAULT_REPORT_DIRS;
-		}
-	});
-	const save = (next: string[]) => {
-		setDirs(next);
-		try {
-			localStorage.setItem(key, JSON.stringify(next));
-		} catch {
-			/* not kept */
-		}
-	};
-	return [dirs, save] as const;
-}
-
 /** A finding from an audit index: a row of a "| ID | Severity | Finding | Status | Evidence |" table under its report's heading. */
 type AuditFinding = { report: string; id: string; severity: string; title: string; status: "fixed" | "works" | "acknowledged" | "rejected" | "open"; statusText: string; evidence: string; tests: string[]; index: string };
 
@@ -471,8 +449,7 @@ function PocView({ folder, invoke, path, fns, onOpenFile }: { folder: string; in
  * each opened on the right.
  */
 function BugsView({ folder, files, invoke, bugs, openBug, setOpenBug, withPoc, onOpenFile, reload = 0 }: { folder: string; files: string[]; invoke: Bridge["invoke"]; bugs: Bug[]; openBug: string | null; setOpenBug: (f: string | null) => void; withPoc: (body: string) => Promise<string>; onOpenFile: (path: string) => void; reload?: number }) {
-	const [dirs, setDirs] = useReportDirs(folder);
-	const [editing, setEditing] = useState<string | null>(null);
+	const dirs = useReportDirs(folder);
 	const inDirs = files.filter((f) => /\.(md|markdown|txt)$/i.test(f) && dirs.some((d) => f.startsWith(`${d.replace(/\/+$/, "")}/`))).sort();
 	// An index (README.md / INDEX.md in a report folder) lists every finding with its status; the rest are reports.
 	const indexes = inDirs.filter((f) => /(^|\/)(readme|index)\.md$/i.test(f));
@@ -528,28 +505,7 @@ function BugsView({ folder, files, invoke, bugs, openBug, setOpenBug, withPoc, o
 			<div className="min-h-0 overflow-y-auto">
 				<div className="flex items-center">
 					<p className={head}>Reports · {reports.length}</p>
-					<button type="button" onClick={() => setEditing(editing === null ? dirs.join(", ") : null)} title="Choose the folders reports are read from" className="ml-auto mt-1 grid size-6 place-items-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground">
-						<Settings className="size-3.5" />
-					</button>
 				</div>
-				{editing !== null ? (
-					<form
-						className="mb-2 space-y-1.5 rounded-xl border bg-card p-2.5 text-[12px]"
-						onSubmit={(e) => {
-							e.preventDefault();
-							const next = editing.split(",").map((d) => d.trim().replace(/^\.?\/+|\/+$/g, "")).filter(Boolean);
-							setDirs(next.length ? next : DEFAULT_REPORT_DIRS);
-							setEditing(null);
-						}}
-					>
-						<label className="block text-muted-foreground">Report folders, comma-separated (relative to the folder)</label>
-						<input autoFocus value={editing} onChange={(e) => setEditing(e.target.value)} placeholder="audit, audits, reports" className="h-7 w-full rounded-md border bg-background px-2 font-mono text-[12px] outline-none focus-visible:ring-2 focus-visible:ring-ring" />
-						<div className="flex justify-end gap-1.5">
-							<button type="button" onClick={() => setEditing(null)} className="h-6 rounded-md px-2 text-muted-foreground hover:bg-muted">Cancel</button>
-							<button type="submit" className="btn-dark h-6 px-2.5 text-[12px]">Save</button>
-						</div>
-					</form>
-				) : null}
 				<ul className="space-y-1">
 					{reports.map((r) => (
 						<li key={r}>
@@ -775,6 +731,19 @@ function NavGroup({ name, git, onDebug, mode, onMode, inBar, compact }: { name: 
 				<span className={`truncate ${compact ? "max-w-28" : "max-w-48"}`}>{name}</span>
 			</span>
 		</div>
+	);
+}
+
+/** A filled speech bubble with two lines cut out of it: the "Talk to the swarm" mark. */
+function TalkIcon({ className }: { className?: string }) {
+	return (
+		<svg viewBox="0 0 16 16" className={className} aria-hidden>
+			<path
+				fillRule="evenodd"
+				fill="currentColor"
+				d="M4 1h8a3.5 3.5 0 0 1 3.5 3.5v4A3.5 3.5 0 0 1 12 12H8.2l-3.9 2.6A.8.8 0 0 1 3 13.9V12h0A3.5 3.5 0 0 1 .5 8.5v-4A3.5 3.5 0 0 1 4 1Zm.6 4a.7.7 0 0 0 0 1.4h6.8a.7.7 0 0 0 0-1.4H4.6Zm1.4 2.8a.7.7 0 0 0 0 1.4h4a.7.7 0 0 0 0-1.4H6Z"
+			/>
+		</svg>
 	);
 }
 
@@ -1448,7 +1417,12 @@ export function SwarmPanel({ folder, name, scan, bridge, session, file: openPath
 								return (
 									<li key={i.index} className={`rounded-md ${working && working.item === String(i.index) ? "bg-muted" : ""}`}>
 										<button type="button" disabled={!proof} onClick={() => setOpenItem(expanded ? null : i.index)} className="flex w-full gap-2 px-2 py-1 text-left enabled:hover:bg-muted/60 rounded-md">
-											<span className={`mt-px grid size-3.5 shrink-0 place-items-center rounded border text-[9px] ${i.mark === "x" ? "border-emerald-500 bg-emerald-500 text-white" : i.mark === "!" ? "border-amber-500 text-amber-600" : ""}`}>{i.mark === "x" ? "✓" : i.mark === "!" ? "!" : ""}</span>
+											<span className={`mt-px grid size-3.5 shrink-0 place-items-center rounded border ${i.mark === "x" ? "border-emerald-500 bg-emerald-500 text-white" : i.mark === "!" ? "border-amber-500 text-amber-600" : ""}`}>
+												{/* Drawn marks, so they sit centred at any zoom (text glyphs ride their baseline). */}
+												{i.mark === "x" ? <Check className="size-2.5" strokeWidth={3.5} /> : i.mark === "!" ? (
+													<svg viewBox="0 0 10 10" className="size-2.5" aria-hidden><path d="M5 2v3.6" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" /><circle cx="5" cy="7.9" r="1" fill="currentColor" /></svg>
+												) : null}
+											</span>
 											<span className="min-w-0 flex-1">
 												<span className={i.mark === "x" ? "text-muted-foreground" : ""}>{i.text}</span>
 												{working && working.item === String(i.index) && activity ? (
@@ -1495,7 +1469,6 @@ export function SwarmPanel({ folder, name, scan, bridge, session, file: openPath
 		<div className="border-t p-2">
 			<div className="flex items-center gap-2 px-2 pb-1 text-[11px] text-muted-foreground">
 				<span className="font-mono uppercase tracking-wider">Entry points</span>
-				<span>{inPlan.size}/{entryUnits.length} in the plan</span>
 				<span className="ml-auto inline-flex items-center gap-2">
 					<span className="inline-flex items-center gap-1"><span className="size-2 rounded-sm bg-red-500/70" />writes</span>
 					<span className="inline-flex items-center gap-1"><span className="size-2 rounded-sm bg-sky-500/50" />reads</span>
@@ -1863,14 +1836,13 @@ export function SwarmPanel({ folder, name, scan, bridge, session, file: openPath
 			{/* Talk to the agents: floats on the right of the Swarm canvas, the Plan's counterpart on the left. */}
 			{mode === "swarm" ? (
 				chatOpen ? (
-					<aside className="pointer-events-auto absolute bottom-3 right-3 top-[calc(max(var(--fm-top),2.75rem)+0.75rem)] z-20 flex w-[min(26rem,calc(100%-1.5rem))] flex-col overflow-hidden rounded-2xl border bg-muted/80 p-1 shadow-pop backdrop-blur">
+					<aside className="pointer-events-auto absolute bottom-3 right-3 top-[calc(max(var(--fm-top),2.75rem)+3.25rem)] z-20 flex w-[min(26rem,calc(100%-1.5rem))] flex-col overflow-hidden rounded-2xl border bg-muted/80 p-1 shadow-pop backdrop-blur">
 						{chatPanel}
 					</aside>
 				) : (
-					<button type="button" onClick={() => toggleChat(true)} className="pointer-events-auto absolute bottom-3 right-3 z-20 inline-flex h-8 items-center gap-1.5 rounded-full border bg-background px-3 text-[12px] font-medium shadow-pop hover:bg-muted">
-						<MessageSquare className="size-3.5" />
-						Talk to the swarm
-						{run ? <span className="size-1.5 animate-pulse rounded-full bg-emerald-500" aria-label="running" /> : null}
+					<button type="button" onClick={() => toggleChat(true)} title="Talk to the swarm" aria-label="Talk to the swarm" className="pointer-events-auto absolute bottom-4 right-4 z-20 grid size-12 place-items-center rounded-full border bg-background shadow-pop transition-colors hover:bg-muted">
+						<TalkIcon className="size-5" />
+						{run ? <span className="absolute right-0.5 top-0.5 size-2.5 animate-pulse rounded-full border-2 border-background bg-emerald-500" aria-label="running" /> : null}
 					</button>
 				)
 			) : null}
