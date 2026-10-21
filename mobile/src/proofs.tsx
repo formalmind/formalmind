@@ -65,6 +65,20 @@ export function CoverageCard({ contract, theorems, proved, notYet, opaque, class
 }
 
 /** A function as a card: its name, where it stands, its kind, its theorems, and the first lines of its Solidity. */
+/** A theorem: checked or not, where it lives, and its first lines (`full`: all of it, wrapped). */
+export function TheoremCard({ t, onOpen, full = false, className = "w-[78%] max-w-[300px] shrink-0 snap-start" }: { t: FormalTheorem; onOpen?: () => void; full?: boolean; className?: string }) {
+	return (
+		<button type="button" onClick={onOpen} className={`flex flex-col rounded-2xl border bg-card p-3.5 text-left shadow-card active:bg-muted/40 ${className}`}>
+			<span className={`text-[12px] font-medium ${t.sorry ? TONE.sorry : TONE.proved}`}>{t.sorry ? "Has sorry" : "Checked"}</span>
+			<span className="mt-1 truncate font-mono text-[14px] font-medium">{t.name}</span>
+			<span className="truncate font-mono text-[11px] text-muted-foreground">{t.file.split("/").pop()}:{t.line}</span>
+			<pre className={`mt-3 overflow-hidden rounded-lg bg-muted/60 px-2 py-1.5 font-mono text-[10.5px] leading-[1.45] text-muted-foreground ${full ? "whitespace-pre-wrap break-words" : "h-[60px]"}`}>
+				{full ? t.text.trimEnd() : t.text.split("\n").slice(0, 4).join("\n")}
+			</pre>
+		</button>
+	);
+}
+
 export function FnCard({ f, theorems, onOpen, className = "w-[78%] max-w-[300px] shrink-0 snap-start" }: { f: FormalFn; theorems: FormalTheorem[]; onOpen: () => void; className?: string }) {
 	const st = fnStatus(f, theorems);
 	return (
@@ -225,12 +239,7 @@ export function ProofsExplorer({ repo, sources, invoke, onOpenFile }: { repo: st
 					<Shelf label="Not modeled" count={opaque.length}>{opaque.map(card)}</Shelf>
 					<Shelf label="Theorems" count={data.theorems.length}>
 						{data.theorems.map((t, i) => (
-							<button key={i} type="button" onClick={() => onOpenFile(t.file)} className="flex w-[78%] max-w-[300px] shrink-0 snap-start flex-col rounded-2xl border bg-card p-3.5 text-left shadow-card active:bg-muted/40">
-								<span className={`text-[12px] font-medium ${t.sorry ? TONE.sorry : TONE.proved}`}>{t.sorry ? "Has sorry" : "Checked"}</span>
-								<span className="mt-1 truncate font-mono text-[14px] font-medium">{t.name}</span>
-								<span className="truncate font-mono text-[11px] text-muted-foreground">{t.file.split("/").pop()}:{t.line}</span>
-								<pre className="mt-3 h-[60px] overflow-hidden rounded-lg bg-muted/60 px-2 py-1.5 font-mono text-[10.5px] leading-[1.45] text-muted-foreground">{t.text.split("\n").slice(0, 4).join("\n")}</pre>
-							</button>
+							<TheoremCard key={i} t={t} onOpen={() => onOpenFile(t.file)} />
 						))}
 					</Shelf>
 				</>

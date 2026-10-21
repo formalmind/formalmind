@@ -5,14 +5,15 @@ import { MarkGithubIcon } from "@primer/octicons-react";
 import { ChevronRight, Laptop } from "lucide-react";
 import { AddProjectCard } from "@/components/add-project";
 import { APP_INSTALL_URL } from "@/components/onboarding/steps";
-import { ItemPreview } from "@/components/swarm/swarm-canvas";
-import type { SwarmItem } from "@/lib/swarm";
 import { projectPath, useProjects } from "@/components/projects/use-projects";
 import type { SessionData } from "@/lib/session";
+import type { Formal } from "@/desktop/src/swarm-panel";
 import { macOnline, setStartBudget, startBudget, useMac } from "./relay";
 import { rememberProject } from "./tabs";
 import { SwarmShowcase } from "./showcase";
-import { CoverageCard } from "./proofs";
+import { Skeleton } from "./bar";
+import { CoverageCard, TheoremCard } from "./proofs";
+import formal from "./fixtures/formal-asyncswap.json";
 
 const KEY = "fm:mobile-setup";
 
@@ -38,23 +39,34 @@ const primary = "w-full rounded-full bg-white px-4 py-3 text-[15px] font-medium 
 const quiet = "w-full py-2 text-[15px] text-white/50";
 const card = "rounded-2xl border border-white/10 bg-white/[0.05]";
 
-/** What the GitHub app posts: a spec issue from an audit, in the proofs repository (asyncswap/protocol-proofs#30). */
-const BOT_ISSUE: SwarmItem = {
-	repo: "asyncswap/protocol-proofs",
-	number: 30,
-	kind: "issue",
-	title: "audit: executor revocation and scoping in setExecutor / setExecutorWithSig",
-	labels: ["fm:in-progress"],
-	url: "https://github.com/asyncswap/protocol-proofs/issues/30",
-	createdAt: "2026-10-20T07:36:09Z",
-	updatedAt: "2026-10-20T07:36:09Z",
-	author: "formalmind[bot]",
-	authorAvatar: "https://avatars.githubusercontent.com/in/1319020?v=4",
-	excerpt: "Goal. Prove that executor authorization is revocable and scoped: after setExecutor(poolId, executor, false), that executor can no longer fill, cancel or updatePrice that maker's orders on that pool.",
-	comments: 0,
-	merged: false,
-	state: "open",
-};
+/**
+ * An issue as the GitHub app files it, laid out as ItemPreview draws one: the bot that opened it is real, the rest is
+ * skeleton (whatever your project's spec turns out to be).
+ */
+function BotIssueCard() {
+	return (
+		<div className={`dark ${card} p-4 text-foreground`}>
+			<div className="flex items-center gap-1.5">
+				<Skeleton className="h-3 w-16" />
+				<Skeleton className="h-3 w-32" />
+			</div>
+			<Skeleton className="mt-3 h-4 w-[92%]" />
+			<Skeleton className="mt-1.5 h-4 w-[64%]" />
+			<Skeleton className="mt-4 h-2.5 w-full" />
+			<Skeleton className="mt-2 h-2.5 w-[95%]" />
+			<Skeleton className="mt-2 h-2.5 w-[70%]" />
+			<Skeleton className="mt-4 h-4 w-24 rounded" />
+			<div className="mt-3 flex items-center gap-2 border-t pt-3 text-xs text-muted-foreground">
+				<img src="https://avatars.githubusercontent.com/in/1319020?v=4&s=40" alt="" className="size-4 rounded-full" />
+				<span className="font-medium text-foreground">formalmind[bot]</span>
+				<span>opened</span>
+			</div>
+		</div>
+	);
+}
+
+/** sweep: anyone but the owner reverts with NotOwner (formal-ast's real output for AsyncSwap, ./fixtures). */
+const THEOREM = (formal as unknown as Formal).theorems.find((t) => t.name === "sweep_notOwner") ?? (formal as unknown as Formal).theorems[0];
 
 function Frame({ step, total, onSkip, onBack, children }: { step: number; total: number; onSkip?: () => void; onBack?: () => void; children: React.ReactNode }) {
 	const start = useRef<{ x: number; y: number } | null>(null);
@@ -193,8 +205,11 @@ export function Setup({ user, onDone }: { user: SessionData["user"]; onDone: () 
 
 			{step === 2 ? (
 				<>
-					<div className="fm-rise my-auto space-y-4 py-6">
-						<Coverage value={100} />
+					{/* One of AsyncSwap's checked theorems, as Proofs shows it. */}
+					<div className="fm-rise my-auto py-6">
+						<div className="dark mx-auto w-full max-w-[330px] text-foreground drop-shadow-[0_24px_50px_rgb(0_0_0/0.5)]">
+							<TheoremCard t={THEOREM} full className="pointer-events-none w-full" />
+						</div>
 					</div>
 					<Headline muted="From 0 to 100." strong="Every function, proved." body="Coverage is how many of your functions have a checked Lean proof. Each one the swarm proves moves the bar; at 100 the whole contract matches its spec." />
 					<button type="button" onClick={next} className={`${primary} mt-10`}>Continue</button>
@@ -204,9 +219,7 @@ export function Setup({ user, onDone }: { user: SessionData["user"]; onDone: () 
 			{step === 3 ? (
 				<>
 					<div className="fm-rise my-auto py-6">
-						<div className={`dark ${card} p-4 text-foreground`}>
-							<ItemPreview item={BOT_ISSUE} />
-						</div>
+						<BotIssueCard />
 					</div>
 					<Headline
 						muted="Set up on GitHub."
