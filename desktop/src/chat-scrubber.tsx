@@ -35,18 +35,21 @@ export function ChatScrubber({ scroller, items }: { scroller: React.RefObject<HT
 		// eslint-disable-next-line react-hooks/exhaustive-deps
 	}, [scroller, items.length]);
 
+	// The rail's height, measured once it is on the page (it isn't while there are fewer than two messages).
+	const on = items.length >= 2;
 	useEffect(() => {
 		const r = rail.current;
 		if (!r) return;
+		setHeight(r.clientHeight);
 		const ro = new ResizeObserver(() => setHeight(r.clientHeight));
 		ro.observe(r);
 		return () => ro.disconnect();
-	}, []);
+	}, [on]);
 
-	if (items.length < 2) return null;
-	// Evenly spaced, centred; many messages pack closer.
-	const step = Math.max(3, Math.min(10, (height - 16) / items.length));
-	const start = Math.max(8, (height - step * (items.length - 1)) / 2);
+	if (!on) return null;
+	// Spread along the chat's whole height; a long chat packs them closer (never under 3px apart).
+	const step = Math.max(3, (height - 32) / (items.length - 1));
+	const start = 16;
 	const at = (y: number) => Math.min(items.length - 1, Math.max(0, Math.round((y - start) / step)));
 	const go = (i: number) => {
 		const n = nodes()[i];

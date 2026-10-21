@@ -97,14 +97,17 @@ const makeDemo = (data: DemoData | null): Bridge => ({
 		return () => listeners.delete(cb as (e: { payload: unknown }) => void);
 	},
 	invoke: async <T,>(cmd: string, args?: Record<string, unknown>): Promise<T> => {
+		// The sample swarm (a lending protocol's plan, chat and bug) belongs to the sample folder only: next to a real
+		// repository's files it would read as that repository's findings.
+		const sample = !data;
 		const answers: Record<string, unknown> = {
-			swarm_plan: PLAN,
-			swarm_bugs: BUGS,
-			swarm_sessions: [{ run: RUN, title: "Liquidations and the penalty cap", outcome: "", spent: 1.84, events: EVENTS.length }],
-			swarm_history: EVENTS,
-			swarm_proofs: PROOFS,
+			swarm_plan: sample ? PLAN : [],
+			swarm_bugs: sample ? BUGS : [],
+			swarm_sessions: sample ? [{ run: RUN, title: "Liquidations and the penalty cap", outcome: "", spent: 1.84, events: EVENTS.length }] : [],
+			swarm_history: sample ? EVENTS : [],
+			swarm_proofs: sample ? PROOFS : {},
 			folder_read: data ? (data.sources[String(args?.path ?? "")] ?? "// Not in the demo data (only the repository's own text files are).\n") : (SOURCES[String(args?.path ?? "")] ?? "// (demo: no contents)\n"),
-			swarm_running: RUN,
+			swarm_running: sample ? RUN : null,
 			anthropic_key_status: false,
 			folder_tree: { files: data ? data.files : DEMO_TREE, truncated: false },
 			ast_units: AST_UNITS,
