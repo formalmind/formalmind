@@ -12,6 +12,7 @@ import { useSearchParams } from "react-router";
 import { ChatComposer } from "@/components/chat-composer";
 import { useReportDirs } from "@/lib/report-dirs";
 import { readEntryPoints, setMainEntryPoint } from "@/lib/entry-points";
+import { ChatScrubber } from "./chat-scrubber";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuRadioGroup, DropdownMenuRadioItem, DropdownMenuSeparator, DropdownMenuSub, DropdownMenuSubContent, DropdownMenuSubTrigger, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { ChatMarkdown } from "@/components/chat-markdown";
 import { CodeBlock, CodeBlockContent } from "@/components/ui/code-block";
@@ -1722,27 +1723,40 @@ export function SwarmPanel({ folder, name, scan, bridge, session, file: openPath
 					</button>
 				</div>
 				<div className="mt-1 flex min-h-0 flex-1 flex-col overflow-hidden rounded-xl border bg-card">
-				<div ref={chat} className="min-h-0 flex-1 space-y-3 overflow-y-auto p-3 text-[13px]">
+				{/* The scrubber: a tick per message along the left edge, to preview and jump through the chat. */}
+				<div className="relative flex min-h-0 flex-1 flex-col">
+				<ChatScrubber
+					scroller={chat}
+					items={blocks(shown).map((b) =>
+						"steps" in b
+							? { label: `${b.steps.length} tool step${b.steps.length === 1 ? "" : "s"}`, text: b.steps.map((st) => st.call.text).join(" · ") }
+							: { label: b.e.kind === "you" ? "You" : `${b.e.role[0]?.toUpperCase() ?? ""}${b.e.role.slice(1)}${b.e.item ? ` · item ${b.e.item}` : ""}`, text: b.e.text },
+					)}
+				/>
+				<div ref={chat} className="min-h-0 flex-1 space-y-3 overflow-y-auto py-3 pl-6 pr-3 text-[13px]">
 					{shown.length === 0 && !run ? <p className="text-muted-foreground">Talk to the agents here. Before a run, what you write is the swarm's focus and ↑ starts it; while it runs, they read your messages before their next turn.</p> : null}
-					{blocks(shown).map((block, i) =>
-						"steps" in block ? (
-							<Steps key={i} steps={block.steps} running={Boolean(run) && i === blocks(shown).length - 1} />
+					{blocks(shown).map((block, i) => (
+						<div key={i} data-msg={i}>
+						{"steps" in block ? (
+							<Steps steps={block.steps} running={Boolean(run) && i === blocks(shown).length - 1} />
 						) : block.e.kind === "you" ? (
-							<Message key={i} align="end">
+							<Message align="end">
 								<MessageContent>
 									<div className="ml-auto w-fit max-w-[85%] whitespace-pre-wrap rounded-2xl rounded-br-md bg-muted px-3 py-2 text-foreground">{block.e.text}</div>
 								</MessageContent>
 							</Message>
 						) : (
-							<AgentMessage key={i} e={block.e} onBug={() => {
+							<AgentMessage e={block.e} onBug={() => {
 								// Open the bugs card on this report.
 								const hit = bugs.find((b) => block.e.text.includes(b.file));
 								setMode("bugs");
 								if (hit) setOpenBug(hit.file);
 							}} />
-						),
-					)}
+						)}
+						</div>
+					))}
 					{finished ? <p className="rounded-lg border px-3 py-2 text-xs text-muted-foreground">Finished: {finished.text}</p> : null}
+				</div>
 				</div>
 
 				<div className="shrink-0 space-y-2 p-3">
