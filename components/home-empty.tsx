@@ -28,8 +28,8 @@ export function HomeEmpty({ muted, strong, hint, children }: { muted: string; st
 	return (
 		<div className="flex min-h-0 flex-1 items-center justify-center p-6">
 			<div className="flex w-full max-w-lg flex-col items-center text-center">
-				<h1 className="fm-rise font-display text-5xl leading-[1.05] [animation-delay:80ms]">
-					<span className="text-muted-foreground/70">{withIcons(muted)}</span>
+				<h1 className="fm-rise whitespace-nowrap font-display text-5xl leading-[1.05] [animation-delay:80ms]">
+					<span className="whitespace-nowrap text-muted-foreground/70">{withIcons(muted)}</span>
 					<br />
 					{strong}
 				</h1>
