@@ -683,11 +683,11 @@ const THEME: &str = include_str!("../report-template/formal-mind-theme.yml");
 /// The brand's lockups: light text for the black cover, dark text for the running header.
 const LOGO_LIGHT: &str = include_str!("../report-template/formal-mind-lockup-light.svg");
 const LOGO_DARK: &str = include_str!("../report-template/formal-mind-lockup-dark.svg");
-/// Inter for the report's text and JetBrains Mono for its code (both OFL 1.1; the licence travels with them).
+/// Inter for the report's text and Geist Mono for its code (both OFL 1.1; the licence travels with them).
 const FONTS: [(&str, &[u8]); 4] = [
     ("Inter-Regular.ttf", include_bytes!("../report-template/fonts/Inter-Regular.ttf")),
     ("Inter-SemiBold.ttf", include_bytes!("../report-template/fonts/Inter-SemiBold.ttf")),
-    ("JetBrainsMono-Regular.ttf", include_bytes!("../report-template/fonts/JetBrainsMono-Regular.ttf")),
+    ("GeistMono-Regular.ttf", include_bytes!("../report-template/fonts/GeistMono-Regular.ttf")),
     ("LICENSE.txt", include_bytes!("../report-template/fonts/LICENSE.txt")),
 ];
 /// The internal audit's files in the audit folder: the standard file, and the PDF beside it.

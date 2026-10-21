@@ -5,5 +5,5 @@ https://openfontlicense.org
 
 ---
 
-JetBrains Mono: Copyright 2020 The JetBrains Mono Project Authors (https://github.com/JetBrains/JetBrainsMono),
+Geist Mono: Copyright (c) 2023 Vercel, in collaboration with basement.studio (https://github.com/vercel/geist-font),
 also under the SIL Open Font License 1.1 (https://openfontlicense.org).
