@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { AuditFolders } from "@/components/audit-folders";
+import { AuditFolders, EntryPoints } from "@/components/audit-folders";
 import { useProjects } from "@/components/projects/use-projects";
 import { setVimMode, useVimMode } from "@/components/vim-mode";
 import { loadDemoRepos, type DemoData } from "@/components/demo/load";
@@ -32,6 +32,15 @@ export function SettingsPage() {
 						<AuditFolders key={d.path} folder={d.path} label={d.name} />
 					))}
 					{!projects?.length && !demos.length ? <p className="text-[11px] text-muted-foreground">Import a repository first.</p> : null}
+				</Section>
+				<Section title="Entry points">
+					<p className="text-[11px] text-muted-foreground">The contracts Proofs models for each repository, comma-separated; the first opens by default.</p>
+					{(projects ?? []).map((p) => (
+						<EntryPoints key={p.repo} folder={p.repo} label={p.repo} />
+					))}
+					{demos.map((d) => (
+						<EntryPoints key={d.path} folder={d.path} label={d.name} />
+					))}
 				</Section>
 				<Section title="Editor">
 					<label className="flex items-center justify-between gap-4">

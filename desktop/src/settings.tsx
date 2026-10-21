@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { apiBase, DEFAULT_API, setApiBase } from "./api";
 import { setVimMode, useVimMode } from "@/components/vim-mode";
-import { AuditFolders } from "@/components/audit-folders";
+import { AuditFolders, EntryPoints } from "@/components/audit-folders";
 import { useFolders } from "./local";
 
 type Provider = "formal" | "anthropic";
@@ -86,6 +86,17 @@ export function SettingsPage() {
 						</form>
 					)}
 				</div>
+			</Section>
+			<Section title="Entry points">
+				<p className="text-xs text-muted-foreground">The contracts Proofs models for each folder, comma-separated; the first opens by default. Picking a contract on the Proofs page makes it the first.</p>
+				{folders.map((f) => (
+					<EntryPoints key={f} folder={f} />
+				))}
+				{Object.entries(repos)
+					.filter(([, path]) => !folders.includes(path))
+					.map(([repo, path]) => (
+						<EntryPoints key={path} folder={path} label={repo} />
+					))}
 			</Section>
 			<Section title="Editor">
 				<label className="flex items-center justify-between gap-4">

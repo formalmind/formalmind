@@ -11,6 +11,7 @@ import { motion as vimMotion, search as vimSearch, setVimMode, useVimMode, type 
 import { useSearchParams } from "react-router";
 import { ChatComposer } from "@/components/chat-composer";
 import { useReportDirs } from "@/lib/report-dirs";
+import { readEntryPoints, setMainEntryPoint } from "@/lib/entry-points";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuRadioGroup, DropdownMenuRadioItem, DropdownMenuSeparator, DropdownMenuSub, DropdownMenuSubContent, DropdownMenuSubTrigger, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { ChatMarkdown } from "@/components/chat-markdown";
 import { CodeBlock, CodeBlockContent } from "@/components/ui/code-block";
@@ -1056,9 +1057,19 @@ function CoverageView({ data, scripts, onOpenFile }: { data: Formal; scripts: Sc
 }
 
 /** Audit mode: what's been established for the contract picked here, as Lean coverage. */
-function AuditView({ folder, scan, invoke, preferred, onOpenFile, reload = 0 }: { folder: string; scan: Scan | null; invoke: Bridge["invoke"]; preferred: string | null; onOpenFile: (path: string) => void; reload?: number }) {
-	const sources = (scan?.solidity ?? []).filter((f) => !f.endsWith(".t.sol") && !f.endsWith(".s.sol"));
-	const pick = preferred && sources.includes(preferred) ? preferred : (sources.find((f) => f.startsWith("src/")) ?? sources[0] ?? null);
+function AuditView({ folder, scan, invoke, onOpenFile, reload = 0 }: { folder: string; scan: Scan | null; invoke: Bridge["invoke"]; onOpenFile: (path: string) => void; reload?: number }) {
+	// Files found to hold no deployable contract (libraries, interfaces, types): left out of the picker once seen.
+	const [noModel, setNoModel] = useState<string[]>([]);
+	const sources = (scan?.solidity ?? []).filter((f) => !f.endsWith(".t.sol") && !f.endsWith(".s.sol") && !noModel.includes(f));
+	// Libraries, interfaces and types have no model of their own; their functions show under a contract that uses them.
+	const support = (f: string) => /(^|\/)(libraries|interfaces|types|utils)\//.test(f) || /\/I[A-Z]\w*\.sol$/.test(f);
+	const firstContract = sources.find((f) => f.startsWith("src/") && !support(f)) ?? sources.find((f) => !support(f)) ?? sources[0] ?? null;
+	// Your entry points (Settings, or the last contract picked here) come first; the first of them opens by default.
+	const [entries, setEntries] = useState(() => readEntryPoints(folder));
+	const mains = entries.filter((f) => sources.includes(f));
+	const others = sources.filter((f) => !mains.includes(f) && !support(f));
+	// Not the file open in Code: the folder's own main entry point, else its first contract.
+	const pick = mains[0] ?? firstContract;
 	const [entry, setEntry] = useState<string | null>(pick);
 	const [formal, setFormal] = useState<Formal | null>(null);
 	const [scripts, setScripts] = useState<Scripts | null>(null);
@@ -1080,7 +1091,17 @@ function AuditView({ folder, scan, invoke, preferred, onOpenFile, reload = 0 }: 
 		// A reload (the swarm proved something) keeps the table up while the coverage is read again.
 		if (!reload) setFormal(null);
 		setError(null);
-		void invoke<Formal>("ast_formal", { folder, entry }).then(setFormal, (e) => setError(String(e)));
+		void invoke<Formal>("ast_formal", { folder, entry }).then(setFormal, (e) => {
+			const msg = String(e);
+			// No deployable contract in the file: move on to the next file that has one instead of failing.
+			if (/no contract|no deployable|libraries, interfaces and types/i.test(msg)) {
+				setNoModel((n) => (n.includes(entry) ? n : [...n, entry]));
+				const next = sources.find((f) => f !== entry && !noModel.includes(f) && !support(f)) ?? null;
+				if (next) return setEntry(next);
+			}
+			setError(msg);
+		});
+		// eslint-disable-next-line react-hooks/exhaustive-deps
 	}, [folder, entry, invoke, reload]);
 	const ready = formal;
 	return (
@@ -1093,8 +1114,24 @@ function AuditView({ folder, scan, invoke, preferred, onOpenFile, reload = 0 }: 
 						<ChevronDown className="size-3 shrink-0" />
 					</DropdownMenuTrigger>
 					<DropdownMenuContent align="start" className="max-h-80 overflow-y-auto">
-						<DropdownMenuRadioGroup value={entry ?? ""} onValueChange={setEntry}>
-							{sources.map((f) => (
+						{/* Picking one makes it the folder's main entry point, so it opens here next time. */}
+						<DropdownMenuRadioGroup
+							value={entry ?? ""}
+							onValueChange={(f) => {
+								setEntry(f);
+								setEntries(setMainEntryPoint(folder, f));
+							}}
+						>
+							{mains.length ? <DropdownMenuLabel className="text-[11px] font-normal text-muted-foreground">Entry points</DropdownMenuLabel> : null}
+							{mains.map((f, i) => (
+								<DropdownMenuRadioItem key={f} value={f} className="font-mono text-[11px]">
+									{f}
+									{i === 0 ? <span className="ml-auto pl-3 font-sans text-[10px] text-muted-foreground">main</span> : null}
+								</DropdownMenuRadioItem>
+							))}
+							{mains.length && others.length ? <DropdownMenuSeparator /> : null}
+							{mains.length && others.length ? <DropdownMenuLabel className="text-[11px] font-normal text-muted-foreground">Other contracts</DropdownMenuLabel> : null}
+							{others.map((f) => (
 								<DropdownMenuRadioItem key={f} value={f} className="font-mono text-[11px]">{f}</DropdownMenuRadioItem>
 							))}
 						</DropdownMenuRadioGroup>
@@ -1953,7 +1990,7 @@ export function SwarmPanel({ folder, name, scan, bridge, session, file: openPath
 				) : null}
 				{mode === "audit" ? (
 					<div className="pointer-events-auto absolute bottom-3 left-3 right-3 top-[var(--fm-top)] z-10 flex min-h-0 flex-col overflow-hidden rounded-2xl border bg-muted/60 p-1">
-						<AuditView folder={folder} scan={scan} invoke={invoke} preferred={openPath ?? null} onOpenFile={view} reload={reload} />
+						<AuditView folder={folder} scan={scan} invoke={invoke} onOpenFile={view} reload={reload} />
 					</div>
 				) : null}
 			</div>
