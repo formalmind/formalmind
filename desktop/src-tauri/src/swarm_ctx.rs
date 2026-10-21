@@ -1,0 +1,381 @@
+//! What the local swarm reads from formal-ast and where its results land, so its work shows on the app's other pages:
+//! the plan comes from the Foundry scripts' entry points, the units and the functions Audit doesn't show as proved yet;
+//! proofs are checked by `lake build` in the folder's Lake project and count once Audit's coverage sees a theorem
+//! naming the def; findings go into the audit index (audit/README.md) that Bugs reads, with their PoC test.
+
+use formal_ast::{all_slices, analyze_full, audit_json, formal_json, lean, script_entries};
+use serde_json::{json, Value};
+use std::path::{Path, PathBuf};
+
+/// One function of an entry contract, as Audit's Lean coverage sees it.
+#[derive(Clone)]
+pub struct Func {
+    /// `Contract.name`
+    pub name: String,
+    /// Its Lean def in the generated model (what a theorem has to name), e.g. `Router.matchBook`.
+    pub lean: String,
+    pub def: Option<String>,
+    /// Why it is opaque in the model, if it is.
+    pub why: Option<String>,
+    pub entry: bool,
+    pub dependency: bool,
+    /// Named by a theorem without `sorry`.
+    pub proved: bool,
+    /// The theorems naming it (file:line name).
+    pub theorems: Vec<String>,
+    /// The Foundry scripts that call it.
+    pub scripts: Vec<String>,
+}
+
+pub struct Contract {
+    pub name: String,
+    pub file: String,
+    /// The generated Lean model, folder-relative, when there is one.
+    pub model: Option<String>,
+    pub functions: Vec<Func>,
+    /// audit_json's units (footprint, calls, guards).
+    pub units: Vec<Value>,
+    /// Each unit's slice (Markdown), by unit name.
+    pub slices: std::collections::BTreeMap<String, String>,
+}
+
+#[derive(Default)]
+pub struct Context {
+    pub contracts: Vec<Contract>,
+    /// Why something couldn't be read (solc missing, a file that doesn't compile); shown to the planner.
+    pub problems: Vec<String>,
+}
+
+/// The folder's Lake project: the folder itself, or formal/ in it.
+pub fn lake_dir(root: &Path) -> Option<PathBuf> {
+    [root.to_path_buf(), root.join("formal")].into_iter().find(|d| d.join("lakefile.toml").exists() || d.join("lakefile.lean").exists())
+}
+
+/// Reads the folder through formal-ast: the scripts' entry points, then each entry contract's coverage, units and
+/// slices. Writes the generated model into the Lake project when it has none for a contract yet.
+pub fn context(root: &Path) -> Context {
+    let mut ctx = Context::default();
+    let scripts = match script_entries(root) {
+        Ok(v) => v,
+        Err(e) => {
+            ctx.problems.push(format!("script entry points: {e:#}"));
+            json!({})
+        }
+    };
+    let entry_points: Vec<Value> = scripts["entryPoints"].as_array().cloned().unwrap_or_default();
+    let mut files: Vec<String> = vec![];
+    for e in &entry_points {
+        if let Some(f) = e["file"].as_str() {
+            if !files.iter().any(|x| x == f) {
+                files.push(f.to_string());
+            }
+        }
+    }
+    if files.is_empty() {
+        // No scripts: the first contract under src/.
+        let mut src: Vec<String> = crate::executor::list_files(root, "src").unwrap_or_default().lines().filter(|f| f.ends_with(".sol") && !f.ends_with(".t.sol") && !f.ends_with(".s.sol")).map(String::from).collect();
+        src.sort();
+        files.extend(src.into_iter().take(1));
+    }
+    let lake = lake_dir(root);
+    for file in files {
+        let (a, output) = match analyze_full(root, &file, None) {
+            Ok(x) => x,
+            Err(e) => {
+                ctx.problems.push(format!("{file}: {e:#}"));
+                continue;
+            }
+        };
+        let f = formal_json(&a, &output, 0);
+        let name = f["contract"].as_str().unwrap_or("").to_string();
+        let theorems: Vec<Value> = f["theorems"].as_array().cloned().unwrap_or_default();
+        let functions = f["functions"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .map(|x| {
+                let by: Vec<&Value> = x["theorems"].as_array().into_iter().flatten().filter_map(|i| i.as_u64().and_then(|i| theorems.get(i as usize))).collect();
+                let short = x["name"].as_str().unwrap_or("").rsplit('.').next().unwrap_or("").to_string();
+                Func {
+                    name: x["name"].as_str().unwrap_or("").to_string(),
+                    lean: x["lean"].as_str().unwrap_or("").to_string(),
+                    def: x["def"].as_str().map(String::from),
+                    why: x["why"].as_str().map(String::from),
+                    entry: x["entry"].as_bool().unwrap_or(false),
+                    dependency: x["dependency"].as_bool().unwrap_or(false),
+                    proved: by.iter().any(|t| t["sorry"] == false),
+                    theorems: by.iter().map(|t| format!("{}:{} {}", t["file"].as_str().unwrap_or(""), t["line"], t["name"].as_str().unwrap_or(""))).collect(),
+                    scripts: entry_points.iter().filter(|e| e["contract"] == name.as_str() && e["function"] == short.as_str()).flat_map(|e| e["scripts"].as_array().cloned().unwrap_or_default()).filter_map(|s| s.as_str().map(String::from)).collect(),
+                }
+            })
+            .collect();
+        // The model the provers write against: formal/Generated/<Contract>.lean, generated here when it is missing.
+        let mut model = None;
+        if let Some(dir) = &lake {
+            let path = dir.join("Generated").join(format!("{name}.lean"));
+            if !path.exists() {
+                let m = lean::Gen::new(&output, &a.graph, &a.scope).generate(&lean::ident(&name));
+                let _ = std::fs::create_dir_all(path.parent().unwrap_or(dir)).and_then(|_| std::fs::write(&path, m.text));
+            }
+            if path.exists() {
+                model = path.strip_prefix(root).ok().map(|p| p.to_string_lossy().replace('\\', "/"));
+            }
+        }
+        let units = audit_json(&a, 0)["units"].as_array().cloned().unwrap_or_default();
+        ctx.contracts.push(Contract { name, file, model, functions, units, slices: all_slices(&a) });
+    }
+    ctx
+}
+
+impl Context {
+    /// The project's own functions (not libraries), entry points first.
+    fn own(&self) -> impl Iterator<Item = (&Contract, &Func)> {
+        self.contracts.iter().flat_map(|c| c.functions.iter().filter(|f| !f.dependency).map(move |f| (c, f)))
+    }
+
+    /// The plan item's function: the first `Contract.fn` in backticks that names one of ours.
+    pub fn target(&self, text: &str) -> Option<(&Contract, &Func)> {
+        let re = regex::Regex::new(r"`([^`]+)`").expect("valid regex");
+        let names: Vec<String> = re.captures_iter(text).map(|c| c[1].trim().to_string()).collect();
+        names.iter().find_map(|t| self.contracts.iter().flat_map(|k| k.functions.iter().map(move |f| (k, f))).find(|(_, f)| &f.lean == t || &f.name == t))
+    }
+
+    /// What the planner reads: entry points, coverage and the units' footprints.
+    pub fn digest(&self) -> String {
+        let mut s = String::from("## What formal-ast reads from solc's AST\n\n");
+        for p in &self.problems {
+            s.push_str(&format!("(couldn't read {p})\n"));
+        }
+        let called: Vec<(&Contract, &Func)> = self.own().filter(|(_, f)| !f.scripts.is_empty()).collect();
+        s.push_str("### Entry points the Foundry scripts call (what production runs)\n\n");
+        if called.is_empty() {
+            s.push_str("(no script under script/ calls the project's contracts)\n");
+        }
+        for (c, f) in &called {
+            s.push_str(&format!("- `{}` ({}) — {}; called by {}\n", f.lean, c.file, status(f), f.scripts.join(", ")));
+        }
+        for c in &self.contracts {
+            s.push_str(&format!(
+                "\n### {} ({}) — Lean model {}\n\n",
+                c.name,
+                c.file,
+                c.model.as_deref().map(|m| format!("`{m}` (namespace `{}`)", lean::ident(&c.name))).unwrap_or_else(|| "not generated (no Lake project)".into())
+            ));
+            for f in c.functions.iter().filter(|f| !f.dependency && f.scripts.is_empty()) {
+                s.push_str(&format!("- `{}`{} — {}\n", f.lean, if f.entry { " (external)" } else { "" }, status(f)));
+            }
+            if !c.units.is_empty() {
+                s.push_str("\nUnits (one per external function): writes · external calls · guards · arithmetic\n");
+                for u in &c.units {
+                    let writes: Vec<&str> = u["writes"].as_array().into_iter().flatten().filter_map(Value::as_str).collect();
+                    s.push_str(&format!("- {} — writes [{}] · ext {} · guards {} · arith {}\n", u["name"].as_str().unwrap_or(""), writes.join(", "), u["external"], u["guards"], u["arith"]));
+                }
+            }
+        }
+        s
+    }
+
+    /// What the prover gets for its item: the def it has to prove something about, the model, the Solidity slice.
+    pub fn brief(&self, text: &str, lake: Option<&Path>, root: &Path) -> String {
+        let Some((c, f)) = self.target(text) else {
+            return "This item names no function of the generated model; prove it in the Lake project and say which file holds it.".into();
+        };
+        let lib = lake.map(|d| d.strip_prefix(root).unwrap_or(d).to_string_lossy().to_string()).filter(|d| !d.is_empty()).unwrap_or_else(|| ".".into());
+        let short = f.name.rsplit('.').next().unwrap_or("").trim_start_matches('_');
+        let module = format!("{}{}", c.name, capitalize(short));
+        let mut s = format!(
+            "## The target\n\n`{}` in {} — Lean def `{}` in the generated model `{}`.\n{}\n\
+Write the proof as `{lib}/Refinement/Swarm/{module}.lean` (module `Refinement.Swarm.{module}`), starting with `import Generated.{}` (and `import Refinement.Monad` for its simp lemmas when the project has it). \
+Every theorem about the def must spell it fully qualified as `{}` in its statement — Audit's coverage counts the function as proved only when a theorem without `sorry` names exactly that. \
+Check it with `lake build Refinement.Swarm.{module}` (lake runs in {lib}/). The swarm itself re-runs `lake build` and the coverage before your work goes to review.\n",
+            f.name,
+            c.file,
+            f.lean,
+            c.model.as_deref().unwrap_or("(none)"),
+            if f.theorems.is_empty() { "No theorem names it yet.".to_string() } else { format!("Already named by: {}.", f.theorems.join("; ")) },
+            c.name,
+            f.lean
+        );
+        if let Some(d) = &f.def {
+            s.push_str(&format!("\n### Its generated def\n\n```lean\n{}\n```\n", d.trim_end()));
+        }
+        let unit = c.slices.get(&f.name).or_else(|| c.slices.iter().find(|(k, _)| k.rsplit('.').next() == f.name.rsplit('.').next()).map(|(_, v)| v));
+        if let Some(sl) = unit {
+            s.push_str(&format!("\n### Its slice of the Solidity (from the AST)\n\n{}\n", crate::executor::clip(sl.clone())));
+        }
+        s
+    }
+}
+
+fn status(f: &Func) -> String {
+    match (&f.why, f.proved, f.theorems.is_empty()) {
+        (Some(why), _, _) => format!("opaque in the model ({why})"),
+        (None, true, _) => format!("proved ({} theorem{})", f.theorems.len(), if f.theorems.len() == 1 { "" } else { "s" }),
+        (None, false, false) => "named only by theorems with sorry".into(),
+        (None, false, true) => "NOT PROVED".into(),
+    }
+}
+
+fn capitalize(s: &str) -> String {
+    let mut c = s.chars();
+    c.next().map(|f| f.to_uppercase().collect::<String>() + c.as_str()).unwrap_or_default()
+}
+
+/// A Lean file that cheats: `sorry`, `admit`, a new `axiom`, or `native_decide`.
+pub fn cheats(text: &str) -> Option<&'static str> {
+    let words: Vec<&str> = text.split(|c: char| !(c.is_alphanumeric() || c == '_')).collect();
+    ["sorry", "admit", "axiom", "native_decide"].into_iter().find(|w| words.contains(w))
+}
+
+// ---- findings: the audit index Bugs reads ----
+
+pub const REPORT: &str = "formal-mind-swarm.md";
+
+/// The folder's report folder: the first of audit/, audits/, reports/ that exists, else audit/.
+fn report_dir(root: &Path) -> PathBuf {
+    ["audit", "audits", "reports"].iter().map(|d| root.join(d)).find(|d| d.is_dir()).unwrap_or_else(|| root.join("audit"))
+}
+
+fn cell(s: &str) -> String {
+    s.replace('|', "\\|").replace('\n', " ").trim().to_string()
+}
+
+/// Files a finding: its section in audit/formal-mind-swarm.md and a row (⏳ Open, the PoC as evidence) in the index,
+/// audit/README.md, under the report's heading. Returns the finding's ID and the report's path.
+pub fn file_finding(root: &Path, input: &Value, poc: &str, forge: &str) -> Result<(String, String), String> {
+    let dir = report_dir(root);
+    std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+    let index_path = dir.join("README.md");
+    let mut index = std::fs::read_to_string(&index_path).unwrap_or_else(|_| "# Audits\n\nSecurity reports and the status of every finding.\n".into());
+    let n = regex::Regex::new(r"\|\s*FM-(\d+)\s*\|").expect("valid regex").captures_iter(&index).filter_map(|c| c[1].parse::<u32>().ok()).max().unwrap_or(0) + 1;
+    let id = format!("FM-{n:02}");
+    let s = |k: &str| input[k].as_str().unwrap_or("").trim().to_string();
+    let title = if s("title").is_empty() { "Finding".to_string() } else { s("title") };
+    let severity = {
+        let v = s("severity");
+        let mut c = v.chars();
+        c.next().map(|f| f.to_uppercase().collect::<String>() + c.as_str()).unwrap_or_else(|| "Medium".into())
+    };
+    let today = chrono_today();
+
+    // The report: one section per finding.
+    let report_path = dir.join(REPORT);
+    let mut report = std::fs::read_to_string(&report_path).unwrap_or_else(|_| {
+        format!("# Formal Mind swarm findings\n\nFindings from Formal Mind's local swarm (planner, prover, reviewer) while proving this repository's contracts against the Lean model formal-ast generates from solc's AST. Each one has a Foundry PoC under `test/`; their status is kept in [README.md](README.md).\n")
+    });
+    report.push_str(&format!(
+        "\n### [{id}] {title}\n\n**Severity:** {}\n**Location:** `{}`\n**PoC:** `{poc}`\n**Found:** {today}\n\n#### Scenario\n\n{}\n{}\n#### PoC run\n\n`forge test --match-path {poc}`\n\n```\n{}\n```\n",
+        severity.to_lowercase(),
+        s("location"),
+        s("scenario"),
+        if s("evidence").is_empty() { String::new() } else { format!("\n#### Evidence\n\n{}\n", s("evidence")) },
+        forge.trim()
+    ));
+    std::fs::write(&report_path, report).map_err(|e| e.to_string())?;
+
+    // The index: the report's section with its table, created on the first finding.
+    let row = format!("| {id} | {severity} | {} | ⏳ Open | PoC `{poc}`; `{}` |", cell(&title), cell(&s("location")));
+    let heading = format!("## {REPORT}");
+    let lines: Vec<String> = index.lines().map(String::from).collect();
+    let out = if let Some(h) = lines.iter().position(|l| l.trim() == heading || l.trim() == format!("## [{REPORT}]({REPORT})")) {
+        // After the last row of the section's table.
+        let mut at = h + 1;
+        let mut last_row = None;
+        while at < lines.len() && !lines[at].starts_with("## ") {
+            if lines[at].trim_start().starts_with('|') {
+                last_row = Some(at);
+            }
+            at += 1;
+        }
+        let mut l = lines.clone();
+        match last_row {
+            Some(r) => l.insert(r + 1, row),
+            None => {
+                l.insert(h + 1, String::new());
+                l.insert(h + 2, "| ID | Severity | Finding | Status | Evidence |".into());
+                l.insert(h + 3, "|----|----------|---------|--------|----------|".into());
+                l.insert(h + 4, row);
+            }
+        }
+        l.join("\n") + "\n"
+    } else {
+        // List the report in the index's report table too, when it has one.
+        let mut l = lines.clone();
+        if let Some(head) = l.iter().position(|x| x.trim_start().starts_with("| Report")) {
+            let mut end = head + 1;
+            while end < l.len() && l[end].trim_start().starts_with('|') {
+                end += 1;
+            }
+            let cols = l[head].matches('|').count().saturating_sub(1);
+            let mut cells = vec![format!("[{REPORT}]({REPORT})"), today.clone(), "Formal Mind swarm".into(), "Local swarm: Lean proofs against the generated model".into()];
+            cells.resize(cols.max(1), String::new());
+            l.insert(end, format!("| {} |", cells.join(" | ")));
+        }
+        let mut text = l.join("\n").trim_end().to_string();
+        text.push_str(&format!("\n\n{heading}\n\n| ID | Severity | Finding | Status | Evidence |\n|----|----------|---------|--------|----------|\n{row}\n"));
+        text
+    };
+    index = out;
+    std::fs::write(&index_path, index).map_err(|e| e.to_string())?;
+    let rel = |p: &Path| p.strip_prefix(root).unwrap_or(p).to_string_lossy().replace('\\', "/");
+    Ok((id, rel(&report_path)))
+}
+
+/// Today as YYYY-MM-DD (UTC), without a date crate.
+fn chrono_today() -> String {
+    let days = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs() / 86_400).unwrap_or(0) as i64;
+    // Civil from days (Howard Hinnant).
+    let z = days + 719_468;
+    let era = z.div_euclid(146_097);
+    let doe = z - era * 146_097;
+    let yoe = (doe - doe / 1460 + doe / 36_524 - doe / 146_096) / 365;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    let mp = (5 * doy + 2) / 153;
+    let d = doy - (153 * mp + 2) / 5 + 1;
+    let m = if mp < 10 { mp + 3 } else { mp - 9 };
+    let y = yoe + era * 400 + if m <= 2 { 1 } else { 0 };
+    format!("{y:04}-{m:02}-{d:02}")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn findings_land_in_the_index() {
+        let root = std::env::temp_dir().join(format!("fm-find-{}", std::process::id()));
+        std::fs::create_dir_all(root.join("audit")).unwrap();
+        std::fs::write(root.join("audit/README.md"), "# Audits\n\n| Report | Date | Author | Scope |\n|---|---|---|---|\n| [a.md](a.md) | 2026-01-01 | X | All |\n\n## a.md\n\n| ID | Severity | Finding | Status | Evidence |\n|----|---|---|---|---|\n| H-01 | High | x | ✅ Fixed | `test/A.t.sol` |\n").unwrap();
+        let input = json!({ "title": "Fee | rounding", "severity": "high", "location": "src/R.sol:10", "scenario": "s" });
+        let (id, report) = file_finding(&root, &input, "test/formal/Fee.t.sol", "exit 0").unwrap();
+        assert_eq!((id.as_str(), report.as_str()), ("FM-01", "audit/formal-mind-swarm.md"));
+        let (id2, _) = file_finding(&root, &input, "test/formal/Fee2.t.sol", "exit 0").unwrap();
+        assert_eq!(id2, "FM-02");
+        let index = std::fs::read_to_string(root.join("audit/README.md")).unwrap();
+        assert!(index.contains("| [formal-mind-swarm.md](formal-mind-swarm.md) |"));
+        let section = index.split("## formal-mind-swarm.md").nth(1).unwrap();
+        assert!(section.contains("| FM-01 | High | Fee \\| rounding | ⏳ Open | PoC `test/formal/Fee.t.sol`"));
+        assert!(section.find("FM-01").unwrap() < section.find("FM-02").unwrap());
+        let report = std::fs::read_to_string(root.join("audit/formal-mind-swarm.md")).unwrap();
+        assert!(report.contains("### [FM-02] Fee | rounding"));
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    /// The planner's digest and a prover's brief for a real folder: `FM_FOLDER=… cargo test -- --ignored digest --nocapture`.
+    #[test]
+    #[ignore]
+    fn digest_of_a_folder() {
+        let root = PathBuf::from(std::env::var("FM_FOLDER").unwrap());
+        let ctx = context(&root);
+        println!("{}", ctx.digest());
+        let item = std::env::var("FM_ITEM").unwrap_or("- [ ] `Router.matchBook` forwards the pool key".into());
+        println!("---\n{}", ctx.brief(&item, lake_dir(&root).as_deref(), &root));
+    }
+
+    #[test]
+    fn cheating_is_seen() {
+        assert_eq!(cheats("theorem a : True := by sorry"), Some("sorry"));
+        assert_eq!(cheats("theorem sorryless : True := trivial"), None);
+        assert_eq!(cheats("axiom x : False"), Some("axiom"));
+    }
+}

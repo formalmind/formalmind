@@ -119,7 +119,7 @@ Be concrete and brief. Finish with a short summary: what you did, what `lake bui
 
 fn tools(role: &str) -> Value {
     let mut tools = vec![
-        json!({"type": "function", "name": "list_files", "description": "List files under a directory of the folder (recursive, skips .git, node_modules, lib, out, cache, target, .lake).",
+        json!({"type": "function", "name": "list_files", "description": "List files under a directory of the folder (recursive, skips .git, node_modules, lib, dependencies, out, cache, target, .lake).",
             "parameters": {"type": "object", "properties": {"dir": {"type": "string"}}, "required": ["dir"], "additionalProperties": false}}),
         json!({"type": "function", "name": "read_file", "description": "Read a text file in the folder.",
             "parameters": {"type": "object", "properties": {"path": {"type": "string"}}, "required": ["path"], "additionalProperties": false}}),
@@ -188,9 +188,17 @@ pub(crate) async fn run_command(root: &Path, command: &str) -> Result<String, St
     if !allowed {
         return Err("Only `lake build`, `lake env lean <file>`, `lake exe cache get`, `lake init|new <Name>`, `forge build` and `forge test` may run.".into());
     }
+    // Lake runs in the folder's Lake project (the folder, or formal/ in it); a file for `lake env lean` is passed
+    // as an absolute path so it can be named relative to the folder either way.
+    let lake = argv[0] == "lake";
+    let cwd = if lake { crate::swarm_ctx::lake_dir(root).or_else(|| Some(root.join("formal")).filter(|d| d.is_dir())).unwrap_or_else(|| root.to_path_buf()) } else { root.to_path_buf() };
+    let mut args: Vec<String> = argv[1..].iter().map(|a| a.to_string()).collect();
+    if let ["lake", "env", "lean", file] = argv.as_slice() {
+        args[2] = inside(root, file)?.to_string_lossy().to_string();
+    }
     let child = tokio::process::Command::new(argv[0])
-        .args(&argv[1..])
-        .current_dir(root)
+        .args(&args)
+        .current_dir(&cwd)
         .env("PATH", tool_path())
         .env("ELAN_TOOLCHAIN", std::env::var("ELAN_TOOLCHAIN").unwrap_or_else(|_| "leanprover/lean4:v4.35.0".into()))
         .kill_on_drop(true)
@@ -207,7 +215,8 @@ pub(crate) async fn run_command(root: &Path, command: &str) -> Result<String, St
 
 pub(crate) fn list_files(root: &Path, dir: &str) -> Result<String, String> {
     let start = inside(root, if dir.is_empty() { "." } else { dir })?;
-    let skip = [".git", "node_modules", "lib", "out", "cache", "target", ".lake", "dist"];
+    // Dependencies (lib/ for git submodules, dependencies/ for Soldeer) and build output.
+    let skip = [".git", "node_modules", "lib", "dependencies", "out", "cache", "broadcast", "target", ".lake", "dist", ".formal"];
     let mut files = vec![];
     let mut stack = vec![start];
     while let Some(d) = stack.pop() {

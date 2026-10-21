@@ -471,7 +471,7 @@ function PocView({ folder, invoke, path, fns, onOpenFile }: { folder: string; in
  * Bugs: the folder's audit reports (Markdown in its report folders, which the gear sets) and the swarm's findings,
  * each opened on the right.
  */
-function BugsView({ folder, files, invoke, bugs, openBug, setOpenBug, withPoc, onOpenFile }: { folder: string; files: string[]; invoke: Bridge["invoke"]; bugs: Bug[]; openBug: string | null; setOpenBug: (f: string | null) => void; withPoc: (body: string) => Promise<string>; onOpenFile: (path: string) => void }) {
+function BugsView({ folder, files, invoke, bugs, openBug, setOpenBug, withPoc, onOpenFile, reload = 0 }: { folder: string; files: string[]; invoke: Bridge["invoke"]; bugs: Bug[]; openBug: string | null; setOpenBug: (f: string | null) => void; withPoc: (body: string) => Promise<string>; onOpenFile: (path: string) => void; reload?: number }) {
 	const [dirs, setDirs] = useReportDirs(folder);
 	const [editing, setEditing] = useState<string | null>(null);
 	const inDirs = files.filter((f) => /\.(md|markdown|txt)$/i.test(f) && dirs.some((d) => f.startsWith(`${d.replace(/\/+$/, "")}/`))).sort();
@@ -486,7 +486,8 @@ function BugsView({ folder, files, invoke, bugs, openBug, setOpenBug, withPoc, o
 			gone = true;
 		};
 		// eslint-disable-next-line react-hooks/exhaustive-deps
-	}, [folder, indexes.join("|"), invoke]);
+		// `reload` ticks when the swarm files a finding in the index.
+	}, [folder, indexes.join("|"), invoke, reload]);
 	const findingKey = (f: AuditFinding) => `audit:${f.report}#${f.id}#${f.title}`;
 	// With nothing picked, the first finding opens.
 	const picked = openBug?.startsWith("audit:") ? (findings.find((f) => findingKey(f) === openBug) ?? null) : !openBug && findings.length ? findings[0] : null;
@@ -1001,7 +1002,7 @@ function CoverageView({ data, scripts, onOpenFile }: { data: Formal; scripts: Sc
 }
 
 /** Audit mode: what's been established for the contract picked here, as Lean coverage. */
-function AuditView({ folder, scan, invoke, preferred, onOpenFile }: { folder: string; scan: Scan | null; invoke: Bridge["invoke"]; preferred: string | null; onOpenFile: (path: string) => void }) {
+function AuditView({ folder, scan, invoke, preferred, onOpenFile, reload = 0 }: { folder: string; scan: Scan | null; invoke: Bridge["invoke"]; preferred: string | null; onOpenFile: (path: string) => void; reload?: number }) {
 	const sources = (scan?.solidity ?? []).filter((f) => !f.endsWith(".t.sol") && !f.endsWith(".s.sol"));
 	const pick = preferred && sources.includes(preferred) ? preferred : (sources.find((f) => f.startsWith("src/")) ?? sources[0] ?? null);
 	const [entry, setEntry] = useState<string | null>(pick);
@@ -1022,10 +1023,11 @@ function AuditView({ folder, scan, invoke, preferred, onOpenFile }: { folder: st
 	}, [entry, pick]);
 	useEffect(() => {
 		if (!entry) return;
-		setFormal(null);
+		// A reload (the swarm proved something) keeps the table up while the coverage is read again.
+		if (!reload) setFormal(null);
 		setError(null);
 		void invoke<Formal>("ast_formal", { folder, entry }).then(setFormal, (e) => setError(String(e)));
-	}, [folder, entry, invoke]);
+	}, [folder, entry, invoke, reload]);
 	const ready = formal;
 	return (
 		<>
@@ -1291,6 +1293,8 @@ export function SwarmPanel({ folder, name, scan, bridge, session, file: openPath
 			() => [] as Session[],
 		);
 
+	// Ticks when the swarm proves an item or files a finding, so Audit's coverage, Bugs and the file tree read again.
+	const [reload, setReload] = useState(0);
 	const refresh = () => {
 		void invoke<Item[]>("swarm_plan", { folder }).then(setPlan, () => {});
 		void invoke<Bug[]>("swarm_bugs", { folder }).then(setBugs, () => {});
@@ -1311,7 +1315,11 @@ export function SwarmPanel({ folder, name, scan, bridge, session, file: openPath
 		const off = listen<Ev>("swarm", ({ payload }) => {
 			if (runRef.current && payload.run !== runRef.current) return;
 			setEvents((all) => [...all.slice(-600), payload]);
-			if (["plan", "bug", "done", "status"].includes(payload.kind)) refresh();
+			if (["plan", "bug", "done"].includes(payload.kind) || (payload.kind === "status" && / is working$/.test(payload.text))) refresh();
+			if (["plan", "bug", "done"].includes(payload.kind)) {
+				setReload((n) => n + 1);
+				void invoke<{ files: string[] }>("folder_tree", { path: folder }).then((t) => setTree(t.files), () => {});
+			}
 			if (payload.kind === "done") {
 				setRun(null);
 				void listSessions();
@@ -1408,7 +1416,9 @@ export function SwarmPanel({ folder, name, scan, bridge, session, file: openPath
 		return sessions[i].title || (sessions[i].run === "swarm" ? "Main session" : `Session ${sessions.length - i}`);
 	};
 	const title = sessionTitle(viewing);
-	const working = [...events].reverse().find((e) => e.kind === "status" && e.role !== "swarm");
+	const working = run ? [...events].reverse().find((e) => e.kind === "status" && e.role !== "swarm") : undefined;
+	// What the working agent did last (a tool call, or the step it's thinking on), shown under its plan item.
+	const activity = working ? [...events].reverse().find((e) => (e.kind === "tool" || e.kind === "status") && e.role === working.role) : undefined;
 	const done = plan.filter((i) => i.mark === "x").length;
 	// Entry points a plan item names, matched as whole words in its text.
 	// constructor, receive and fallback have no name of their own in the AST.
@@ -1431,6 +1441,12 @@ export function SwarmPanel({ folder, name, scan, bridge, session, file: openPath
 											<span className={`mt-0.5 grid size-4 shrink-0 place-items-center rounded border text-[10px] ${i.mark === "x" ? "border-emerald-500 bg-emerald-500 text-white" : i.mark === "!" ? "border-amber-500 text-amber-600" : ""}`}>{i.mark === "x" ? "✓" : i.mark === "!" ? "!" : ""}</span>
 											<span className="min-w-0 flex-1">
 												<span className={i.mark === "x" ? "text-muted-foreground" : ""}>{i.text}</span>
+												{working && working.item === String(i.index) && activity ? (
+													<span className="mt-0.5 flex items-center gap-1.5 truncate text-[11px] text-muted-foreground" title={activity.text}>
+														<span className="size-1.5 shrink-0 animate-pulse rounded-full" style={{ backgroundColor: colorOf(working.role) }} />
+														<span className="truncate">{working.role} · {activity.text}</span>
+													</span>
+												) : null}
 												{named(i.text).length ? (
 													<span className="mt-1 flex flex-wrap gap-1">
 														{named(i.text).map((u) => (
@@ -1707,10 +1723,10 @@ export function SwarmPanel({ folder, name, scan, bridge, session, file: openPath
 						{debug(openPath && /\.[ts]\.sol$/.test(openPath) ? openPath : null, params.get("test"), debugFile)}
 					</div>
 				) : null}
-				{mode === "bugs" ? <BugsView folder={folder} files={tree} invoke={invoke} bugs={bugs} openBug={openBug} setOpenBug={setOpenBug} withPoc={withPoc} onOpenFile={view} /> : null}
+				{mode === "bugs" ? <BugsView folder={folder} files={tree} invoke={invoke} bugs={bugs} openBug={openBug} setOpenBug={setOpenBug} withPoc={withPoc} onOpenFile={view} reload={reload} /> : null}
 				{mode === "audit" ? (
 					<div className="pointer-events-auto absolute bottom-3 left-3 right-3 top-[var(--fm-top)] z-10 flex min-h-0 flex-col overflow-hidden rounded-2xl border bg-muted/60 p-1">
-						<AuditView folder={folder} scan={scan} invoke={invoke} preferred={openPath ?? null} onOpenFile={view} />
+						<AuditView folder={folder} scan={scan} invoke={invoke} preferred={openPath ?? null} onOpenFile={view} reload={reload} />
 					</div>
 				) : null}
 			</div>

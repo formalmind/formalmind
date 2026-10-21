@@ -8,6 +8,7 @@ mod ast;
 mod debug;
 mod executor;
 mod swarm;
+mod swarm_ctx;
 mod local;
 mod lsp;
 mod term;
@@ -70,6 +71,25 @@ pub fn run() {
             // Installed builds register formalmind:// from tauri.conf.json; this covers `tauri dev` on Windows/Linux.
             #[cfg(any(windows, target_os = "linux"))]
             app.deep_link().register_all()?;
+            // Dev builds only: FM_SWARM_AUTOSTART=<added folder> starts the folder's swarm at launch, the same way the
+            // Swarm page's Start does (FM_SWARM_BUDGET, FM_SWARM_MODEL, FM_SWARM_PROVIDER, FM_SWARM_GOAL), so a run
+            // can be driven without clicking.
+            #[cfg(debug_assertions)]
+            if let Ok(folder) = std::env::var("FM_SWARM_AUTOSTART") {
+                let env = |k: &str| std::env::var(k).ok().filter(|v| !v.is_empty());
+                let request = swarm::SwarmRequest {
+                    folder,
+                    goal: env("FM_SWARM_GOAL"),
+                    budget_usd: env("FM_SWARM_BUDGET").and_then(|v| v.parse().ok()).unwrap_or(10.0),
+                    api_base: env("FM_API_BASE").unwrap_or_else(|| "https://formal.team".into()),
+                    provider: env("FM_SWARM_PROVIDER"),
+                    model: env("FM_SWARM_MODEL"),
+                    session: None,
+                };
+                if let Err(e) = swarm::swarm_start(app.handle().clone(), app.state::<swarm::Swarms>(), request) {
+                    eprintln!("FM_SWARM_AUTOSTART: {e}");
+                }
+            }
             let _ = app;
             Ok(())
         })
