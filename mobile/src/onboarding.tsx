@@ -24,15 +24,15 @@ type Page = { muted: string; strong: string; body: string; art: React.ReactNode 
 
 /* The pages show the app itself: real screens (public/onboarding), their edges fading into the page. */
 
-/** A screen of the app, its edges fading out so it reads as a glimpse rather than a frame. */
+/** A screen of the app; only its bottom fades, into the words below it. */
 export function Shot({ src, className = "", style }: { src: string; className?: string; style?: React.CSSProperties }) {
 	return (
 		<img
 			src={src}
 			alt=""
 			draggable={false}
-			className={`pointer-events-none select-none rounded-[26px] ${className}`}
-			style={{ WebkitMaskImage: "linear-gradient(to bottom, #000 62%, transparent), linear-gradient(to right, transparent, #000 10%, #000 90%, transparent)", WebkitMaskComposite: "source-in", maskComposite: "intersect", ...style }}
+			className={`pointer-events-none select-none rounded-[14px] ${className}`}
+			style={{ WebkitMaskImage: "linear-gradient(to bottom, #000 55%, transparent)", maskImage: "linear-gradient(to bottom, #000 55%, transparent)", ...style }}
 		/>
 	);
 }
@@ -54,27 +54,34 @@ const PAGES: Page[] = [
 		art: <MacCorner />,
 	},
 	{
-		muted: "Code, proofs, bugs.",
-		strong: "Read them anywhere.",
-		body: "Add a GitHub repository and see how much of it is proved, by which theorems, and every finding with its status and PoC. It all runs on the phone, from a copy of the repository.",
-		art: (
-			<div className="relative h-[320px] w-[330px]">
-				<Shot src="/onboarding/proofs.jpg" className="absolute left-0 top-0 w-[200px] -rotate-3 shadow-[0_20px_60px_rgb(0_0_0/0.5)]" />
-				<Shot src="/onboarding/bugs.jpg" className="absolute right-0 top-8 w-[200px] rotate-3 shadow-[0_20px_60px_rgb(0_0_0/0.5)]" />
-			</div>
-		),
+		muted: "Every function, against its spec.",
+		strong: "See what's proved.",
+		body: "Each contract's Lean coverage: which functions are modeled, which are proved, and the theorems that prove them, beside the Solidity.",
+		art: <Shot src="/onboarding/mac-proofs.jpg" className="w-[370px]" />,
+	},
+	{
+		muted: "Every finding, with its proof.",
+		strong: "See what's broken.",
+		body: "The bugs from your audits and from the swarm, with their severity, where they stand in the code today, and the Foundry test that shows them.",
+		art: <Shot src="/onboarding/mac-bugs.jpg" className="w-[370px]" />,
 	},
 	{
 		muted: "The swarm works on your Mac.",
 		strong: "You steer it from here.",
-		body: "Agents prove your functions and hunt bugs on your Mac, where Lean and Foundry run. Follow what they say, send them a message, start or stop a session. Your code stays on the Mac.",
-		art: <Shot src="/onboarding/chat.jpg" className="w-[250px]" style={{ maxHeight: 340, objectFit: "cover", objectPosition: "bottom" }} />,
+		body: "Agents prove your functions and hunt bugs on your Mac, where Lean and Foundry run. Follow them, send a message, start or stop, and hear when a proof lands or a bug is filed.",
+		art: <Shot src="/onboarding/mac-swarm.jpg" className="w-[370px]" />,
 	},
 	{
-		muted: "A proof lands, a bug is filed.",
-		strong: "You hear about it.",
-		body: "Notifications tell you when a proof is done, a bug is filed with its PoC, or a session reaches its budget. Choose which in Settings.",
-		art: <Shot src="/onboarding/notifications.jpg" className="w-[300px]" />,
+		// The last page has no words: the app's icon, and Home as you'll find it.
+		muted: "",
+		strong: "",
+		body: "",
+		art: (
+			<div className="flex flex-col items-center gap-6">
+				<img src="/onboarding/icon.png" alt="Formal Mind" className="size-[84px] drop-shadow-[0_12px_30px_rgb(0_0_0/0.6)]" />
+				<Shot src="/onboarding/home.jpg" className="w-[250px] rounded-[34px]" />
+			</div>
+		),
 	},
 ];
 
@@ -104,12 +111,16 @@ export function Onboarding({ onDone }: { onDone: () => void }) {
 			</div>
 			<div key={i} className="flex flex-1 flex-col justify-end">
 				<div className="fm-rise mb-auto grid flex-1 place-items-center text-white/80">{page.art}</div>
-				<h1 className="fm-rise font-display text-[42px] leading-[1.05] [animation-delay:60ms]">
-					<span className="text-white/45">{page.muted}</span>
-					<br />
-					{page.strong}
-				</h1>
-				<p className="fm-rise mt-4 text-[15px] leading-6 text-white/60 [animation-delay:120ms]">{page.body}</p>
+				{page.strong ? (
+					<>
+						<h1 className="fm-rise font-display text-[42px] leading-[1.05] [animation-delay:60ms]">
+							<span className="text-white/45">{page.muted}</span>
+							<br />
+							{page.strong}
+						</h1>
+						<p className="fm-rise mt-4 text-[15px] leading-6 text-white/60 [animation-delay:120ms]">{page.body}</p>
+					</>
+				) : null}
 			</div>
 			<div className="mt-8 flex justify-center gap-1.5" aria-label={`Page ${i + 1} of ${PAGES.length}`}>
 				{PAGES.map((_, n) => (

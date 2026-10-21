@@ -2,12 +2,11 @@ import { useEffect, useState } from "react";
 import { useNavigate } from "react-router";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { MarkGithubIcon } from "@primer/octicons-react";
-import { ChevronRight, Laptop } from "lucide-react";
+import { ChevronRight, GitCommitHorizontal, Laptop } from "lucide-react";
 import { AddProjectCard } from "@/components/add-project";
 import { projectPath, useProjects } from "@/components/projects/use-projects";
 import { apiBase } from "@/desktop/src/api";
 import type { SessionData } from "@/lib/session";
-import { ROLE_COLORS } from "@/lib/swarm-roles";
 import { macOnline, setStartBudget, startBudget, useMac } from "./relay";
 import { rememberProject } from "./tabs";
 import { Shot } from "./onboarding";
@@ -116,12 +115,6 @@ function Coverage({ value }: { value: number }) {
 }
 
 const BUDGETS = [2, 5, 10, 20, 50];
-const AGENTS = [
-	{ role: "planner", what: "lists every function in scope, from the Solidity AST" },
-	{ role: "prover", what: "writes each one's Lean proof and checks it with lake build" },
-	{ role: "reviewer", what: "reads the proof against the Solidity before it counts" },
-	{ role: "auditor", what: "files what's wrong as a bug, with a Foundry proof of concept" },
-];
 
 /**
  * Setup after signing in: welcome, what the swarm does, what coverage means (0 to 100), specs written on GitHub as the
@@ -170,15 +163,10 @@ export function Setup({ user, onDone }: { user: SessionData["user"]; onDone: () 
 
 			{step === 1 ? (
 				<>
-					<ul className="fm-rise my-auto space-y-2.5 py-6">
-						{AGENTS.map((a) => (
-							<li key={a.role} className={`${card} flex items-start gap-3 p-3`}>
-								<span className="text-[14px] leading-5">
-									<span className="font-medium capitalize" style={{ color: (ROLE_COLORS as Record<string, string>)[a.role] ?? "#fff" }}>{a.role}</span> <span className="text-white/55">{a.what}</span>
-								</span>
-							</li>
-						))}
-					</ul>
+					{/* The swarm on the Mac: its agents' cursors at work on the plan. */}
+					<div className="fm-rise -mx-6 my-auto py-6">
+						<Shot src="/onboarding/mac-cursors.jpg" className="w-full rounded-none" />
+					</div>
 					<Headline muted="Run a swarm." strong="Agents do the proving." body="On your Mac, a swarm of agents works through your contracts until every function is proved or the budget is spent. From here you follow it and steer it." />
 					<button type="button" onClick={next} className={`${primary} mt-10`}>Continue</button>
 				</>
@@ -197,9 +185,14 @@ export function Setup({ user, onDone }: { user: SessionData["user"]; onDone: () 
 
 			{step === 3 ? (
 				<>
-					{/* Home, as it will greet you: the projects kept in sync and your Mac. */}
-					<div className="fm-rise my-auto grid place-items-center py-4">
-						<Shot src="/onboarding/home.jpg" className="w-[230px] shadow-[0_20px_60px_rgb(0_0_0/0.5)]" style={{ maxHeight: 360, objectFit: "cover", objectPosition: "top" }} />
+					<div className="fm-rise my-auto space-y-2 py-6">
+						{["feat: add matchBook", "fix: round fees down", "refactor: split Router"].map((c, i) => (
+							<div key={c} className={`${card} flex items-center gap-3 p-3 font-mono text-[12px]`} style={{ opacity: 1 - i * 0.25 }}>
+								<GitCommitHorizontal className="size-4 shrink-0 text-white/50" />
+								<span className="min-w-0 flex-1 truncate">{c}</span>
+								<span className="shrink-0 text-emerald-300">spec updated</span>
+							</div>
+						))}
 					</div>
 					<Headline
 						muted="Set up on GitHub."
