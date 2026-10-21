@@ -1,7 +1,8 @@
 import { useEffect, useState } from "react";
 import { useSearchParams } from "react-router";
 import { invoke } from "@tauri-apps/api/core";
-import { Crosshair, FolderSearch, Server, Sparkles, SquareCode, type LucideIcon } from "lucide-react";
+import { ArrowUpRight, CreditCard, Crosshair, FolderSearch, Server, Sparkles, SquareCode, type LucideIcon } from "lucide-react";
+import { openOnWeb } from "@/lib/open-web";
 import { apiBase, DEFAULT_API, setApiBase } from "./api";
 import { setVimMode, useVimMode } from "@/components/vim-mode";
 import { AuditFolders, EntryPoints } from "@/components/audit-folders";
@@ -23,14 +24,15 @@ const Section = ({ title, children }: { title: string; children: React.ReactNode
 	</section>
 );
 
-/** The page's subsections, in menu order. `?section=` picks one, so a reload or a link lands on it. */
+/** The page's subsections, in menu order under their group labels. `?section=` picks one, so a reload or a link lands on it. */
 const SECTIONS = [
-	{ id: "models", title: "Models", icon: Sparkles },
-	{ id: "entry-points", title: "Entry points", icon: Crosshair },
-	{ id: "editor", title: "Editor", icon: SquareCode },
-	{ id: "audit-folders", title: "Audit folders", icon: FolderSearch },
-	{ id: "server", title: "Server", icon: Server },
-] as const satisfies readonly { id: string; title: string; icon: LucideIcon }[];
+	{ id: "models", title: "Models", icon: Sparkles, group: "This computer" },
+	{ id: "editor", title: "Editor", icon: SquareCode, group: "This computer" },
+	{ id: "server", title: "Server", icon: Server, group: "This computer" },
+	{ id: "entry-points", title: "Entry points", icon: Crosshair, group: "Projects" },
+	{ id: "audit-folders", title: "Audit folders", icon: FolderSearch, group: "Projects" },
+] as const satisfies readonly { id: string; title: string; icon: LucideIcon; group: string }[];
+const GROUPS = [...new Set(SECTIONS.map((s) => s.group))];
 type SectionId = (typeof SECTIONS)[number]["id"];
 
 /** The desktop app's settings: how agents reach Claude (and your key), and which server the app talks to. */
@@ -63,24 +65,37 @@ export function SettingsPage() {
 	};
 
 	return (
-		<div className="mx-auto w-full max-w-4xl p-6">
-			<h1 className="mb-4 text-xl font-semibold">Settings</h1>
-			<div className="flex flex-col gap-4 md:flex-row md:gap-8">
-				<nav aria-label="Settings sections" className="flex shrink-0 gap-1 overflow-x-auto md:sticky md:top-6 md:w-44 md:flex-col md:self-start">
-					{SECTIONS.map(({ id, title, icon: Icon }) => (
-						<button
-							key={id}
-							type="button"
-							onClick={() => show(id)}
-							aria-current={section === id ? "page" : undefined}
-							className={`flex h-8 shrink-0 items-center gap-2 rounded-lg px-2.5 text-left text-sm ${section === id ? "bg-muted font-medium text-foreground" : "text-muted-foreground hover:bg-muted/60 hover:text-foreground"}`}
-						>
-							<Icon className="size-4 shrink-0" />
-							{title}
-						</button>
+		<div className="flex w-full flex-1">
+			{/* The side panel: the subsections under their group labels, then Billing on formal.team. Its line runs the page's height. */}
+			<nav aria-label="Settings sections" className="w-56 shrink-0 border-r">
+				<div className="sticky top-0 px-3 py-5">
+					{GROUPS.map((group) => (
+						<div key={group} className="mb-5">
+							<p className="mb-1 px-2.5 text-[12px] text-muted-foreground">{group}</p>
+							{SECTIONS.filter((s) => s.group === group).map(({ id, title, icon: Icon }) => (
+								<button
+									key={id}
+									type="button"
+									onClick={() => show(id)}
+									aria-current={section === id ? "page" : undefined}
+									className={`flex h-8 w-full items-center gap-2.5 rounded-lg px-2.5 text-left text-[13px] ${section === id ? "bg-muted text-foreground" : "text-muted-foreground hover:bg-muted/60 hover:text-foreground"}`}
+								>
+									<Icon className="size-4 shrink-0" />
+									{title}
+								</button>
+							))}
+						</div>
 					))}
-				</nav>
-				<div className="min-w-0 flex-1 space-y-4">
+					<p className="mb-1 px-2.5 text-[12px] text-muted-foreground">Account</p>
+					<button type="button" onClick={() => openOnWeb("/billing")} className="flex h-8 w-full items-center gap-2.5 rounded-lg px-2.5 text-left text-[13px] text-muted-foreground hover:bg-muted/60 hover:text-foreground">
+						<CreditCard className="size-4 shrink-0" />
+						Billing
+						<ArrowUpRight className="ml-auto size-3.5" />
+					</button>
+				</div>
+			</nav>
+			<div className="min-w-0 flex-1 p-6">
+				<div className="mx-auto max-w-3xl space-y-4">
 					{section === "models" ? <Section title="Models">
 						<label className="flex items-center justify-between gap-4">
 							<span>
