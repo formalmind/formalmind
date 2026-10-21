@@ -6,6 +6,8 @@ page:
   size: Letter
   margin: [0.95in, 0.8in, 0.8in, 0.8in]
 base:
+  # Ragged right: justified text spreads words apart.
+  text-align: left
   font-size: 10
   line-height: 1.4
   font-color: #1F1F1F
