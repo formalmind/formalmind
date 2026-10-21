@@ -159,6 +159,10 @@ fn main() -> Result<()> {
         if !s.evm.inspector.cheats.missing.is_empty() {
             println!("unsupported cheatcodes called: {:?}", s.evm.inspector.cheats.missing);
         }
+        if !run.test.success {
+            drop(out);
+            std::process::exit(1);
+        }
         return Ok(());
     }
 

@@ -65,7 +65,8 @@ storage writes:
   Counter      Counter.sol:12           bumps[0x5b73C5498c1E3b4dbA84de0F1833c4a029d90519]: 1 → 2
 ```
 
-A failing test prints `FAIL` with the revert reason, and in the TUI `G` (last step) lands on the revert.
+A failing test prints `FAIL` with the revert reason and exits with code 1, so it can gate CI. In the TUI, `G`
+(last step) lands on the revert.
 
 Only the test is traced by default; add `--trace-setup` to step through `setUp()` too (slow on big fixtures).
 
