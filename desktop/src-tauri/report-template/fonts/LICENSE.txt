@@ -2,3 +2,8 @@ These fonts are licensed under the SIL Open Font License 1.1, which allows use i
 logos and products and redistribution with this notice.
 https://openfontlicense.org
 - Inter
+
+---
+
+JetBrains Mono: Copyright 2020 The JetBrains Mono Project Authors (https://github.com/JetBrains/JetBrainsMono),
+also under the SIL Open Font License 1.1 (https://openfontlicense.org).

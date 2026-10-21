@@ -570,6 +570,12 @@ fn git(root: &Path, args: &[&str]) -> Option<String> {
     out.status.success().then(|| String::from_utf8_lossy(&out.stdout).trim().to_string()).filter(|s| !s.is_empty())
 }
 
+/// A repository's name as its owner writes it: `https://github.com/asyncswap/contracts` → `asyncswap/contracts`.
+fn repo_name(url: &str) -> Option<String> {
+    let path = url.split_once("://").map_or(url, |(_, r)| r).split_once('/')?.1.trim_matches('/');
+    (!path.is_empty()).then(|| path.to_string())
+}
+
 /// `git@github.com:o/r.git` or `https://github.com/o/r.git` as `https://github.com/o/r`.
 fn web_url(remote: &str) -> Option<String> {
     let r = remote.trim().trim_end_matches(".git");
@@ -587,7 +593,7 @@ pub fn internal_audit(root: &Path, dirs: &[String], previous: Option<&Value>) ->
     let mut problems = vec![];
     let commit = git(root, &["rev-parse", "HEAD"]);
     let repo = git(root, &["remote", "get-url", "origin"]).and_then(|r| web_url(&r));
-    let project = repo.as_deref().and_then(|u| u.rsplit('/').next()).map(String::from).unwrap_or_else(|| root.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default());
+    let project = repo.as_deref().and_then(repo_name).unwrap_or_else(|| root.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default());
 
     let (contracts, _) = in_scope(root, &mut problems);
     let mut cov = vec![];
@@ -677,10 +683,11 @@ const THEME: &str = include_str!("../report-template/formal-mind-theme.yml");
 /// The brand's lockups: light text for the black cover, dark text for the running header.
 const LOGO_LIGHT: &str = include_str!("../report-template/formal-mind-lockup-light.svg");
 const LOGO_DARK: &str = include_str!("../report-template/formal-mind-lockup-dark.svg");
-/// Inter for the report's text (OFL 1.1; its licence travels with it).
-const FONTS: [(&str, &[u8]); 3] = [
+/// Inter for the report's text and JetBrains Mono for its code (both OFL 1.1; the licence travels with them).
+const FONTS: [(&str, &[u8]); 4] = [
     ("Inter-Regular.ttf", include_bytes!("../report-template/fonts/Inter-Regular.ttf")),
     ("Inter-SemiBold.ttf", include_bytes!("../report-template/fonts/Inter-SemiBold.ttf")),
+    ("JetBrainsMono-Regular.ttf", include_bytes!("../report-template/fonts/JetBrainsMono-Regular.ttf")),
     ("LICENSE.txt", include_bytes!("../report-template/fonts/LICENSE.txt")),
 ];
 /// The internal audit's files in the audit folder: the standard file, and the PDF beside it.
@@ -737,7 +744,7 @@ pub fn render(root: &Path, doc: &Value, src_dir: &str) -> String {
     let commit = doc["commit"].as_str();
     let linked = repo.is_some() && commit.is_some();
     let short = commit.map(|c| &c[..c.len().min(7)]).unwrap_or("working tree");
-    let project = repo.and_then(|r| r.rsplit('/').next()).unwrap_or_else(|| s(doc, "title").split(' ').next().unwrap_or(""));
+    let project = repo.and_then(repo_name).unwrap_or_else(|| s(doc, "title").split(' ').next().unwrap_or("").to_string());
     // A repository path, linked at the audited commit.
     let at = |file: &str, line: Option<u64>| {
         let label = match line {
@@ -1185,6 +1192,12 @@ mod tests {
         assert!(a.contains("* one\n** two\n. first"));
         assert!(a.contains("|===\n| A | B\n| `++p\\|q++` | 2\n|==="));
         assert!(a.contains("[source,solidity]\n----\nuint x;\n----"));
+    }
+
+    #[test]
+    fn repository_names_keep_the_owner() {
+        assert_eq!(repo_name("https://github.com/asyncswap/contracts").as_deref(), Some("asyncswap/contracts"));
+        assert_eq!(repo_name(&web_url("git@github.com:asyncswap/contracts.git").unwrap()).as_deref(), Some("asyncswap/contracts"));
     }
 
     #[test]
