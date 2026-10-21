@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState, useSyncExternalStore } from "react";
 import { createPortal } from "react-dom";
 import { useNavigate, useParams, useSearchParams } from "react-router";
-import { Check, ChevronDown, ChevronRight, FileCode2, Folder, History, Laptop, Plus, Settings } from "lucide-react";
+import { Check, ChevronDown, ChevronRight, FileCode2, Folder, Laptop, Plus, Settings } from "lucide-react";
 import { useAuth } from "@/components/auth-context";
 import { MarkGithubIcon } from "@primer/octicons-react";
 import { makeGitBridge } from "@/components/projects/git-bridge";
@@ -12,7 +12,7 @@ import { cachedTree, syncRepo } from "@/lib/browser-git";
 import { FileView } from "@/desktop/src/swarm-panel";
 import { ProofsExplorer } from "./proofs";
 import { BugsExplorer } from "./bugs";
-import { CodeSkeleton, FloatingBar, ListSkeleton, TopBar } from "./bar";
+import { ChatsIcon, CodeSkeleton, FloatingBar, ListSkeleton, TopBar } from "./bar";
 import { SlideDrawer } from "./drawer";
 import { ChatButtons, MacState, SessionChat } from "./mac";
 import { macOnline, useMac } from "./relay";
@@ -159,7 +159,7 @@ export function ProjectScreen() {
 		<div className="relative flex h-dvh flex-col bg-background">
 			{/* Chat is full screen, its controls floating over it (history on the left, as in Mike's); the rest keep the bar. */}
 			{tab === "chat" ? (
-				<FloatingBar back="/" left={<History className="size-[22px]" />} onLeft={() => setHistory(true)} leftLabel="Chat history" right={<ChatButtons />} />
+				<FloatingBar back="/" left={<ChatsIcon className="size-[22px]" />} onLeft={() => setHistory(true)} leftLabel="Chat history" right={<ChatButtons />} />
 			) : (
 				<TopBar back={atRoot ? "/" : true} title={<ProjectSwitcher repo={repo} tab={tab} />} right={<BellLink />} />
 			)}
