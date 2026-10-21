@@ -144,7 +144,7 @@ export function BillingPage() {
 								{paying === amount ? "Opening checkout…" : `$${amount}`}
 							</button>
 						))}
-						<label className="inline-flex h-7 items-center rounded-full border pl-3 text-[12px] focus-within:ring-2 focus-within:ring-ring">
+						<label className="inline-flex h-7 items-center rounded-full border pl-3 text-[12px] transition-colors focus-within:border-neutral-300 dark:focus-within:border-neutral-600">
 							<span className="text-muted-foreground">$</span>
 							<input
 								type="number"
