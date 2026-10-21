@@ -941,7 +941,6 @@ function CoverageView({ data, scripts, onOpenFile }: { data: Formal; scripts: Sc
 								<span className={`size-1.5 rounded-full ${status.dot}`} />
 								{status.label}
 							</span>
-							<span className="text-[11px] text-muted-foreground">{[current.visibility, current.mutability !== "nonpayable" ? current.mutability : ""].filter(Boolean).join(" · ")}</span>
 							{calledBy(current).length ? <span className="text-[11px] text-muted-foreground">called by {calledBy(current).map((x) => x.split("/").pop()).join(", ")}</span> : null}
 							{current.file ? (
 								<button type="button" onClick={() => onOpenFile(current.file!)} className="ml-auto inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 font-mono text-[11px] text-muted-foreground hover:bg-muted hover:text-foreground" title="Open in Code">
