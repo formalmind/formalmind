@@ -1,6 +1,7 @@
 "use client"
 
 import { MarkGithubIcon } from "@primer/octicons-react"
+import { openAddProject } from "@/components/add-project"
 import { useEffect, useState } from "react";
 import { Link, useLocation, useNavigate } from "react-router";
 import { Archive, ArchiveRestore, ChevronRight, GitBranch, Plus } from "lucide-react"
@@ -365,14 +366,15 @@ export function AppSidebar({ extra, repoSource, ...props }: React.ComponentProps
 						{/* Imported repositories, under the local folders: a quiet heading, and + to import one. */}
 						<li className="mt-2 flex h-7 items-center justify-between pl-2 pr-1 text-xs font-medium text-sidebar-foreground/60 group-data-[collapsible=icon]:justify-center group-data-[collapsible=icon]:p-0">
 							<span className="group-data-[collapsible=icon]:hidden">Import</span>
-							<Link
-								to="/onboarding?new=1"
-								aria-label="Import a repository"
-								title="Import a repository"
+							<button
+								type="button"
+								onClick={openAddProject}
+								aria-label="Add a project"
+								title="Add a project"
 								className="icon-anim-host flex size-6 items-center justify-center rounded-md text-sidebar-foreground/60 outline-none hover:bg-sidebar-accent hover:text-sidebar-foreground focus-visible:ring-2 focus-visible:ring-sidebar-ring"
 							>
 								<Plus className="icon-anim-plus size-4" />
-							</Link>
+							</button>
 						</li>
 					</SidebarMenu>
 					<Projects pathname={pathname} source={repoSource} />

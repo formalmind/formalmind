@@ -1,9 +1,10 @@
 import { useNavigate } from "react-router";
-import { Folder, FolderPlus } from "lucide-react";
+import { Folder } from "lucide-react";
+import { AddProjectCard } from "@/components/add-project";
 import { HomeEmpty } from "@/components/home-empty";
 import { useFolders } from "./local";
 
-/** The Mac app's home: add a folder, or reopen one already added. */
+/** The Mac app's home: add a project (a folder here or a GitHub repository), or reopen a folder already added. */
 export function DesktopHome() {
 	const { folders, add } = useFolders();
 	const navigate = useNavigate();
@@ -11,14 +12,7 @@ export function DesktopHome() {
 	return (
 		<HomeEmpty muted={folders.length ? "Welcome back." : "Bugs, proofs and code."} strong={folders.length ? "Pick up where you left off." : "Open a repository to start."}>
 			<div className="space-y-2">
-				<button
-					type="button"
-					onClick={() => void add().then((p) => p && open(p))}
-					className="inline-flex w-full items-center justify-center gap-2 rounded-xl bg-foreground px-4 py-3 text-[15px] font-medium text-background transition hover:opacity-90"
-				>
-					<FolderPlus className="size-4" />
-					Add a folder
-				</button>
+				<AddProjectCard onLocal={() => add().then((p) => p && open(p))} />
 				{folders.length ? (
 					<ul className="mt-4 space-y-1 text-left">
 						{folders.map((f) => (

@@ -1,6 +1,7 @@
 import { DesktopHome } from "./home";
 import { lazy, Suspense, useCallback, useEffect, useState } from "react";
-import { Navigate, Route, Routes } from "react-router";
+import { Navigate, Route, Routes, useNavigate } from "react-router";
+import { AddProjectHost } from "@/components/add-project";
 import { getCurrent, onOpenUrl } from "@tauri-apps/plugin-deep-link";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { getCurrentWindow } from "@tauri-apps/api/window";
@@ -16,7 +17,7 @@ import type { SessionData } from "@/lib/session";
 import { apiBase, clearToken, exchangeCode, loadToken } from "./api";
 
 import { DebugPage } from "./debug";
-import { LocalFolderPage, LocalFolders, useRepoSource } from "./local";
+import { LocalFolderPage, LocalFolders, useFolders, useRepoSource } from "./local";
 import { onboarded, SetupSteps, SignInStep } from "./onboarding";
 import { SettingsPage } from "./settings";
 import { TabBar } from "./tabs";
@@ -49,6 +50,7 @@ function Shell({ user }: { user: User }) {
 				<SidebarProvider defaultOpen>
 					<TabBar />
 					<AppSidebar extra={<LocalFolders />} repoSource={repoSource} />
+					<AddLocalHost />
 					<WorkspaceContent>
 						<Suspense fallback={null}>
 							<Routes>
@@ -139,4 +141,11 @@ export function DesktopApp() {
 			<UpdateNotice />
 		</ThemeProvider>
 	);
+}
+
+/** The Add a project popup; its Local folder is this Mac's folder picker, and the folder opens once added. */
+function AddLocalHost() {
+	const { add } = useFolders();
+	const navigate = useNavigate();
+	return <AddProjectHost onLocal={() => add().then((p) => p && navigate(`/local?path=${encodeURIComponent(p)}`))} />;
 }

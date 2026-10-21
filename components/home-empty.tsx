@@ -4,10 +4,13 @@ import { Bug, Code2, Network, ScanSearch, type LucideIcon } from "lucide-react";
 /** The app's parts, with their tab icons: the agents (the Swarm tab), then the three the headline names. */
 const PART_ICONS: Record<string, LucideIcon> = { agents: Network, bugs: Bug, proofs: ScanSearch, code: Code2 };
 
-/** The parts a line cycles through: the agents, then those it names, in its order (none when it names fewer than two). */
+/** The order the headline cycles through them. */
+const ORDER = ["agents", "proofs", "bugs", "code"];
+
+/** The parts a line cycles through, in ORDER: the agents and those it names (none when it names fewer than two). */
 const partsOf = (line: string) => {
-	const named = (line.match(/\w+/g) ?? []).filter((w) => PART_ICONS[w.toLowerCase()]);
-	return named.length < 2 ? [] : ["agents", ...named];
+	const named = (line.match(/\w+/g) ?? []).map((w) => w.toLowerCase()).filter((w) => PART_ICONS[w]);
+	return named.length < 2 ? [] : ORDER.filter((p) => p === "agents" || named.includes(p));
 };
 
 /**

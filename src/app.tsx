@@ -1,6 +1,7 @@
-import { HomeEmpty } from "@/components/home-empty";
+import { AddProjectHost } from "@/components/add-project";
+import { WebHome } from "@/components/web-home";
 import { lazy, Suspense, useEffect, useState } from "react";
-import { Link, Navigate, Outlet, Route, Routes, useLocation, useParams } from "react-router";
+import { Navigate, Outlet, Route, Routes, useLocation, useParams } from "react-router";
 import { AppSidebar } from "@/components/app-sidebar";
 import { AuthProvider } from "@/components/auth-context";
 import { ChatConversationsProvider } from "@/components/chat-conversations";
@@ -90,6 +91,7 @@ function SignedInLayout({ user }: { user: User }) {
 			<ChatConversationsProvider>
 				<SidebarProvider defaultOpen={open}>
 					<AppSidebar />
+					<AddProjectHost />
 					<WorkspaceContent>
 						<Suspense fallback={null}>
 							<Outlet />
@@ -121,7 +123,7 @@ export function App() {
 					{user ? (
 						<Route element={<SignedInLayout user={user} />}>
 							{/* Home is an empty screen with the next step; the swarm canvas lives at /swarm. */}
-							<Route path="/" element={<Title text="Formal Mind"><HomeEmpty muted="Bugs, proofs and code." strong="Pick a project to start." hint={<>Choose one in the sidebar, or <Link to="/onboarding?new=1" className="underline underline-offset-2">add one</Link>.</>} /></Title>} />
+							<Route path="/" element={<Title text="Formal Mind"><WebHome /></Title>} />
 							<Route path="/swarm" element={<Title text="Swarm · Formal Mind"><SwarmWorkspace repo={SWARM_REPO} /></Title>} />
 							<Route path="/swarm/chat" element={<Title text="Ask the swarm · Formal Mind"><SwarmChatPage /></Title>} />
 							<Route path="/roadmap" element={<Title text="Roadmap · Formal Mind"><FirstProject page="roadmap" /></Title>} />
@@ -150,3 +152,4 @@ export function App() {
 		</ThemeProvider>
 	);
 }
+
