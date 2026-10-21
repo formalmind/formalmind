@@ -108,7 +108,6 @@ const BUDGETS = [2, 5, 10, 20, 50];
  */
 export function Setup({ user, onDone }: { user: SessionData["user"]; onDone: () => void }) {
 	const [step, setStep] = useState(0);
-	const [slide, setSlide] = useState(0);
 	const [budget, setBudget] = useState(() => startBudget() ?? 5);
 	const [verifying, setVerifying] = useState(false);
 	const [adding, setAdding] = useState(false);
@@ -130,10 +129,6 @@ export function Setup({ user, onDone }: { user: SessionData["user"]; onDone: () 
 	const counted = useCount(step === 2);
 	const toHundred = useCount(verifying, 3000);
 	const handle = user.nickname ?? user.name ?? "there";
-	// The slider starts by running itself up to 100, then it's yours to drag.
-	useEffect(() => {
-		if (step === 2) setSlide(counted);
-	}, [counted, step]);
 
 	return (
 		<Frame step={step} total={total} onSkip={step < total - 1 ? () => finish() : undefined}>
@@ -163,8 +158,7 @@ export function Setup({ user, onDone }: { user: SessionData["user"]; onDone: () 
 			{step === 2 ? (
 				<>
 					<div className="fm-rise my-auto space-y-4 py-6">
-						<Coverage value={slide} />
-						<input type="range" min={0} max={100} value={slide} onChange={(e) => setSlide(Number(e.target.value))} aria-label="Coverage" className="w-full accent-emerald-400" />
+						<Coverage value={counted} />
 					</div>
 					<Headline muted="From 0 to 100." strong="Every function, proved." body="Coverage is how many of your functions have a checked Lean proof. Each one the swarm proves moves the bar; at 100 the whole contract matches its spec." />
 					<button type="button" onClick={next} className={`${primary} mt-10`}>Continue</button>
