@@ -2047,17 +2047,35 @@ export function SwarmPanel({ folder, name, scan, bridge, session, file: openPath
 			    The strip above it stays free for the Live pill and the bell. */}
 			{/* Talk to the agents: floats on the right of the Swarm canvas, the Plan's counterpart on the left. */}
 			{mode === "swarm" ? (
-				chatOpen ? (
-					<aside className="pointer-events-auto absolute bottom-3 right-3 top-[calc(max(var(--fm-top),2.75rem)+3.25rem)] z-20 flex w-[min(26rem,calc(100%-1.5rem))] flex-col overflow-hidden rounded-2xl border bg-muted/80 p-1 shadow-pop backdrop-blur">
-						{chatPanel}
+				<>
+					{/* One shape that morphs: the panel shrinks into the round button at the corner it is anchored to, and
+					    grows back out of it. The chat inside keeps its size and fades, so nothing reflows mid-way. */}
+					<aside
+						className={`pointer-events-auto absolute bottom-3 right-3 z-20 overflow-hidden border shadow-pop backdrop-blur transition-[width,height,border-radius,background-color] duration-300 ease-[cubic-bezier(0.22,1,0.36,1)] motion-reduce:transition-none ${chatOpen ? "rounded-2xl bg-muted/80" : "cursor-pointer rounded-[24px] border-transparent bg-foreground hover:opacity-90"}`}
+						style={{ width: chatOpen ? "min(26rem, calc(100% - 1.5rem))" : 48, height: chatOpen ? "calc(100% - max(var(--fm-top), 2.75rem) - 4rem)" : 48 }}
+						onClick={chatOpen ? undefined : () => toggleChat(true)}
+					>
+						<div
+							className={`absolute bottom-1 right-1 flex flex-col transition-opacity duration-200 ${chatOpen ? "opacity-100 delay-100" : "pointer-events-none opacity-0"}`}
+							style={{ width: "calc(min(26rem, 100vw - 1.5rem) - 0.5rem - 2px)", height: "calc(100vh - max(var(--fm-top), 2.75rem) - 4.5rem - 2px)", maxHeight: "calc(100% - 0.5rem)" }}
+							aria-hidden={!chatOpen}
+						>
+							{chatPanel}
+						</div>
+						<button
+							type="button"
+							tabIndex={chatOpen ? -1 : 0}
+							onClick={() => toggleChat(true)}
+							title={unread ? `Talk to the swarm · ${unread} new` : "Talk to the swarm"}
+							aria-label="Talk to the swarm"
+							className={`absolute bottom-0 right-0 grid size-12 place-items-center text-background transition-opacity duration-200 ${chatOpen ? "pointer-events-none opacity-0" : "opacity-100 delay-100"}`}
+						>
+							<TalkIcon className="size-5" />
+						</button>
 					</aside>
-				) : (
-					<button type="button" onClick={() => toggleChat(true)} title={unread ? `Talk to the swarm · ${unread} new` : "Talk to the swarm"} aria-label="Talk to the swarm" className="pointer-events-auto absolute bottom-4 right-4 z-20 grid size-12 place-items-center rounded-full bg-foreground text-background shadow-pop transition-opacity hover:opacity-90">
-						<TalkIcon className="size-5" />
-						{/* New agent messages since you folded the chat, counted like the bell's. */}
-						{unread ? <span className="absolute -right-0.5 -top-0.5 grid h-5 min-w-5 place-items-center rounded-full border-2 border-background bg-red-500 px-1 text-[10px] font-semibold tabular-nums text-white">{unread > 99 ? "99+" : unread}</span> : null}
-					</button>
-				)
+					{/* New agent messages since you folded the chat, counted like the bell's (outside the shape, so it isn't clipped). */}
+					{!chatOpen && unread ? <span className="pointer-events-none absolute bottom-[3.25rem] right-3 z-30 grid h-5 min-w-5 translate-x-1 place-items-center rounded-full border-2 border-background bg-red-500 px-1 text-[10px] font-semibold tabular-nums text-white">{unread > 99 ? "99+" : unread}</span> : null}
+				</>
 			) : null}
 		</div>
 	);

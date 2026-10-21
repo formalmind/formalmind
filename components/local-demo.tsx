@@ -88,6 +88,21 @@ const EVENTS = [
 	ev("status", "prover", "3", "prover is working", 1.84),
 ];
 
+/** A long made-up conversation, offered as its own session beside a real repository so the chat (and its scrubber) can be
+ * tried out; it is labelled as demo data and never reaches the plan or Bugs. */
+const SAMPLE_RUN = "sample";
+const SAMPLE_EVENTS = (() => {
+	const out = EVENTS.map((e) => ({ ...e, run: SAMPLE_RUN }));
+	const roles = ["prover", "reviewer", "assistant", "planner"];
+	for (let i = 4; i <= 24; i++) {
+		const role = roles[i % roles.length];
+		out.push({ run: SAMPLE_RUN, kind: "say", role, item: String(i), text: `(demo) Item ${i}: ${role === "reviewer" ? "the statement matches the Solidity; approved." : role === "prover" ? "proved the guards and the storage it writes; lake build passes." : role === "planner" ? "added the next functions from the AST to the plan." : "noted, carrying on with the next item."}`, spent: 1.84 + i * 0.07 });
+		if (i % 3 === 0) out.push({ run: SAMPLE_RUN, kind: "you", role: "you", item: "", text: `(demo) What's left after item ${i}?`, spent: 1.84 + i * 0.07 });
+		if (i % 4 === 0) out.push({ run: SAMPLE_RUN, kind: "tool", role, item: String(i), text: `read_file src/Vault.sol ${i * 10} ${i * 10 + 40}`, spent: 1.84 + i * 0.07 });
+	}
+	return out;
+})();
+
 const listeners = new Set<(e: { payload: unknown }) => void>();
 /** The demo's bridge: a real repository's files and AST when `data` is there, the sample folder otherwise. */
 const makeDemo = (data: DemoData | null): Bridge => ({
@@ -103,8 +118,8 @@ const makeDemo = (data: DemoData | null): Bridge => ({
 		const answers: Record<string, unknown> = {
 			swarm_plan: sample ? PLAN : [],
 			swarm_bugs: sample ? BUGS : [],
-			swarm_sessions: sample ? [{ run: RUN, title: "Liquidations and the penalty cap", outcome: "", spent: 1.84, events: EVENTS.length }] : [],
-			swarm_history: sample ? EVENTS : [],
+			swarm_sessions: sample ? [{ run: RUN, title: "Liquidations and the penalty cap", outcome: "", spent: 1.84, events: EVENTS.length }] : [{ run: SAMPLE_RUN, title: "Sample session (demo data)", outcome: "", spent: 3.5, events: SAMPLE_EVENTS.length }],
+			swarm_history: sample ? EVENTS : args?.run === SAMPLE_RUN ? SAMPLE_EVENTS : [],
 			swarm_proofs: sample ? PROOFS : {},
 			folder_read: data ? (data.sources[String(args?.path ?? "")] ?? "// Not in the demo data (only the repository's own text files are).\n") : (SOURCES[String(args?.path ?? "")] ?? "// (demo: no contents)\n"),
 			swarm_running: sample ? RUN : null,
