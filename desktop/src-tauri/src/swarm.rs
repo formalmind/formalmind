@@ -52,6 +52,8 @@ pub struct SwarmRequest {
     pub model: Option<String>,
     /// The session to continue: "swarm" (the folder's default) unless you made another with +.
     pub session: Option<String>,
+    /// Only the jobs already queued (e.g. reading an audit report), then stop, instead of going on to the plan.
+    pub only_queued: Option<bool>,
 }
 
 fn anthropic_entry() -> Result<keyring::Entry, String> {
@@ -336,6 +338,7 @@ Be brief; end with one short paragraph saying what you did and what's next.{}",
     );
     let job = match role {
         "prover" => "Take the plan item you're given and prove it against the generated def named in your task: read the def in the model and the function's slice (call `function` for any callee you need), state the property as a theorem that names the def fully qualified, prove it, and check with `lake build <Module>`. Reuse the project's existing lemmas (search the Lake project for simp lemmas about the monad). If the property is false, that's a bug: show it with a Foundry PoC and call report_bug. Address the reviewer's notes if there are any.",
+        "auditor" => "You are reading an audit report (attached, or in your task) and recording every finding it lists in the folder's audit index, with where it stands now. For each finding: take the report's own ID (H-01, M-2, L-03…; if it has none, number them in order as F-01, F-02…), its severity and a short title. Then check the current code: read the affected function (`functions`, `function`), the files around it, and the tests under test/ that cover it (run `forge test --match-path …` to confirm when a regression test exists). Decide the status: fixed (the code no longer has the issue; say what changed and name the test that covers it), works as expected (the behaviour is intended or the finding is invalid for this code; say why), acknowledged (real but accepted, as the report or code comments say), or open (still there). Call record_finding once per finding, with evidence a reader can check (the file:line, the test). Record every finding, even informational ones; don't fix code or write tests. End with one line: how many findings, and how many of each status.",
         "reviewer" => "Review the prover's work on the plan item: does the Lean statement really say what the Solidity does (read the def in the generated model and the function's slice, in your task), is it about the generated def rather than a restatement, does it check, is there any sorry/admit/axiom? Then call verdict exactly once: approve, or changes with concrete notes. Do not edit proofs yourself. If you spot a real bug in the contract, say so in your notes; the prover writes the PoC.",
         _ => "The maintainer wrote to the swarm. Answer them directly and briefly, using the tools to look things up. If they ask for a change of focus or a new property, update .formal/plan.md accordingly.",
     };
@@ -351,7 +354,15 @@ fn tools(role: &str) -> Value {
         json!({ "name": "search", "description": "Find lines matching a regex in the Lean project's .lean files (path:line: text), e.g. simp lemmas about the monad.", "input_schema": s(json!({ "pattern": { "type": "string" } }), vec!["pattern"]) }),
         json!({ "name": "run", "description": "Run `lake build`, `lake env lean <file>`, `lake exe cache get`, `lake init|new <Name>`, `forge build` or `forge test [args]` in the folder. Returns exit code and output.", "input_schema": s(json!({ "command": { "type": "string" } }), vec!["command"]) }),
     ];
-    if role != "reviewer" {
+    if role == "auditor" {
+        t.push(json!({ "name": "record_finding", "description": "Record one of the report's findings in the audit index next to the report, with its status in the current code. Calling it again with the same id updates that finding.", "input_schema": s(json!({
+            "id": { "type": "string", "description": "The report's own ID, e.g. H-01" },
+            "severity": { "type": "string", "description": "As the report rates it: critical, high, medium, low, informational…" },
+            "title": { "type": "string" },
+            "status": { "type": "string", "enum": ["fixed", "works as expected", "acknowledged", "open"] },
+            "evidence": { "type": "string", "description": "Why: what changed (file:line) and the test that covers it, or why it is intended" } }), vec!["id", "severity", "title", "status", "evidence"]) }));
+    }
+    if role != "reviewer" && role != "auditor" {
         t.push(json!({ "name": "report_bug", "description": "Report a real bug in the contracts, with its Foundry PoC (already written and passing). The swarm runs the PoC, files the finding in audit/README.md (status Open) and audit/formal-mind-swarm.md, and moves on to the next item.", "input_schema": s(json!({
             "title": { "type": "string" }, "severity": { "type": "string", "enum": ["critical", "high", "medium", "low"] },
             "location": { "type": "string", "description": "file:line" }, "scenario": { "type": "string", "description": "Concrete steps and impact" },
@@ -466,7 +477,8 @@ async fn model_access(client: &reqwest::Client, folder_path: &str, api_base: &st
 impl Turn<'_> {
 
     /// One agent turn: a tool loop against Claude until it stops calling tools.
-    async fn agent(&self, role: &str, item: &str, task: String) -> Result<Outcome, String> {
+    async fn agent(&self, role: &str, item: &str, task: impl Into<Value>) -> Result<Outcome, String> {
+        let task: Value = task.into();
         let root = PathBuf::from(&self.req.folder);
         let (key, base) = self.session(role, item).await?;
         let goal = self.req.goal.clone().unwrap_or_default();
@@ -570,6 +582,15 @@ impl Turn<'_> {
                                 let r = crate::executor::search_in(&root, input["pattern"].as_str().unwrap_or(""), &lake, &[".lean"]).unwrap_or_else(|e| format!("error: {e}"));
                                 self.emit("result", role, item, r.chars().take(500).collect());
                                 r
+                            }
+                            "record_finding" => {
+                                // The report is the job's text: its path in the folder.
+                                let job = *self.job.lock().unwrap();
+                                let report = with_queue(&self.queue, |q| q.jobs.iter().find(|j| Some(j.id) == job).map(|j| j.text.clone())).unwrap_or_default();
+                                let r = crate::swarm_ctx::record_finding(&root, &report, input);
+                                let label = format!("{} {} · {}", input["id"].as_str().unwrap_or(""), input["title"].as_str().unwrap_or(""), input["status"].as_str().unwrap_or(""));
+                                self.emit("tool", role, item, format!("record_finding {label}"));
+                                r.map(|idx| format!("recorded in {idx}")).unwrap_or_else(|e| format!("error: {e}"))
                             }
                             "report_bug" => {
                                 self.emit("tool", role, item, format!("report_bug {shown}"));
@@ -783,6 +804,9 @@ async fn run_swarm(turn: &Turn<'_>) -> String {
             return format!("budget reached (${spent:.2} of ${budget}); raise it and resume to carry on");
         }
 
+        if turn.req.only_queued.unwrap_or(false) && with_queue(&turn.queue, |q| !q.jobs.iter().any(|j| j.state == "running" || j.state == "queued")) {
+            return "done: the queued work is finished".into();
+        }
         // Next job: an interrupted one first, then your messages, then the rest in order; derive one if the queue is empty.
         let next = with_queue(&turn.queue, |q| {
             let pick = q.jobs.iter().position(|j| j.state == "running")
@@ -822,6 +846,21 @@ async fn run_swarm(turn: &Turn<'_>) -> String {
 
         let outcome = match job.kind.as_str() {
             "answer" => turn.agent("assistant", "you", format!("The maintainer says:\n\n{}{resume_note}", job.text)).await,
+            // An audit report to read: a PDF goes to the model as a document; Markdown and text as text.
+            "triage" => {
+                let report = job.text.clone();
+                turn.emit("status", "auditor", "report", format!("reading {report}"));
+                let task = format!("The audit report {report} is attached. Record every finding it lists, each with its status in the current code.{resume_note}");
+                let content = match inside(&root, &report).and_then(|p| std::fs::read(&p).map_err(|e| e.to_string())) {
+                    Ok(bytes) if report.to_ascii_lowercase().ends_with(".pdf") => json!([
+                        { "type": "document", "source": { "type": "base64", "media_type": "application/pdf", "data": base64(&bytes) }, "title": report },
+                        { "type": "text", "text": task }
+                    ]),
+                    Ok(bytes) => json!(format!("The audit report {report}:\n\n{}\n\n{task}", String::from_utf8_lossy(&bytes))),
+                    Err(e) => json!(format!("The report {report} can't be read ({e}). Say so and stop.")),
+                };
+                turn.agent("auditor", "report", content).await
+            }
             "plan" => {
                 let _ = &resume_note;
                 let added = sync_plan(turn, &root).await;
@@ -933,6 +972,7 @@ async fn run_swarm(turn: &Turn<'_>) -> String {
             ("prove", None, _) if gate.is_some() && job.attempt >= MAX_ATTEMPTS => turn.emit("plan", "prover", &id, format!("item {id} blocked: the proof didn't check after {MAX_ATTEMPTS} attempts")),
             ("prove", None, _) if gate.is_some() => turn.emit("plan", "prover", &id, format!("item {id}: the check failed, back to the prover")),
             ("prove", None, _) => turn.emit("plan", "prover", &id, format!("item {id} checks; to review")),
+            ("triage", _, _) => turn.emit("plan", "auditor", "report", format!("read {}: its findings are in Bugs", job.text)),
             _ => {}
         }
     }
@@ -1009,6 +1049,30 @@ pub fn swarm_stop(swarms: State<'_, Swarms>, run: String) {
     if let Some(s) = swarms.0.lock().unwrap().get(&run) {
         s.stop.store(true, Ordering::SeqCst);
     }
+}
+
+/// An audit report to read (a PDF, Markdown or text file in the folder): queued as a "triage" job in the session, so a
+/// running swarm picks it up next and a stopped one reads it when it starts. The auditor records each finding, with its
+/// status in the current code, in the README.md next to the report.
+#[tauri::command(async)]
+pub fn swarm_triage(folder: String, path: String, session: Option<String>) -> Result<(), String> {
+    if !local::read()?.allows(&folder) {
+        return Err("Add the folder first".into());
+    }
+    let root = PathBuf::from(&folder);
+    let p = inside(&root, &path)?;
+    if !p.is_file() {
+        return Err(format!("{path} isn't a file"));
+    }
+    let ext = p.extension().and_then(|e| e.to_str()).unwrap_or("").to_ascii_lowercase();
+    if !["pdf", "md", "markdown", "txt"].contains(&ext.as_str()) {
+        return Err("Reports are PDF, Markdown or text files".into());
+    }
+    let qf = queue_file(&root, session.as_deref().unwrap_or("swarm"));
+    with_queue(&qf, |q| {
+        enqueue(q, "triage", 0, &path, 1, "");
+    });
+    Ok(())
 }
 
 /// A message to the swarm: queued as an "answer" job (on disk, so a quit can't lose it), answered before the next turn.

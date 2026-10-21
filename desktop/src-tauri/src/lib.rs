@@ -84,6 +84,7 @@ pub fn run() {
                     provider: env("FM_SWARM_PROVIDER"),
                     model: env("FM_SWARM_MODEL"),
                     session: None,
+                    only_queued: env("FM_SWARM_ONLY_QUEUED").map(|v| v == "1"),
                 };
                 if let Err(e) = swarm::swarm_start(app.handle().clone(), app.state::<swarm::Swarms>(), request) {
                     eprintln!("FM_SWARM_AUTOSTART: {e}");
@@ -120,6 +121,7 @@ pub fn run() {
             swarm::swarm_start,
             swarm::swarm_stop,
             swarm::swarm_say,
+            swarm::swarm_triage,
             swarm::swarm_running,
             swarm::swarm_suggest,
             swarm::swarm_plan,

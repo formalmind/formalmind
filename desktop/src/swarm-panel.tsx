@@ -325,7 +325,7 @@ const SEVERITY: Record<string, string> = {
 };
 
 /** A report or finding on the Bugs page: the file it comes from on the card's header row, as on the Proofs page. */
-function DetailCard({ label, action, children }: { label: string; action?: React.ReactNode; children: React.ReactNode }) {
+function DetailCard({ label, action, bare, children }: { label: string; action?: React.ReactNode; bare?: boolean; children: React.ReactNode }) {
 	return (
 		<section className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-xl border bg-card">
 			<header className="flex h-10 shrink-0 items-center gap-2 border-b pl-4 pr-2">
@@ -333,7 +333,8 @@ function DetailCard({ label, action, children }: { label: string; action?: React
 				<span className="min-w-0 flex-1 truncate font-mono text-[12px] text-muted-foreground" title={label}>{label}</span>
 				{action}
 			</header>
-			<article className="min-h-0 flex-1 overflow-y-auto px-6 py-5">{children}</article>
+			{/* `bare`: the content lays itself out (a report: its PDF viewer, or its own scrolling text). */}
+			<article className={`min-h-0 flex-1 ${bare ? "flex flex-col overflow-hidden" : "overflow-y-auto px-6 py-5"}`}>{children}</article>
 		</section>
 	);
 }
@@ -462,9 +463,9 @@ function PocView({ folder, invoke, path, fns, onOpenFile }: { folder: string; in
  * Bugs: the folder's audit reports (Markdown in its report folders, which the gear sets) and the swarm's findings,
  * each opened on the right.
  */
-function BugsView({ folder, files, invoke, bugs, openBug, setOpenBug, withPoc, onOpenFile, reload = 0 }: { folder: string; files: string[]; invoke: Bridge["invoke"]; bugs: Bug[]; openBug: string | null; setOpenBug: (f: string | null) => void; withPoc: (body: string) => Promise<string>; onOpenFile: (path: string) => void; reload?: number }) {
+function BugsView({ folder, files, invoke, bugs, openBug, setOpenBug, withPoc, onOpenFile, reload = 0, onTriage }: { folder: string; files: string[]; invoke: Bridge["invoke"]; bugs: Bug[]; openBug: string | null; setOpenBug: (f: string | null) => void; withPoc: (body: string) => Promise<string>; onOpenFile: (path: string) => void; reload?: number; onTriage?: (path: string) => Promise<void> }) {
 	const dirs = useReportDirs(folder);
-	const inDirs = files.filter((f) => /\.(md|markdown|txt)$/i.test(f) && dirs.some((d) => f.startsWith(`${d.replace(/\/+$/, "")}/`))).sort();
+	const inDirs = files.filter((f) => /\.(md|markdown|txt|pdf)$/i.test(f) && dirs.some((d) => f.startsWith(`${d.replace(/\/+$/, "")}/`))).sort();
 	// An index (README.md / INDEX.md in a report folder) lists every finding with its status; the rest are reports.
 	const indexes = inDirs.filter((f) => /(^|\/)(readme|index)\.md$/i.test(f));
 	const reports = inDirs.filter((f) => !indexes.includes(f));
@@ -499,7 +500,9 @@ function BugsView({ folder, files, invoke, bugs, openBug, setOpenBug, withPoc, o
 	const shownFindings = only.size ? findings.filter((f) => only.has(f.status)) : findings;
 	const byReport = [...new Set(shownFindings.map((f) => f.report))].map((r) => ({ report: r, items: shownFindings.filter((f) => f.report === r) }));
 	const reportPath = openBug?.startsWith("report:") ? openBug.slice(7) : null;
-	const [report, setReport] = useState<{ path: string; text: string } | null>(null);
+	const [report, setReport] = useState<{ path: string; text: string; url?: string } | null>(null);
+	// Reading a report into the index: the paths queued for the auditor this visit, and why one couldn't be.
+	const [triaging, setTriaging] = useState<Record<string, string>>({});
 	// What's open: a picked report or finding; with nothing picked, the first report, else the first finding.
 	const selected = reportPath || picked ? null : (bugs.find((b) => b.file === openBug) ?? (reports.length || findings.length ? null : bugs[0]));
 	const showing = picked ? null : reportPath ? `report:${reportPath}` : selected ? null : reports[0] && !findings.length ? `report:${reports[0]}` : null;
@@ -507,6 +510,13 @@ function BugsView({ folder, files, invoke, bugs, openBug, setOpenBug, withPoc, o
 	useEffect(() => {
 		if (!showingPath) return;
 		setReport(null);
+		if (/\.pdf$/i.test(showingPath)) {
+			void invoke<string>("folder_image", { folder, path: showingPath }).then(
+				(url) => setReport({ path: showingPath, text: "", url }),
+				(e) => setReport({ path: showingPath, text: `Couldn't open ${showingPath}: ${e}` }),
+			);
+			return;
+		}
 		void invoke<string>("folder_read", { folder, path: showingPath }).then(
 			(text) => setReport({ path: showingPath, text }),
 			(e) => setReport({ path: showingPath, text: `Couldn't read ${showingPath}: ${e}` }),
@@ -532,7 +542,7 @@ function BugsView({ folder, files, invoke, bugs, openBug, setOpenBug, withPoc, o
 							<button type="button" onClick={() => setOpenBug(`report:${r}`)} title={r} className={`flex w-full items-center gap-2 rounded-xl border px-3 py-2 text-left transition-colors ${showing === `report:${r}` ? "bg-muted" : "border-transparent hover:bg-muted/60"}`}>
 								<FileCode2 className="size-3.5 shrink-0 text-muted-foreground" />
 								<span className="min-w-0">
-									<span className="block truncate text-[13px] font-medium">{r.split("/").pop()?.replace(/\.(md|markdown|txt)$/i, "").replace(/[_-]+/g, " ")}</span>
+									<span className="block truncate text-[13px] font-medium">{r.split("/").pop()?.replace(/\.(md|markdown|txt|pdf)$/i, "").replace(/[_-]+/g, " ")}</span>
 									<span className="block truncate font-mono text-[10px] text-muted-foreground">{r}</span>
 								</span>
 							</button>
@@ -672,9 +682,29 @@ function BugsView({ folder, files, invoke, bugs, openBug, setOpenBug, withPoc, o
 			) : showing ? (
 				<DetailCard
 					label={showing.slice(7)}
+					bare
 					action={
 						<>
-							{report ? <CopyButton text={report.text} label="Copy the report as Markdown" /> : null}
+							{onTriage ? (
+								<button
+									type="button"
+									disabled={Boolean(triaging[showing.slice(7)])}
+									onClick={() => {
+										const p = showing.slice(7);
+										setTriaging((t) => ({ ...t, [p]: "Reading…" }));
+										void onTriage(p).then(
+											() => setTriaging((t) => ({ ...t, [p]: "Reading… the auditor records each finding below as it goes" })),
+											(e) => setTriaging((t) => ({ ...t, [p]: String(e) })),
+										);
+									}}
+									title="The auditor reads this report and records every finding in the index next to it, with its status in the current code"
+									className="inline-flex h-7 items-center gap-1.5 rounded-lg px-2 text-[12px] text-muted-foreground hover:bg-background hover:text-foreground disabled:opacity-60"
+								>
+									<ScanSearch className="size-3.5" />
+									{triaging[showing.slice(7)] ? "Reading" : "Read findings"}
+								</button>
+							) : null}
+							{report && !report.url ? <CopyButton text={report.text} label="Copy the report as Markdown" /> : null}
 							<button type="button" onClick={() => onOpenFile(showing.slice(7))} title="Open in Code" className="inline-flex h-7 items-center gap-1.5 rounded-lg px-2 text-[12px] text-muted-foreground hover:bg-background hover:text-foreground">
 								<Code2 className="size-3.5" />
 								Code
@@ -682,7 +712,12 @@ function BugsView({ folder, files, invoke, bugs, openBug, setOpenBug, withPoc, o
 						</>
 					}
 				>
-					<div className="prose prose-sm max-w-none dark:prose-invert">{report && report.path === showing.slice(7) ? <ChatMarkdown>{report.text}</ChatMarkdown> : <p className="text-muted-foreground">Opening…</p>}</div>
+					{triaging[showing.slice(7)] ? <p className="border-b bg-muted/40 px-4 py-2 text-[12px] text-muted-foreground">{triaging[showing.slice(7)]}</p> : null}
+					{report?.url && report.path === showing.slice(7) ? (
+						<iframe src={report.url} title={showing.slice(7)} className="min-h-0 w-full flex-1 border-0" />
+					) : (
+						<div className="prose prose-sm min-h-0 max-w-none flex-1 overflow-y-auto px-6 py-5 dark:prose-invert">{report && report.path === showing.slice(7) ? <ChatMarkdown>{report.text}</ChatMarkdown> : <p className="text-muted-foreground">Opening…</p>}</div>
+					)}
 				</DetailCard>
 			) : selected && facts ? (
 				<DetailCard label={selected.file} action={<CopyButton get={() => withPoc(selected.body)} label="Copy the report as Markdown, PoC included" />}>
@@ -1356,6 +1391,8 @@ export function SwarmPanel({ folder, name, scan, bridge, session, file: openPath
 			if (runRef.current && payload.run !== runRef.current) return;
 			setEvents((all) => [...all.slice(-600), payload]);
 			if (["plan", "bug", "done"].includes(payload.kind) || (payload.kind === "status" && / is working$/.test(payload.text))) refresh();
+			// A finding recorded from a report shows in Bugs straight away.
+			if (payload.kind === "tool" && payload.text.startsWith("record_finding")) setReload((n) => n + 1);
 			if (["plan", "bug", "done"].includes(payload.kind)) {
 				setReload((n) => n + 1);
 				void invoke<{ files: string[] }>("folder_tree", { path: folder }).then((t) => setTree(t.files), () => {});
@@ -1417,11 +1454,12 @@ export function SwarmPanel({ folder, name, scan, bridge, session, file: openPath
 		chat.current?.scrollTo({ top: chat.current.scrollHeight });
 	}, [events]);
 
-	const start = async () => {
+	// `onlyQueued`: a run for the work already queued (reading a report), which stops when that's done.
+	const start = async (onlyQueued = false) => {
 		setError(null);
 		setEvents([]);
 		try {
-			const id = await invoke<string>("swarm_start", { request: { folder, goal: goal.trim() || null, budget_usd: budget, api_base: apiBase(), provider, model, session: session === "new" && !viewing ? `s-${Date.now().toString(16)}` : viewing ?? "swarm" } });
+			const id = await invoke<string>("swarm_start", { request: { folder, goal: goal.trim() || null, budget_usd: budget, api_base: apiBase(), provider, model, session: session === "new" && !viewing ? `s-${Date.now().toString(16)}` : viewing ?? "swarm", only_queued: onlyQueued } });
 			runRef.current = id;
 			setRun(id);
 			setViewing(id);
@@ -1895,7 +1933,24 @@ export function SwarmPanel({ folder, name, scan, bridge, session, file: openPath
 						{debug(openPath && /\.[ts]\.sol$/.test(openPath) ? openPath : null, params.get("test"), debugFile)}
 					</div>
 				) : null}
-				{mode === "bugs" ? <BugsView folder={folder} files={tree} invoke={invoke} bugs={bugs} openBug={openBug} setOpenBug={setOpenBug} withPoc={withPoc} onOpenFile={view} reload={reload} /> : null}
+				{mode === "bugs" ? (
+					<BugsView
+						folder={folder}
+						files={tree}
+						invoke={invoke}
+						bugs={bugs}
+						openBug={openBug}
+						setOpenBug={setOpenBug}
+						withPoc={withPoc}
+						onOpenFile={view}
+						reload={reload}
+						// Queued for the swarm's auditor; a stopped swarm starts just for it (and stops after).
+						onTriage={async (path) => {
+							await invoke("swarm_triage", { folder, path, session: viewing && viewing !== "new" ? viewing : "swarm" });
+							if (!runRef.current) await start(true);
+						}}
+					/>
+				) : null}
 				{mode === "audit" ? (
 					<div className="pointer-events-auto absolute bottom-3 left-3 right-3 top-[var(--fm-top)] z-10 flex min-h-0 flex-col overflow-hidden rounded-2xl border bg-muted/60 p-1">
 						<AuditView folder={folder} scan={scan} invoke={invoke} preferred={openPath ?? null} onOpenFile={view} reload={reload} />
