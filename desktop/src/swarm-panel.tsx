@@ -744,7 +744,7 @@ type Mode = "code" | "chat" | "swarm" | "roadmap" | "audit" | "bugs" | "debug";
 const MODES: { id: Mode; label: string; icon: typeof Code2 }[] = [
 	{ id: "code", label: "Code", icon: Code2 },
 	{ id: "swarm", label: "Swarm", icon: Network },
-	{ id: "audit", label: "Audit", icon: ScanSearch },
+	{ id: "audit", label: "Proofs", icon: ScanSearch },
 	{ id: "bugs", label: "Bugs", icon: Bug },
 ];
 
@@ -1008,7 +1008,7 @@ function AuditView({ folder, scan, invoke, preferred, onOpenFile }: { folder: st
 	const [scripts, setScripts] = useState<Scripts | null>(null);
 	const [error, setError] = useState<string | null>(null);
 	const errorSource = useRef("");
-	errorSource.current = `Audit · ${entry ?? ""}`;
+	errorSource.current = `Proofs · ${entry ?? ""}`;
 	useEffect(() => {
 		if (error) reportError(errorSource.current, error);
 	}, [error]);
