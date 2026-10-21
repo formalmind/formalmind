@@ -11,8 +11,8 @@ const partsOf = (line: string) => {
 };
 
 /**
- * A line naming the parts ("Bugs, proofs and code.") cycles: the whole line, then each part's icon alone (the agents
- * first), then the whole line again, each rising in as the last goes; any other line is shown as it is. With reduced motion, the line stays.
+ * A line naming the parts ("Bugs, proofs and code.") is shown as the parts one at a time, each with its icon (the agents
+ * first), each rising in as the last goes; any other line is shown as it is. With reduced motion, the line stays.
  */
 function Parts({ line }: { line: string }) {
 	const parts = partsOf(line);
@@ -20,16 +20,16 @@ function Parts({ line }: { line: string }) {
 	const [still] = useState(() => typeof window !== "undefined" && window.matchMedia?.("(prefers-reduced-motion: reduce)").matches);
 	useEffect(() => {
 		if (parts.length < 2 || still) return;
-		// Step 0 is the whole line, held five times as long as each icon (1…).
-		const t = setTimeout(() => setI((n) => (n + 1) % (parts.length + 1)), i === 0 ? 10000 : 2000);
+		const t = setTimeout(() => setI((n) => (n + 1) % parts.length), 2400);
 		return () => clearTimeout(t);
 	}, [i, parts.length, still]);
-	if (parts.length < 2 || still || i === 0) return <span key="whole" className={still ? "" : "fm-swap inline-block"}>{line}</span>;
-	const Icon = PART_ICONS[parts[i - 1].toLowerCase()];
+	if (parts.length < 2 || still) return <>{line}</>;
+	const part = parts[i];
+	const Icon = PART_ICONS[part.toLowerCase()];
 	return (
-		// The line's height stays, so the strong line below doesn't move.
-		<span key={i} className="fm-swap inline-block" role="img" aria-label={parts[i - 1]}>
-			<Icon className="inline-block size-[0.9em] align-[-0.12em]" strokeWidth={1.5} />
+		<span key={i} className="fm-swap inline-block">
+			<Icon className="mr-[0.14em] inline-block size-[0.8em] align-[-0.08em]" strokeWidth={1.75} aria-hidden />
+			{part[0].toUpperCase() + part.slice(1)}.
 		</span>
 	);
 }
