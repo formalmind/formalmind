@@ -8,8 +8,9 @@ const PART_ICONS: Record<string, LucideIcon> = { bugs: Bug, proofs: ScanSearch, 
 const partsOf = (line: string) => (line.match(/\w+/g) ?? []).filter((w) => PART_ICONS[w.toLowerCase()]);
 
 /**
- * A line naming the parts ("Bugs, proofs and code.") cycles through them, one at a time with its icon, each rising in
- * as the last goes; any other line is shown as it is. With reduced motion, the whole line stays, icons before the words.
+ * A line naming the parts ("Bugs, proofs and code.") cycles: the whole line, then each part alone with its icon, then
+ * the whole line again, each rising in as the last goes; any other line is shown as it is. With reduced
+ * motion, the whole line stays.
  */
 function Parts({ line }: { line: string }) {
 	const parts = partsOf(line);
@@ -17,9 +18,10 @@ function Parts({ line }: { line: string }) {
 	const [still] = useState(() => typeof window !== "undefined" && window.matchMedia?.("(prefers-reduced-motion: reduce)").matches);
 	useEffect(() => {
 		if (parts.length < 2 || still) return;
-		const t = setInterval(() => setI((n) => (n + 1) % parts.length), 2200);
-		return () => clearInterval(t);
-	}, [parts.length, still]);
+		// Step 0 is the whole line, held a little longer; 1… are the parts.
+		const t = setTimeout(() => setI((n) => (n + 1) % (parts.length + 1)), i === 0 ? 3200 : 2000);
+		return () => clearTimeout(t);
+	}, [i, parts.length, still]);
 	if (parts.length < 2) return <>{line}</>;
 	const word = (w: string) => {
 		const Icon = PART_ICONS[w.toLowerCase()];
@@ -30,8 +32,10 @@ function Parts({ line }: { line: string }) {
 			</>
 		);
 	};
-	if (still) return <>{line.split(/(\w+)/).map((piece, k) => (PART_ICONS[piece.toLowerCase()] ? <span key={k}>{word(piece)}</span> : piece))}</>;
-	const w = parts[i];
+	// The whole line is plain words; only a part shown alone carries its icon.
+	if (still) return <>{line}</>;
+	if (i === 0) return <span key="whole" className="fm-swap inline-block">{line}</span>;
+	const w = parts[i - 1];
 	return (
 		<span key={i} className="fm-swap inline-block" aria-label={line}>
 			{word(w[0].toUpperCase() + w.slice(1))}.
