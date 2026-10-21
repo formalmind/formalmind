@@ -1518,7 +1518,7 @@ export function SwarmPanel({ folder, name, scan, bridge, session, file: openPath
 		<>
 				<div className="flex h-8 shrink-0 items-center gap-2 pl-2 pr-0.5">
 					<DropdownMenu>
-						<DropdownMenuTrigger className="flex min-w-0 flex-1 items-center gap-1 rounded-md text-left text-[13px] font-medium outline-none hover:text-foreground" title={`${title} — switch sessions`}>
+						<DropdownMenuTrigger className="flex min-w-0 flex-1 items-center gap-1 rounded-md text-left text-[12px] text-muted-foreground outline-none hover:text-foreground" title={`${title} — switch sessions`}>
 							<span className="truncate">{title}</span>
 							<ChevronDown className="size-3 shrink-0 text-muted-foreground" />
 						</DropdownMenuTrigger>
