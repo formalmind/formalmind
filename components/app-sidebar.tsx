@@ -231,7 +231,7 @@ export function AppSidebar({ extra, ...props }: React.ComponentProps<typeof Side
 				<Link to="/" aria-label="Formal Mind" className="flex h-8 items-center gap-2 px-1.5 text-sm font-semibold tracking-tight group-data-[collapsible=icon]:gap-0">
 					<LogoMark size={20} className="shrink-0" />
 					{/* Fades out with the transitions.dev text-swap timing as the rail narrows. */}
-					<span className="max-w-40 overflow-hidden whitespace-nowrap transition-[max-width,opacity,filter] [transition-duration:var(--text-swap-dur)] [transition-timing-function:var(--text-swap-ease)] group-data-[collapsible=icon]:max-w-0 group-data-[collapsible=icon]:opacity-0 group-data-[collapsible=icon]:blur-[var(--text-swap-blur)] motion-reduce:transition-none">
+					<span className="max-w-40 overflow-hidden whitespace-nowrap font-display text-[21px] font-normal leading-none tracking-normal transition-[max-width,opacity,filter] [transition-duration:var(--text-swap-dur)] [transition-timing-function:var(--text-swap-ease)] group-data-[collapsible=icon]:max-w-0 group-data-[collapsible=icon]:opacity-0 group-data-[collapsible=icon]:blur-[var(--text-swap-blur)] motion-reduce:transition-none">
 						Formal Mind.
 					</span>
 				</Link>
