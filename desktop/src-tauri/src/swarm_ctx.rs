@@ -89,7 +89,7 @@ pub fn context(root: &Path) -> Context {
         let f = formal_json(&a, &output, 0);
         let name = f["contract"].as_str().unwrap_or("").to_string();
         let theorems: Vec<Value> = f["theorems"].as_array().cloned().unwrap_or_default();
-        let functions = f["functions"]
+        let functions: Vec<Func> = f["functions"]
             .as_array()
             .into_iter()
             .flatten()
@@ -119,7 +119,16 @@ pub fn context(root: &Path) -> Context {
                 model = path.strip_prefix(root).ok().map(|p| p.to_string_lossy().replace('\\', "/"));
             }
         }
-        let units = audit_json(&a, 0)["units"].as_array().cloned().unwrap_or_default();
+        let mut units = audit_json(&a, 0)["units"].as_array().cloned().unwrap_or_default();
+        // The Proofs page counts every function the model has a def for, not only the entry points: internal and
+        // library functions join the plan after them, so the swarm keeps going until each is proved (or blocked).
+        // Functions the model leaves opaque ("not modeled") have nothing to prove against and stay out.
+        for f in &functions {
+            if f.lean.is_empty() || f.why.is_some() || units.iter().any(|u| u["name"].as_str() == Some(f.name.as_str())) {
+                continue;
+            }
+            units.push(json!({ "name": f.name, "mutability": "internal", "writes": [], "guards": 0, "external": 0, "arith": 0, "internal": true }));
+        }
         ctx.contracts.push(Contract { name, file, model, functions, units, slices: all_slices(&a) });
     }
     ctx
@@ -198,7 +207,8 @@ impl Context {
             let called = u.func.is_some_and(|f| !f.scripts.is_empty());
             let writes = u.unit["writes"].as_array().is_some_and(|w| !w.is_empty()) || u.unit["external"].as_u64().unwrap_or(0) > 0;
             let n = |k: &str| u.unit[k].as_u64().unwrap_or(0);
-            (if called { 0 } else if writes { 1 } else { 2 }, n("arith") + 2 * n("external") + n("guards"))
+            let internal = u.unit["internal"] == true;
+            (if called { 0 } else if internal { 3 } else if writes { 1 } else { 2 }, n("arith") + 2 * n("external") + n("guards"))
         };
         out.sort_by_key(|u| rank(u));
         out
@@ -575,3 +585,4 @@ mod record_tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 }
+

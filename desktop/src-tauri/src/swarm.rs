@@ -931,7 +931,7 @@ async fn sync_plan(turn: &Turn<'_>, root: &Path) -> usize {
     turn.emit("tool", "planner", "plan", format!("functions: {} in scope across {}", ctx.units().len(), ctx.contracts.iter().map(|c| c.name.as_str()).collect::<Vec<_>>().join(", ")));
     if !missing.is_empty() {
         let mut out = if text.trim().is_empty() {
-            "# Plan\n\nOne item per function in scope, from formal-ast: the contracts the Foundry scripts deploy or call, with their bases; the scripts' calls first. `- [x]` is proved on the Proofs page, `- [!]` blocked or a finding.\n\n".to_string()
+            "# Plan\n\nOne item per function in scope, from formal-ast: the contracts the Foundry scripts deploy or call, with their bases; the scripts' calls first, then the internal and library functions the model has a def for. `- [x]` is proved on the Proofs page, `- [!]` blocked or a finding.\n\n".to_string()
         } else {
             text.trim_end().to_string() + "\n"
         };
@@ -1228,6 +1228,12 @@ pub fn swarm_start(app: AppHandle, swarms: State<'_, Swarms>, request: SwarmRequ
     merge_old_sessions(Path::new(&request.folder));
     let qf = queue_file(Path::new(&request.folder), &run);
     let spent = load_queue(&qf).spent;
+    // What you typed before starting is a message too: the assistant answers it first (as with one sent while it runs).
+    if let Some(text) = request.goal.as_deref().map(str::trim).filter(|t| !t.is_empty()) {
+        with_queue(&qf, |q| {
+            enqueue(q, "answer", 0, text, 1, "");
+        });
+    }
     let swarm = Arc::new(Swarm { stop: AtomicBool::new(false), folder: request.folder.clone(), queue: qf.clone(), spent: Mutex::new(spent), budget: Mutex::new(request.budget_usd.max(spent)), compact_now: AtomicBool::new(false) });
     swarms.0.lock().unwrap().insert(run.clone(), swarm.clone());
     let id = run.clone();
