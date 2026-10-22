@@ -391,15 +391,10 @@ function MacChat({ repo }: { repo: string }) {
 	return <FolderChat repo={repo} folder={folder} />;
 }
 
-/** A folder's swarm chat, on the session followed (useChosenRun); the history drawer or the pill switches it. */
+/** A folder's swarm chat, on the session followed (useChosenRun); the history drawer switches sessions, the chip back to Formal Mind. */
 function FolderChat({ repo, folder }: { repo: string; folder: RelayFolder }) {
 	const { run, pick } = useChosenRun(repo, folder);
 	const { chatId, choose } = useChatChoice(repo);
-	const label = (r: string) => {
-		const s = folder.sessions.find((x) => x.run === r);
-		return `${s?.title || (r === "swarm" ? "Swarm" : r)}${s?.running ? " · running" : ""}`;
-	};
-	const runs = folder.sessions.some((s) => s.run === run) ? folder.sessions.map((s) => s.run) : [run, ...folder.sessions.map((s) => s.run)];
 	return (
 		<div className="flex min-h-0 flex-1 flex-col">
 			<SessionChat
@@ -408,16 +403,7 @@ function FolderChat({ repo, folder }: { repo: string; folder: RelayFolder }) {
 				run={run}
 				aboveTabs
 				fullScreen
-				header={
-					<select value={run} onChange={(e) => (e.target.value === "\u0000cloud" ? choose(chatId) : pick(e.target.value))} aria-label="Session" className="max-w-full truncate bg-transparent text-[13px] text-foreground outline-none">
-						<option value={"\u0000cloud"}>Formal Mind</option>
-						{runs.map((r) => (
-							<option key={r} value={r}>
-								{folder.name} · {label(r)}
-							</option>
-						))}
-					</select>
-				}
+				header={<ChatSwitch value="mac" onChange={(v) => v === "cloud" && choose(chatId)} />}
 			/>
 		</div>
 	);
