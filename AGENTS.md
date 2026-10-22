@@ -4,6 +4,8 @@ Formal Mind: a website (Vite + React, `src/`, `components/`) with a Hono API on 
 routes in `server/routes/`), and a Tauri 2 Mac app in `desktop/` that reuses the same components through `@/`.
 Check `bunx tsc --noEmit -p .` and `bun run build` before committing.
 
+UI follows [DESIGN.md](DESIGN.md): tokens, type scale, layout patterns, the Mac app's title bar and shortcuts, copy.
+
 `crates/formal-ast` (solc's AST → graph, units, Lean coverage) runs natively in the Mac app and as wasm on the website's
 Proofs tab (`crates/formal-ast-wasm`, with solc-js in a Web Worker: `lib/ast/`). The wasm build is committed in
 `lib/formal-ast-wasm`: after changing either crate, run `bun run build:ast-wasm` and commit what it writes.

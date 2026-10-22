@@ -2,7 +2,7 @@ import { MarkGithubIcon } from "@primer/octicons-react";
 import { isTauri } from "@tauri-apps/api/core";
 import { SemanticsPanel } from "./semantics-panel";
 import { ProofWorkspace } from "./proof-workspace";
-import { CodeProofPanel } from "./code-proof-panel";
+import { ProofRail, fnKey, proofGutter, useFileProofs } from "./code-proof-panel";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { NvimTerminal } from "./nvim-terminal";
@@ -222,7 +222,10 @@ export function AgentMessage({ e, onBug }: { e: Ev; onBug: () => void }) {
  * and steer the swarm, the plan, and what each agent says as it works).
  */
 /** A whole file, highlighted by its extension, with a line-number gutter. */
-export function FileView({ path, text, big, start = 1, mark, cursor, diagnostics }: { path: string; text: string; big?: boolean; start?: number; mark?: number | null; cursor?: Cursor | null; /** solc's errors and warnings in this file: a wavy underline, the message under the line. */ diagnostics?: Diagnostic[] }) {
+/** A dot in the code's gutter (a function's proof status), on a 0-based line. */
+export type GutterMark = { dot: string; title: string; onClick: () => void };
+
+export function FileView({ path, text, big, start = 1, mark, cursor, diagnostics, gutter, band }: { path: string; text: string; big?: boolean; start?: number; mark?: number | null; cursor?: Cursor | null; /** solc's errors and warnings in this file: a wavy underline, the message under the line. */ diagnostics?: Diagnostic[]; gutter?: Map<number, GutterMark>; /** 0-based lines tinted as one block (the function the Proofs rail has picked). */ band?: { from: number; to: number } | null }) {
 	const lines = useHighlightedCode(text, EXT[path.split(".").pop() ?? ""] ?? "text");
 	const marked = useRef<HTMLSpanElement | null>(null);
 	useEffect(() => {
@@ -235,7 +238,22 @@ export function FileView({ path, text, big, start = 1, mark, cursor, diagnostics
 	return (
 		<pre className={`overflow-x-auto py-2 font-mono ${big ? "text-[12.5px] leading-6" : "text-[11px] leading-5"}`}>
 			{lines.map((line, i) => (
-				<span key={i} ref={i === mark ? marked : undefined} data-line={i} className={`relative block whitespace-pre pr-3 ${i === mark ? "bg-amber-300/25" : cursor?.line === i ? "bg-muted/60" : ""}`}>
+				<span key={i} ref={i === mark ? marked : undefined} data-line={i} className={`relative block whitespace-pre pr-3 ${i === mark ? "bg-amber-300/25" : cursor?.line === i ? "bg-muted/60" : band && i >= band.from && i <= band.to ? "bg-foreground/[0.035]" : ""}`}>
+					{band && i >= band.from && i <= band.to ? <span aria-hidden className="absolute inset-y-0 left-0 w-0.5 bg-foreground/25" /> : null}
+					{gutter?.get(i) ? (
+						<button
+							type="button"
+							title={gutter.get(i)!.title}
+							aria-label={gutter.get(i)!.title}
+							onClick={(e) => {
+								e.stopPropagation();
+								gutter.get(i)!.onClick();
+							}}
+							className="absolute left-1.5 top-[0.5lh] grid size-3 -translate-y-1/2 place-items-center rounded-full hover:bg-muted"
+						>
+							<span className={`size-2 rounded-full ${gutter.get(i)!.dot}`} />
+						</button>
+					) : null}
 					<span className="mr-3 inline-block w-9 select-none text-right text-muted-foreground/60">{i + start}</span>
 					<span data-code>{line}</span>
 					{cursor?.line === i ? <span ref={caret} data-vim-cursor className="pointer-events-none absolute top-0 h-full w-[1ch] bg-foreground/35" style={{ left: `calc(3rem + ${cursor.col}ch)` }} /> : null}
@@ -1166,7 +1184,7 @@ const COVERAGE_FILTERS = [
  * Solidity beside its Lean, and the theorems in the folder that name it. Opaque functions say why they couldn't be
  * translated (the model then holds for every behaviour of them).
  */
-function CoverageView({ data, scripts, onOpenFile }: { data: Formal; scripts: Scripts | null; onOpenFile: (path: string) => void }) {
+function CoverageView({ data, scripts, onOpenFile }: { data: Formal; scripts: Scripts | null; onOpenFile: (path: string, line?: number) => void }) {
 	// The scripts that call a function, matched by its contract (or the contract it is inherited into) and name.
 	const contractOf = (f: FormalFn) => f.name.split(".").slice(0, -1).join(".");
 	const fnName = (f: FormalFn) => f.name.split(".").pop() ?? f.name;
@@ -1252,7 +1270,7 @@ function CoverageView({ data, scripts, onOpenFile }: { data: Formal; scripts: Sc
 								{status.label}
 							</span>
 							{current.file ? (
-								<button type="button" onClick={() => onOpenFile(current.file!)} className="ml-auto inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 font-mono text-[11px] text-muted-foreground hover:bg-muted hover:text-foreground" title="Open in Code">
+								<button type="button" onClick={() => onOpenFile(current.file!, current.line)} className="ml-auto inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 font-mono text-[11px] text-muted-foreground hover:bg-muted hover:text-foreground" title="Open in Code">
 									<FileCode2 className="size-3" />
 									{current.file}:{current.line}
 								</button>
@@ -1291,7 +1309,7 @@ function CoverageView({ data, scripts, onOpenFile }: { data: Formal; scripts: Sc
 													<span className={`size-1.5 rounded-full ${t.sorry ? "bg-sky-500" : "bg-emerald-500"}`} />
 													<span className="font-mono font-medium">{t.name}</span>
 													{t.sorry ? <span className="text-sky-700 dark:text-sky-400">sorry</span> : null}
-													<button type="button" onClick={() => onOpenFile(t.file)} className="ml-auto font-mono text-muted-foreground hover:text-foreground">
+													<button type="button" onClick={() => onOpenFile(t.file, t.line)} className="ml-auto font-mono text-muted-foreground hover:text-foreground">
 														{t.file}:{t.line}
 													</button>
 												</div>
@@ -1309,19 +1327,31 @@ function CoverageView({ data, scripts, onOpenFile }: { data: Formal; scripts: Sc
 	);
 }
 
-/** Audit mode: what's been established for the contract picked here, as Lean coverage. */
-export function AuditView(props: { folder: string; scan: Scan | null; invoke: Bridge["invoke"]; onOpenFile: (path: string) => void; reload?: number }) {
-	const [tab, setTab] = useState<"workspace" | "coverage" | "experiment">("workspace");
-	if (!isTauri()) return <CoverageAuditView {...props} />;
-	return <>
-		<div role="tablist" aria-label="Proof views" className="flex shrink-0 gap-1 p-1 text-xs">
-			{(["workspace", "coverage", "experiment"] as const).map(t => <button key={t} role="tab" aria-selected={tab === t} className={`rounded-md px-3 py-2 ${tab === t ? "bg-background shadow-sm" : "text-muted-foreground hover:bg-background/50"}`} onClick={() => setTab(t)}>{t === "workspace" ? "Proof workspace" : t === "coverage" ? "Solidity coverage" : "Semantics experiment"}</button>)}
-		</div>
-		{tab === "workspace" ? <ProofWorkspace key={props.folder} {...props} /> : tab === "coverage" ? <CoverageAuditView {...props} /> : <div className="min-h-0 flex-1 overflow-auto"><SemanticsPanel invoke={props.invoke} /></div>}
-	</>;
+/** Audit mode: what's been established for the contract picked here, as Lean coverage; on the Mac, also the SolidCore experiment. */
+export function AuditView(props: { folder: string; scan: Scan | null; invoke: Bridge["invoke"]; onOpenFile: (path: string, line?: number) => void; reload?: number }) {
+	const [view, setView] = useState<"coverage" | "semantics">("coverage");
+	const views = isTauri() ? (["coverage", "semantics"] as const) : (["coverage"] as const);
+	const switcher =
+		views.length > 1 ? (
+			<span role="tablist" aria-label="Proofs view" className="inline-flex h-6 items-center rounded-md border bg-muted/60 p-0.5">
+				{views.map((v) => (
+					<button key={v} type="button" role="tab" aria-selected={view === v} onClick={() => setView(v)} className={`h-5 rounded px-2 text-[11px] ${view === v ? "bg-background font-medium text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"}`}>
+						{v === "coverage" ? "Coverage" : "Semantics"}
+					</button>
+				))}
+			</span>
+		) : null;
+	return view === "semantics" ? (
+		<>
+			<div className="flex h-8 shrink-0 items-center gap-2 px-1.5">{switcher}</div>
+			<SemanticsPanel invoke={props.invoke} />
+		</>
+	) : (
+		<CoverageAuditView {...props} switcher={switcher} />
+	);
 }
 
-function CoverageAuditView({ folder, scan, invoke, onOpenFile, reload = 0 }: { folder: string; scan: Scan | null; invoke: Bridge["invoke"]; onOpenFile: (path: string) => void; reload?: number }) {
+function CoverageAuditView({ folder, scan, invoke, onOpenFile, reload = 0, switcher }: { folder: string; scan: Scan | null; invoke: Bridge["invoke"]; onOpenFile: (path: string, line?: number) => void; reload?: number; switcher?: React.ReactNode }) {
 	// Files found to hold no deployable contract (libraries, interfaces, types): left out of the picker once seen.
 	const [noModel, setNoModel] = useState<string[]>([]);
 	const sources = (scan?.solidity ?? []).filter((f) => !f.endsWith(".t.sol") && !f.endsWith(".s.sol") && !noModel.includes(f));
@@ -1371,6 +1401,7 @@ function CoverageAuditView({ folder, scan, invoke, onOpenFile, reload = 0 }: { f
 	return (
 		<>
 			<div className="flex h-8 shrink-0 items-center gap-2 px-1.5 text-[12px]">
+				{switcher}
 				<span className="pl-1 font-mono text-[11px] font-medium uppercase tracking-wider text-muted-foreground">Lean coverage</span>
 				<DropdownMenu>
 					<DropdownMenuTrigger className="inline-flex h-6 min-w-0 items-center gap-1 rounded-md border bg-background px-2 font-mono text-[11px] outline-none hover:bg-muted" title="The contract to read">
@@ -1456,8 +1487,9 @@ export function SwarmPanel({ folder, name, scan, bridge, session, file: openPath
 	const [openItem, setOpenItem] = useState<number | null>(null);
 	// `url`: a PDF, shown in the browser's own viewer instead of as text.
 	const [file, setFile] = useState<{ path: string; text: string; url?: string } | null>(null);
-	const [proofTools, setProofTools] = useState(true);
-	const [codeSpecId, setCodeSpecId] = useState("");
+	// The Proofs rail beside Solidity (and, on the Mac, the Lean editor for .lean files): on unless turned off.
+	const [proofsOn, setProofsOn] = useState(() => store.get("fm:proofs") !== "0");
+	const [proofFn, setProofFn] = useState<string | null>(null);
 	const [planOpen, setPlanOpen] = useState(false);
 	const [chatOpen, setChatOpen] = useState(() => store.get("fm:chat-open") !== "0");
 	// How many agent messages you had seen when the chat was folded; the button counts the ones since.
@@ -1603,6 +1635,21 @@ export function SwarmPanel({ folder, name, scan, bridge, session, file: openPath
 		setParams(next);
 	};
 	const markLine = Number(params.get("line")) || null;
+	// The open Solidity file's Lean coverage (gutter dots and the Proofs rail); the Lean editor keeps the last one, to
+	// say which Solidity the theorem at its cursor is about.
+	const solProofs = useFileProofs(folder, proofsOn && file && !file.url && file.path.endsWith(".sol") ? file.path : null, invoke);
+	const [lastFormal, setLastFormal] = useState<Formal | null>(null);
+	useEffect(() => {
+		if (solProofs.data) setLastFormal(solProofs.data);
+	}, [solProofs.data]);
+	useEffect(() => setProofFn(null), [file?.path]);
+	const pickedFn = solProofs.functions.find((f) => fnKey(f) === proofFn) ?? null;
+	/** Picks a function in the rail (or by its gutter dot) and brings its code into view. */
+	const pickProof = (f: FormalFn) => {
+		setProofFn(fnKey(f));
+		codeBox.current?.querySelector(`[data-line="${f.line - 1}"]`)?.scrollIntoView({ block: "center", behavior: "smooth" });
+	};
+	const leanEditor = isTauri() && proofsOn && !!file && file.path.endsWith(".lean");
 	/** Debug mode on a test file (the debugger compiles it and lists its tests). */
 	const debugFile = (path: string) => {
 		const next = new URLSearchParams(params);
@@ -2320,18 +2367,36 @@ export function SwarmPanel({ folder, name, scan, bridge, session, file: openPath
 										) : null}
 										<button
 											type="button"
-											onClick={() => { setVimMode(!vim); if (!vim && file.path.endsWith(".lean")) setProofTools(false); }}
+											onClick={() => {
+												setVimMode(!vim);
+												// Vim edits Lean in Neovim, so the Lean editor steps aside.
+												if (!vim && leanEditor) setProofsOn(false);
+											}}
 											aria-pressed={vim}
 											title={vim ? (slot ? "Vim mode is on: Neovim runs here. Turn it off" : "Vim keys are on. Turn them off") : slot ? "Open in Neovim (Vim mode)" : "Vim keys"}
 											className={`inline-flex h-6 items-center rounded-md px-1.5 font-mono text-[11px] font-medium ${vim ? "bg-emerald-500/15 text-emerald-700 dark:text-emerald-400" : "text-muted-foreground hover:bg-muted hover:text-foreground"}`}
 										>
 											vim
 										</button>
-										{isTauri() && /\.(sol|lean)$/.test(file.path) && <button type="button" aria-pressed={proofTools} onClick={() => setProofTools(v => !v)} className="rounded border px-2 py-0.5 text-[11px]">Proof tools</button>}
+										{!file.url && (file.path.endsWith(".sol") || (isTauri() && file.path.endsWith(".lean"))) ? (
+											<button
+												type="button"
+												onClick={() => {
+													store.set("fm:proofs", proofsOn ? "0" : "1");
+													setProofsOn(!proofsOn);
+												}}
+												aria-pressed={proofsOn}
+												title={file.path.endsWith(".lean") ? (proofsOn ? "Lean editor with live goals is on. Show the plain file" : "Edit with Lean: live goals and messages") : proofsOn ? "Hide the Proofs rail" : "Show which functions are proved"}
+												className={`inline-flex h-6 items-center gap-1 rounded-md px-1.5 text-[11px] font-medium ${proofsOn ? "bg-emerald-500/15 text-emerald-700 dark:text-emerald-400" : "text-muted-foreground hover:bg-muted hover:text-foreground"}`}
+											>
+												<ScanSearch className="size-3" />
+												Proofs
+											</button>
+										) : null}
 										<CopyButton text={file.text} label="Copy the file" />
 									</span>
 								</div>
-								{isTauri() && proofTools && file.path.endsWith(".lean") ? <ProofWorkspace key={`${folder}:${file.path}`} folder={folder} scan={scan} invoke={invoke} initialPath={file.path} initialSpecId={codeSpecId} initialLine={markLine ?? 1} onNavigate={(path, id) => { setCodeSpecId(id ?? ""); view(path); }} onOpenFile={view} /> : <div className="flex min-h-0 flex-1">
+								{leanEditor ? <ProofWorkspace key={`${folder}:${file.path}:${markLine ?? ""}`} folder={folder} path={file.path} invoke={invoke} initialLine={markLine ?? 1} onOpenFile={view} formal={lastFormal} /> : <div className="flex min-h-0 flex-1">
 								<div
 									className={`min-w-0 min-h-0 flex-1 overflow-auto ${navigable(file.path) ? "[&_[data-code]]:cursor-text" : ""}`}
 									ref={codeBox}
@@ -2363,7 +2428,15 @@ export function SwarmPanel({ folder, name, scan, bridge, session, file: openPath
 									) : /\.(md|markdown)$/i.test(file.path) && !mdSource ? (
 										<ChatMarkdown className="mx-auto max-w-3xl px-6 py-6 text-[14px]" image={(src) => { const p = imagePath(src, file.path); return p === null ? src : images[p]; }}>{file.text}</ChatMarkdown>
 									) : (
-										<FileView path={file.path} text={file.text} big mark={markLine ? markLine - 1 : null} cursor={vim ? cursor : null} />
+										<FileView
+											path={file.path}
+											text={file.text}
+											big
+											mark={markLine ? markLine - 1 : null}
+											cursor={vim ? cursor : null}
+											gutter={solProofs.data ? proofGutter(solProofs.data, solProofs.functions, pickProof) : undefined}
+											band={pickedFn ? { from: pickedFn.line - 1, to: pickedFn.endLine - 1 } : null}
+										/>
 									)}
 									{hover ? (
 										<div className="pointer-events-none fixed z-50 max-h-72 max-w-xl overflow-hidden rounded-lg border bg-popover p-2 shadow-pop" style={{ left: Math.min(hover.x + 8, window.innerWidth - 580), top: hover.y + 16 }}>
@@ -2406,7 +2479,7 @@ export function SwarmPanel({ folder, name, scan, bridge, session, file: openPath
 										</div>
 									) : null}
 								</div>
-								{isTauri() && proofTools && file.path.endsWith(".sol") && <CodeProofPanel key={`${folder}:${file.path}`} folder={folder} path={file.path} invoke={invoke} onOpenFile={view} onOpenProof={(path, id, line) => { setCodeSpecId(id); view(path, line); }} />}
+								{proofsOn && !file.url && file.path.endsWith(".sol") ? <ProofRail key={file.path} proofs={solProofs} selected={proofFn} onSelect={pickProof} onOpenFile={view} /> : null}
 								</div>}
 							</>
 						) : (
