@@ -6,7 +6,7 @@ import { BellLink } from "./notifications";
 import { Message, MessageContent } from "@/components/ui/message";
 import { AgentMessage, blocks, Steps, type Ev } from "@/desktop/src/swarm-panel";
 import { CenterState, FloatingBar, GlassDivider, GlassSegment, Skeleton, TopBar } from "./bar";
-import { hasHistory, macOnline, send, startBudget, useMac, useSession } from "./relay";
+import { hasHistory, macName, macOnline, send, startBudget, useMac, useSession } from "./relay";
 
 /** Whether this stretch of the Mac being offline has had its notice. */
 let offlineNoted = false;
@@ -89,7 +89,7 @@ export function MacScreen() {
 	const online = macOnline(m);
 	return (
 		<div className="min-h-dvh bg-background">
-			<TopBar back="/" title="Your Mac" sub={!m.loaded ? "Connecting…" : online ? "Online" : "Offline"} right={<BellLink />} />
+			<TopBar back="/" title={macName(m)} sub={!m.loaded ? "Connecting…" : online ? "Online" : "Offline"} right={<BellLink />} />
 			{!m.state?.folders.length ? <div className="flex min-h-[70dvh] flex-col"><MacState /></div> : <Offline />}
 			<main className="fm-safe-bottom space-y-5 px-4 py-4">
 				{m.state?.folders.map((f) => (

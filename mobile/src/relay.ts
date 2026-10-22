@@ -27,6 +27,9 @@ const subscribe = (l: () => void) => {
 };
 
 /** The Mac is online when it asked for commands lately (it asks at least every 25 s while the app runs). */
+/** The Mac's own name (its Computer Name), or "Your Mac" until it sends one. */
+export const macName = (m: MacState) => m.state?.name?.trim() || "Your Mac";
+
 export const macOnline = (m: MacState) => !!m.macSeenAt && Date.now() - m.macSeenAt < 60_000;
 
 export function useMac(): MacState {

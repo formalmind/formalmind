@@ -16,7 +16,7 @@ import { ChatsIcon, CodeSkeleton, FloatingBar, ListSkeleton, TopBar } from "./ba
 import { SlideDrawer } from "./drawer";
 import { ChatButtons, MacState, SessionChat } from "./mac";
 import { CloudChat, cloudChats, newCloudChatId, useCloudChats } from "./cloud-chat";
-import { macOnline, useMac } from "./relay";
+import { macName, macOnline, useMac } from "./relay";
 import type { RelayFolder } from "@/lib/relay";
 import { rememberProject, TabBar, type Tab } from "./tabs";
 
@@ -284,7 +284,7 @@ function useChosenRun(repo: string, folder: RelayFolder | undefined) {
 function SessionHistory({ repo, onPicked }: { repo: string; onPicked: () => void }) {
 	const { user } = useAuth();
 	const navigate = useNavigate();
-	const { folder } = useProjectFolder(repo);
+	const { m, folder } = useProjectFolder(repo);
 	const { run, pick } = useChosenRun(repo, folder);
 	const { mac, chatId, choose } = useChatChoice(repo);
 	const chats = useCloudChats(repo);
@@ -323,7 +323,7 @@ function SessionHistory({ repo, onPicked }: { repo: string; onPicked: () => void
 					))}
 					{!chats.length ? <li className="px-3 py-2 text-[14px] text-muted-foreground">Your chats show here.</li> : null}
 				</ul>
-				<p className={caption}>Your Mac</p>
+				<p className={caption}>{macName(m)}</p>
 				<ul>
 					{(folder?.sessions ?? []).map((s) => (
 						<li key={s.run}>
@@ -342,7 +342,7 @@ function SessionHistory({ repo, onPicked }: { repo: string; onPicked: () => void
 					) : (
 						<li>
 							<button type="button" onClick={() => goMac(run)} className={`${row(mac)} text-muted-foreground`}>
-								<Laptop className="size-4" /> Your Mac's swarm
+								<Laptop className="size-4" /> {macName(m)}'s swarm
 							</button>
 						</li>
 					)}
@@ -378,10 +378,11 @@ function ProjectChat({ repo }: { repo: string }) {
 
 /** Which chat: Formal Mind (formal.team) or your Mac's swarm, as the composer's chip. */
 function ChatSwitch({ value, onChange }: { value: "cloud" | "mac"; onChange: (v: "cloud" | "mac") => void }) {
+	const name = macName(useMac());
 	return (
 		<select value={value} onChange={(e) => onChange(e.target.value as "cloud" | "mac")} aria-label="Chat with" className="max-w-full truncate bg-transparent text-[13px] text-foreground outline-none">
 			<option value="cloud">Formal Mind</option>
-			<option value="mac">Your Mac's swarm</option>
+			<option value="mac">{name}</option>
 		</select>
 	);
 }

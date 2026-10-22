@@ -17,7 +17,8 @@ export type RelaySession = { run: string; title: string; outcome: string; spent:
 /** `repo`: the GitHub repository the folder's origin is ("owner/name"), so a project can find its folder. */
 export type RelayFolder = { path: string; name: string; repo: string | null; sessions: RelaySession[] };
 /** The Mac's folders and their sessions, published whenever they change. */
-export type RelayState = { folders: RelayFolder[]; at: number };
+/** The Mac's folders and their sessions; `name` is the computer's own (older Macs don't send it). */
+export type RelayState = { folders: RelayFolder[]; at: number; name?: string };
 
 /** What a client asks the Mac to do. `history` asks it to publish a session's events from its log. */
 export type RelayCommand =

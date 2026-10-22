@@ -9,7 +9,7 @@ import { BellLink } from "./notifications";
 import { projectPath, useProjects } from "@/components/projects/use-projects";
 import type { SessionData } from "@/lib/session";
 import { Skeleton, TopBar } from "./bar";
-import { macOnline, useMac } from "./relay";
+import { macName, macOnline, useMac } from "./relay";
 import { lastProject, TabBar } from "./tabs";
 
 
@@ -34,6 +34,7 @@ function MacCard() {
 	return (
 		<Link to="/mac" className="block active:opacity-80">
 			<MacCardView
+				name={macName(m)}
 				status={online ? "Online" : m.loaded ? "Offline" : null}
 				title={running ? `${running} session${running === 1 ? "" : "s"} running` : "Nothing running"}
 				hint={!m.loaded ? <Skeleton className="mt-1 h-3 w-40" /> : online ? "Follow and steer it from here" : m.state ? "Open Formal Mind on your Mac" : "Sign in to the Mac app to connect it"}
@@ -43,9 +44,9 @@ function MacCard() {
 }
 
 /** The Your Mac card as Home draws it (the introduction shows it too). */
-export function MacCardView({ status, title, hint }: { status: string | null; title: string; hint: React.ReactNode }) {
+export function MacCardView({ status, title, hint, name = "Your Mac" }: { status: string | null; title: string; hint: React.ReactNode; name?: string }) {
 	return (
-		<FrameCard label="Your Mac" aside={status}>
+		<FrameCard label={name} aside={status}>
 			<div className="flex items-center gap-3 px-3 py-3">
 				<Laptop className="size-5 shrink-0 text-muted-foreground" />
 				<span className="min-w-0 flex-1">

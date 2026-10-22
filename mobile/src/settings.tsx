@@ -9,7 +9,7 @@ import type { SessionData } from "@/lib/session";
 import { TopBar } from "./bar";
 import { setIntroduced } from "./onboarding";
 import { setSetUpDone } from "./setup";
-import { macOnline, NOTICES, noticeOn, setNotice, useMac } from "./relay";
+import { macName, macOnline, NOTICES, noticeOn, setNotice, useMac } from "./relay";
 import { lastProject, TabBar } from "./tabs";
 
 /** A group of rows as iOS draws Settings (the askmike app's): a caption over a rounded card, a note under it. */
@@ -114,7 +114,7 @@ export function SettingsScreen({ user, onSignOut }: { user: SessionData["user"];
 					<Row
 						icon={Laptop}
 						color={online ? "bg-emerald-500" : "bg-neutral-400 dark:bg-neutral-600"}
-						label="Your Mac"
+						label={macName(m)}
 						sub={m.state ? `${folders} folder${folders === 1 ? "" : "s"}` : "No Mac has signed in"}
 						value={!m.loaded ? "Connecting…" : online ? "Online" : m.state ? "Offline" : "Not connected"}
 						onClick={() => navigate("/mac")}

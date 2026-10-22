@@ -253,6 +253,19 @@ pub fn folder_repo(path: String) -> Result<Option<String>, String> {
     Ok(git(&["remote", "get-url", "origin"], Some(Path::new(&path))).ok().and_then(|url| github_repo(&url)))
 }
 
+/// This computer's name as its owner set it (macOS: Sharing → Computer Name), else its host name; the phone shows it.
+#[tauri::command(async)]
+pub fn machine_name() -> Option<String> {
+    let run = |cmd: &str, args: &[&str]| {
+        std::process::Command::new(cmd).args(args).output().ok().filter(|o| o.status.success()).map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string()).filter(|s| !s.is_empty())
+    };
+    #[cfg(target_os = "macos")]
+    if let Some(name) = run("scutil", &["--get", "ComputerName"]) {
+        return Some(name);
+    }
+    std::env::var("COMPUTERNAME").ok().filter(|s| !s.is_empty()).or_else(|| run("hostname", &[]))
+}
+
 /// "owner/name" from a GitHub remote URL (https or ssh, with or without .git).
 fn github_repo(url: &str) -> Option<String> {
     let url = url.trim().trim_end_matches('/').trim_end_matches(".git");

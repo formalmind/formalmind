@@ -161,6 +161,7 @@ pub fn run() {
             local::folder_tree,
             local::repo_local,
             local::folder_repo,
+            local::machine_name,
             ast::ast_units,
             ast::ast_slice,
             ast::ast_formal,

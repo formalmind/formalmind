@@ -87,7 +87,7 @@ export function startRelay(): () => void {
 	const publishState = () => {
 		stateDue = null;
 		void readState()
-			.then((folders) => post({ state: { folders, at: Date.now() } }))
+			.then(async (folders) => post({ state: { folders, at: Date.now(), name: (await invoke<string | null>("machine_name").catch(() => null)) ?? undefined } }))
 			.catch(() => {});
 	};
 	const stateSoon = () => (stateDue ??= setTimeout(publishState, 300));
