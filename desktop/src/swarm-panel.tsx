@@ -236,7 +236,9 @@ export function FileView({ path, text, big, start = 1, mark, cursor, diagnostics
 		caret.current?.scrollIntoView({ block: "nearest", inline: "nearest" });
 	}, [cursor?.line, cursor?.col]);
 	return (
-		<pre className={`overflow-x-auto py-2 font-mono ${big ? "text-[12.5px] leading-6" : "text-[11px] leading-5"}`}>
+		// With gutter dots, a 1rem strip left of the line numbers holds them (lines keep their columns, so positions
+		// measured from a line's start, like squiggles and the Vim cursor, don't move).
+		<pre className={`overflow-x-auto py-2 font-mono ${gutter ? "pl-4" : ""} ${big ? "text-[12.5px] leading-6" : "text-[11px] leading-5"}`}>
 			{lines.map((line, i) => (
 				<span key={i} ref={i === mark ? marked : undefined} data-line={i} className={`relative block whitespace-pre pr-3 ${i === mark ? "bg-amber-300/25" : cursor?.line === i ? "bg-muted/60" : band && i >= band.from && i <= band.to ? "bg-foreground/[0.035]" : ""}`}>
 					{band && i >= band.from && i <= band.to ? <span aria-hidden className="absolute inset-y-0 left-0 w-0.5 bg-foreground/25" /> : null}
@@ -249,7 +251,7 @@ export function FileView({ path, text, big, start = 1, mark, cursor, diagnostics
 								e.stopPropagation();
 								gutter.get(i)!.onClick();
 							}}
-							className="absolute left-1.5 top-[0.5lh] grid size-3 -translate-y-1/2 place-items-center rounded-full hover:bg-muted"
+							className="absolute -left-3.5 top-[0.5lh] grid size-3 -translate-y-1/2 place-items-center rounded-full hover:bg-muted"
 						>
 							<span className={`size-2 rounded-full ${gutter.get(i)!.dot}`} />
 						</button>
