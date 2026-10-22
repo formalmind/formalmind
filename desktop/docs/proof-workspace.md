@@ -7,8 +7,8 @@ tab keeps the whole-contract coverage table and, on the Mac, the SolidCore exper
 
 Open a `.sol` file with **Proofs** on (the toggle beside `vim` in the file bar; on by default, remembered):
 
-- **Gutter dots.** Each function of the file has a dot on its first line, coloured like the Proofs tab: green proved,
-  sky has `sorry`, violet in Lean but unproved, amber not modeled. Click one to pick the function.
+- **Line numbers.** Each function's first line number takes its status colour, as in the Proofs tab: green proved,
+  sky has `sorry`, violet in Lean but unproved, amber not modeled. Click it to pick the function.
 - **The rail.** The file's functions (proved / total, a bar), then the picked function: its status, its Lean model
   (folded), why it isn't modeled if it isn't, and the theorems that name it. **Open** goes to the theorem's line.
   "Also names" lists the other functions the same theorem covers.

@@ -32,14 +32,14 @@ export function useFileProofs(folder: string, path: string | null, invoke: Bridg
 	return { data, error, functions, loading: !!path && !data && !error, refresh: () => setRevision((r) => r + 1) };
 }
 
-/** The gutter dots for a file's functions: each on its first line, coloured by its proof status. */
+/** The gutter marks for a file's functions: each first line's number, coloured by its proof status. */
 export function proofGutter(data: Formal | null, functions: FormalFn[], onPick: (f: FormalFn) => void): Map<number, GutterMark> {
 	const marks = new Map<number, GutterMark>();
 	if (!data) return marks;
 	for (const f of functions) {
 		const st = fnStatus(f, data.theorems);
 		const n = f.theorems.length;
-		marks.set(f.line - 1, { dot: st.dot, title: `${f.name.split(".").pop()}: ${st.label}${n ? ` · ${n} theorem${n === 1 ? "" : "s"}` : ""}`, onClick: () => onPick(f) });
+		marks.set(f.line - 1, { text: st.text, title: `${f.name.split(".").pop()}: ${st.label}${n ? ` · ${n} theorem${n === 1 ? "" : "s"}` : ""}`, onClick: () => onPick(f) });
 	}
 	return marks;
 }

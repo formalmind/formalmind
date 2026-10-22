@@ -222,8 +222,8 @@ export function AgentMessage({ e, onBug }: { e: Ev; onBug: () => void }) {
  * and steer the swarm, the plan, and what each agent says as it works).
  */
 /** A whole file, highlighted by its extension, with a line-number gutter. */
-/** A dot in the code's gutter (a function's proof status), on a 0-based line. */
-export type GutterMark = { dot: string; title: string; onClick: () => void };
+/** A line number marked in the code's gutter (a function's proof status, in its colour), on a 0-based line. */
+export type GutterMark = { text: string; title: string; onClick: () => void };
 
 export function FileView({ path, text, big, start = 1, mark, cursor, diagnostics, gutter, band }: { path: string; text: string; big?: boolean; start?: number; mark?: number | null; cursor?: Cursor | null; /** solc's errors and warnings in this file: a wavy underline, the message under the line. */ diagnostics?: Diagnostic[]; gutter?: Map<number, GutterMark>; /** 0-based lines tinted as one block (the function the Proofs rail has picked). */ band?: { from: number; to: number } | null }) {
 	const lines = useHighlightedCode(text, EXT[path.split(".").pop() ?? ""] ?? "text");
@@ -236,12 +236,11 @@ export function FileView({ path, text, big, start = 1, mark, cursor, diagnostics
 		caret.current?.scrollIntoView({ block: "nearest", inline: "nearest" });
 	}, [cursor?.line, cursor?.col]);
 	return (
-		// With gutter dots, a 1rem strip left of the line numbers holds them (lines keep their columns, so positions
-		// measured from a line's start, like squiggles and the Vim cursor, don't move).
-		<pre className={`overflow-x-auto py-2 font-mono ${gutter ? "pl-4" : ""} ${big ? "text-[12.5px] leading-6" : "text-[11px] leading-5"}`}>
+		<pre className={`overflow-x-auto py-2 font-mono ${big ? "text-[12.5px] leading-6" : "text-[11px] leading-5"}`}>
 			{lines.map((line, i) => (
 				<span key={i} ref={i === mark ? marked : undefined} data-line={i} className={`relative block whitespace-pre pr-3 ${i === mark ? "bg-amber-300/25" : cursor?.line === i ? "bg-muted/60" : band && i >= band.from && i <= band.to ? "bg-foreground/[0.035]" : ""}`}>
 					{band && i >= band.from && i <= band.to ? <span aria-hidden className="absolute inset-y-0 left-0 w-0.5 bg-foreground/25" /> : null}
+					{/* A marked line's number takes its status colour and picks it; the others stay muted. */}
 					{gutter?.get(i) ? (
 						<button
 							type="button"
@@ -251,12 +250,13 @@ export function FileView({ path, text, big, start = 1, mark, cursor, diagnostics
 								e.stopPropagation();
 								gutter.get(i)!.onClick();
 							}}
-							className="absolute -left-3.5 top-[0.5lh] grid size-3 -translate-y-1/2 place-items-center rounded-full hover:bg-muted"
+							className={`mr-3 inline-block w-9 select-none rounded-sm text-right font-medium hover:underline ${gutter.get(i)!.text}`}
 						>
-							<span className={`size-2 rounded-full ${gutter.get(i)!.dot}`} />
+							{i + start}
 						</button>
-					) : null}
-					<span className="mr-3 inline-block w-9 select-none text-right text-muted-foreground/60">{i + start}</span>
+					) : (
+						<span className="mr-3 inline-block w-9 select-none text-right text-muted-foreground/60">{i + start}</span>
+					)}
 					<span data-code>{line}</span>
 					{cursor?.line === i ? <span ref={caret} data-vim-cursor className="pointer-events-none absolute top-0 h-full w-[1ch] bg-foreground/35" style={{ left: `calc(3rem + ${cursor.col}ch)` }} /> : null}
 					{diagnostics

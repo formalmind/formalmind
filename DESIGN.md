@@ -209,7 +209,7 @@ Use these before writing markup.
 
 | Component | Where | Use it for |
 | --- | --- | --- |
-| `FileView` | `desktop/src/swarm-panel.tsx` | Any code. Highlighted, numbered, with optional `mark`, `diagnostics`, `gutter` dots and a `band`. `big` for the editor, default for snippets |
+| `FileView` | `desktop/src/swarm-panel.tsx` | Any code. Highlighted, numbered, with optional `mark`, `diagnostics`, `gutter` (status-coloured, clickable line numbers) and a `band`. `big` for the editor, default for snippets |
 | `DetailCard` | same | A document-like detail pane (bug report, finding) |
 | `PanelCard`, `PanelLabel` | `components/panel-card.tsx` | Settings-style grouped cards |
 | `CopyButton` | `swarm-panel.tsx` | Copy, which turns into an emerald check for 1.2s |
@@ -310,7 +310,7 @@ Rules:
 ### Proofs in Code (an example to follow)
 
 The proof tools show how a new capability should enter the app (`desktop/docs/proof-workspace.md`):
-- **Gutter and rail:** status dots in the code's gutter, and a rail beside the code for the selected function.
+- **Gutter and rail:** each function's line number in its status colour, and a rail beside the code for the selected function. Mark the existing gutter rather than adding a column.
 - **One click each way:** the rail opens the theorem at its line, and the Lean editor's Infoview links back to the
   Solidity function.
 - **One toggle:** **Proofs** in the file bar, remembered per viewer.
