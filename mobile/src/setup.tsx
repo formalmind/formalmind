@@ -13,6 +13,7 @@ import type { Formal } from "@/desktop/src/swarm-panel";
 import { macOnline, setStartBudget, startBudget, useMac } from "./relay";
 import { rememberProject } from "./tabs";
 import { SwarmShowcase } from "./showcase";
+import { recentProjects } from "./home";
 import { Skeleton } from "./bar";
 import { useSwipe } from "./swipe";
 import { TheoremCard } from "./proofs";
@@ -241,7 +242,7 @@ export function Setup({ user, onDone }: { user: SessionData["user"]; onDone: () 
 						<div className="dark fm-home mx-auto w-full max-w-[360px] text-foreground">
 							<HomeEmpty muted="Bugs, proofs and code." strong={projects?.length === 0 ? "Open a repository." : "Pick a project."}>
 								<div className="w-full space-y-2">
-									{projects?.slice(0, 4).map((p) => (
+									{recentProjects(projects ?? []).map((p) => (
 										<button key={p.repo} type="button" onClick={() => finish(p.repo)} className="btn-soft flex h-11 w-full items-center gap-2.5 px-3.5 text-left text-[14px]">
 											<MarkGithubIcon size={16} className="shrink-0 text-muted-foreground" />
 											<span className="min-w-0 flex-1 truncate">

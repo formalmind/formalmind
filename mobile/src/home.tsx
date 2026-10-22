@@ -13,6 +13,15 @@ import { macName, macOnline, useMac } from "./relay";
 import { lastProject, TabBar } from "./tabs";
 
 
+/**
+ * At most four projects, the one you last opened first and then the newest added, so Home's other cards keep their
+ * room (setup's list too).
+ */
+export function recentProjects<T extends { repo: string; addedAt: string }>(projects: T[], n = 4): T[] {
+	const last = lastProject();
+	return [...projects].sort((a, b) => Number(b.repo === last) - Number(a.repo === last) || b.addedAt.localeCompare(a.addedAt)).slice(0, n);
+}
+
 /** The app's card: a grey frame with its label on top, the content on a white card inside (as on the Mac and the web). */
 export function FrameCard({ label, aside, children }: { label: string; aside?: React.ReactNode; children: React.ReactNode }) {
 	return (
@@ -96,7 +105,7 @@ export function MobileHome({ user }: { user: SessionData["user"] }) {
 					{projects?.length ? (
 						<FrameCard label="Projects" aside={String(projects.length)}>
 							<ul className="divide-y">
-								{projects.map((p) => (
+								{recentProjects(projects).map((p) => (
 									<li key={p.repo}>
 										<Link to={projectPath(p.repo)} className="flex items-center gap-3 px-3 py-3 active:bg-muted">
 											<MarkGithubIcon size={18} className="shrink-0 text-muted-foreground" />
