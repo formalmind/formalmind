@@ -69,3 +69,6 @@ components/demo/data.json
 
 # Neovim, fetched by desktop/scripts/fetch-nvim.sh
 /desktop/src-tauri/nvim/
+
+# App Store screenshots: uploaded to App Store Connect, not kept in the repo
+mobile/app-store/screenshots/
