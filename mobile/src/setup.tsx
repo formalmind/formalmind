@@ -272,8 +272,8 @@ export function Setup({ user, onDone }: { user: SessionData["user"]; onDone: () 
 						</div>
 					</div>
 					{/* In the style of the landing page's Download for Mac, with a light across it. */}
-					<button type="button" onClick={() => finish()} className="btn-dark fm-btn-sheen mt-4 h-12 w-full text-[15px]">
-						<LogoMark bare size={16} /> Welcome to Formal Mind
+					<button type="button" onClick={() => finish()} className="btn-dark fm-btn-sheen mt-4 h-14 w-full gap-2.5 text-[17px] font-medium">
+						<LogoMark bare size={20} /> Welcome to Formal Mind
 					</button>
 				</>
 			) : null}
