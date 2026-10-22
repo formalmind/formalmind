@@ -177,7 +177,7 @@ with `hover:bg-muted` when off. Then `CopyButton`.
 - Filters are a row of `h-6 rounded-md px-2 text-[11px]` buttons, selected `bg-muted font-medium`.
 - On a phone the list stacks above the detail (`max-sm:flex-col`).
 
-**Rail.** A panel beside the code: `w-[min(26rem,42%)] shrink-0 border-l bg-background`, an `h-8` header with the label
+**Rail.** A panel beside the code: `relative shrink-0 border-l bg-background` with its width from `useResizable` (`desktop/src/resize-handle.tsx`: a drag handle on its edge, the size kept per viewer, double-click resets), an `h-8` header with the label
 and an icon button, then its content. Examples are the Proofs rail beside Solidity and the Lean Infoview.
 
 **Summary strip.** Counts as `mono value + muted unit`, with a thin progress bar on the right: `h-1.5 w-20

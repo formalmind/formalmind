@@ -3,6 +3,7 @@ import { ChevronRight, FileCode2, Loader2, RotateCw, SquareArrowOutUpRight } fro
 import { FileView, fnStatus } from "./swarm-panel";
 import type { Bridge, Formal, FormalFn, GutterMark } from "./swarm-panel";
 import { mappedSources } from "./proof-mapping";
+import { useResizable } from "./resize-handle";
 
 /** A function's identity: several share a name (overloads, or the same library compiled twice), so add where it is. */
 export const fnKey = (f: FormalFn) => `${f.name}@${f.file ?? ""}:${f.line}`;
@@ -66,8 +67,12 @@ export function ProofRail({ proofs, selected, onSelect, onOpenFile }: { proofs: 
 	const status = fn && data ? fnStatus(fn, data.theorems) : null;
 	const theorems = fn && data ? fn.theorems.map((i) => ({ i, t: data.theorems[i] })) : [];
 	const shown = allTheorems ? theorems : theorems.slice(0, 3);
+	// The rail's width (its left edge) and the height of its function list (the edge under it), both dragged.
+	const width = useResizable("fm:proofs-rail-width", 416, 280, 900, "left");
+	const list = useResizable("fm:proofs-rail-list", 260, 96, 720, "bottom");
 	return (
-		<aside aria-label="Proofs for this file" className="flex min-h-0 w-[min(26rem,42%)] shrink-0 flex-col border-l bg-background text-[12px]">
+		<aside aria-label="Proofs for this file" style={{ width: width.size }} className="relative flex min-h-0 max-w-[70%] shrink-0 flex-col border-l bg-background text-[12px]">
+			{width.handle}
 			<header className="flex h-8 shrink-0 items-center gap-2 border-b px-3">
 				<span className="font-mono text-[11px] font-medium uppercase tracking-wider text-muted-foreground">Proofs</span>
 				{data ? <span className="truncate text-[11px] text-muted-foreground">{data.contract}</span> : null}
@@ -109,7 +114,8 @@ export function ProofRail({ proofs, selected, onSelect, onOpenFile }: { proofs: 
 							<span className="block h-full rounded-full bg-emerald-500" style={{ width: `${(proved / functions.length) * 100}%` }} />
 						</span>
 					</div>
-					<nav className="max-h-[38%] shrink-0 overflow-y-auto border-b p-1">
+					<nav className="relative shrink-0 border-b">
+						<div className="h-full overflow-y-auto p-1" style={{ maxHeight: list.size }}>
 						{functions.map((f) => {
 							const st = fnStatus(f, data.theorems);
 							const on = fn && fnKey(f) === fnKey(fn);
@@ -122,6 +128,8 @@ export function ProofRail({ proofs, selected, onSelect, onOpenFile }: { proofs: 
 								</button>
 							);
 						})}
+						</div>
+						{list.handle}
 					</nav>
 				</>
 			) : null}

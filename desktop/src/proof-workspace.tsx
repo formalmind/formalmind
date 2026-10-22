@@ -5,6 +5,7 @@ import { fnStatus } from "./swarm-panel";
 import { useHighlightedCode } from "@/hooks/use-highlighted-code";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { SpecificationCode } from "./specification-code";
+import { useResizable } from "./resize-handle";
 
 type Position = { line: number; character: number };
 type Diagnostic = { range: { start: Position; end: Position }; severity?: number; message: string };
@@ -269,6 +270,7 @@ export function ProofWorkspace({ folder, path, invoke, onOpenFile, initialLine =
 		return m;
 	}, [diagnostics]);
 	const lines = text.split("\n");
+	const infoview = useResizable("fm:lean-infoview-width", 416, 280, 900, "left");
 	const goals = goal?.goals?.goals ?? null;
 
 	return (
@@ -395,7 +397,9 @@ export function ProofWorkspace({ folder, path, invoke, onOpenFile, initialLine =
 					/>
 					{!opened && !error ? <p className="absolute inset-x-0 top-10 text-center text-[12px] text-muted-foreground">Starting the project's Lean server and loading its imports…</p> : null}
 				</div>
-				<aside aria-label="Lean infoview" className="flex w-[min(26rem,42%)] shrink-0 flex-col overflow-y-auto border-l bg-background pb-3 text-[12px]">
+				<aside aria-label="Lean infoview" style={{ width: infoview.size }} className="relative flex max-w-[70%] shrink-0 flex-col border-l bg-background text-[12px]">
+					{infoview.handle}
+					<div className="flex min-h-0 flex-1 flex-col overflow-y-auto pb-3">
 					{error || state?.error ? (
 						<div className="m-2 rounded-lg border border-red-500/30 bg-red-500/5 p-2.5">
 							<pre className="whitespace-pre-wrap font-mono text-[11px] leading-4 text-red-700 dark:text-red-400">{error || state?.error}</pre>
@@ -464,6 +468,7 @@ export function ProofWorkspace({ folder, path, invoke, onOpenFile, initialLine =
 						</>
 					) : null}
 					<p className="mx-3 mt-auto pt-4 text-[11px] leading-4 text-muted-foreground">Lean checks the proofs in this file against its Lean model. That the model matches the Solidity is a separate question.</p>
+					</div>
 				</aside>
 			</div>
 		</div>
