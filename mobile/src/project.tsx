@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, useSyncExternalStore } from "react";
+import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { createPortal } from "react-dom";
 import { useNavigate, useParams, useSearchParams } from "react-router";
 import { Check, ChevronDown, ChevronRight, FileCode2, Folder, Laptop, Plus, Settings } from "lucide-react";
@@ -15,6 +15,7 @@ import { ProofsExplorer } from "./proofs";
 import { BugsExplorer } from "./bugs";
 import { ChatsIcon, CodeSkeleton, FloatingBar, ListSkeleton, TopBar } from "./bar";
 import { SlideDrawer } from "./drawer";
+import { PullToRefresh } from "./pull";
 import { ChatButtons, MacState, SessionChat } from "./mac";
 import { CloudChat, cloudChats, newCloudChatId, useCloudChats } from "./cloud-chat";
 import { macName, macOnline, useMac } from "./relay";
@@ -174,7 +175,10 @@ export function ProjectScreen() {
 	const tab = (TABS.find((t) => t === params.get("tab")) ?? "code") as Tab;
 	const dir = params.get("dir") ?? "";
 	const file = params.get("file");
-	const bridge = useMemo(() => makeGitBridge(repo), [repo]);
+	// `rev` ticks when a pull to refresh brings a new commit: the bridge and the tabs start over on it.
+	const [rev, setRev] = useState(0);
+	const head = useRef<string | null>(null);
+	const bridge = useMemo(() => makeGitBridge(repo), [repo, rev]);
 	const [files, setFiles] = useState<string[] | null>(null);
 	const [error, setError] = useState<string | null>(null);
 	const [history, setHistory] = useState(false);
@@ -188,7 +192,7 @@ export function ProjectScreen() {
 			const cached = await cachedTree(repo).catch(() => null);
 			if (cached && live) setFiles(cached.files);
 			// Fetch the newest commit (a clone the first time); the cached copy serves meanwhile.
-			const fresh = await syncRepo(repo).then(() => cachedTree(repo)).catch((e) => {
+			const fresh = await syncRepo(repo).then((h) => ((head.current = h), cachedTree(repo))).catch((e) => {
 				if (!cached && live) setError(String(e?.message ?? e));
 				return null;
 			});
@@ -197,7 +201,19 @@ export function ProjectScreen() {
 		return () => {
 			live = false;
 		};
-	}, [repo, bridge]);
+	}, [repo]);
+
+	/** Pull to refresh: the newest commit from GitHub, and the tabs again on it when it's new. */
+	const refresh = async () => {
+		const before = head.current;
+		const h = await syncRepo(repo);
+		head.current = h;
+		const tree = await cachedTree(repo);
+		if (tree) setFiles(tree.files);
+		if (h === before) return `Up to date · ${h.slice(0, 7)}`;
+		setRev((r) => r + 1);
+		return `Updated to ${h.slice(0, 7)}`;
+	};
 
 	const scan: Scan | null = useMemo(() => (files ? { solidity: files.filter((f) => f.endsWith(".sol")), lean: files.filter((f) => f.endsWith(".lean")), truncated: false, git: true } : null), [files]);
 	// Each step is its own history entry, so the back button walks back through folders and files.
@@ -225,10 +241,17 @@ export function ProjectScreen() {
 			)}
 			{error ? <p className="m-4 rounded-xl border border-red-500/30 bg-red-500/5 p-3 text-sm text-red-700 dark:text-red-400">Couldn&apos;t clone {repo}: {error}</p> : null}
 			<main className="flex min-h-0 flex-1 flex-col">
-				{tab === "code" ? <CodeTab files={files} bridge={bridge} dir={dir} file={file} open={(n) => go(n)} /> : null}
-				{tab === "proofs" ? <ProofsExplorer repo={repo} sources={scan?.solidity ?? null} invoke={bridge.invoke} onOpenFile={openFile} /> : null}
-				{tab === "chat" ? <ProjectChat repo={repo} /> : null}
-				{tab === "bugs" ? <BugsExplorer repo={repo} files={files} invoke={bridge.invoke} onOpenFile={openFile} /> : null}
+				{tab === "chat" ? (
+					<ProjectChat repo={repo} />
+				) : (
+					<PullToRefresh onRefresh={refresh}>
+						<div key={rev} className="flex min-h-0 flex-1 flex-col">
+							{tab === "code" ? <CodeTab files={files} bridge={bridge} dir={dir} file={file} open={(n) => go(n)} /> : null}
+							{tab === "proofs" ? <ProofsExplorer repo={repo} sources={scan?.solidity ?? null} invoke={bridge.invoke} onOpenFile={openFile} /> : null}
+							{tab === "bugs" ? <BugsExplorer repo={repo} files={files} invoke={bridge.invoke} onOpenFile={openFile} /> : null}
+						</div>
+					</PullToRefresh>
+				)}
 			</main>
 			<TabBar active={tab} repo={repo} />
 		</div>

@@ -14,6 +14,7 @@ const LIMIT = 5000;
 const LATEST = "refs/heads/fm-latest";
 /** A repository syncs at most this often per visit; the cached copy serves in between. */
 const SYNC_EVERY_MS = 5 * 60 * 1000;
+const SYNC_TIMEOUT_MS = 45_000;
 
 type Git = typeof import("isomorphic-git");
 type Kit = { git: Git; fs: InstanceType<typeof import("@isomorphic-git/lightning-fs")>; http: import("isomorphic-git").HttpClient };
@@ -74,9 +75,12 @@ export function syncRepo(repo: string): Promise<string> {
 		await k.git.writeRef({ fs: k.fs, dir, ref: LATEST, value: head, force: true });
 		syncedAt.set(repo, Date.now());
 		return head;
-	})().finally(() => syncing.delete(repo));
-	syncing.set(repo, job);
-	return job;
+	})();
+	// A sync that never answers (a request the webview drops) must not hold every later one: after a while it gives up
+	// and the next sync starts afresh.
+	const timed = Promise.race([job, new Promise<never>((_, reject) => setTimeout(() => reject(new Error("GitHub didn't answer in time.")), SYNC_TIMEOUT_MS))]).finally(() => syncing.delete(repo));
+	syncing.set(repo, timed);
+	return timed;
 }
 
 /** Whether this visit has synced the repository recently enough to skip another round. */
