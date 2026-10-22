@@ -71,19 +71,34 @@ export function ProofRail({ proofs, selected, onSelect, onOpenFile, onOpenDef }:
 	return (
 		<aside aria-label="Proofs for this file" style={{ width: width.size }} className="relative flex min-h-0 max-w-[70%] shrink-0 flex-col border-l bg-background text-[12px]">
 			{width.handle}
-			<header className="flex h-8 shrink-0 items-center gap-2 border-b px-3">
-				<span className="font-mono text-[11px] font-medium uppercase tracking-wider text-muted-foreground">Proofs</span>
-				{data ? <span className="truncate text-[11px] text-muted-foreground">{data.contract}</span> : null}
-				<button type="button" onClick={refresh} title="Read the AST and the Lean files again" className="ml-auto grid size-6 place-items-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground">
+			{/* One row on top: the file's proof count (or what's happening) and Refresh. */}
+			<div className="flex h-8 shrink-0 items-center gap-3 border-b pl-3 pr-1.5 text-[11px]">
+				{data && functions.length ? (
+					<>
+						<span>
+							<span className="font-mono font-medium text-emerald-700 dark:text-emerald-400">{proved}</span>
+							<span className="text-muted-foreground">/{functions.length} proved</span>
+						</span>
+						{opaque ? (
+							<span>
+								<span className="font-mono font-medium text-amber-700 dark:text-amber-400">{opaque}</span>
+								<span className="text-muted-foreground"> not modeled</span>
+							</span>
+						) : null}
+						<span className="ml-auto h-1.5 w-20 shrink-0 overflow-hidden rounded-full bg-muted" title={`${proved} of ${functions.length} proved`}>
+							<span className="block h-full rounded-full bg-emerald-500" style={{ width: `${(proved / functions.length) * 100}%` }} />
+						</span>
+					</>
+				) : loading ? (
+					<span className="flex items-center gap-2 text-muted-foreground">
+						<Loader2 className="size-3 animate-spin motion-reduce:animate-none" />
+						Building the Lean model from the AST…
+					</span>
+				) : null}
+				<button type="button" onClick={refresh} title="Read the AST and the Lean files again" className={`${data && functions.length ? "" : "ml-auto"} grid size-6 shrink-0 place-items-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground`}>
 					<RotateCw className={`size-3 ${loading ? "animate-spin motion-reduce:animate-none" : ""}`} />
 				</button>
-			</header>
-			{loading ? (
-				<p className="flex items-center gap-2 px-3 py-3 text-muted-foreground">
-					<Loader2 className="size-3.5 animate-spin motion-reduce:animate-none" />
-					Building the Lean model from the AST…
-				</p>
-			) : null}
+			</div>
 			{error ? (
 				/no contract|no deployable|libraries, interfaces and types/i.test(error) ? (
 					<p className="px-3 py-3 leading-5 text-muted-foreground">No contract to model in this file. Its functions show under the contracts that use them: open one of those, or the Proofs tab.</p>
@@ -97,21 +112,6 @@ export function ProofRail({ proofs, selected, onSelect, onOpenFile, onOpenDef }:
 			{data && !functions.length ? <p className="px-3 py-3 text-muted-foreground">None of {data.contract}'s functions are written in this file.</p> : null}
 			{data && functions.length ? (
 				<>
-					<div className="flex shrink-0 items-center gap-3 border-b px-3 py-1.5 text-[11px]">
-						<span>
-							<span className="font-mono font-medium text-emerald-700 dark:text-emerald-400">{proved}</span>
-							<span className="text-muted-foreground">/{functions.length} proved</span>
-						</span>
-						{opaque ? (
-							<span>
-								<span className="font-mono font-medium text-amber-700 dark:text-amber-400">{opaque}</span>
-								<span className="text-muted-foreground"> not modeled</span>
-							</span>
-						) : null}
-						<span className="ml-auto h-1.5 w-20 overflow-hidden rounded-full bg-muted" title={`${proved} of ${functions.length} proved`}>
-							<span className="block h-full rounded-full bg-emerald-500" style={{ width: `${(proved / functions.length) * 100}%` }} />
-						</span>
-					</div>
 					<nav className="relative shrink-0 border-b">
 						<div className="h-full overflow-y-auto p-1" style={{ maxHeight: list.size }}>
 						{functions.map((f) => {
