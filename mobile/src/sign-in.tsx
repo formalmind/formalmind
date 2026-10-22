@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { LogoMark } from "@/components/logo";
-import { apiBase, newPollId, pollForToken } from "@/desktop/src/api";
+import { apiBase, newPollId, pollForToken, saveToken, setApiBase } from "@/desktop/src/api";
 
 const primary = "w-full rounded-full bg-white px-4 py-3 text-[15px] font-medium text-neutral-950 shadow-[0_0_0_3px_rgba(96,165,250,0.35)] transition active:bg-neutral-100 disabled:opacity-60";
 
@@ -47,6 +47,13 @@ export function SignIn({ onCode, onSignedIn, error }: { onCode: (code: string) =
 						className="flex gap-2"
 						onSubmit={(e) => {
 							e.preventDefault();
+							// Development only (the Vite dev server, e.g. the simulator): "0" is the local Worker's Dev Preview
+							// user, which takes any fmd_ token. Release builds never have this.
+							if (import.meta.env.DEV && code.trim() === "0") {
+								setApiBase("http://localhost:8787");
+								void saveToken("fmd_dev-preview").then(onSignedIn);
+								return;
+							}
 							if (code.trim()) onCode(code.trim());
 						}}
 					>
