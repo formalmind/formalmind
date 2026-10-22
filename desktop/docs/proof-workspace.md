@@ -19,6 +19,12 @@ The rail reads `ast_formal` with the open file as the entry, so it works on the 
 "Proved" means a finished theorem names the function's Lean definition; Lean checks the theorem, not that the model
 matches the bytecode.
 
+## Getting around
+
+Back and Forward (⌘[ and ⌘]) sit at the start of the file bar, with the history beside them: every file, line and
+function you opened in Code, newest first, the current one ticked. Going back to a function's line picks it in the rail
+again, so a Solidity → theorem → Solidity round trip lands where it started.
+
 ## Lean: the editor (Mac app)
 
 Open a `.lean` file with **Proofs** on and Code becomes a Lean editor backed by the project's `lake serve` (the nearest

@@ -289,7 +289,7 @@ Rules:
 - **Shell offset:** `.fm-shell` adds 40px top padding. Full-height things use `h-dvh`, which `desktop.css` corrects.
   Don't hard-code 40px yourself.
 - **Shortcuts:**
-  - App-wide: ⌘T new tab, ⌘W close tab, ⌘, Settings (native menu "Settings…"), ⌘B sidebar, ⌘S save (Lean editor),
+  - App-wide: ⌘T new tab, ⌘W close tab, ⌘, Settings (native menu "Settings…"), ⌘B sidebar, ⌘S save (Lean editor), ⌘[ / ⌘] back and forward in Code,
     ⌘-click go to definition.
   - In Code with Vim on: `gd` go to definition, `ctrl-o` back.
   - Show each shortcut in the control's `title`: "New tab (⌘T)", "Save (⌘S)".

@@ -8,7 +8,7 @@ import { createPortal } from "react-dom";
 import { NvimTerminal } from "./nvim-terminal";
 import { reportError } from "@/lib/report-error";
 import { JsonTree } from "./json-tree";
-import { ArrowDown, Bug, Check, ChevronDown, Code2, Copy, FileCode2, FileDown, Network, Play, Plus, ScanSearch, Square, Terminal, ThumbsDown, ThumbsUp, WandSparkles } from "lucide-react";
+import { ArrowDown, ArrowLeft, ArrowRight, Bug, Check, ChevronDown, Code2, History, Copy, FileCode2, FileDown, Network, Play, Plus, ScanSearch, Square, Terminal, ThumbsDown, ThumbsUp, WandSparkles } from "lucide-react";
 
 // The project roadmap (GitHub Projects-style), the same view the web app had on its own page.
 import { motion as vimMotion, search as vimSearch, setVimMode, useVimMode, type Cursor } from "@/components/vim-mode";
@@ -1645,13 +1645,67 @@ export function SwarmPanel({ folder, name, scan, bridge, session, file: openPath
 		if (solProofs.data) setLastFormal(solProofs.data);
 	}, [solProofs.data]);
 	useEffect(() => setProofFn(null), [file?.path]);
+	// Arriving at a function's first line (Back, the history, a theorem's Proves link) picks that function.
+	useEffect(() => {
+		const f = markLine ? solProofs.functions.find((g) => g.line === markLine) : undefined;
+		if (f) setProofFn(fnKey(f));
+		// eslint-disable-next-line react-hooks/exhaustive-deps
+	}, [markLine, solProofs.data]);
 	const pickedFn = solProofs.functions.find((f) => fnKey(f) === proofFn) ?? null;
-	/** Picks a function in the rail (or by its gutter dot) and brings its code into view. */
+	/** Picks a function in the rail (or by its line number) and brings its code into view. */
 	const pickProof = (f: FormalFn) => {
 		setProofFn(fnKey(f));
+		if (openPath) remember({ path: openPath, line: f.line, label: f.name.split(".").pop() ?? f.name });
 		codeBox.current?.querySelector(`[data-line="${f.line - 1}"]`)?.scrollIntoView({ block: "center", behavior: "smooth" });
 	};
 	const leanEditor = isTauri() && proofsOn && !!file && file.path.endsWith(".lean");
+
+	// Where you've been in Code, as a browser's history: a list of places with a cursor in it. Opening a file, a line
+	// or a function adds a place after the cursor (dropping the ones ahead of it); Back and Forward move the cursor.
+	type Place = { path: string; line: number | null; label: string };
+	const [trail, setTrail] = useState<{ places: Place[]; at: number }>({ places: [], at: -1 });
+	const travelling = useRef(false);
+	const remember = (p: Place) =>
+		setTrail(({ places, at }) => {
+			const here = places[at];
+			if (here && here.path === p.path && here.line === p.line) return { places, at };
+			const next = [...places.slice(0, at + 1), p].slice(-50);
+			return { places: next, at: next.length - 1 };
+		});
+	useEffect(() => setTrail({ places: [], at: -1 }), [folder]);
+	useEffect(() => {
+		if (mode !== "code" || !openPath) return;
+		if (travelling.current) {
+			travelling.current = false;
+			return;
+		}
+		const base = openPath.split("/").pop() ?? openPath;
+		remember({ path: openPath, line: markLine, label: markLine ? `${base}:${markLine}` : base });
+		// eslint-disable-next-line react-hooks/exhaustive-deps
+	}, [mode, openPath, markLine]);
+	const travel = (to: number) => {
+		const p = trail.places[to];
+		if (!p) return;
+		setTrail((t) => ({ ...t, at: to }));
+		if (p.path !== openPath || p.line !== markLine) {
+			travelling.current = true;
+			view(p.path, p.line ?? undefined);
+		} else codeBox.current?.querySelector(`[data-line="${(p.line ?? 1) - 1}"]`)?.scrollIntoView({ block: "center", behavior: "smooth" });
+	};
+	const canBack = trail.at > 0;
+	const canForward = trail.at < trail.places.length - 1;
+	// ⌘[ and ⌘] (as in Xcode and Safari) go back and forward in Code.
+	const travelKeys = useRef<(e: KeyboardEvent) => void>(() => {});
+	travelKeys.current = (e) => {
+		if (mode !== "code" || !(e.metaKey || e.ctrlKey) || (e.key !== "[" && e.key !== "]")) return;
+		e.preventDefault();
+		travel(trail.at + (e.key === "[" ? -1 : 1));
+	};
+	useEffect(() => {
+		const on = (e: KeyboardEvent) => travelKeys.current(e);
+		window.addEventListener("keydown", on);
+		return () => window.removeEventListener("keydown", on);
+	}, []);
 	/** Debug mode on a test file (the debugger compiles it and lists its tests). */
 	const debugFile = (path: string) => {
 		const next = new URLSearchParams(params);
@@ -2315,7 +2369,34 @@ export function SwarmPanel({ folder, name, scan, bridge, session, file: openPath
 						{file ? (
 							<>
 								<div className="flex h-8 shrink-0 items-center gap-2 border-y px-4">
-									<FileCode2 className="size-3.5 shrink-0 text-muted-foreground" />
+									<span className="-ml-1.5 flex shrink-0 items-center">
+										<button type="button" onClick={() => travel(trail.at - 1)} disabled={!canBack} title={canBack ? `Back to ${trail.places[trail.at - 1].label} (⌘[)` : "Back (⌘[)"} aria-label="Back" className="grid size-6 place-items-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground disabled:pointer-events-none disabled:opacity-30">
+											<ArrowLeft className="size-3.5" />
+										</button>
+										<button type="button" onClick={() => travel(trail.at + 1)} disabled={!canForward} title={canForward ? `Forward to ${trail.places[trail.at + 1].label} (⌘])` : "Forward (⌘])"} aria-label="Forward" className="grid size-6 place-items-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground disabled:pointer-events-none disabled:opacity-30">
+											<ArrowRight className="size-3.5" />
+										</button>
+										<DropdownMenu>
+											<DropdownMenuTrigger disabled={trail.places.length < 2} title="Where you've been" aria-label="History" className="grid size-6 place-items-center rounded-md text-muted-foreground outline-none hover:bg-muted hover:text-foreground disabled:pointer-events-none disabled:opacity-30">
+												<History className="size-3.5" />
+											</DropdownMenuTrigger>
+											<DropdownMenuContent align="start" className="max-h-96 w-72 overflow-y-auto [&_[role=menuitem]]:py-1 [&_[role=menuitem]]:text-[12px]">
+												<DropdownMenuLabel className="font-mono text-[10px] font-normal uppercase tracking-wider text-muted-foreground">History</DropdownMenuLabel>
+												{trail.places
+													.map((p, i) => ({ p, i }))
+													.reverse()
+													.map(({ p, i }) => (
+														<DropdownMenuItem key={i} onSelect={() => travel(i)} className={`gap-2 ${i === trail.at ? "font-medium" : i > trail.at ? "text-muted-foreground" : ""}`}>
+															<span className="w-3 shrink-0">{i === trail.at ? <Check className="size-3" /> : null}</span>
+															<span className="truncate font-mono">{p.label}</span>
+															<span className="ml-auto max-w-[45%] shrink-0 truncate text-[10px] text-muted-foreground" title={p.path}>
+																{p.path.split("/").slice(0, -1).pop() ?? ""}
+															</span>
+														</DropdownMenuItem>
+													))}
+											</DropdownMenuContent>
+										</DropdownMenu>
+									</span>
 									<Breadcrumbs root={name} path={file.path} files={tree} onOpen={view} />
 									<span className="ml-auto flex items-center gap-1">
 										{debug && /\.[ts]\.sol$/.test(file.path) ? (
