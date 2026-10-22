@@ -44,6 +44,7 @@ function MacCard() {
 		<Link to="/mac" className="block active:opacity-80">
 			<MacCardView
 				name={macName(m)}
+				online={online}
 				status={online ? "Online" : m.loaded ? "Offline" : null}
 				title={running ? `${running} session${running === 1 ? "" : "s"} running` : "Nothing running"}
 				hint={!m.loaded ? <Skeleton className="mt-1 h-3 w-40" /> : online ? "Follow and steer it from here" : m.state ? "Open Formal Mind on your Mac" : "Sign in to the Mac app to connect it"}
@@ -52,10 +53,16 @@ function MacCard() {
 	);
 }
 
-/** The Your Mac card as Home draws it (the introduction shows it too). */
-export function MacCardView({ status, title, hint, name = "Your Mac" }: { status: string | null; title: string; hint: React.ReactNode; name?: string }) {
+/** The Your Mac card as Home draws it (the introduction shows it too). The dot beside the status is green while the Mac is online. */
+export function MacCardView({ status, online = false, title, hint, name = "Your Mac" }: { status: string | null; online?: boolean; title: string; hint: React.ReactNode; name?: string }) {
+	const aside = status ? (
+		<span className="flex items-center gap-1.5">
+			<span className={`size-1.5 rounded-full ${online ? "bg-emerald-500" : "bg-muted-foreground/40"}`} aria-hidden />
+			{status}
+		</span>
+	) : null;
 	return (
-		<FrameCard label={name} aside={status}>
+		<FrameCard label={name} aside={aside}>
 			<div className="flex items-center gap-3 px-3 py-3">
 				<Laptop className="size-5 shrink-0 text-muted-foreground" />
 				<span className="min-w-0 flex-1">

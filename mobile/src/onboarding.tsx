@@ -84,7 +84,7 @@ const PAGES: Page[] = [
 		body: "Agents prove your functions and hunt bugs on your Mac, where Lean and Foundry run. Follow them, send a message, start or stop, and hear when a proof lands or a bug is filed.",
 		art: (
 			<Piece>
-				<MacCardView status="Online" title="1 session running" hint="Follow and steer it from here" />
+				<MacCardView status="Online" online title="1 session running" hint="Follow and steer it from here" />
 			</Piece>
 		),
 	},
