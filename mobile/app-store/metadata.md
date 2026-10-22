@@ -76,14 +76,16 @@ advertising data. No third-party SDKs and no tracking.
 
 ## App Review Information
 
-**Sign-in required**: yes. Reviewers need a GitHub account that can sign in to formal.team. Give them a dedicated
-test account here (username and password), not a personal one.
+**Sign-in required**: yes, by a review code instead of GitHub. Set it once on the Worker with
+`bunx wrangler secret put APP_REVIEW_CODE` (16 to 64 letters, digits, `-` or `_`), then put the same code in App Store
+Connect: User name `App Review`, Password the code. It signs in as a demo account (no GitHub, no Mac). Change the
+secret to revoke it.
 
 **Notes**
 
 > Formal Mind for iPhone reads a project's code, Lean proofs and audit findings from its GitHub repository, and lets you follow and steer the agent swarm that runs in Formal Mind for Mac.
 >
-> To review: sign in with the account above, then on Home tap "Add a project" and enter asyncswap/contracts (a public repository). Code, Proofs and Bugs show its contracts, its Lean proofs and its audit findings. Chat answers questions about it. The "Your Mac" screens need Formal Mind running on a Mac with the same account; without one they explain how to connect it.
+> To review: on the first screen tap "Have a code?", enter the password above and tap Continue. Tap Skip on setup, then on Home tap "Add a project" and enter asyncswap/contracts (a public repository). Code, Proofs and Bugs show its contracts, its Lean proofs and its audit findings. Chat answers questions about it. The "Your Mac" screens need Formal Mind running on a Mac with the same account; without one they explain how to connect it.
 
 ## Export compliance
 
