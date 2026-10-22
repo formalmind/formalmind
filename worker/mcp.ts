@@ -1,10 +1,11 @@
 /* Read-only MCP server at formal.team/mcp (Streamable HTTP, stateless).
  *
- * Four tools over what is already public on GitHub, so an agent can read the
- * swarm without learning its issues, labels and markers first. Nothing here
- * writes: talking to the swarm is done on GitHub (worker/skills.ts). The
- * server card for pre-connection discovery is served at
- * /.well-known/mcp/server-card.json and /mcp/server-card.
+ * Three tools over what is public: the audit format Formal Mind reads and
+ * writes, Formal Mind's audit of an example repository in that format, and the
+ * desktop app's latest release. Nothing here writes, and the swarm itself runs
+ * in the desktop app (worker/skills.ts says how). The server card for
+ * pre-connection discovery is served at /.well-known/mcp/server-card.json and
+ * /mcp/server-card.
  *
  * Tools are declared with plain JSON Schema on the SDK's low-level Server:
  * the high-level McpServer infers its types from zod shapes, and this
@@ -15,9 +16,8 @@ import { CfWorkerJsonSchemaValidator } from "@modelcontextprotocol/sdk/validatio
 import { WebStandardStreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js";
 import { CallToolRequestSchema, ListToolsRequestSchema, type CallToolResult, type Tool } from "@modelcontextprotocol/sdk/types.js";
 import { z } from "zod/v4";
-import { LIVE_PROJECT } from "@/lib/projects";
-import { getSwarmState } from "@/lib/swarm";
-import { APP_REPO, CHANGELOG_RAW, ORIGIN, ROLE_DOCS_RAW, SHORT, STATUS_LINE } from "./narrative";
+import type { AuditDoc } from "@/lib/audit-format";
+import { APP_REPO, AUDIT_FORMAT_RAW, EXAMPLE_AUDIT_RAW, EXAMPLE_REPO, ORIGIN, SHORT, STATUS_LINE } from "./narrative";
 
 /* zod 4 compiles object parsers with `new Function` when it believes the
  * runtime allows it; workerd lets the empty probe through and then rejects
@@ -27,76 +27,48 @@ import { APP_REPO, CHANGELOG_RAW, ORIGIN, ROLE_DOCS_RAW, SHORT, STATUS_LINE } fr
 z.config({ jitless: true });
 
 const MCP_URL = `${ORIGIN}/mcp`;
-export const MCP_VERSION = "0.2.0";
+export const MCP_VERSION = "0.3.0";
 const PROTOCOL_VERSIONS = ["2025-03-26", "2025-06-18", "2025-11-25"];
 
-/* Role documentation files in asyncswap/v2-proofs/.github/formalmind/. */
-const ROLE_DOCS: Record<string, string> = {
-  overview: "README.md",
-  planner: "plan.md",
-  prover: "prove.md",
-  reviewer: "review.md",
-  merger: "merge.md",
-  rebuilder: "rebuild.md",
-  editor: "editor.md",
-  consolidator: "consolidate.md",
-  chief: "chief.md",
-  assistant: "assistant.md",
-  answer: "answer.md",
-  cycle: "cycle.md",
-};
+const AUDIT_SECTIONS = ["summary", "findings", "coverage", "properties", "full"] as const;
 
 const READ_ONLY = { readOnlyHint: true, openWorldHint: true };
 
 export const TOOLS: Tool[] = [
   {
-    name: "get_swarm_state",
-    title: "Swarm state",
+    name: "get_audit_format",
+    title: "Audit format",
     description:
-      "The live state of the swarm: its projects (protocol and proofs repositories), open issues and pull requests carrying fm: labels, each project's recently merged pull requests, spend today and the latest cost lines in the ledger, the chief's and the assistant's latest notes, the rebuild cycle, and the latest workflow runs. Read from GitHub, cached for ten seconds.",
+      "The formalmind.audit/v1 format: one JSON file per audit report (<report>.audit.json), with the report's facts, every finding (id, severity, status in the current code, locations, description, impact, recommendation, evidence, PoC, fix) and, for Formal Mind's own audit, the Proofs coverage of each contract and the properties proved. The Bugs tab reads only this format. Returns docs/audit-format.md.",
     inputSchema: { type: "object", properties: {} },
     annotations: READ_ONLY,
   },
   {
-    name: "list_open_work",
-    title: "Open work",
-    description:
-      "Open issues and pull requests the swarm is working, across its projects, each with its fm: labels (fm:todo queued, fm:in-progress being worked, fm:review waiting for the reviewer, fm:approved waiting for the merger, fm:blocked waiting for a human, fm:rebuild and fm:finding for the rebuild cycle). Optionally only items carrying one label.",
+    name: "get_example_audit",
+    title: "Example audit",
+    description: `Formal Mind's audit of Async Swap's contracts (${EXAMPLE_REPO}), audit/formal-mind.audit.json, as the swarm and Generate report left it: what a finished run looks like. section "summary" (default) gives the report's facts and counts per contract; "findings", "coverage" or "properties" gives that list; "full" the whole file.`,
     inputSchema: {
       type: "object",
-      properties: { label: { type: "string", pattern: "^fm:[a-z-]+$", description: "Only items with this fm: label, e.g. fm:review" } },
+      properties: { section: { type: "string", enum: [...AUDIT_SECTIONS], default: "summary", description: "Which part of the file" } },
     },
     annotations: READ_ONLY,
   },
   {
-    name: "get_changelog",
-    title: "Proofs changelog",
+    name: "get_app_release",
+    title: "Desktop app release",
     description:
-      "The latest entries of FORMAL_MIND.md in the proofs repository: one entry per run with the protocol commit reconciled, what changed in the spec, which theorems were added, changed or could not be proved, and what the build said. Newest first.",
-    inputSchema: {
-      type: "object",
-      properties: { entries: { type: "integer", minimum: 1, maximum: 50, default: 5, description: "How many entries, default 5" } },
-    },
-    annotations: READ_ONLY,
-  },
-  {
-    name: "get_role_doc",
-    title: "Role documentation",
-    description:
-      "The instructions a swarm role works from, as published in the proofs repository (.github/formalmind/): overview (the README: roles, labels, turns, budget, safety rails), planner, prover, reviewer, merger, rebuilder, editor, consolidator, chief, assistant, answer (how a role answers an /ask) or cycle (the rebuild cycle).",
-    inputSchema: {
-      type: "object",
-      required: ["role"],
-      properties: { role: { type: "string", enum: Object.keys(ROLE_DOCS), description: "Which document" } },
-    },
+      "The Formal Mind desktop app's latest release: its version, when it was published, its notes, and the download links for macOS (one universal build) and Windows. The local swarm runs in this app.",
+    inputSchema: { type: "object", properties: {} },
     annotations: READ_ONLY,
   },
 ];
 
-async function getText(url: string): Promise<string> {
-  const res = await fetch(url, { headers: { accept: "text/plain", "user-agent": "formalmind-mcp/" + MCP_VERSION } });
+async function get(url: string, accept = "text/plain"): Promise<Response> {
+  const headers: Record<string, string> = { accept, "user-agent": "formalmind-mcp/" + MCP_VERSION };
+  if (url.startsWith("https://api.github.com/") && process.env.GITHUB_TOKEN) headers.authorization = `Bearer ${process.env.GITHUB_TOKEN}`;
+  const res = await fetch(url, { headers });
   if (!res.ok) throw new Error(`${url} returned ${res.status}`);
-  return res.text();
+  return res;
 }
 
 const text = (value: string): CallToolResult => ({ content: [{ type: "text", text: value }] });
@@ -104,27 +76,38 @@ const json = (value: unknown): CallToolResult => text(JSON.stringify(value, null
 
 async function callTool(name: string, args: Record<string, unknown>): Promise<CallToolResult> {
   switch (name) {
-    case "get_swarm_state": {
-      const state = await getSwarmState([LIVE_PROJECT]);
-      return json({ ...state, costs: state.costs.slice(-20), merged: state.merged.slice(0, 10), runs: state.runs.slice(0, 10) });
+    case "get_audit_format":
+      return text(await (await get(AUDIT_FORMAT_RAW)).text());
+    case "get_example_audit": {
+      const section = typeof args.section === "string" && args.section ? args.section : "summary";
+      if (!(AUDIT_SECTIONS as readonly string[]).includes(section)) throw new Error(`section must be one of ${AUDIT_SECTIONS.join(", ")}`);
+      const audit = (await (await get(EXAMPLE_AUDIT_RAW, "application/json")).json()) as AuditDoc;
+      if (section === "full") return json(audit);
+      if (section !== "summary") return json(audit[section as "findings" | "coverage" | "properties"] ?? []);
+      const { findings = [], coverage = [], properties = [], ...facts } = audit;
+      return json({
+        ...facts,
+        findings: findings.length,
+        properties: properties.length,
+        coverage: coverage.map(({ rows: _rows, ...counts }) => counts),
+      });
     }
-    case "list_open_work": {
-      const label = typeof args.label === "string" && args.label ? args.label : undefined;
-      if (label && !/^fm:[a-z-]+$/.test(label)) throw new Error("label must be an fm: label, like fm:todo");
-      const state = await getSwarmState([LIVE_PROJECT]);
-      const work = label ? state.work.filter((item) => item.labels.includes(label)) : state.work;
-      return json({ fetchedAt: state.fetchedAt, count: work.length, work });
-    }
-    case "get_changelog": {
-      const entries = Math.min(50, Math.max(1, Number(args.entries) || 5));
-      const body = await getText(CHANGELOG_RAW);
-      const [intro, ...rest] = body.split(/\n(?=## )/);
-      return text([intro.trim(), ...rest.slice(0, entries)].join("\n\n"));
-    }
-    case "get_role_doc": {
-      const file = typeof args.role === "string" ? ROLE_DOCS[args.role] : undefined;
-      if (!file) throw new Error(`role must be one of ${Object.keys(ROLE_DOCS).join(", ")}`);
-      return text(await getText(`${ROLE_DOCS_RAW}/${file}`));
+    case "get_app_release": {
+      const release = (await (await get("https://api.github.com/repos/formalmind/formalmind/releases/latest", "application/vnd.github+json")).json()) as {
+        tag_name: string;
+        published_at: string;
+        html_url: string;
+        body?: string;
+        assets: { name: string; browser_download_url: string }[];
+      };
+      const asset = (file: string) => release.assets.find((a) => a.name === file)?.browser_download_url ?? null;
+      return json({
+        version: release.tag_name.replace(/^desktop-v/, ""),
+        published: release.published_at,
+        url: release.html_url,
+        downloads: { mac: asset("Formal-Mind-mac.dmg"), windows: asset("Formal-Mind-windows-setup.exe") },
+        notes: release.body ?? "",
+      });
     }
     default:
       throw new Error(`Unknown tool: ${name}`);
@@ -155,7 +138,7 @@ function buildServer(): Server {
         SHORT +
         " " +
         STATUS_LINE +
-        " These tools read the swarm's public record on GitHub (issues, labels, notebook comments and FORMAL_MIND.md); they change nothing. To run the swarm locally, onboard a repository or read Formal Mind's files in one, read the skills at " +
+        " These tools read what is public: the audit format, Formal Mind's audit of an example repository, and the desktop app's latest release; they change nothing. The swarm runs in the desktop app. To run it, onboard a repository or read Formal Mind's files in one, read the skills at " +
         ORIGIN +
         "/.well-known/agent-skills/index.json.",
     },
@@ -187,9 +170,9 @@ export function serverCard(): Response {
     $schema: "https://static.modelcontextprotocol.io/schemas/v1/server-card.schema.json",
     name: "formal.team/formalmind",
     version: MCP_VERSION,
-    title: "Formal Mind swarm",
+    title: "Formal Mind",
     description:
-      "Two remotes. /mcp: read-only tools over the Formal Mind swarm's public record on GitHub (its live state, open issues and pull requests by fm: label, the proofs changelog FORMAL_MIND.md and each role's instructions), no authentication. /mcp/account: the signed-in person's own projects, usage, credits and swarm state, plus planning a repository and starting the swarm on it, behind an OAuth 2.0 access token from this host's authorization server (GitHub sign-in; RFC 9728 metadata at /.well-known/oauth-protected-resource/mcp/account, RFC 8414 at /.well-known/oauth-authorization-server). Talking to the swarm itself happens on GitHub; see the Agent Skills at /.well-known/agent-skills/index.json.",
+      "Two remotes. /mcp: read-only tools, no authentication: the formalmind.audit/v1 format Formal Mind's Bugs tab reads, Formal Mind's audit of an example repository (Async Swap's contracts) in that format, and the desktop app's latest release. /mcp/account: the signed-in person's own projects, usage, credits and hosted swarm state, plus planning a repository and setting up its specs, behind an OAuth 2.0 access token from this host's authorization server (GitHub sign-in; RFC 9728 metadata at /.well-known/oauth-protected-resource/mcp/account, RFC 8414 at /.well-known/oauth-authorization-server). The swarm itself runs locally in the desktop app; see the Agent Skills at /.well-known/agent-skills/index.json.",
     websiteUrl: ORIGIN,
     repository: { source: "github", url: APP_REPO },
     remotes: [

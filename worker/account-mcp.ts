@@ -208,7 +208,7 @@ function buildServer(principal: Principal & { via: "token" }): Server {
       capabilities: { tools: {} },
       jsonSchemaValidator: new CfWorkerJsonSchemaValidator(),
       instructions:
-        `${SHORT} These tools act for the Formal Mind account of ${who} (scopes: ${principal.scopes.join(", ")}): its projects, usage, credits and swarm state, and with swarm:write, planning a repository and starting the swarm on it. The swarm's public record is also readable without a token at ${ORIGIN}/mcp.`,
+        `${SHORT} These tools act for the Formal Mind account of ${who} (scopes: ${principal.scopes.join(", ")}): its projects, usage, credits and hosted swarm state, and with swarm:write, planning a repository and setting up its specs. The local swarm runs in the desktop app; public reads (the audit format, an example audit, the app's latest release) need no token at ${ORIGIN}/mcp.`,
     },
   );
   const handlers = server as unknown as ToolHandlers;

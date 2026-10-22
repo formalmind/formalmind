@@ -41,11 +41,11 @@ export function prefersMarkdown(accept: string | null): boolean {
 const ROUTES: Record<string, { title: string; body: string }> = {
   "/": {
     title: "Formal Mind",
-    body: "The front door. Signed out it is the landing page: paste a public GitHub repository and the planner drafts the swarm's first issues for it, live. Signed in it is the swarm workspace: the live board of open work, merged pull requests, spend today and the latest notes from the chief and the assistant. Agents: the same state is the `get_swarm_state` MCP tool, and the same plan is `POST /api/onboarding/plan`.",
+    body: "The front door. Signed out it is the landing page: paste a public GitHub repository and the planner plans it, live. Signed in it is home: your projects and Add a project (a public GitHub repository here; a local folder in the desktop app), each with Code, Bugs and Proofs. Agents: the same plan is `POST /api/onboarding/plan`; the `onboard-a-repository` skill covers the rest.",
   },
   "/welcome": {
     title: "Formal Mind · Prove your Solidity correct",
-    body: "The landing page: paste a repository, watch the planner read your contracts and write the swarm's first issues, then preview the six onboarding steps (plan, team, daily budget, credits, GitHub App, start). Agents: `POST /api/onboarding/plan` with `{\"repo\":\"owner/name\"}` returns the same plan without signing in.",
+    body: "The landing page: paste a repository and watch the planner read your contracts and plan the work, then sign in and add it as a project. Download the desktop app (macOS, Windows) to run the swarm on your own computer. Agents: `POST /api/onboarding/plan` with `{\"repo\":\"owner/name\"}` returns the same plan without signing in.",
   },
   "/login": {
     title: "Log in · Formal Mind",
@@ -57,9 +57,9 @@ const ROUTES: Record<string, { title: string; body: string }> = {
   "/swarm/chat": { title: "Ask the swarm · Formal Mind", body: "Signed in: a chat that posts on the swarm's public notebook issues as you, so the roles answer on GitHub. The local swarm in the desktop app takes messages in its own chat; see the `run-the-local-swarm` skill." },
   "/roadmap": { title: "Roadmap · Formal Mind", body: "Signed in: the project's roadmap items and the issues and pull requests under each." },
   "/billing": { title: "Billing · Formal Mind", body: "Signed in: prepaid credits, deposits through Stripe Checkout ($10 to $1,000)." },
-  "/usage": { title: "Usage · Formal Mind", body: "Signed in: every cost line the swarm recorded, from the spend ledger." },
+  "/usage": { title: "Usage · Formal Mind", body: "Signed in: every metered cost line, local swarm runs on formal.team credits included." },
   "/chat": { title: "Chat · Formal Mind", body: "Signed in: a private chat with your assistant, kept under your account and never posted to GitHub." },
-  "/onboarding": { title: "Onboarding · Formal Mind", body: "Signed in: your plan, team size, daily budget, credits, the GitHub App install, and Start, which creates the proofs repository and lists it for the swarm. The `onboard-a-repository` skill describes it." },
+  "/onboarding": { title: "Onboarding · Formal Mind", body: "Signed in: Set up specs for a GitHub repository: a daily budget, credits, the GitHub App install, and Start, which creates the proofs repository where Formal Mind writes the specs as commits land. The `onboard-a-repository` skill describes it." },
   "/github": { title: "Get Started · Formal Mind", body: "Signed in: your repositories and the GitHub App's installation status." },
   "/documentation/get-started": { title: "Get Started · Formal Mind", body: "Signed in: your repositories and the GitHub App's installation status." },
 };

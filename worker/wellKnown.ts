@@ -6,7 +6,7 @@
 import { issuer, SCOPE_LIST } from "@/lib/oauth";
 import { ACCOUNT_MCP_PATH } from "./account-mcp";
 import { authorizationServerMetadata, jwksDocument } from "./oauth";
-import { CHANGELOG, DESCRIPTION, ORIGIN, PROTOCOL_DOC, SITE_NAME, SWARM_DOC } from "./narrative";
+import { AUDIT_FORMAT_DOC, DESCRIPTION, EXAMPLE_REPO, ORIGIN, PROTOCOL_DOC, SITE_NAME } from "./narrative";
 
 function json(body: unknown, contentType = "application/json; charset=utf-8"): Response {
   return new Response(JSON.stringify(body, null, 2), {
@@ -70,15 +70,14 @@ function aiCatalog(): Response {
       {
         identifier: id("server", "swarm"),
         displayName: "Formal Mind MCP servers",
-        description: "One card, two remotes: read-only tools over the swarm's public record at /mcp (no auth), and the account tools at /mcp/account (OAuth 2.0 from this host, GitHub sign-in): your projects, usage, credits and swarm state, planning a repository and starting the swarm on it.",
+        description: "One card, two remotes: read-only tools at /mcp (no auth): the audit format, Formal Mind's audit of an example repository, the desktop app's latest release; and the account tools at /mcp/account (OAuth 2.0 from this host, GitHub sign-in): your projects, usage, credits and hosted swarm state, planning a repository and setting up its specs.",
         type: "application/mcp-server-card+json",
         url: `${ORIGIN}/.well-known/mcp/server-card.json`,
         representativeQueries: [
-          "what is the formalmind swarm working on right now",
-          "which pull requests are waiting for the merger",
-          "what did the last proofs run change",
+          "what is the latest version of the formal mind app",
+          "what does a formal mind audit look like",
           "what did my swarm spend today",
-          "start the planner on my repository",
+          "plan my repository",
         ],
       },
       {
@@ -128,7 +127,7 @@ function aiCatalog(): Response {
       {
         identifier: id("doc", "llms-full"),
         displayName: "Formal Mind full reference for agents",
-        description: "What the swarm is, how its roles, labels and budget work, what an agent can do here today, and what is planned.",
+        description: "What Formal Mind is, how the local swarm works and where it keeps its files, what an agent can do here today, and what is planned.",
         type: "text/plain",
         url: `${ORIGIN}/llms-full.txt`,
         representativeQueries: [
@@ -137,25 +136,25 @@ function aiCatalog(): Response {
         ],
       },
       {
-        identifier: id("doc", "swarm-readme"),
-        displayName: "The formalmind swarm: roles, labels, turns and safety rails",
-        description: "The swarm's own documentation in the proofs repository it maintains.",
+        identifier: id("doc", "audit-format"),
+        displayName: "The formalmind.audit/v1 format",
+        description: "One JSON file per audit report: the report's facts, every finding with its status in the current code, PoC and fix, and for Formal Mind's own audit the Proofs coverage and the properties proved. The Bugs tab reads it; the swarm writes it.",
         type: "text/markdown",
-        url: SWARM_DOC,
-        representativeQueries: ["what do the fm: labels mean", "how does the dispatcher choose the next job"],
+        url: AUDIT_FORMAT_DOC,
+        representativeQueries: ["what fields does a formal mind audit finding have", "how do I make my audit report show in Formal Mind"],
       },
       {
-        identifier: id("doc", "changelog"),
-        displayName: "FORMAL_MIND.md, the proofs changelog",
-        description: "One entry per run: the protocol commit reconciled, what changed in the spec, theorems added or not proved, and what the build said.",
-        type: "text/markdown",
-        url: CHANGELOG,
-        representativeQueries: ["what could the swarm not prove", "which theorems were added recently"],
+        identifier: id("doc", "example-repository"),
+        displayName: "Example: Async Swap's contracts",
+        description: "A public repository Formal Mind works on: Lean proofs in formal/, Formal Mind's audit in audit/formal-mind.audit.json.",
+        type: "text/html",
+        url: EXAMPLE_REPO,
+        representativeQueries: ["what does a repository look like after Formal Mind ran", "show me formal mind's lean proofs"],
       },
       {
         identifier: id("doc", "protocol-v1"),
         displayName: "Formal Mind protocol, v1 draft",
-        description: "The messages, records and rules each part of the system follows; a draft.",
+        description: "The messages, records and rules of the hosted side; a draft.",
         type: "text/markdown",
         url: PROTOCOL_DOC,
         representativeQueries: ["how will Formal Mind run one object per project"],

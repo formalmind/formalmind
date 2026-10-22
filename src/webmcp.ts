@@ -1,4 +1,4 @@
-/* WebMCP: expose the read-only swarm tools to an agent driving this page
+/* WebMCP: expose the read-only /mcp tools to an agent driving this page
  * (webmachinelearning.github.io/webmcp). The spec puts the API on
  * document.modelContext; early Chrome builds used navigator.modelContext.
  * Nothing is registered when neither exists. Each tool calls the same
@@ -49,40 +49,28 @@ async function callTool(name: string, args: Record<string, unknown>, signal?: Ab
 
 const TOOLS: ModelContextTool[] = [
 	{
-		name: "formalmind_swarm_state",
-		title: "Swarm state",
-		description: "The live state of the Formal Mind swarm: projects, open work with fm: labels, merged pull requests, spend today, the chief's and the assistant's latest notes, the rebuild cycle and recent runs.",
+		name: "formalmind_audit_format",
+		title: "Audit format",
+		description: "The formalmind.audit/v1 format: one JSON file per audit report, with every finding's status in the current code, PoC and fix, and for Formal Mind's own audit the Proofs coverage and the properties proved.",
 		inputSchema: { type: "object", properties: {} },
 		annotations: { readOnlyHint: true },
-		execute: (_input, o) => callTool("get_swarm_state", {}, o?.signal),
+		execute: (_input, o) => callTool("get_audit_format", {}, o?.signal),
 	},
 	{
-		name: "formalmind_open_work",
-		title: "Open work",
-		description: "Open issues and pull requests the swarm is working, optionally only those carrying one fm: label (fm:todo, fm:in-progress, fm:review, fm:approved, fm:blocked, fm:rebuild, fm:finding).",
-		inputSchema: { type: "object", properties: { label: { type: "string", pattern: "^fm:[a-z-]+$", description: "Only items with this label" } } },
+		name: "formalmind_example_audit",
+		title: "Example audit",
+		description: "Formal Mind's audit of Async Swap's contracts (asyncswap/contracts, audit/formal-mind.audit.json): a summary, or its findings, coverage or properties.",
+		inputSchema: { type: "object", properties: { section: { type: "string", enum: ["summary", "findings", "coverage", "properties", "full"], default: "summary" } } },
 		annotations: { readOnlyHint: true },
-		execute: (input, o) => callTool("list_open_work", input.label ? { label: input.label } : {}, o?.signal),
+		execute: (input, o) => callTool("get_example_audit", input.section ? { section: input.section } : {}, o?.signal),
 	},
 	{
-		name: "formalmind_changelog",
-		title: "Proofs changelog",
-		description: "The latest entries of FORMAL_MIND.md in the proofs repository: what each run reconciled, changed, proved or could not prove.",
-		inputSchema: { type: "object", properties: { entries: { type: "integer", minimum: 1, maximum: 50, default: 5 } } },
+		name: "formalmind_app_release",
+		title: "Desktop app release",
+		description: "The Formal Mind desktop app's latest release: version, date, notes, and the macOS and Windows downloads.",
+		inputSchema: { type: "object", properties: {} },
 		annotations: { readOnlyHint: true },
-		execute: (input, o) => callTool("get_changelog", input.entries ? { entries: input.entries } : {}, o?.signal),
-	},
-	{
-		name: "formalmind_role_doc",
-		title: "Role documentation",
-		description: "The instructions a swarm role works from: overview, planner, prover, reviewer, merger, rebuilder, editor, consolidator, chief, assistant, answer or cycle.",
-		inputSchema: {
-			type: "object",
-			required: ["role"],
-			properties: { role: { type: "string", enum: ["overview", "planner", "prover", "reviewer", "merger", "rebuilder", "editor", "consolidator", "chief", "assistant", "answer", "cycle"] } },
-		},
-		annotations: { readOnlyHint: true },
-		execute: (input, o) => callTool("get_role_doc", { role: input.role }, o?.signal),
+		execute: (_input, o) => callTool("get_app_release", {}, o?.signal),
 	},
 ];
 

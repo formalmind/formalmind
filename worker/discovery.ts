@@ -17,21 +17,21 @@ import { handleWellKnown } from "./wellKnown";
 import {
   AGENT_ACCESS,
   APP_REPO,
-  CHANGELOG,
+  AUDIT_FORMAT_DOC,
   DESCRIPTION,
+  EXAMPLE_REPO,
   GITHUB_APP,
   HOW_IT_WORKS,
   MAC_DOWNLOAD,
   ORIGIN,
   PLANNED,
-  PROOFS_REPO,
   PROTOCOL_DOC,
-  PROTOCOL_REPO,
+  RELEASES,
   SHORT,
   SITE_NAME,
   STATUS_LINE,
   STATUS_SECTION,
-  SWARM_DOC,
+  WINDOWS_DOWNLOAD,
 } from "./narrative";
 
 /* Pages anyone can open without signing in (src/app.tsx routes plus the
@@ -70,7 +70,7 @@ function robotsTxt(): Response {
   ];
   const rules = ["Content-Signal: search=yes, ai-input=yes, ai-train=no", "Allow: /", "Disallow: /api/", "Disallow: /auth/", "Disallow: /oauth/", "Disallow: /login/callback", ""];
   const lines = [
-    `# ${SITE_NAME}: a swarm of agents that keeps a Lean 4 specification of a Solidity protocol honest on every commit.`,
+    `# ${SITE_NAME}: proves Solidity contracts correct in Lean 4, with a swarm of agents that runs on your own computer.`,
     "# Agents: start at /llms.txt and /.well-known/api-catalog.",
     "",
     "User-agent: *",
@@ -96,7 +96,7 @@ function sitemapXml(): Response {
 export const AGENT_LINKS_MARKDOWN = `## For agents
 
 - [llms.txt](${ORIGIN}/llms.txt) and [llms-full.txt](${ORIGIN}/llms-full.txt): orientation and the full account of the swarm
-- [MCP server card](${ORIGIN}/.well-known/mcp/server-card.json): read-only MCP server at ${ORIGIN}/mcp (swarm state, open work, changelog, role documentation) and the account server at ${ORIGIN}/mcp/account (your projects, usage, credits, swarm state, plan and start; OAuth 2.0)
+- [MCP server card](${ORIGIN}/.well-known/mcp/server-card.json): read-only MCP server at ${ORIGIN}/mcp (the audit format, an example audit, the desktop app's latest release) and the account server at ${ORIGIN}/mcp/account (your projects, usage, credits, swarm state, plan and start; OAuth 2.0)
 - [Agent Skills](${ORIGIN}/.well-known/agent-skills/index.json): how to run the local swarm, how to onboard a repository, how to read Formal Mind's results in a repository, and how to connect Formal Mind as an MCP connector
 - [API catalog](${ORIGIN}/.well-known/api-catalog): the open plan endpoint, the two MCP servers and the token-capable account routes
 - [auth.md](${ORIGIN}/auth.md): GitHub sign-in for people; the OAuth 2.0 authorization server, scopes and tokens for agents`;
@@ -109,32 +109,32 @@ function llmsTxt(): Response {
 
 **${STATUS_LINE}**
 
-${SHORT} The full account, roles, labels and safety rails included, is in [llms-full.txt](${ORIGIN}/llms-full.txt).
+${SHORT} The full account, how the swarm works and where it keeps its files included, is in [llms-full.txt](${ORIGIN}/llms-full.txt).
 
 ## Agents
 
-- [MCP server card](${ORIGIN}/.well-known/mcp/server-card.json): read-only tools at ${ORIGIN}/mcp (Streamable HTTP, no auth): the swarm's live state, its open work, the proofs changelog and each role's instructions; and the account server at ${ORIGIN}/mcp/account (OAuth 2.0, GitHub sign-in): my_projects, my_usage, my_credits, swarm_state, plan_repository, start_swarm
+- [MCP server card](${ORIGIN}/.well-known/mcp/server-card.json): read-only tools at ${ORIGIN}/mcp (Streamable HTTP, no auth): get_audit_format, get_example_audit, get_app_release; and the account server at ${ORIGIN}/mcp/account (OAuth 2.0, GitHub sign-in): my_projects, my_usage, my_credits, swarm_state, plan_repository, start_swarm
 - [Skill: connect-formal-mind-as-mcp](${ORIGIN}/.well-known/agent-skills/connect-formal-mind-as-mcp/SKILL.md): add ${ORIGIN}/mcp/account to Claude, ChatGPT or Cursor and act on your own account
 - [Skill: run-the-local-swarm](${ORIGIN}/.well-known/agent-skills/run-the-local-swarm/SKILL.md): run the swarm on a folder in the desktop app; proofs, bugs and state stay in the folder
 - [Skill: onboard-a-repository](${ORIGIN}/.well-known/agent-skills/onboard-a-repository/SKILL.md): plan a repository, add it as a project, optionally set up specs from its commits
 - [Skill: read-formal-mind-results](${ORIGIN}/.well-known/agent-skills/read-formal-mind-results/SKILL.md): the files Formal Mind keeps in a repository and the formalmind.audit/v1 format
 - [auth.md](${ORIGIN}/auth.md): GitHub sign-in for people; OAuth 2.0 (RFC 8414 metadata, dynamic registration, PKCE, refresh, revocation) for agents acting on an account
 
-## The swarm
+## Formal Mind
 
-- [How the swarm works](${SWARM_DOC}): roles, labels, turns, budget and safety rails, in the swarm's own repository
-- [FORMAL_MIND.md](${CHANGELOG}): the proofs changelog, one entry per run, including what could not be proved
-- [Proofs repository](${PROOFS_REPO}): the Lean 4 + Mathlib specification of Async Swap v2 the swarm maintains
-- [Protocol repository](${PROTOCOL_REPO}): the Solidity it models
-- [Formal Mind protocol, v1 draft](${PROTOCOL_DOC}): the messages, records and rules each part of the system follows (draft)
+- [The audit format](${AUDIT_FORMAT_DOC}): formalmind.audit/v1, the JSON file per audit report that Bugs reads and the swarm writes
+- [Example: Async Swap's contracts](${EXAMPLE_REPO}): Lean proofs in formal/, Formal Mind's audit in audit/formal-mind.audit.json
+- [Formal Mind protocol, v1 draft](${PROTOCOL_DOC}): the messages, records and rules of the hosted side (draft)
 
 ## App
 
-- [Landing page](${ORIGIN}/welcome): paste a public repository and watch the planner draft its first issues
-- [Sign in](${ORIGIN}/login): GitHub sign-in; the swarm workspace, onboarding, billing and usage are behind it
-- [GitHub App](${GITHUB_APP}): what the swarm installs in your repositories
-- [Mac app](${MAC_DOWNLOAD}): the same app for the desktop, which can run agent turns on local folders
-- [Source](${APP_REPO}): this web app and the Mac app
+- [Download for Mac](${MAC_DOWNLOAD}): the desktop app, one universal build; the local swarm runs here
+- [Download for Windows](${WINDOWS_DOWNLOAD}): the same app for Windows
+- [Releases](${RELEASES}): every version of the desktop app
+- [Landing page](${ORIGIN}/welcome): paste a public repository and watch the planner plan it
+- [Sign in](${ORIGIN}/login): GitHub sign-in; projects, billing and usage are behind it
+- [GitHub App](${GITHUB_APP}): installed on a repository's owner to set up specs from its commits
+- [Source](${APP_REPO}): the website and the desktop app
 
 ## Optional
 
@@ -157,11 +157,12 @@ ${HOW_IT_WORKS}
 
 ## What an agent can do here today
 
-- **Read the swarm.** The MCP server at ${ORIGIN}/mcp (Streamable HTTP, JSON responses, no authentication) has four read-only tools: \`get_swarm_state\` (projects, open work with labels, merged pull requests, spend today, the chief's and the assistant's latest notes, the rebuild cycle, recent runs), \`list_open_work\` (open issues and pull requests carrying an fm: label, optionally filtered by label), \`get_changelog\` (the latest entries of FORMAL_MIND.md) and \`get_role_doc\` (a role's instructions). Everything they return is also public on GitHub.
-- **Plan a repository.** \`POST ${ORIGIN}/api/onboarding/plan\` with body \`{"repo":"owner/name"}\` and no credentials. The response is \`text/plain\`: a JSON object streamed a few characters at a time, with the protocol summary, the contracts found, and the first issues the planner would open. Limits: public repositories with Solidity contracts outside tests and libraries; five plans per hour per address (429 after that); a plan is cached for a week and replayed (header \`X-Plan-Cache: hit\`).
-- **Run the swarm locally.** The desktop app runs the swarm on a folder on the person's computer, with nothing on GitHub; the skill at ${ORIGIN}/.well-known/agent-skills/run-the-local-swarm/SKILL.md says how, and ${ORIGIN}/.well-known/agent-skills/read-formal-mind-results/SKILL.md how to read what it leaves in the repository.
-- **Act on a person's account.** With an OAuth access token from ${ORIGIN} (the person signs in with GitHub and allows the client on a consent page), the account MCP server at ${ORIGIN}/mcp/account and the API routes listed in ${ORIGIN}/auth.md give the account's projects, usage, credits and swarm state (\`swarm:read\`), and plan a repository or start the swarm on it (\`swarm:write\`). The section below says how.
-- **Onboard a repository for a person.** Planning and Start can be done with a \`swarm:write\` token (\`plan_repository\`, \`start_swarm\`, or \`POST /api/projects/init\`); adding a project, setting a budget, buying credits and installing the GitHub App are browser flows behind GitHub sign-in. The skill at ${ORIGIN}/.well-known/agent-skills/onboard-a-repository/SKILL.md walks a person through them.
+- **Read what is public.** The MCP server at ${ORIGIN}/mcp (Streamable HTTP, JSON responses, no authentication) has three read-only tools: \`get_audit_format\` (the formalmind.audit/v1 format), \`get_example_audit\` (Formal Mind's audit of Async Swap's contracts: a summary, its findings, coverage or properties) and \`get_app_release\` (the desktop app's latest version, notes and downloads).
+- **Read Formal Mind's files in a repository.** In a checkout where Formal Mind ran, \`.formal/plan.md\` is the plan and its progress, \`formal/\` the Lean proofs, and \`audit/*.audit.json\` the reports and findings; the skill at ${ORIGIN}/.well-known/agent-skills/read-formal-mind-results/SKILL.md says what each holds.
+- **Plan a repository.** \`POST ${ORIGIN}/api/onboarding/plan\` with body \`{"repo":"owner/name"}\` and no credentials. The response is \`text/plain\`: a JSON object streamed a few characters at a time, with the protocol summary, the contracts found, and the work the planner would hand out. Limits: public repositories with Solidity contracts outside tests and libraries; five plans per hour per address (429 after that); a plan is cached for a week and replayed (header \`X-Plan-Cache: hit\`).
+- **Help a person run the swarm.** The desktop app runs the swarm on a folder on the person's computer, with nothing on GitHub; it is started and steered in the app. The skill at ${ORIGIN}/.well-known/agent-skills/run-the-local-swarm/SKILL.md says how.
+- **Act on a person's account.** With an OAuth access token from ${ORIGIN} (the person signs in with GitHub and allows the client on a consent page), the account MCP server at ${ORIGIN}/mcp/account and the API routes listed in ${ORIGIN}/auth.md give the account's projects, usage, credits and swarm state (\`swarm:read\`), and plan a repository or set up its specs (\`swarm:write\`). The section below says how.
+- **Onboard a repository for a person.** Planning and setting up specs can be done with a \`swarm:write\` token (\`plan_repository\`, \`start_swarm\`, or \`POST /api/projects/init\`); adding a project, setting a budget, buying credits and installing the GitHub App are browser flows behind GitHub sign-in. The skill at ${ORIGIN}/.well-known/agent-skills/onboard-a-repository/SKILL.md walks a person through them.
 
 ${AGENT_ACCESS}
 
@@ -171,12 +172,13 @@ ${PLANNED}
 
 - App: ${ORIGIN}
 - Source: ${APP_REPO}
+- Download for Mac: ${MAC_DOWNLOAD}
+- Download for Windows: ${WINDOWS_DOWNLOAD}
+- Releases: ${RELEASES}
 - GitHub App: ${GITHUB_APP}
-- Swarm documentation: ${SWARM_DOC}
-- Proofs changelog: ${CHANGELOG}
-- Proofs: ${PROOFS_REPO}
-- Protocol: ${PROTOCOL_REPO}
-- Protocol v1 draft (this system's own protocol): ${PROTOCOL_DOC}
+- Audit format: ${AUDIT_FORMAT_DOC}
+- Example repository: ${EXAMPLE_REPO}
+- Protocol v1 draft (the hosted side's own protocol): ${PROTOCOL_DOC}
 `;
   return text(body);
 }

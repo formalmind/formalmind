@@ -5,8 +5,7 @@
  * the code under desktop/, lib/ and server/routes/ in this repository, or
  * desktop/README.md and docs/audit-format.md. */
 
-import { GITHUB_APP, ORIGIN } from "./narrative";
-import { MAC_DOWNLOAD, WINDOWS_DOWNLOAD } from "../lib/downloads";
+import { GITHUB_APP, MAC_DOWNLOAD, ORIGIN, STATUS_LINE, WINDOWS_DOWNLOAD } from "./narrative";
 
 interface Skill {
   name: string;
@@ -14,17 +13,13 @@ interface Skill {
   body: string;
 }
 
-/* Where things stand, for the skills. */
-const STATUS =
-  "Status: early access. The app is free to download for macOS (Apple Silicon and Intel) and Windows; agents run on formal.team credits or your own Anthropic or OpenAI key.";
-
 const LOCAL_SWARM: Skill = {
   name: "run-the-local-swarm",
   description:
     "Run the Formal Mind swarm on a Solidity repository on your own computer: download the app, add the folder, pick who pays for the model (formal.team credits, your Anthropic key or your OpenAI key), and Start. A planner, provers and a reviewer write and check Lean 4 proofs of each in-scope function and file bugs with Foundry PoCs, keeping everything in the folder (.formal/, formal/, audit/, test/) and nothing on GitHub. Use when a person wants formal proofs or an audit of their contracts, or asks how the swarm works, what it costs or how to stop and resume it.",
   body: `# Run the local swarm
 
-> **${STATUS}**
+> **${STATUS_LINE}**
 
 The swarm runs in the Formal Mind desktop app, on a folder on your computer. The code, \`lake\` and \`forge\` stay on the machine; only the model calls leave it. It opens no issues or pull requests, sets no labels, comments nowhere and pushes nothing: its tools cannot run git.
 
@@ -81,7 +76,7 @@ const ONBOARD: Skill = {
     "Get a Solidity repository into Formal Mind: plan it without signing in (POST /api/onboarding/plan), then, signed in with GitHub, add it as a project (a local folder in the desktop app, or a remote GitHub repository on formal.team) to read its code, audits (Bugs) and theorem coverage (Proofs). Optionally set up specs: a <owner>/<name>-proofs repository where Formal Mind writes the Lean specs as commits land. Use when helping a person start with Formal Mind on their contracts.",
   body: `# Onboard a repository
 
-> **${STATUS}**
+> **${STATUS_LINE}**
 
 A project is a repository with four tabs: **Code** (read it, with LSP navigation), **Bugs** (every audit report and finding, with status, PoC and the report's section), **Proofs** (the theorems so far, per Solidity function) and the **Swarm** that does the work. Planning is open to anyone; the rest needs a GitHub sign-in.
 
@@ -129,7 +124,7 @@ const RESULTS: Skill = {
     "Read what Formal Mind left in a repository: the swarm's plan and progress in .formal/, Lean proofs in formal/, audit reports and findings in the formalmind.audit/v1 JSON format (audit/*.audit.json, including Formal Mind's own formal-mind.audit.json) with their Foundry PoCs under test/. Use when working in a repository where Formal Mind ran, to answer what is proved, which findings are open, or to write an audit file the Bugs page can show.",
   body: `# Read Formal Mind's results in a repository
 
-> **${STATUS}**
+> **${STATUS_LINE}**
 
 Formal Mind keeps its state in the repository's own files, so an agent with the checkout can read all of it.
 
@@ -170,7 +165,7 @@ const CONNECT: Skill = {
     "Add Formal Mind to Claude, ChatGPT, Cursor or any remote-MCP client as a connector at formal.team/mcp/account, sign in with GitHub, and ask about or act on your own account: your projects, what the swarm spent today, your credits, the swarm's state, plan a repository, start the swarm on it. Also how an agent gets an OAuth token for the account by hand (RFC 8414 metadata, dynamic registration, PKCE, refresh, revoke). Use when a person wants their AI assistant to see or run their Formal Mind swarm.",
   body: `# Connect Formal Mind as an MCP connector
 
-> **${STATUS}**
+> **${STATUS_LINE}**
 
 Formal Mind runs an OAuth 2.0 authorization server at ${ORIGIN} and an account MCP server at ${ORIGIN}/mcp/account. A connector added in an MCP client discovers the authorization server by itself, registers, sends you to sign in with GitHub, shows a consent page naming the client and the scopes, and from then on holds a token for your account (an hour at a time, renewed until you revoke it). Nothing here changes how you sign in to formal.team; the public swarm record stays readable without any of this at ${ORIGIN}/mcp.
 
