@@ -1659,6 +1659,22 @@ export function SwarmPanel({ folder, name, scan, bridge, session, file: openPath
 		codeBox.current?.querySelector(`[data-line="${f.line - 1}"]`)?.scrollIntoView({ block: "center", behavior: "smooth" });
 	};
 	const leanEditor = isTauri() && proofsOn && !!file && file.path.endsWith(".lean");
+	/** Opens a function's generated Lean definition: its `def Contract.function` line, in formal/Generated/ first. */
+	const leanTexts = useRef(new Map<string, string>());
+	useEffect(() => leanTexts.current.clear(), [folder]);
+	const openLeanDef = async (f: FormalFn) => {
+		const at = new RegExp(`^(?:[a-z]+ )*def ${f.lean.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?:\\s|$)`, "m");
+		const files = tree.filter((p) => p.endsWith(".lean")).sort((a, b) => Number(!/(^|\/)Generated\//.test(a)) - Number(!/(^|\/)Generated\//.test(b)));
+		for (const path of files) {
+			let text = leanTexts.current.get(path);
+			if (text === undefined) {
+				text = await invoke<string>("folder_read", { folder, path }).catch(() => "");
+				leanTexts.current.set(path, text);
+			}
+			const m = at.exec(text);
+			if (m) return view(path, text.slice(0, m.index).split("\n").length);
+		}
+	};
 
 	// Where you've been in Code, as a browser's history: a list of places with a cursor in it. Opening a file, a line
 	// or a function adds a place after the cursor (dropping the ones ahead of it); Back and Forward move the cursor.
@@ -2562,7 +2578,7 @@ export function SwarmPanel({ folder, name, scan, bridge, session, file: openPath
 										</div>
 									) : null}
 								</div>
-								{proofsOn && !file.url && file.path.endsWith(".sol") ? <ProofRail key={file.path} proofs={solProofs} selected={proofFn} onSelect={pickProof} onOpenFile={view} /> : null}
+								{proofsOn && !file.url && file.path.endsWith(".sol") ? <ProofRail key={file.path} proofs={solProofs} selected={proofFn} onSelect={pickProof} onOpenFile={view} onOpenDef={(f) => void openLeanDef(f)} /> : null}
 								</div>}
 							</>
 						) : (

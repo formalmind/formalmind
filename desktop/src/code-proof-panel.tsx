@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { ChevronRight, FileCode2, Loader2, RotateCw, SquareArrowOutUpRight } from "lucide-react";
+import { FileCode2, Loader2, RotateCw, SquareArrowOutUpRight } from "lucide-react";
 import { FileView, fnStatus } from "./swarm-panel";
 import type { Bridge, Formal, FormalFn, GutterMark } from "./swarm-panel";
 import { mappedSources } from "./proof-mapping";
@@ -52,13 +52,11 @@ const section = "px-3 pb-1 pt-3 font-mono text-[10px] uppercase tracking-wider t
  * for the one picked, its Lean model and the theorems that name it. Opening a theorem takes Code to the Lean file at
  * that line (the Mac app opens it in the Lean editor, with live goals).
  */
-export function ProofRail({ proofs, selected, onSelect, onOpenFile }: { proofs: ReturnType<typeof useFileProofs>; selected: string | null; onSelect: (f: FormalFn) => void; onOpenFile: (path: string, line?: number) => void }) {
+export function ProofRail({ proofs, selected, onSelect, onOpenFile, onOpenDef }: { proofs: ReturnType<typeof useFileProofs>; selected: string | null; onSelect: (f: FormalFn) => void; onOpenFile: (path: string, line?: number) => void; /** Opens the function's generated Lean definition (in formal/Generated/). */ onOpenDef?: (f: FormalFn) => void }) {
 	const { data, error, functions, loading, refresh } = proofs;
 	const fn = functions.find((f) => fnKey(f) === selected) ?? functions[0] ?? null;
-	const [showModel, setShowModel] = useState(false);
 	const [allTheorems, setAllTheorems] = useState(false);
 	useEffect(() => {
-		setShowModel(false);
 		setAllTheorems(false);
 	}, [selected]);
 	const counts = data ? functions.map((f) => fnStatus(f, data.theorems).key) : [];
@@ -136,7 +134,13 @@ export function ProofRail({ proofs, selected, onSelect, onOpenFile }: { proofs: 
 			{fn && status && data ? (
 				<div className="min-h-0 flex-1 overflow-y-auto pb-3">
 					<div className="flex flex-wrap items-center gap-2 px-3 pt-3">
-						<span className="font-mono text-[13px] font-medium">{fn.name}</span>
+						{onOpenDef && !fn.why ? (
+							<button type="button" onClick={() => onOpenDef(fn)} title="Open its Lean definition" className="text-left font-mono text-[13px] font-medium underline-offset-2 hover:underline">
+								{fn.name}
+							</button>
+						) : (
+							<span className="font-mono text-[13px] font-medium">{fn.name}</span>
+						)}
 						<span className={`inline-flex items-center gap-1.5 rounded-full bg-muted px-2 py-0.5 text-[11px] ${status.text}`}>
 							<span className={`size-1.5 rounded-full ${status.dot}`} />
 							{status.label}
@@ -151,11 +155,15 @@ export function ProofRail({ proofs, selected, onSelect, onOpenFile }: { proofs: 
 						</div>
 					) : (
 						<>
-							<button type="button" onClick={() => setShowModel((v) => !v)} aria-expanded={showModel} className={`${section} flex w-full items-center gap-1 text-left hover:text-foreground`}>
-								<ChevronRight className={`size-3 transition-transform ${showModel ? "rotate-90" : ""}`} />
-								Lean model <span className="normal-case tracking-normal">· {fn.lean}</span>
-							</button>
-							{showModel && fn.def ? (
+							{onOpenDef ? (
+								<button type="button" onClick={() => onOpenDef(fn)} title="Open its Lean definition" className={`${section} flex items-center gap-1 text-left hover:text-foreground`}>
+									Lean model
+									<SquareArrowOutUpRight className="size-3" />
+								</button>
+							) : (
+								<p className={section}>Lean model</p>
+							)}
+							{fn.def ? (
 								<div className="mx-2 max-h-72 overflow-auto rounded-lg border bg-muted/30">
 									<FileView path="f.lean" text={fn.def.trimEnd()} />
 								</div>
