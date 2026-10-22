@@ -1,0 +1,115 @@
+{
+  "scope": "Reduced setExecutor fixture; three concrete calls per variant",
+  "proofScope": "One concrete permission example; not a universal refinement theorem",
+  "proofSha256": "610b342b66a7c753c619cc9d17b88d89f242bbea6ce846b57994575f669b60bc",
+  "sourceSha256": "6fd1b4dbbd6f668082dbbcb3b2b5b3d50327959f9092580b9cef40d0ed8f1000",
+  "revision": "16843fdd947b750d9690521d42eefb8be31dbe21",
+  "toolchain": "leanprover/lean4:v4.28.0",
+  "solc": "solc, the solidity compiler commandline interface\nVersion: 0.8.35+commit.47b9dedd.Darwin.appleclang",
+  "variants": [
+    {
+      "name": "baseline",
+      "sourceSha256": "6fd1b4dbbd6f668082dbbcb3b2b5b3d50327959f9092580b9cef40d0ed8f1000",
+      "parity": true,
+      "permissionMatches": true,
+      "proofPassed": false,
+      "timings": {
+        "import": 0.112,
+        "execution": 12.057,
+        "evm": 0.533,
+        "proof": 6.391
+      },
+      "observations": {
+        "solidcore": {
+          "22:1": "1|1|10525782300712245005017586020204109119231950329210898193204832738717741787247,1,11,22|0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1",
+          "22:0": "0|1|10525782300712245005017586020204109119231950329210898193204832738717741787247,1,11,22|0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0",
+          "0:1": "1|1|10525782300712245005017586020204109119231950329210898193204832738717741787247,1,11,0|0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1"
+        },
+        "evm": {
+          "22:1": "1|1|10525782300712245005017586020204109119231950329210898193204832738717741787247,1,11,22|0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1",
+          "22:0": "0|1|10525782300712245005017586020204109119231950329210898193204832738717741787247,1,11,22|0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0",
+          "0:1": "1|1|10525782300712245005017586020204109119231950329210898193204832738717741787247,1,11,0|0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1"
+        }
+      },
+      "proofDiagnostic": "error: Tactic `decide` failed for proposition\n  preservesPermission 22 1 = true\nbecause its `Decidable` instance\n  instDecidableEqBool (preservesPermission 22 1) true\ndid not reduce to `isTrue` or `isFalse`.\n\nAfter unfolding the instances `decEq`, `instDecidableEqBitVec`, `instDecidableEqBool`, `instDecidableEqFin`, `instDecidableEqList`, `instDecidableEqNat`, `instDecidableEqString`, `instDecidableEqUInt8`, `instDecidableOr`, `BitVec.decEq`, `Bool.decEq`, `List.hasDecEq`, `Nat.decEq`, `Nat.decLe`, `Nat.decLt`, `String.decEq`, and `UInt8.decEq`, reduction got stuck at the `Decidable` instance\n  match preservesPermission 22 1, true with\n  | false, false => isTrue \u22ef\n  | false, true => isFalse \u22ef\n  | true, false => isFalse \u22ef\n  | true, true => isTrue \u22ef\n'permission_example' depends on axioms: [propext, sorryAx, Classical.choice, Quot.sound]\n"
+    },
+    {
+      "name": "reordered",
+      "sourceSha256": "1c3969753c50044f4d8cff9bdefb366ef647f754262b456b078e2adb62485ae5",
+      "parity": true,
+      "permissionMatches": true,
+      "proofPassed": false,
+      "timings": {
+        "import": 0.106,
+        "execution": 5.254,
+        "evm": 0.473,
+        "proof": 5.682
+      },
+      "observations": {
+        "solidcore": {
+          "22:1": "1|1|10525782300712245005017586020204109119231950329210898193204832738717741787247,1,11,22|0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1",
+          "22:0": "0|1|10525782300712245005017586020204109119231950329210898193204832738717741787247,1,11,22|0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0",
+          "0:1": "1|1|10525782300712245005017586020204109119231950329210898193204832738717741787247,1,11,0|0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1"
+        },
+        "evm": {
+          "22:1": "1|1|10525782300712245005017586020204109119231950329210898193204832738717741787247,1,11,22|0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1",
+          "22:0": "0|1|10525782300712245005017586020204109119231950329210898193204832738717741787247,1,11,22|0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0",
+          "0:1": "1|1|10525782300712245005017586020204109119231950329210898193204832738717741787247,1,11,0|0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1"
+        }
+      },
+      "proofDiagnostic": "error: Tactic `decide` failed for proposition\n  preservesPermission 22 1 = true\nbecause its `Decidable` instance\n  instDecidableEqBool (preservesPermission 22 1) true\ndid not reduce to `isTrue` or `isFalse`.\n\nAfter unfolding the instances `decEq`, `instDecidableEqBitVec`, `instDecidableEqBool`, `instDecidableEqFin`, `instDecidableEqList`, `instDecidableEqNat`, `instDecidableEqString`, `instDecidableEqUInt8`, `instDecidableOr`, `BitVec.decEq`, `Bool.decEq`, `List.hasDecEq`, `Nat.decEq`, `Nat.decLe`, `Nat.decLt`, `String.decEq`, and `UInt8.decEq`, reduction got stuck at the `Decidable` instance\n  match preservesPermission 22 1, true with\n  | false, false => isTrue \u22ef\n  | false, true => isFalse \u22ef\n  | true, false => isFalse \u22ef\n  | true, true => isTrue \u22ef\n'permission_example' depends on axioms: [propext, sorryAx, Classical.choice, Quot.sound]\n"
+    },
+    {
+      "name": "guarded",
+      "sourceSha256": "b7e4bec6e8b6f99337818c58a8f45fa7b5b69cdb1876f547e015738fb44ef1db",
+      "parity": true,
+      "permissionMatches": true,
+      "proofPassed": false,
+      "timings": {
+        "import": 0.123,
+        "execution": 5.632,
+        "evm": 0.462,
+        "proof": 5.793
+      },
+      "observations": {
+        "solidcore": {
+          "22:1": "1|1|10525782300712245005017586020204109119231950329210898193204832738717741787247,1,11,22|0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1",
+          "22:0": "0|1|10525782300712245005017586020204109119231950329210898193204832738717741787247,1,11,22|0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0",
+          "0:1": "revert:217,46,35,61"
+        },
+        "evm": {
+          "22:1": "1|1|10525782300712245005017586020204109119231950329210898193204832738717741787247,1,11,22|0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1",
+          "22:0": "0|1|10525782300712245005017586020204109119231950329210898193204832738717741787247,1,11,22|0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0",
+          "0:1": "revert:217,46,35,61"
+        }
+      },
+      "proofDiagnostic": "error: Tactic `decide` failed for proposition\n  preservesPermission 22 1 = true\nbecause its `Decidable` instance\n  instDecidableEqBool (preservesPermission 22 1) true\ndid not reduce to `isTrue` or `isFalse`.\n\nAfter unfolding the instances `decEq`, `instDecidableEqBitVec`, `instDecidableEqBool`, `instDecidableEqFin`, `instDecidableEqList`, `instDecidableEqNat`, `instDecidableEqString`, `instDecidableEqUInt8`, `instDecidableOr`, `BitVec.decEq`, `Bool.decEq`, `List.hasDecEq`, `Nat.decEq`, `Nat.decLe`, `Nat.decLt`, `String.decEq`, and `UInt8.decEq`, reduction got stuck at the `Decidable` instance\n  match preservesPermission 22 1, true with\n  | false, false => isTrue \u22ef\n  | false, true => isFalse \u22ef\n  | true, false => isFalse \u22ef\n  | true, true => isTrue \u22ef\n'permission_example' depends on axioms: [propext, sorryAx, Classical.choice, Quot.sound]\n"
+    },
+    {
+      "name": "broken",
+      "sourceSha256": "3c122030c233a6f200b36a37dfc65c151df167956602a5a9cef31c051a36cbd7",
+      "parity": true,
+      "permissionMatches": false,
+      "proofPassed": false,
+      "timings": {
+        "import": 0.122,
+        "execution": 5.292,
+        "evm": 0.441,
+        "proof": 5.63
+      },
+      "observations": {
+        "solidcore": {
+          "22:1": "0|1|10525782300712245005017586020204109119231950329210898193204832738717741787247,1,11,22|0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1",
+          "22:0": "1|1|10525782300712245005017586020204109119231950329210898193204832738717741787247,1,11,22|0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0",
+          "0:1": "0|1|10525782300712245005017586020204109119231950329210898193204832738717741787247,1,11,0|0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1"
+        },
+        "evm": {
+          "22:1": "0|1|10525782300712245005017586020204109119231950329210898193204832738717741787247,1,11,22|0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1",
+          "22:0": "1|1|10525782300712245005017586020204109119231950329210898193204832738717741787247,1,11,22|0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0",
+          "0:1": "0|1|10525782300712245005017586020204109119231950329210898193204832738717741787247,1,11,0|0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1"
+        }
+      },
+      "proofDiagnostic": "error: Tactic `decide` failed for proposition\n  preservesPermission 22 1 = true\nbecause its `Decidable` instance\n  instDecidableEqBool (preservesPermission 22 1) true\ndid not reduce to `isTrue` or `isFalse`.\n\nAfter unfolding the instances `decEq`, `instDecidableEqBitVec`, `instDecidableEqBool`, `instDecidableEqFin`, `instDecidableEqList`, `instDecidableEqNat`, `instDecidableEqString`, `instDecidableEqUInt8`, `instDecidableOr`, `BitVec.decEq`, `Bool.decEq`, `List.hasDecEq`, `Nat.decEq`, `Nat.decLe`, `Nat.decLt`, `String.decEq`, and `UInt8.decEq`, reduction got stuck at the `Decidable` instance\n  match preservesPermission 22 1, true with\n  | false, false => isTrue \u22ef\n  | false, true => isFalse \u22ef\n  | true, false => isFalse \u22ef\n  | true, true => isTrue \u22ef\n'permission_example' depends on axioms: [propext, sorryAx, Classical.choice, Quot.sound]\n"
+    }
+  ]
+}

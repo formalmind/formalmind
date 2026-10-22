@@ -1,0 +1,5 @@
+name = "formal_mind_proof_demo"
+version = "0.1.0"
+
+[[lean_lib]]
+name = "Permissions"
