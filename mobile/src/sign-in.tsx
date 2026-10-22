@@ -30,8 +30,9 @@ export function SignIn({ onCode, onSignedIn, error }: { onCode: (code: string) =
 	};
 	return (
 		<main className="fm-safe-top fm-safe-bottom relative flex min-h-dvh flex-col justify-end bg-[radial-gradient(ellipse_at_top,#151a24_0%,#08090b_60%)] px-6 pb-10 text-white">
-			<div className="mb-auto pt-16">
-				<LogoMark size={44} />
+			{/* The F alone, large, in the middle of the space above the words. */}
+			<div className="grid flex-1 place-items-center py-10">
+				<LogoMark bare shimmer size={132} className="drop-shadow-[0_18px_40px_rgb(0_0_0/0.6)]" />
 			</div>
 			<h1 className="fm-rise font-display text-[44px] leading-[1.05]">
 				<span className="text-white/45">Your proofs and bugs,</span>
