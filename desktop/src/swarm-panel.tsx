@@ -1,4 +1,8 @@
 import { MarkGithubIcon } from "@primer/octicons-react";
+import { isTauri } from "@tauri-apps/api/core";
+import { SemanticsPanel } from "./semantics-panel";
+import { ProofWorkspace } from "./proof-workspace";
+import { CodeProofPanel } from "./code-proof-panel";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { NvimTerminal } from "./nvim-terminal";
@@ -1306,7 +1310,18 @@ function CoverageView({ data, scripts, onOpenFile }: { data: Formal; scripts: Sc
 }
 
 /** Audit mode: what's been established for the contract picked here, as Lean coverage. */
-export function AuditView({ folder, scan, invoke, onOpenFile, reload = 0 }: { folder: string; scan: Scan | null; invoke: Bridge["invoke"]; onOpenFile: (path: string) => void; reload?: number }) {
+export function AuditView(props: { folder: string; scan: Scan | null; invoke: Bridge["invoke"]; onOpenFile: (path: string) => void; reload?: number }) {
+	const [tab, setTab] = useState<"workspace" | "coverage" | "experiment">("workspace");
+	if (!isTauri()) return <CoverageAuditView {...props} />;
+	return <>
+		<div role="tablist" aria-label="Proof views" className="flex shrink-0 gap-1 p-1 text-xs">
+			{(["workspace", "coverage", "experiment"] as const).map(t => <button key={t} role="tab" aria-selected={tab === t} className={`rounded-md px-3 py-2 ${tab === t ? "bg-background shadow-sm" : "text-muted-foreground hover:bg-background/50"}`} onClick={() => setTab(t)}>{t === "workspace" ? "Proof workspace" : t === "coverage" ? "Solidity coverage" : "Semantics experiment"}</button>)}
+		</div>
+		{tab === "workspace" ? <ProofWorkspace key={props.folder} {...props} /> : tab === "coverage" ? <CoverageAuditView {...props} /> : <div className="min-h-0 flex-1 overflow-auto"><SemanticsPanel invoke={props.invoke} /></div>}
+	</>;
+}
+
+function CoverageAuditView({ folder, scan, invoke, onOpenFile, reload = 0 }: { folder: string; scan: Scan | null; invoke: Bridge["invoke"]; onOpenFile: (path: string) => void; reload?: number }) {
 	// Files found to hold no deployable contract (libraries, interfaces, types): left out of the picker once seen.
 	const [noModel, setNoModel] = useState<string[]>([]);
 	const sources = (scan?.solidity ?? []).filter((f) => !f.endsWith(".t.sol") && !f.endsWith(".s.sol") && !noModel.includes(f));
@@ -1441,6 +1456,8 @@ export function SwarmPanel({ folder, name, scan, bridge, session, file: openPath
 	const [openItem, setOpenItem] = useState<number | null>(null);
 	// `url`: a PDF, shown in the browser's own viewer instead of as text.
 	const [file, setFile] = useState<{ path: string; text: string; url?: string } | null>(null);
+	const [proofTools, setProofTools] = useState(true);
+	const [codeSpecId, setCodeSpecId] = useState("");
 	const [planOpen, setPlanOpen] = useState(false);
 	const [chatOpen, setChatOpen] = useState(() => store.get("fm:chat-open") !== "0");
 	// How many agent messages you had seen when the chat was folded; the button counts the ones since.
@@ -2303,18 +2320,20 @@ export function SwarmPanel({ folder, name, scan, bridge, session, file: openPath
 										) : null}
 										<button
 											type="button"
-											onClick={() => setVimMode(!vim)}
+											onClick={() => { setVimMode(!vim); if (!vim && file.path.endsWith(".lean")) setProofTools(false); }}
 											aria-pressed={vim}
 											title={vim ? (slot ? "Vim mode is on: Neovim runs here. Turn it off" : "Vim keys are on. Turn them off") : slot ? "Open in Neovim (Vim mode)" : "Vim keys"}
 											className={`inline-flex h-6 items-center rounded-md px-1.5 font-mono text-[11px] font-medium ${vim ? "bg-emerald-500/15 text-emerald-700 dark:text-emerald-400" : "text-muted-foreground hover:bg-muted hover:text-foreground"}`}
 										>
 											vim
 										</button>
+										{isTauri() && /\.(sol|lean)$/.test(file.path) && <button type="button" aria-pressed={proofTools} onClick={() => setProofTools(v => !v)} className="rounded border px-2 py-0.5 text-[11px]">Proof tools</button>}
 										<CopyButton text={file.text} label="Copy the file" />
 									</span>
 								</div>
+								{isTauri() && proofTools && file.path.endsWith(".lean") ? <ProofWorkspace key={`${folder}:${file.path}`} folder={folder} scan={scan} invoke={invoke} initialPath={file.path} initialSpecId={codeSpecId} initialLine={markLine ?? 1} onNavigate={(path, id) => { setCodeSpecId(id ?? ""); view(path); }} onOpenFile={view} /> : <div className="flex min-h-0 flex-1">
 								<div
-									className={`min-h-0 flex-1 overflow-auto ${navigable(file.path) ? "[&_[data-code]]:cursor-text" : ""}`}
+									className={`min-w-0 min-h-0 flex-1 overflow-auto ${navigable(file.path) ? "[&_[data-code]]:cursor-text" : ""}`}
 									ref={codeBox}
 									tabIndex={vim && !slot ? 0 : undefined}
 									onKeyDown={vimKey}
@@ -2387,6 +2406,8 @@ export function SwarmPanel({ folder, name, scan, bridge, session, file: openPath
 										</div>
 									) : null}
 								</div>
+								{isTauri() && proofTools && file.path.endsWith(".sol") && <CodeProofPanel key={`${folder}:${file.path}`} folder={folder} path={file.path} invoke={invoke} onOpenFile={view} onOpenProof={(path, id, line) => { setCodeSpecId(id); view(path, line); }} />}
+								</div>}
 							</>
 						) : (
 							<p className="m-auto text-sm text-muted-foreground">Pick a file in the sidebar.</p>
