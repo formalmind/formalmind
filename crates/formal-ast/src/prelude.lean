@@ -47,11 +47,15 @@ def mulw (bits a b : Nat) : Nat := (a * b) % 2 ^ bits
 def divw (a b : Nat) : Nat := if b = 0 then 0 else a / b
 def shlw (bits a b : Nat) : Nat := (a <<< b) % 2 ^ bits
 
-/-- OpenZeppelin `Math.mulDiv(x, y, d)`: floor, reverts when `d = 0` or the result doesn't fit 256 bits. -/
+/-- OpenZeppelin 5.0 `Math.mulDiv(x, y, d)`: floor, reverts when `d = 0` or the result doesn't fit
+256 bits. Which error depends on the 512-bit product: when it fits one word (`prod1 = 0`) the code
+divides, so `d = 0` panics `0x12`; otherwise `d ≤ prod1` is checked first and reverts
+`MathOverflowedMulDiv` (for `d > 0` that is exactly "the result overflows"), `d = 0` included. -/
 def mulDivFloor (x y d : Nat) : M σ Nat :=
-  if d = 0 then throw (panic "0x12")
-  else if x * y / d < 2 ^ 256 then pure (x * y / d)
-  else throw ⟨"MathOverflowedMulDiv"⟩
+  if x * y < 2 ^ 256 then
+    if d = 0 then throw (panic "0x12") else pure (x * y / d)
+  else if d ≤ x * y / 2 ^ 256 then throw ⟨"MathOverflowedMulDiv"⟩
+  else pure (x * y / d)
 
 /-- Rounding up: the floor result plus one when there is a remainder (checked). -/
 def mulDivCeil (x y d : Nat) : M σ Nat := do
