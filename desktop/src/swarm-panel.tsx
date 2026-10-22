@@ -34,6 +34,8 @@ export type Bridge = {
 	apiBase: () => string;
 };
 
+import type { Diagnostic } from "@/lib/ast/run";
+
 export type Ev = { folder?: string; run: string; kind: "start" | "status" | "context" | "say" | "tool" | "result" | "you" | "bug" | "plan" | "done" | "error"; role: string; item: string; text: string; spent: number };
 type Item = { index: number; mark: string; text: string };
 export type Bug = { file: string; title: string; body: string };
@@ -184,7 +186,7 @@ export function AgentMessage({ e, onBug }: { e: Ev; onBug: () => void }) {
  * and steer the swarm, the plan, and what each agent says as it works).
  */
 /** A whole file, highlighted by its extension, with a line-number gutter. */
-export function FileView({ path, text, big, start = 1, mark, cursor }: { path: string; text: string; big?: boolean; start?: number; mark?: number | null; cursor?: Cursor | null }) {
+export function FileView({ path, text, big, start = 1, mark, cursor, diagnostics }: { path: string; text: string; big?: boolean; start?: number; mark?: number | null; cursor?: Cursor | null; /** solc's errors and warnings in this file: a wavy underline, the message under the line. */ diagnostics?: Diagnostic[] }) {
 	const lines = useHighlightedCode(text, EXT[path.split(".").pop() ?? ""] ?? "text");
 	const marked = useRef<HTMLSpanElement | null>(null);
 	useEffect(() => {
@@ -201,6 +203,22 @@ export function FileView({ path, text, big, start = 1, mark, cursor }: { path: s
 					<span className="mr-3 inline-block w-9 select-none text-right text-muted-foreground/60">{i + start}</span>
 					<span data-code>{line}</span>
 					{cursor?.line === i ? <span ref={caret} data-vim-cursor className="pointer-events-none absolute top-0 h-full w-[1ch] bg-foreground/35" style={{ left: `calc(3rem + ${cursor.col}ch)` }} /> : null}
+					{diagnostics
+						?.filter((d) => d.line - start === i)
+						.map((d, k) => {
+							// To the end of its range on this line (a range over several lines: to the line's end).
+							const width = d.endLine === d.line ? Math.max(1, d.endCol - d.col) : Math.max(1, (text.split("\n")[i]?.length ?? d.col) - d.col + 1);
+							return (
+								<span key={`u${k}`} className={`pointer-events-none absolute top-[calc(1lh-3px)] h-[3px] ${d.severity === "error" ? "fm-squiggle-error" : "fm-squiggle-warning"}`} style={{ left: `calc(3rem + ${d.col - 1}ch)`, width: `${width}ch` }} />
+							);
+						})}
+					{diagnostics
+						?.filter((d) => d.line - start === i)
+						.map((d, k) => (
+							<span key={`m${k}`} className={`block whitespace-pre-wrap py-0.5 pl-12 font-sans text-[11px] leading-4 ${d.severity === "error" ? "text-red-600 dark:text-red-400" : "text-amber-700 dark:text-amber-400"}`}>
+								{d.severity === "error" ? "Error" : "Warning"}: {d.message}
+							</span>
+						))}
 				</span>
 			))}
 		</pre>

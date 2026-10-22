@@ -10,6 +10,7 @@ import { BellLink } from "./notifications";
 import { ChatMarkdown } from "@/components/chat-markdown";
 import { cachedTree, syncRepo } from "@/lib/browser-git";
 import { FileView } from "@/desktop/src/swarm-panel";
+import type { Diagnostic } from "@/lib/ast/run";
 import { ProofsExplorer } from "./proofs";
 import { BugsExplorer } from "./bugs";
 import { ChatsIcon, CodeSkeleton, FloatingBar, ListSkeleton, TopBar } from "./bar";
@@ -76,6 +77,26 @@ function MarkdownFile({ path, text, bridge }: { path: string; text: string; brid
 	);
 }
 
+/**
+ * A Solidity file with solc's errors and warnings underlined: the same compile the Proofs tab runs (in the browser,
+ * cached per commit), asked for this file.
+ */
+function SolidityFile({ path, text, bridge }: { path: string; text: string; bridge: Bridge }) {
+	const [diagnostics, setDiagnostics] = useState<Diagnostic[]>([]);
+	useEffect(() => {
+		let live = true;
+		setDiagnostics([]);
+		bridge.invoke<Diagnostic[]>("ast_diagnostics", { entry: path }).then(
+			(all) => live && setDiagnostics(all.filter((d) => d.file === path)),
+			() => undefined,
+		);
+		return () => {
+			live = false;
+		};
+	}, [bridge, path]);
+	return <FileView path={path} text={text} diagnostics={diagnostics} />;
+}
+
 /** Code: browse the repository's folders, open a file. */
 function CodeTab({ files, bridge, dir, file, open }: { files: string[] | null; bridge: Bridge; dir: string; file: string | null; open: (next: { dir?: string; file?: string | null }) => void }) {
 	const [text, setText] = useState<{ path: string; text: string } | { path: string; error: string } | null>(null);
@@ -104,6 +125,8 @@ function CodeTab({ files, bridge, dir, file, open }: { files: string[] | null; b
 					<p className="p-4 text-sm text-red-600">{text.error}</p>
 				) : /\.(md|markdown)$/i.test(file) ? (
 					<MarkdownFile path={file} text={text.text} bridge={bridge} />
+				) : /\.sol$/i.test(file) ? (
+					<SolidityFile path={file} text={text.text} bridge={bridge} />
 				) : (
 					<FileView path={file} text={text.text} />
 				)}

@@ -22,7 +22,10 @@ export type Snapshot = {
 	gitlinks: { path: string; oid: string }[];
 };
 
-export type Command = { cmd: "ast_units" | "ast_slice" | "ast_formal" | "ast_scripts"; entry?: string; function?: string };
+export type Command = { cmd: "ast_units" | "ast_slice" | "ast_formal" | "ast_scripts" | "ast_diagnostics"; entry?: string; function?: string };
+
+/** One of solc's errors or warnings, placed in a file by line and column (1-based; `end*` is exclusive). */
+export type Diagnostic = { file: string; line: number; col: number; endLine: number; endCol: number; severity: "error" | "warning" | "info"; message: string };
 
 /** formal-ast's wasm exports (lib/formal-ast-wasm). */
 export type Wasm = {
@@ -153,6 +156,26 @@ export function makeRunner(wasm: Wasm, kv: Kv, net: { fetch: (url: string, init?
 		return errors.length ? `solc failed to compile ${entry}:\n${errors.map((e) => (e.formattedMessage ?? "").trim()).join("\n\n")}` : null;
 	};
 
+	/** solc's errors and warnings as Diagnostics. Its offsets count UTF-8 bytes; lines and columns count characters. */
+	const diagnosticsOf = (p: Project, out: string): Diagnostic[] => {
+		type E = { severity: string; message?: string; formattedMessage?: string; sourceLocation?: { file: string; start: number; end: number } };
+		const where = (text: string, byte: number) => {
+			const before = new TextDecoder().decode(new TextEncoder().encode(text).slice(0, Math.max(0, byte)));
+			const lines = before.split("\n");
+			return { line: lines.length, col: lines[lines.length - 1].length + 1 };
+		};
+		return ((JSON.parse(out) as { errors?: E[] }).errors ?? []).flatMap((e) => {
+			const loc = e.sourceLocation;
+			const file = loc?.file?.replace(/^\.\//, "");
+			const text = file ? p.text[file] : undefined;
+			if (!loc || !file || text === undefined || loc.start < 0) return [];
+			const a = where(text, loc.start);
+			const b = where(text, Math.max(loc.end, loc.start));
+			const severity = e.severity === "error" ? "error" : e.severity === "warning" ? "warning" : "info";
+			return [{ file, line: a.line, col: a.col, endLine: b.line, endCol: b.col, severity, message: (e.message ?? e.formattedMessage ?? "").trim() } as Diagnostic];
+		});
+	};
+
 	/** Formal and units requests run before the scripts' compiles, which wait while one is in progress. */
 	let urgent = 0;
 	const yieldTo = async (prio: "urgent" | "background") => {
@@ -252,7 +275,16 @@ export function makeRunner(wasm: Wasm, kv: Kv, net: { fetch: (url: string, init?
 			try {
 				const p = await project(s);
 				keep = !p.partial;
-				if (c.cmd === "ast_scripts") {
+				if (c.cmd === "ast_diagnostics") {
+					// The checks solc makes (types, imports, warnings) without its AST: as fast as a compile gets.
+					const { input, solc } = await prepare(p, entry);
+					await gather(p, solc, input, entry, "urgent");
+					const out = solc(JSON.stringify({ ...input, settings: { ...input.settings, outputSelection: {} } }), (name) => {
+						const path = name.replace(/^\.\//, "");
+						return path in p.text ? { contents: p.text[path] } : { error: `File not found: ${path}` };
+					});
+					result = { ok: diagnosticsOf(p, out) };
+				} else if (c.cmd === "ast_scripts") {
 					const { outputs, byScript } = await compileScripts(p, JSON.parse(wasm.script_files(filesJson(p))) as string[]);
 					result = { ok: JSON.parse(wasm.scripts(filesJson(p), `[${outputs.map((o) => JSON.stringify(o)).join(",")}]`, JSON.stringify(byScript))) };
 				} else {
@@ -261,7 +293,7 @@ export function makeRunner(wasm: Wasm, kv: Kv, net: { fetch: (url: string, init?
 				}
 				// formal-ast has no clock in wasm; the time is the whole run's, solc included.
 				const ok = result.ok as { ms?: number };
-				if (c.cmd !== "ast_scripts" && ok && typeof ok === "object") ok.ms = Math.round(performance.now() - started);
+				if (c.cmd !== "ast_scripts" && c.cmd !== "ast_diagnostics" && ok && typeof ok === "object") ok.ms = Math.round(performance.now() - started);
 			} catch (e) {
 				if (e instanceof Offline) throw e.message;
 				result = { error: String(e) };

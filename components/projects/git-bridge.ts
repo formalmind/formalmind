@@ -65,7 +65,8 @@ export function makeGitBridge(repo: string): Bridge {
 				case "ast_units":
 				case "ast_slice":
 				case "ast_formal":
-				case "ast_scripts": {
+				case "ast_scripts":
+				case "ast_diagnostics": {
 					await ready();
 					// solc and formal-ast load only here, the first time the Proofs tab asks.
 					const { runAst } = await import("@/lib/browser-ast");
