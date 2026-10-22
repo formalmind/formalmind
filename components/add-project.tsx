@@ -88,7 +88,21 @@ export function AddProjectCard({ onLocal, onCancel, onDone, initialRepo, remoteO
 						className="flex items-center gap-2 rounded-full border bg-background p-1 pl-3.5 focus-within:border-foreground/30"
 					>
 						<MarkGithubIcon size={14} className="shrink-0 text-muted-foreground" />
-						<input autoFocus value={text} onChange={(e) => setText(e.target.value)} placeholder="github.com/owner/repo" aria-label="GitHub repository" className="min-w-0 flex-1 bg-transparent outline-none placeholder:text-muted-foreground" />
+						{/* Only owner/repo to type: github.com/ is already there (a pasted link still works). */}
+						<span className="shrink-0 text-muted-foreground">github.com/</span>
+						<input
+							autoFocus
+							value={text}
+							onChange={(e) => setText(e.target.value.replace(/^\s*(?:https?:\/\/)?(?:www\.)?github\.com\//i, ""))}
+							placeholder="owner/repo"
+							aria-label="GitHub repository, as owner/repo"
+							autoCapitalize="off"
+							autoCorrect="off"
+							spellCheck={false}
+							inputMode="url"
+							enterKeyHint="go"
+							className="-ml-2 min-w-0 flex-1 bg-transparent outline-none placeholder:text-muted-foreground"
+						/>
 						<button type="submit" disabled={!repo || adding.busy} className="btn-dark inline-flex h-7 items-center gap-1 px-3 text-[12px] disabled:opacity-50">
 							{adding.busy ? <Loader2 className="size-3.5 animate-spin" /> : null}
 							Add {adding.busy ? null : <ArrowRight className="size-3.5" />}
