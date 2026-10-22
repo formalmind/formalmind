@@ -2,12 +2,11 @@ import { useState } from "react";
 import { useNavigate } from "react-router";
 import { useTheme } from "next-themes";
 import { openUrl } from "@tauri-apps/plugin-opener";
-import { BadgeCheck, Bell, Bug, ChevronRight, ChevronsUpDown, CreditCard, FileText, Info, Laptop, LogOut, RotateCcw, Server, Shield, Sparkles, SunMoon, Wallet } from "lucide-react";
+import { BadgeCheck, Bell, Bug, ChevronRight, ChevronsUpDown, CreditCard, FileText, Info, Laptop, LogOut, RotateCcw, Server, Shield, SunMoon, Wallet } from "lucide-react";
 import { apiBase, DEFAULT_API, setApiBase } from "@/desktop/src/api";
 import { BUILD } from "@/lib/build-info";
 import type { SessionData } from "@/lib/session";
 import { TopBar } from "./bar";
-import { setIntroduced } from "./onboarding";
 import { setSetUpDone } from "./setup";
 import { macName, macOnline, NOTICES, noticeOn, setNotice, useMac } from "./relay";
 import { lastProject, TabBar } from "./tabs";
@@ -77,7 +76,7 @@ const NOTICE_TILE: Record<string, [React.ComponentType<{ className?: string; str
 	budget: [Wallet, "bg-orange-500"],
 };
 
-/** Settings: your account, your Mac, notifications, appearance, the server, and the introduction again. */
+/** Settings: your account, your Mac, notifications, appearance, the server, and setup again. */
 export function SettingsScreen({ user, onSignOut }: { user: SessionData["user"]; onSignOut: () => void }) {
 	const navigate = useNavigate();
 	const m = useMac();
@@ -171,15 +170,6 @@ export function SettingsScreen({ user, onSignOut }: { user: SessionData["user"];
 				</Group>
 
 				<Group title="About">
-					<Row
-						icon={Sparkles}
-						color="bg-violet-500"
-						label="Show the introduction"
-						onClick={() => {
-							setIntroduced(false);
-							window.location.reload();
-						}}
-					/>
 					<Row
 						icon={RotateCcw}
 						color="bg-sky-500"
