@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!-- Merged into the app's Info.plist by Tauri. The app has no encryption of its own: HTTPS goes through WebKit and
+     Apple's networking, the token sits in the Keychain, and git's checksums are hashing. That is exempt, so App Store
+     Connect needn't ask about export compliance for each build. -->
+<plist version="1.0">
+<dict>
+	<key>ITSAppUsesNonExemptEncryption</key>
+	<false/>
+</dict>
+</plist>

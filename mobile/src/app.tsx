@@ -7,7 +7,6 @@ import type { SessionData } from "@/lib/session";
 import { clearToken, exchangeCode, loadToken } from "@/desktop/src/api";
 import { MobileHome } from "./home";
 import { followRelay } from "./relay";
-import { introduced, Onboarding, setIntroduced } from "./onboarding";
 import { Setup, setUpDone } from "./setup";
 import { SignIn } from "./sign-in";
 
@@ -95,20 +94,7 @@ export function MobileApp() {
 		return () => void off.then((f) => f());
 	}, [refresh, signInWith]);
 
-	// The introduction shows once, before signing in.
-	const [intro, setIntro] = useState(() => !introduced());
 	if (user === undefined) return <div className="min-h-dvh bg-background" />;
-	// Before signing in the first time, or when Settings asks to see it again.
-	if (intro) {
-		return (
-			<Onboarding
-				onDone={() => {
-					setIntroduced(true);
-					setIntro(false);
-				}}
-			/>
-		);
-	}
 	return (
 		<ThemeProvider>
 			{user ? <Shell user={user} onSignOut={() => void clearToken().then(() => setUser(null))} /> : <SignIn onCode={signInWith} onSignedIn={() => void refresh()} error={error} />}

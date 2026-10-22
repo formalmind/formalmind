@@ -691,12 +691,15 @@ pub fn internal_audit(root: &Path, dirs: &[String], previous: Option<&Value>) ->
     props.sort_by_key(|p| p["id"].as_str().and_then(|i| i.trim_start_matches("P-").parse::<u64>().ok()).unwrap_or(u64::MAX));
     let total = |k: &str| cov.iter().map(|c| c[k].as_u64().unwrap_or(0)).sum::<u64>();
     let summary = format!(
-        "Formal Mind's swarm verified {project} against a Lean 4 model generated from the Solidity compiler's AST: {} of {} functions in scope are proved, with {} reviewed properties. It filed {} finding{}, each with a proof-of-concept test.",
+        "Formal Mind's swarm verified {project} against a Lean 4 model generated from the Solidity compiler's AST: {} of {} functions in scope are proved, with {} reviewed properties. {}",
         total("proved"),
         total("functions"),
         props.len(),
-        findings.len(),
-        if findings.len() == 1 { "" } else { "s" }
+        match findings.len() {
+            0 => "It filed no findings.".to_string(),
+            1 => "It filed 1 finding, with a proof-of-concept test.".to_string(),
+            n => format!("It filed {n} findings, each with a proof-of-concept test."),
+        }
     );
     let mut doc = json!({
         "schema": "formalmind.audit/v1",
@@ -790,6 +793,37 @@ fn s<'a>(v: &'a Value, k: &str) -> &'a str {
 
 /// The report (AsciiDoc) for an audit in the standard format, read from nothing but the JSON and, for code excerpts,
 /// the folder at `src_dir` (relative to where the AsciiDoc is written).
+/// The Project Summary's verification matrix: each contract's functions by where their proof stands (coloured as the
+/// Verification Notations colour them, white when none), how much of it is modeled and how much proved, and totals.
+fn verification_matrix(coverage: &[&Value], properties: usize) -> String {
+    if coverage.is_empty() {
+        return String::new();
+    }
+    let rows_with = |c: &Value, st: &str| c["rows"].as_array().into_iter().flatten().filter(|r| r["status"] == st).count() as u64;
+    let num = |c: &Value, k: &str| c[k].as_u64().unwrap_or(0);
+    let pct = |p: u64, n: u64| if n == 0 { "—".to_string() } else { format!("{:.0}%", p as f64 * 100.0 / n as f64) };
+    let count = |n: u64, color: &str| cell(if n > 0 { Some(color) } else { None }, &n.to_string());
+    let (mut tf, mut tp, mut ts, mut tm, mut to) = (0, 0, 0, 0, 0);
+    let mut out = String::from("=== Verification Matrix\n\nWhere each contract's proofs stand: its functions by status, the share the Lean model covers, and the share that is proved.\n\n[%header%footer,cols=\"3,1,1,1,1,1,1,1\"]\n|===\n");
+    out.push_str(&[head("Contract"), head("Functions"), head("Proved"), head("Has sorry"), head("In Lean"), head("Not modeled"), head("Modeled"), head("Proved")].join(" "));
+    out.push('\n');
+    for c in coverage {
+        let (f, p, so, m, o) = (num(c, "functions"), num(c, "proved"), rows_with(c, "sorry"), rows_with(c, "modeled"), num(c, "notModeled"));
+        (tf, tp, ts, tm, to) = (tf + f, tp + p, ts + so, tm + m, to + o);
+        out.push_str(&[cell(None, &format!("*{}*", s(c, "contract"))), cell(None, &f.to_string()), count(p, GREEN), count(so, BLUE), count(m, GRAY), count(o, AMBER), cell(None, &pct(f - o, f)), cell(if p > 0 { Some(GREEN) } else { None }, &format!("*{}*", pct(p, f)))].join(" "));
+        out.push('\n');
+    }
+    out.push_str(&[head("Total"), head(&tf.to_string()), head(&tp.to_string()), head(&ts.to_string()), head(&tm.to_string()), head(&to.to_string()), head(&pct(tf - to, tf)), head(&pct(tp, tf))].join(" "));
+    out.push_str("\n|===\n\n");
+    let theorems = coverage.iter().map(|c| num(c, "theorems")).max().unwrap_or(0);
+    out.push_str(&format!(
+        "*{tp}* of *{tf}* functions proved ({}), against {theorems} theorems{}. Modeled but unproved functions ({tm}) and opaque ones ({to}) are where the next proofs go.\n\n",
+        pct(tp, tf),
+        if properties > 0 { format!(", with {properties} properties approved by the reviewer") } else { String::new() }
+    ));
+    out
+}
+
 pub fn render(root: &Path, doc: &Value, src_dir: &str) -> String {
     let repo = doc["repository"].as_str();
     let commit = doc["commit"].as_str();
@@ -850,6 +884,11 @@ pub fn render(root: &Path, doc: &Value, src_dir: &str) -> String {
         a.push_str(&format!("| Total ({} files) | {l} | {c}\n|===\n\n", scope.len()));
     }
 
+    a.push_str(&verification_matrix(&coverage, props.len()));
+
+    if findings.is_empty() {
+        a.push_str(&format!("=== Findings Summary\n\nThe swarm filed no findings at commit {short}: every property it checked holds. Its result is the verification above and the properties in <<_formal_verification>>.\n\n"));
+    } else {
     a.push_str("=== Findings Summary\n\n[%header%footer,cols=\"3,2,2,2,2\"]\n|===\n");
     a.push_str(&[head("Severity"), head("Found"), head("Fixed"), head("Acknowledged"), head("Open")].join(" "));
     a.push('\n');
@@ -881,6 +920,7 @@ pub fn render(root: &Path, doc: &Value, src_dir: &str) -> String {
     }
     a.push_str(&[cell(None, ""), cell(None, ""), head("Low"), head("Medium"), head("High")].join(" "));
     a.push_str("\n|===\n_Likelihood runs left to right._\n\n");
+    }
 
     // ---- Detailed findings ----
     a.push_str("== Detailed Findings\n\n");
@@ -1259,6 +1299,23 @@ pub async fn report_generate(folder: String, dirs: Vec<String>, api_base: String
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn no_findings_shows_the_verification_matrix() {
+        let doc = serde_json::json!({
+            "title": "X Security Assessment", "date": "2026-10-21", "summary": "s", "findings": [], "properties": [],
+            "coverage": [{ "contract": "Vault", "functions": 4, "inLean": 3, "proved": 2, "notModeled": 1, "theorems": 9, "sorry": 0,
+                "rows": [{ "status": "proved" }, { "status": "proved" }, { "status": "modeled" }, { "status": "not modeled" }] }]
+        });
+        let a = super::render(std::path::Path::new("/nonexistent"), &doc, "src");
+        assert!(a.contains("=== Verification Matrix"));
+        assert!(a.contains("*Vault*"));
+        assert!(a.contains("50%"), "half of Vault is proved");
+        assert!(a.contains("75%"), "three quarters of Vault is modeled");
+        assert!(a.contains("filed no findings"));
+        assert!(!a.contains("=== Severity Matrix"), "no all-zero severity tables without findings");
+    }
+
+
     use super::*;
 
     const INDEX: &str = "# Audits\n\n| Report | Date | Author | Scope |\n|---|---|---|---|\n| [a.md](a.md) | 2026-01-01 | Lee | All |\n\n## a.md\n\n| ID | Severity | Finding | Status | Evidence |\n|----|---|---|---|---|\n| H-01 | High | Fee \\| rounding | ✅ Fixed | `test/A.t.sol` |\n| I-02 | Info | Small | 📝 Acknowledged | why |\n\n## formal-mind-swarm.md\n\n| ID | Severity | Finding | Status | Evidence |\n|---|---|---|---|---|\n| FM-01 | High | Fill drains | ⏳ Open | PoC `test/formal/Fill.t.sol`; `src/R.sol:2` |\n";

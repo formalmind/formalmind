@@ -144,7 +144,7 @@ export function Setup({ user, onDone }: { user: SessionData["user"]; onDone: () 
 					<div className="fm-rise grid flex-1 place-items-center">
 						{/* Your GitHub picture; without one, the app's icon on its own. */}
 						{user.picture ? (
-							<span className="grid size-24 place-items-center overflow-hidden rounded-full border border-white/15 bg-white/10">
+							<span className="grid size-[148px] place-items-center overflow-hidden rounded-full border border-white/15 bg-white/10 shadow-[0_18px_40px_rgb(0_0_0/0.6)]">
 								<img src={user.picture} alt="" className="size-full object-cover" />
 							</span>
 						) : (
@@ -272,8 +272,8 @@ export function Setup({ user, onDone }: { user: SessionData["user"]; onDone: () 
 						</div>
 					</div>
 					{/* In the style of the landing page's Download for Mac, with a light across it. */}
-					<button type="button" onClick={() => finish()} className="btn-dark fm-btn-sheen mt-4 h-12 w-full text-[15px]">
-						<LogoMark bare size={16} /> Welcome to Formal Mind
+					<button type="button" onClick={() => finish()} className="btn-dark fm-btn-sheen mt-4 h-14 w-full gap-2.5 text-[17px] font-medium">
+						<LogoMark bare size={20} /> Welcome to Formal Mind
 					</button>
 				</>
 			) : null}
