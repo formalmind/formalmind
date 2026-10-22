@@ -1,7 +1,7 @@
 # Formal Mind for iPhone: App Store listing
 
 Everything App Store Connect asks for, ready to paste. Character limits are Apple's; each field here fits its limit.
-Screenshots are in `screenshots/` beside this file (6.9" iPhone, 1320 × 2868).
+Screenshots are in `screenshots/` beside this file (6.9" iPhone, 1320 × 2868): upload `01`–`10` in order (setup first, then the app); `more/` holds spares.
 
 ## App Information (App Store Connect → App Information)
 
