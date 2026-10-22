@@ -40,6 +40,42 @@ function entries(files: string[], dir: string) {
 	return { dirs: [...dirs].sort(), files: here.sort() };
 }
 
+/** A path a Markdown file's image points at, from the repository's root; null for a URL (loaded as it is). */
+function imagePath(src: string, from: string) {
+	if (/^([a-z][a-z0-9+.-]*:|\/\/|#)/i.test(src)) return null;
+	const parts = src.startsWith("/") ? [] : from.split("/").slice(0, -1);
+	for (const seg of src.replace(/^\//, "").split(/[?#]/)[0].split("/")) {
+		if (seg === "..") parts.pop();
+		else if (seg && seg !== ".") parts.push(decodeURIComponent(seg));
+	}
+	return parts.join("/");
+}
+
+/** A Markdown file, its images (relative to it) read from the phone's copy of the repository, as on the Mac. */
+function MarkdownFile({ path, text, bridge }: { path: string; text: string; bridge: Bridge }) {
+	const [images, setImages] = useState<Record<string, string>>({});
+	useEffect(() => {
+		let live = true;
+		const srcs = [...text.matchAll(/!\[[^\]]*\]\(\s*<?([^)\s>]+)/g), ...text.matchAll(/<img[^>]*\ssrc=["']([^"']+)["']/gi)].map((m) => m[1]);
+		for (const src of new Set(srcs)) {
+			const p = imagePath(src, path);
+			if (!p) continue;
+			bridge.invoke<string>("folder_image", { path: p }).then(
+				(url) => live && setImages((m) => ({ ...m, [p]: url })),
+				() => undefined,
+			);
+		}
+		return () => {
+			live = false;
+		};
+	}, [bridge, path, text]);
+	return (
+		<div className="p-4">
+			<ChatMarkdown image={(src) => { const p = imagePath(src, path); return p === null ? src : images[p]; }}>{text}</ChatMarkdown>
+		</div>
+	);
+}
+
 /** Code: browse the repository's folders, open a file. */
 function CodeTab({ files, bridge, dir, file, open }: { files: string[] | null; bridge: Bridge; dir: string; file: string | null; open: (next: { dir?: string; file?: string | null }) => void }) {
 	const [text, setText] = useState<{ path: string; text: string } | { path: string; error: string } | null>(null);
@@ -67,7 +103,7 @@ function CodeTab({ files, bridge, dir, file, open }: { files: string[] | null; b
 				) : "error" in text ? (
 					<p className="p-4 text-sm text-red-600">{text.error}</p>
 				) : /\.(md|markdown)$/i.test(file) ? (
-					<div className="p-4"><ChatMarkdown>{text.text}</ChatMarkdown></div>
+					<MarkdownFile path={file} text={text.text} bridge={bridge} />
 				) : (
 					<FileView path={file} text={text.text} />
 				)}
