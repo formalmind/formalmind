@@ -142,9 +142,6 @@ export function ProofRail({ proofs, selected, onSelect, onOpenFile }: { proofs: 
 							{status.label}
 						</span>
 					</div>
-					<p className="px-3 pt-1 text-[11px] text-muted-foreground">
-						{fn.visibility} {fn.mutability} · lines {fn.line}–{fn.endLine}
-					</p>
 					{fn.why ? (
 						<div className="mx-3 mt-3 rounded-lg border border-amber-500/30 bg-amber-500/5 p-2.5 leading-5">
 							<p className="font-medium text-amber-800 dark:text-amber-300">Not translated: {fn.why}</p>
