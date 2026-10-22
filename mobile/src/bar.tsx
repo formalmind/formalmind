@@ -1,14 +1,24 @@
-import { useNavigate } from "react-router";
+import { useNavigate, type NavigateFunction } from "react-router";
 import { ChevronLeft } from "lucide-react";
 
 /** The screen's top bar, under the status bar: back (or the app's mark), the title, and actions on the right. */
+/**
+ * Back: to the screen you came from (Settings, a chat, Home); a named screen only when there's none to return to (a
+ * notification or a link opened it). `true` is always the previous screen.
+ */
+function goBack(navigate: NavigateFunction, back: string | true | undefined) {
+	const came = ((window.history.state as { idx?: number } | null)?.idx ?? 0) > 0;
+	if (back === true || came) navigate(-1);
+	else navigate(back ?? "/");
+}
+
 export function TopBar({ title, sub, back, left, right }: { title: React.ReactNode; sub?: React.ReactNode; back?: string | true; left?: React.ReactNode; right?: React.ReactNode }) {
 	const navigate = useNavigate();
 	return (
 		<header className="fm-safe-top sticky top-0 z-30 border-b bg-background/85 backdrop-blur-xl">
 			<div className="flex h-12 items-center gap-1 px-2">
 				{back ? (
-					<button type="button" onClick={() => (back === true ? navigate(-1) : navigate(back))} aria-label="Back" className="grid size-10 place-items-center rounded-full text-foreground active:bg-muted">
+					<button type="button" onClick={() => goBack(navigate, back)} aria-label="Back" className="grid size-10 place-items-center rounded-full text-foreground active:bg-muted">
 						<ChevronLeft className="size-6" />
 					</button>
 				) : (
@@ -44,7 +54,7 @@ export function FloatingBar({ back, title, right, left, onLeft, leftLabel }: { b
 	return (
 		<div className="fm-safe-top fm-floating-fade pointer-events-none fixed inset-x-0 top-0 z-30">
 			<div className="relative flex items-start gap-3 px-4 pt-1.5">
-				<button type="button" onClick={() => (onLeft ? onLeft() : back === true ? navigate(-1) : navigate(back))} aria-label={leftLabel ?? "Back"} className="fm-glass pointer-events-auto grid size-[50px] shrink-0 place-items-center rounded-full text-foreground">
+				<button type="button" onClick={() => (onLeft ? onLeft() : goBack(navigate, back))} aria-label={leftLabel ?? "Back"} className="fm-glass pointer-events-auto grid size-[50px] shrink-0 place-items-center rounded-full text-foreground">
 					{left ?? <ChevronLeft className="size-6" />}
 				</button>
 				<div className="min-w-0 flex-1 pt-3.5 text-center">{title ? <span className="fm-glass pointer-events-auto inline-block max-w-full truncate rounded-full px-3 py-1 text-[13px] font-medium">{title}</span> : null}</div>
