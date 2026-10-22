@@ -225,7 +225,7 @@ export function AgentMessage({ e, onBug }: { e: Ev; onBug: () => void }) {
 /** A line number marked in the code's gutter (a function's proof status, in its colour), on a 0-based line. */
 export type GutterMark = { text: string; title: string; onClick: () => void };
 
-export function FileView({ path, text, big, start = 1, mark, cursor, diagnostics, gutter, band }: { path: string; text: string; big?: boolean; start?: number; mark?: number | null; cursor?: Cursor | null; /** solc's errors and warnings in this file: a wavy underline, the message under the line. */ diagnostics?: Diagnostic[]; gutter?: Map<number, GutterMark>; /** 0-based lines tinted as one block (the function the Proofs rail has picked). */ band?: { from: number; to: number } | null }) {
+export function FileView({ path, text, big, start = 1, mark, cursor, diagnostics, gutter, band }: { path: string; text: string; big?: boolean; start?: number; mark?: number | null; cursor?: Cursor | null; /** solc's errors and warnings in this file: a wavy underline, the message under the line. */ diagnostics?: Diagnostic[]; gutter?: Map<number, GutterMark>; /** 0-based lines tinted as one block (the function the Proofs rail has picked), its numbers in `text`'s colour. */ band?: { from: number; to: number; text?: string } | null }) {
 	const lines = useHighlightedCode(text, EXT[path.split(".").pop() ?? ""] ?? "text");
 	const marked = useRef<HTMLSpanElement | null>(null);
 	useEffect(() => {
@@ -239,7 +239,7 @@ export function FileView({ path, text, big, start = 1, mark, cursor, diagnostics
 		<pre className={`overflow-x-auto py-2 font-mono ${big ? "text-[12.5px] leading-6" : "text-[11px] leading-5"}`}>
 			{lines.map((line, i) => (
 				<span key={i} ref={i === mark ? marked : undefined} data-line={i} className={`relative block whitespace-pre pr-3 ${i === mark ? "bg-amber-300/25" : cursor?.line === i ? "bg-muted/60" : band && i >= band.from && i <= band.to ? "bg-foreground/[0.035]" : ""}`}>
-					{band && i >= band.from && i <= band.to ? <span aria-hidden className="absolute inset-y-0 left-0 w-0.5 bg-foreground/25" /> : null}
+					{band && i >= band.from && i <= band.to ? <span aria-hidden className={`absolute inset-y-0 left-0 w-0.5 bg-current opacity-70 ${band.text ?? "text-foreground/25"}`} /> : null}
 					{/* A marked line's number takes its status colour and picks it; the others stay muted. */}
 					{gutter?.get(i) ? (
 						<button
@@ -255,7 +255,7 @@ export function FileView({ path, text, big, start = 1, mark, cursor, diagnostics
 							{i + start}
 						</button>
 					) : (
-						<span className="mr-3 inline-block w-9 select-none text-right text-muted-foreground/60">{i + start}</span>
+						<span className={`mr-3 inline-block w-9 select-none text-right ${band?.text && i >= band.from && i <= band.to ? `font-medium ${band.text}` : "text-muted-foreground/60"}`}>{i + start}</span>
 					)}
 					<span data-code>{line}</span>
 					{cursor?.line === i ? <span ref={caret} data-vim-cursor className="pointer-events-none absolute top-0 h-full w-[1ch] bg-foreground/35" style={{ left: `calc(3rem + ${cursor.col}ch)` }} /> : null}
@@ -2437,7 +2437,7 @@ export function SwarmPanel({ folder, name, scan, bridge, session, file: openPath
 											mark={markLine ? markLine - 1 : null}
 											cursor={vim ? cursor : null}
 											gutter={solProofs.data ? proofGutter(solProofs.data, solProofs.functions, pickProof) : undefined}
-											band={pickedFn ? { from: pickedFn.line - 1, to: pickedFn.endLine - 1 } : null}
+											band={pickedFn && solProofs.data ? { from: pickedFn.line - 1, to: pickedFn.endLine - 1, text: fnStatus(pickedFn, solProofs.data.theorems).text } : null}
 										/>
 									)}
 									{hover ? (
