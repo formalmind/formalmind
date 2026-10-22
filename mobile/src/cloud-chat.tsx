@@ -4,6 +4,7 @@ import type { UIMessage } from "ai";
 import { ArrowDown, ArrowUp, Brain, Check, ChevronDown, Copy, RotateCcw, Share, Sparkles, Square, ThumbsDown, ThumbsUp } from "lucide-react";
 import { ChatMarkdown } from "@/components/chat-markdown";
 import { ToolCalls } from "@/components/swarm/swarm-chat";
+import { notify } from "@/lib/notifications";
 import { CenterState } from "./bar";
 
 /*
@@ -139,6 +140,9 @@ export function CloudChat({ repo, chatId, shelf, aboveTabs }: { repo: string; ch
 		experimental_throttle: 50,
 	});
 	const busy = status === "submitted" || status === "streaming";
+	useEffect(() => {
+		if (error) notify.error("Formal Mind didn't reply", { description: error.message });
+	}, [error]);
 
 	// Kept once a turn settles, not on every streamed word.
 	useEffect(() => {
@@ -221,13 +225,11 @@ export function CloudChat({ repo, chatId, shelf, aboveTabs }: { repo: string; ch
 					);
 				})}
 				{waiting ? <Thinking /> : null}
+				{/* What went wrong is in the bell; here, only the way to try again. */}
 				{error ? (
-					<div className="rounded-2xl bg-red-500/[0.12] p-3 text-[14px] text-red-700 dark:text-red-400">
-						{error.message || "The reply failed."}
-						<button type="button" onClick={() => void reload()} className="mt-2 flex items-center gap-1.5 font-medium">
-							<RotateCcw className="size-3.5" /> Try again
-						</button>
-					</div>
+					<button type="button" onClick={() => void reload()} className="flex items-center gap-1.5 text-[14px] font-medium text-muted-foreground">
+						<RotateCcw className="size-3.5" /> The reply didn&apos;t come. Try again
+					</button>
 				) : null}
 			</div>
 			<form

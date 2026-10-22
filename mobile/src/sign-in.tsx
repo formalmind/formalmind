@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { LogoMark } from "@/components/logo";
-import { apiBase, DEFAULT_API, newPollId, pollForToken, setApiBase } from "@/desktop/src/api";
+import { apiBase, newPollId, pollForToken } from "@/desktop/src/api";
 
 const primary = "w-full rounded-full bg-white px-4 py-3 text-[15px] font-medium text-neutral-950 shadow-[0_0_0_3px_rgba(96,165,250,0.35)] transition active:bg-neutral-100 disabled:opacity-60";
 
@@ -13,11 +13,9 @@ export function SignIn({ onCode, onSignedIn, error }: { onCode: (code: string) =
 	const [waiting, setWaiting] = useState(false);
 	const [pasting, setPasting] = useState(false);
 	const [code, setCode] = useState("");
-	const [base, setBase] = useState(apiBase());
 	const polling = useRef<AbortController | null>(null);
 	useEffect(() => () => polling.current?.abort(), []);
 	const start = () => {
-		setApiBase(base);
 		setWaiting(true);
 		polling.current?.abort();
 		const controller = (polling.current = new AbortController());
@@ -64,10 +62,6 @@ export function SignIn({ onCode, onSignedIn, error }: { onCode: (code: string) =
 					</p>
 				)}
 				{error ? <p className="text-sm text-red-400">{error}</p> : null}
-				<details className="text-xs text-white/35">
-					<summary className="cursor-pointer list-none">Server</summary>
-					<input value={base} onChange={(e) => setBase(e.target.value)} onBlur={() => setApiBase(base)} placeholder={DEFAULT_API} autoCapitalize="off" autoCorrect="off" className="mt-2 w-full rounded-md border border-white/15 bg-white/5 px-2 py-1 text-white" />
-				</details>
 			</div>
 		</main>
 	);

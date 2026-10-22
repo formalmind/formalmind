@@ -1,12 +1,15 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router";
-import { useNotifications } from "@/lib/notifications";
+import { notify, useNotifications } from "@/lib/notifications";
 import { ArrowUp, Bell, ChevronRight, Folder, Laptop, Play, Settings, Square } from "lucide-react";
 import { BellLink } from "./notifications";
 import { Message, MessageContent } from "@/components/ui/message";
 import { AgentMessage, blocks, Steps, type Ev } from "@/desktop/src/swarm-panel";
 import { CenterState, FloatingBar, GlassDivider, GlassSegment, Skeleton, TopBar } from "./bar";
 import { hasHistory, macOnline, send, startBudget, useMac, useSession } from "./relay";
+
+/** Whether this stretch of the Mac being offline has had its notice. */
+let offlineNoted = false;
 
 const sessionHref = (folder: string, run: string) => `/mac/session?${new URLSearchParams({ folder, run })}`;
 
@@ -153,7 +156,20 @@ export function SessionChat({ folder, run, aboveTabs, header, fullScreen }: { fo
 	const online = macOnline(m);
 	const [text, setText] = useState("");
 	const [busy, setBusy] = useState<"send" | "start" | "stop" | null>(null);
-	const [error, setError] = useState<string | null>(null);
+	// Your Mac going away is a notice in the bell (once each time), not a banner over the chat.
+	useEffect(() => {
+		if (online) offlineNoted = false;
+		if (!m.loaded || !m.state || online || offlineNoted) return;
+		offlineNoted = true;
+		notify.info("Your Mac is offline", { id: "mac-offline", description: "Messages wait up to 10 minutes for it; open Formal Mind there to carry on." });
+	}, [m.loaded, !!m.state, online]);
+	// What you've sent that the Mac hasn't echoed yet: shown at once, marked as waiting while the Mac is away.
+	const [pending, setPending] = useState<string[]>([]);
+	useEffect(() => {
+		if (!pending.length) return;
+		const left = pending.filter((t) => !events.some((e) => e.kind === "you" && e.text.trim() === t));
+		if (left.length !== pending.length) setPending(left);
+	}, [events, pending]);
 
 	// The relay keeps recent events; the whole session comes from the Mac's log, once per visit.
 	const asked = useRef("");
@@ -177,14 +193,20 @@ export function SessionChat({ folder, run, aboveTabs, header, fullScreen }: { fo
 	}, [chat.length]);
 
 	const act = async (kind: "send" | "start" | "stop") => {
-		setError(null);
 		setBusy(kind);
 		try {
 			if (kind === "send") {
 				const t = text.trim();
 				if (!t) return;
-				await send({ type: "say", folder, run, text: t });
 				setText("");
+				setPending((p) => [...p, t]);
+				try {
+					await send({ type: "say", folder, run, text: t });
+				} catch (e) {
+					setPending((p) => p.filter((x) => x !== t));
+					setText(t);
+					throw e;
+				}
 				atBottom.current = true;
 			} else if (kind === "start") {
 				// Resuming carries on this session's queue on the Mac; the cap goes above what it has spent, or a session that
@@ -194,7 +216,8 @@ export function SessionChat({ folder, run, aboveTabs, header, fullScreen }: { fo
 				setText("");
 			} else await send({ type: "stop", folder, run });
 		} catch (e) {
-			setError(e instanceof Error ? e.message : String(e));
+			// Errors go to the bell, not into the conversation.
+			notify.error(kind === "send" ? "Your message didn't go" : kind === "stop" ? "Couldn't stop the swarm" : "Couldn't start the swarm", { description: e instanceof Error ? e.message : String(e) });
 		} finally {
 			setBusy(null);
 		}
@@ -202,7 +225,7 @@ export function SessionChat({ folder, run, aboveTabs, header, fullScreen }: { fo
 
 	// One button, as in Mike's composer: Send with text; Stop while it works and the box is empty; Start or Resume when
 	// it's stopped.
-	const action: "send" | "stop" | "start" = running ? (text.trim() ? "send" : "stop") : "start";
+	const action: "send" | "stop" | "start" = running || (!online && text.trim()) ? (text.trim() ? "send" : "stop") : "start";
 	return (
 		<div className="fm-chat flex min-h-0 flex-1 flex-col">
 			<div
@@ -213,8 +236,6 @@ export function SessionChat({ folder, run, aboveTabs, header, fullScreen }: { fo
 				}}
 				className={`min-h-0 flex-1 space-y-5 overflow-y-auto px-4 pb-6 text-[16px] leading-relaxed ${fullScreen ? "fm-under-floating" : "pt-4"}`}
 			>
-				{/* In the scroll, so floating controls never cover it. */}
-				<Offline flush />
 				{chat.length === 0 && online && asked.current && !hasHistory(folder, run) && resumable ? <ChatSkeleton /> : chat.length === 0 ? (
 					<div className="flex min-h-[55dvh] flex-col">
 						{online ? (
@@ -242,10 +263,17 @@ export function SessionChat({ folder, run, aboveTabs, header, fullScreen }: { fo
 						)}
 					</div>
 				))}
+				{pending.map((t, i) => (
+					<Message key={`p${i}`} align="end">
+						<MessageContent>
+							<div className="fm-bubble ml-10 w-fit whitespace-pre-wrap rounded-2xl p-3 text-foreground">{t}</div>
+							<p className="mt-1 text-right text-[12px] text-muted-foreground">{online ? "Sent" : "Waiting for your Mac"}</p>
+						</MessageContent>
+					</Message>
+				))}
 				{working ? (
 					<p className="fm-shimmer-text text-[14px]">{working.text}</p>
 				) : null}
-				{error ? <p className="rounded-2xl bg-red-500/10 p-3 text-[14px] text-red-700 dark:text-red-400">{error}</p> : null}
 			</div>
 			<form
 				onSubmit={(e) => {
@@ -267,12 +295,11 @@ export function SessionChat({ folder, run, aboveTabs, header, fullScreen }: { fo
 						<span className="inline-flex h-8 min-w-0 items-center rounded-full bg-foreground/[0.06] px-3 text-[13px] font-medium">
 							<span className="min-w-0 truncate">{header ?? (running ? "Running" : resumable ? "Paused" : "New session")}</span>
 						</span>
-						<span className="ml-auto shrink-0 font-mono text-[12px] text-muted-foreground">${spent.toFixed(2)}</span>
 						<button
 							type="submit"
-							disabled={!!busy || !online}
+							disabled={!!busy || (action === "send" && !text.trim())}
 							aria-label={action === "send" ? "Send" : action === "stop" ? "Stop the swarm" : resumable ? "Resume the swarm" : "Start the swarm"}
-							className={`inline-flex h-8 shrink-0 items-center justify-center gap-1.5 rounded-full bg-foreground text-[13px] font-medium text-background disabled:opacity-40 ${action === "start" ? "px-3.5" : "w-8"}`}
+							className={`ml-auto inline-flex h-8 shrink-0 items-center justify-center gap-1.5 rounded-full bg-foreground text-[13px] font-medium text-background disabled:opacity-40 ${action === "start" ? "px-3.5" : "w-8"}`}
 						>
 							{action === "send" ? (
 								<ArrowUp className="size-4" />
