@@ -4,7 +4,7 @@ import { createPortal } from "react-dom";
 import { NvimTerminal } from "./nvim-terminal";
 import { reportError } from "@/lib/report-error";
 import { JsonTree } from "./json-tree";
-import { Bug, Check, ChevronDown, Code2, Copy, FileCode2, FileDown, Network, Play, Plus, ScanSearch, Square, Terminal, WandSparkles } from "lucide-react";
+import { ArrowDown, Bug, Check, ChevronDown, Code2, Copy, FileCode2, FileDown, Network, Play, Plus, ScanSearch, Square, Terminal, ThumbsDown, ThumbsUp, WandSparkles } from "lucide-react";
 
 // The project roadmap (GitHub Projects-style), the same view the web app had on its own page.
 import { motion as vimMotion, search as vimSearch, setVimMode, useVimMode, type Cursor } from "@/components/vim-mode";
@@ -156,6 +156,35 @@ function ToolOutput({ call, text }: { call: string; text: string }) {
 }
 
 /** One agent's message: who said it (and on which item), then the text flat as Markdown; a bug opens its report. */
+/** Under an agent's reply, as Mike's chat draws it: copy (a tick for a moment) and a thumbs up or down. */
+function ReplyActions({ text }: { text: string }) {
+	const [copied, setCopied] = useState(false);
+	const [vote, setVote] = useState<"up" | "down" | null>(null);
+	return (
+		<div className="mt-1 flex items-center gap-3.5 text-muted-foreground/70 opacity-0 transition-opacity group-hover/reply:opacity-100 [@media(hover:none)]:opacity-100">
+			<button
+				type="button"
+				title="Copy"
+				onClick={() =>
+					void navigator.clipboard.writeText(text).then(() => {
+						setCopied(true);
+						setTimeout(() => setCopied(false), 1500);
+					})
+				}
+				className="hover:text-foreground"
+			>
+				{copied ? <Check className="size-3.5 text-emerald-600 dark:text-emerald-400" /> : <Copy className="size-3.5" />}
+			</button>
+			<button type="button" title="Good reply" onClick={() => setVote(vote === "up" ? null : "up")} className="hover:text-foreground">
+				<ThumbsUp className={`size-3.5 ${vote === "up" ? "fill-current text-foreground" : ""}`} />
+			</button>
+			<button type="button" title="Bad reply" onClick={() => setVote(vote === "down" ? null : "down")} className="hover:text-foreground">
+				<ThumbsDown className={`size-3.5 ${vote === "down" ? "fill-current text-foreground" : ""}`} />
+			</button>
+		</div>
+	);
+}
+
 export function AgentMessage({ e, onBug }: { e: Ev; onBug: () => void }) {
 	const color = e.kind === "bug" ? "#dc2626" : colorOf(e.role);
 	return (
@@ -174,7 +203,10 @@ export function AgentMessage({ e, onBug }: { e: Ev; onBug: () => void }) {
 				) : e.kind === "plan" || e.kind === "done" ? (
 					<p className="text-[13px] text-muted-foreground">{e.text}</p>
 				) : (
-					<ChatMarkdown>{e.text}</ChatMarkdown>
+					<div className="group/reply">
+						<ChatMarkdown>{e.text}</ChatMarkdown>
+						<ReplyActions text={e.text} />
+					</div>
 				)}
 			</MessageContent>
 		</Message>
@@ -1790,6 +1822,8 @@ export function SwarmPanel({ folder, name, scan, bridge, session, file: openPath
 	// New messages scroll the chat down only while you're at the bottom (or just sent one): scrolled up to read, it
 	// stays where you are.
 	const atBottom = useRef(true);
+	// Scrolled up: a button back to the end shows over the composer (Mike's).
+	const [away, setAway] = useState(false);
 	useEffect(() => {
 		const last = events.at(-1);
 		if (!atBottom.current && last?.kind !== "you") return;
@@ -1853,13 +1887,13 @@ export function SwarmPanel({ folder, name, scan, bridge, session, file: openPath
 	const chatList = useMemo(
 		() =>
 			chatBlocks.map((block, i) => (
-				<div key={i} data-msg={i}>
+				<div key={i} data-msg={i} className="fm-settle">
 					{"steps" in block ? (
 						<Steps steps={block.steps} running={Boolean(run) && i === chatBlocks.length - 1} />
 					) : block.e.kind === "you" ? (
 						<Message align="end">
 							<MessageContent>
-								<div className="ml-auto w-fit max-w-[85%] whitespace-pre-wrap rounded-2xl rounded-br-md bg-muted px-3 py-2 text-foreground">{block.e.text}</div>
+								<div className="ml-10 w-fit whitespace-pre-wrap rounded-2xl bg-muted px-3 py-2.5 text-foreground">{block.e.text}</div>
 							</MessageContent>
 						</Message>
 					) : (
@@ -2071,14 +2105,39 @@ export function SwarmPanel({ folder, name, scan, bridge, session, file: openPath
 					ref={chat}
 					onScroll={(e) => {
 						const el = e.currentTarget;
-						atBottom.current = el.scrollHeight - el.scrollTop - el.clientHeight < 48;
+						atBottom.current = el.scrollHeight - el.scrollTop - el.clientHeight < 80;
+						setAway(!atBottom.current);
 					}}
-					className="min-h-0 flex-1 space-y-3 overflow-y-auto py-3 pl-6 pr-3 text-[13px]"
+					className="min-h-0 flex-1 space-y-3.5 overflow-y-auto py-3 pl-6 pr-3 text-[13px]"
 				>
 					{shown.length === 0 && !run ? <p className="text-muted-foreground">Talk to the agents here. Before a run, what you write is the swarm's focus and ↑ starts it; while it runs, they read your messages before their next turn.</p> : null}
 					{chatList}
+					{/* While an agent works, Mike's loader until its next words. */}
+					{run && working ? (
+						<p className="flex items-center gap-2 text-[12px] text-muted-foreground">
+							<span className="fm-dots inline-flex gap-1">
+								<i />
+								<i />
+								<i />
+							</span>
+							<span className="font-medium" style={{ color: colorOf(working.role) }}>{working.role}</span>
+							<span className="truncate">{working.text}</span>
+						</p>
+					) : null}
 					{finished ? <p className="rounded-lg border px-3 py-2 text-xs text-muted-foreground">Finished: {finished.text}</p> : null}
 				</div>
+				<button
+					type="button"
+					onClick={() => {
+						atBottom.current = true;
+						setAway(false);
+						chat.current?.scrollTo({ top: chat.current.scrollHeight, behavior: "smooth" });
+					}}
+					aria-label="Scroll to the end"
+					className={`absolute bottom-2 left-1/2 grid size-8 -translate-x-1/2 place-items-center rounded-full border bg-background shadow-md transition-all duration-200 ${away ? "scale-100 opacity-100" : "pointer-events-none scale-75 opacity-0"}`}
+				>
+					<ArrowDown className="size-3.5" strokeWidth={2.6} />
+				</button>
 				</div>
 
 				<div className="shrink-0 space-y-2 p-3">
