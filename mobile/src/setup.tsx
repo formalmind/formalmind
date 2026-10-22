@@ -5,6 +5,7 @@ import { MarkGithubIcon } from "@primer/octicons-react";
 import { ChevronRight, Laptop, Plus } from "lucide-react";
 import { AddProjectCard } from "@/components/add-project";
 import { HomeEmpty } from "@/components/home-empty";
+import { LogoMark } from "@/components/logo";
 import { APP_INSTALL_URL } from "@/components/onboarding/steps";
 import { projectPath, useProjects } from "@/components/projects/use-projects";
 import type { SessionData } from "@/lib/session";
@@ -240,7 +241,7 @@ export function Setup({ user, onDone }: { user: SessionData["user"]; onDone: () 
 						<div className="dark fm-home mx-auto w-full max-w-[360px] text-foreground">
 							<HomeEmpty muted="Bugs, proofs and code." strong={projects?.length === 0 ? "Open a repository." : "Pick a project."}>
 								<div className="w-full space-y-2">
-									{projects?.map((p) => (
+									{projects?.slice(0, 4).map((p) => (
 										<button key={p.repo} type="button" onClick={() => finish(p.repo)} className="btn-soft flex h-11 w-full items-center gap-2.5 px-3.5 text-left text-[14px]">
 											<MarkGithubIcon size={16} className="shrink-0 text-muted-foreground" />
 											<span className="min-w-0 flex-1 truncate">
@@ -269,7 +270,10 @@ export function Setup({ user, onDone }: { user: SessionData["user"]; onDone: () 
 							</HomeEmpty>
 						</div>
 					</div>
-					<button type="button" onClick={() => finish()} className={`${quiet} mt-4`}>Go to Home</button>
+					{/* In the style of the landing page's Download for Mac, with a light across it. */}
+					<button type="button" onClick={() => finish()} className="btn-dark fm-btn-sheen mt-4 h-12 w-full text-[15px]">
+						<LogoMark bare size={16} /> Welcome to Formal Mind
+					</button>
 				</>
 			) : null}
 		</Frame>

@@ -213,3 +213,24 @@ html.fm-mobile.dark {
 @media (prefers-reduced-motion: reduce) {
 	.fm-think-dot, .fm-reply .chat-markdown > * { animation: none; opacity: 0.6; }
 }
+/* A light that sweeps across a button now and then (setup's last step). */
+.fm-btn-sheen {
+	position: relative;
+	overflow: hidden;
+}
+.fm-btn-sheen::after {
+	content: "";
+	position: absolute;
+	inset: 0;
+	pointer-events: none;
+	background: linear-gradient(105deg, transparent 35%, rgb(255 255 255 / 0.22) 50%, transparent 65%);
+	background-size: 250% 100%;
+	animation: fm-btn-sheen 3s ease-in-out infinite;
+}
+@keyframes fm-btn-sheen {
+	0% { background-position: 130% 0; }
+	55%, 100% { background-position: -30% 0; }
+}
+@media (prefers-reduced-motion: reduce) {
+	.fm-btn-sheen::after { animation: none; opacity: 0; }
+}
