@@ -25,10 +25,10 @@ spike code in `spikes/solidcore-setexecutor/` on the same branch.
 | solc 0.8.35 (SolidCore's pinned version; checksum checked against binaries.soliditylang.org) | `~/.solc-bin/solc-0.8.35`. `solc-select install` fails here with HTTP 403, so use this binary via the importer's `--solc` flag |
 | Foundry | `~/.foundry/bin/forge` |
 
-**State left behind.** A background `lake exe cache get && lake build SolidCore.Solidity.Checked
-SolidCore.Solidity.ABI` was started in `references/solidity-lean`; logs are in `/tmp/sl-cache.log` and
-`/tmp/sl-build.log`. If it didn't finish, rerun it. Expect a long first build: Mathlib comes from the
-cache, but `Interpreter.lean` (11k lines) and `Interface/*.lean` (≈30k lines) compile from source.
+**State left behind.** `lake exe cache get && lake build SolidCore.Solidity.Checked SolidCore.Solidity.ABI`
+has already succeeded in `references/solidity-lean` (1,093 jobs, 34m40s wall clock with Mathlib from the
+cache). Its `.lake` is built for the interpreter, ABI and checked entry points, so step 1 only has to
+smoke-test. Logs are in `/tmp/sl-cache.log` and `/tmp/sl-build.log`.
 
 ## The function
 
