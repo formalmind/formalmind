@@ -88,8 +88,7 @@ export function AddProjectCard({ onLocal, onCancel, onDone, initialRepo, remoteO
 						className="flex items-center gap-2 rounded-full border bg-background p-1 pl-3.5 focus-within:border-foreground/30"
 					>
 						<MarkGithubIcon size={14} className="shrink-0 text-muted-foreground" />
-						{/* Only owner/repo to type: github.com/ is already there (a pasted link still works). */}
-						<span className="shrink-0 text-muted-foreground">github.com/</span>
+						{/* Only owner/repo to type (a pasted link is trimmed to it). */}
 						<input
 							autoFocus
 							value={text}
@@ -101,7 +100,7 @@ export function AddProjectCard({ onLocal, onCancel, onDone, initialRepo, remoteO
 							spellCheck={false}
 							inputMode="url"
 							enterKeyHint="go"
-							className="-ml-2 min-w-0 flex-1 bg-transparent outline-none placeholder:text-muted-foreground"
+							className="min-w-0 flex-1 bg-transparent outline-none placeholder:text-muted-foreground"
 						/>
 						<button type="submit" disabled={!repo || adding.busy} className="btn-dark inline-flex h-7 items-center gap-1 px-3 text-[12px] disabled:opacity-50">
 							{adding.busy ? <Loader2 className="size-3.5 animate-spin" /> : null}
