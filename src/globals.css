@@ -458,3 +458,17 @@ button:is(:hover, :focus-visible) > .fm-bell, .fm-bell-ring { animation: fm-bell
 @media (prefers-reduced-motion: reduce) {
 	.fm-settle { animation: none; }
 }
+
+/* Text that is being worked on (an agent's "Reading src/…", "Thinking…"): a bright band sweeps through dimmed letters. */
+@keyframes fm-text-sheen { from { background-position: 100% 0; } to { background-position: -100% 0; } }
+.fm-shimmer-text {
+	background: linear-gradient(100deg, hsl(var(--muted-foreground) / 0.45) 35%, hsl(var(--foreground)) 50%, hsl(var(--muted-foreground) / 0.45) 65%);
+	background-size: 250% 100%;
+	-webkit-background-clip: text;
+	background-clip: text;
+	color: transparent;
+	animation: fm-text-sheen 1.4s linear infinite;
+}
+@media (prefers-reduced-motion: reduce) {
+	.fm-shimmer-text { animation: none; color: hsl(var(--muted-foreground)); background: none; }
+}

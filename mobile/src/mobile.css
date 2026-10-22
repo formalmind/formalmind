@@ -153,14 +153,7 @@ html.fm-mobile.dark {
 	background-size: 200% 100%;
 }
 /* The working agent's line: its text shimmers instead of a spinner beside it. */
-.fm-shimmer-text {
-	background: linear-gradient(90deg, hsl(var(--muted-foreground)) 0%, hsl(var(--foreground)) 50%, hsl(var(--muted-foreground)) 100%);
-	background-size: 200% 100%;
-	-webkit-background-clip: text;
-	background-clip: text;
-	color: transparent;
-	animation: fm-sheen 1.8s linear infinite;
-}
+/* .fm-shimmer-text (the working agent's line) is in src/globals.css, shared with the Mac app. */
 @keyframes fm-sheen {
 	from {
 		background-position: 100% 0;
@@ -171,9 +164,6 @@ html.fm-mobile.dark {
 }
 @media (prefers-reduced-motion: reduce) {
 	.fm-skeleton,
-	.fm-shimmer-text {
-		animation: none;
-	}
 }
 /* The introduction's first glimpse settles from close on the logo out to the app around it. */
 .fm-zoom-in {
