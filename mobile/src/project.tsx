@@ -15,6 +15,7 @@ import { BugsExplorer } from "./bugs";
 import { ChatsIcon, CodeSkeleton, FloatingBar, ListSkeleton, TopBar } from "./bar";
 import { SlideDrawer } from "./drawer";
 import { ChatButtons, MacState, SessionChat } from "./mac";
+import { CloudChat, cloudChats, newCloudChatId, useCloudChats } from "./cloud-chat";
 import { macOnline, useMac } from "./relay";
 import type { RelayFolder } from "@/lib/relay";
 import { rememberProject, TabBar, type Tab } from "./tabs";
@@ -183,6 +184,8 @@ export function ProjectScreen() {
 
 const folderKey = (repo: string) => `fm:mac-folder:${repo}`;
 const runKey = (repo: string) => `fm:mac-run:${repo}`;
+/** Which chat the Chat tab shows: "mac" for your Mac's swarm, else a Formal Mind conversation's id. */
+const chatChoiceKey = (repo: string) => `fm:chat-choice:${repo}`;
 const read = (key: string) => {
 	try {
 		return localStorage.getItem(key);
@@ -208,6 +211,15 @@ function useStored(key: string): [string | null, (v: string) => void] {
 		() => read(key),
 	);
 	return [value, (v) => write(key, v)];
+}
+
+/** The chat on the Chat tab: Formal Mind on formal.team by default (the latest conversation, or a new one), or your Mac. */
+function useChatChoice(repo: string) {
+	const [chosen, choose] = useStored(chatChoiceKey(repo));
+	const [fresh] = useState(newCloudChatId);
+	const latest = cloudChats(repo)[0]?.id;
+	const choice = chosen ?? latest ?? fresh;
+	return { mac: choice === "mac", chatId: choice === "mac" ? (latest ?? fresh) : choice, choose };
 }
 
 /** The Mac folder that is this repository: picked once, else the one whose origin it is. */
@@ -238,35 +250,68 @@ function SessionHistory({ repo, onPicked }: { repo: string; onPicked: () => void
 	const navigate = useNavigate();
 	const { folder } = useProjectFolder(repo);
 	const { run, pick } = useChosenRun(repo, folder);
-	const go = (r: string) => {
+	const { mac, chatId, choose } = useChatChoice(repo);
+	const chats = useCloudChats(repo);
+	const goMac = (r: string) => {
 		pick(r);
+		choose("mac");
 		onPicked();
 	};
+	const goCloud = (id: string) => {
+		choose(id);
+		onPicked();
+	};
+	const row = (on: boolean) => `flex h-11 w-full items-center gap-3 rounded-xl px-3 text-left active:bg-muted ${on ? "bg-card shadow-card" : ""}`;
+	const caption = "px-5 pb-1 pt-4 font-mono text-[11px] uppercase tracking-wider text-muted-foreground";
 	return (
 		<div className="fm-safe-top flex h-full flex-col">
 			<div className="px-5 pb-3 pt-4">
-				<h2 className="truncate font-display text-[28px] leading-tight">{folder?.name ?? repo.split("/")[1]}</h2>
-				<p className="truncate text-[13px] text-muted-foreground">Swarm sessions on your Mac</p>
+				<h2 className="truncate font-display text-[28px] leading-tight">{repo.split("/")[1]}</h2>
+				<p className="truncate text-[13px] text-muted-foreground">Chats with Formal Mind, and your Mac's swarm</p>
 			</div>
 			<div className="px-3 pb-2">
-				<button type="button" onClick={() => go(`s-${Date.now().toString(16)}`)} className="flex h-11 w-full items-center gap-2 rounded-full bg-card px-4 text-[15px] font-medium shadow-card active:bg-muted">
-					<Plus className="size-4" /> New session
+				<button type="button" onClick={() => goCloud(newCloudChatId())} className="flex h-11 w-full items-center gap-2 rounded-full bg-card px-4 text-[15px] font-medium shadow-card active:bg-muted">
+					<Plus className="size-4" /> New chat
 				</button>
 			</div>
-			<p className="px-5 pb-1 pt-3 font-mono text-[11px] uppercase tracking-wider text-muted-foreground">History</p>
-			<ul className="min-h-0 flex-1 overflow-y-auto px-2 pb-10">
-				{(folder?.sessions ?? []).map((s) => (
-					<li key={s.run}>
-						{/* One line each, as a chat history: the title, and what it spent. */}
-						<button type="button" onClick={() => go(s.run)} className={`flex h-11 w-full items-center gap-3 rounded-xl px-3 text-left active:bg-muted ${s.run === run ? "bg-card shadow-card" : ""}`}>
-							<span className={`min-w-0 flex-1 truncate text-[15px] ${s.running ? "font-medium" : ""}`}>{s.title || (s.run === "swarm" ? "Swarm" : s.run)}</span>
-							<span className={`shrink-0 font-mono text-[12px] ${s.running ? "text-emerald-600 dark:text-emerald-400" : "text-muted-foreground"}`}>{s.running ? "running" : `$${s.spent.toFixed(2)}`}</span>
-						</button>
-					</li>
-				))}
-				{folder && !folder.sessions.length ? <li className="px-3 py-2 text-[14px] text-muted-foreground">No sessions yet.</li> : null}
-				{!folder ? <li className="px-3 py-2 text-[14px] text-muted-foreground">Your Mac's sessions show here once it's connected.</li> : null}
-			</ul>
+			<div className="min-h-0 flex-1 overflow-y-auto px-2 pb-10">
+				<p className={caption}>Formal Mind</p>
+				<ul>
+					{chats.map((c) => (
+						<li key={c.id}>
+							{/* One line each, as a chat history. */}
+							<button type="button" onClick={() => goCloud(c.id)} className={row(!mac && c.id === chatId)}>
+								<span className="min-w-0 flex-1 truncate text-[15px]">{c.title}</span>
+							</button>
+						</li>
+					))}
+					{!chats.length ? <li className="px-3 py-2 text-[14px] text-muted-foreground">Your chats show here.</li> : null}
+				</ul>
+				<p className={caption}>Your Mac</p>
+				<ul>
+					{(folder?.sessions ?? []).map((s) => (
+						<li key={s.run}>
+							<button type="button" onClick={() => goMac(s.run)} className={row(mac && s.run === run)}>
+								<span className={`min-w-0 flex-1 truncate text-[15px] ${s.running ? "font-medium" : ""}`}>{s.title || (s.run === "swarm" ? "Swarm" : s.run)}</span>
+								<span className={`shrink-0 font-mono text-[12px] ${s.running ? "text-emerald-600 dark:text-emerald-400" : "text-muted-foreground"}`}>{s.running ? "running" : `$${s.spent.toFixed(2)}`}</span>
+							</button>
+						</li>
+					))}
+					{folder ? (
+						<li>
+							<button type="button" onClick={() => goMac(`s-${Date.now().toString(16)}`)} className={`${row(false)} text-muted-foreground`}>
+								<Plus className="size-4" /> New swarm session
+							</button>
+						</li>
+					) : (
+						<li>
+							<button type="button" onClick={() => goMac(run)} className={`${row(mac)} text-muted-foreground`}>
+								<Laptop className="size-4" /> Your Mac's swarm
+							</button>
+						</li>
+					)}
+				</ul>
+			</div>
 			{/* You, and Settings, at the foot of the drawer. */}
 			<div className="fm-safe-bottom flex items-center gap-3 border-t px-4 pt-3">
 				<span className="grid size-9 shrink-0 place-items-center overflow-hidden rounded-full border bg-muted text-[14px] font-medium">
@@ -290,6 +335,23 @@ function SessionHistory({ repo, onPicked }: { repo: string; onPicked: () => void
  * none matches (a renamed repository), you pick the folder once and it's remembered.
  */
 function ProjectChat({ repo }: { repo: string }) {
+	const { mac, chatId, choose } = useChatChoice(repo);
+	if (!mac) return <CloudChat key={chatId} repo={repo} chatId={chatId} aboveTabs shelf={<ChatSwitch value="cloud" onChange={(v) => choose(v === "mac" ? "mac" : chatId)} />} />;
+	return <MacChat repo={repo} />;
+}
+
+/** Which chat: Formal Mind (formal.team) or your Mac's swarm, as the composer's chip. */
+function ChatSwitch({ value, onChange }: { value: "cloud" | "mac"; onChange: (v: "cloud" | "mac") => void }) {
+	return (
+		<select value={value} onChange={(e) => onChange(e.target.value as "cloud" | "mac")} aria-label="Chat with" className="max-w-full truncate bg-transparent text-[13px] text-foreground outline-none">
+			<option value="cloud">Formal Mind</option>
+			<option value="mac">Your Mac's swarm</option>
+		</select>
+	);
+}
+
+/** The Chat tab on your Mac's swarm (as before Formal Mind's chat was the default). */
+function MacChat({ repo }: { repo: string }) {
 	const { m, folders, folder, pick } = useProjectFolder(repo);
 	if (!folder) {
 		// No folder yet: why (centered, as the onboarding draws it), or which of the Mac's folders this repository is.
@@ -332,6 +394,7 @@ function ProjectChat({ repo }: { repo: string }) {
 /** A folder's swarm chat, on the session followed (useChosenRun); the history drawer or the pill switches it. */
 function FolderChat({ repo, folder }: { repo: string; folder: RelayFolder }) {
 	const { run, pick } = useChosenRun(repo, folder);
+	const { chatId, choose } = useChatChoice(repo);
 	const label = (r: string) => {
 		const s = folder.sessions.find((x) => x.run === r);
 		return `${s?.title || (r === "swarm" ? "Swarm" : r)}${s?.running ? " · running" : ""}`;
@@ -346,7 +409,8 @@ function FolderChat({ repo, folder }: { repo: string; folder: RelayFolder }) {
 				aboveTabs
 				fullScreen
 				header={
-					<select value={run} onChange={(e) => pick(e.target.value)} aria-label="Session" className="max-w-full truncate bg-transparent text-[13px] text-foreground outline-none">
+					<select value={run} onChange={(e) => (e.target.value === "\u0000cloud" ? choose(chatId) : pick(e.target.value))} aria-label="Session" className="max-w-full truncate bg-transparent text-[13px] text-foreground outline-none">
+						<option value={"\u0000cloud"}>Formal Mind</option>
 						{runs.map((r) => (
 							<option key={r} value={r}>
 								{folder.name} · {label(r)}
