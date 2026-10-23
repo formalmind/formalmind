@@ -225,7 +225,22 @@ export function AgentMessage({ e, onBug }: { e: Ev; onBug: () => void }) {
 /** A line number marked in the code's gutter (a function's proof status, in its colour), on a 0-based line. */
 export type GutterMark = { text: string; title: string; onClick: () => void };
 
-export function FileView({ path, text, big, start = 1, mark, cursor, diagnostics, gutter, band }: { path: string; text: string; big?: boolean; start?: number; mark?: number | null; cursor?: Cursor | null; /** solc's errors and warnings in this file: a wavy underline, the message under the line. */ diagnostics?: Diagnostic[]; gutter?: Map<number, GutterMark>; /** 0-based lines tinted as one block (the function the Proofs rail has picked), its numbers in `text`'s colour. */ band?: { from: number; to: number; text?: string } | null }) {
+/** Where a text caret sits in a FileView: its 0-based line and column (characters of code before it). */
+function caretIn(pre: HTMLElement): { line: number; col: number } | null {
+	const sel = window.getSelection();
+	const node = sel?.focusNode;
+	if (!sel || !node || !pre.contains(node)) return null;
+	const row = (node.nodeType === Node.ELEMENT_NODE ? (node as Element) : node.parentElement)?.closest<HTMLElement>("[data-line]");
+	const code = row?.querySelector("[data-code]");
+	if (!row || !code) return null;
+	if (!code.contains(node)) return { line: Number(row.dataset.line), col: 0 };
+	let col = 0;
+	const walk = document.createTreeWalker(code, NodeFilter.SHOW_TEXT);
+	for (let t = walk.nextNode(); t && t !== node; t = walk.nextNode()) col += t.textContent?.length ?? 0;
+	return { line: Number(row.dataset.line), col: col + (node.nodeType === Node.TEXT_NODE ? sel.focusOffset : 0) };
+}
+
+export function FileView({ path, text, big, start = 1, mark, cursor, diagnostics, gutter, band, onCaret }: { path: string; text: string; big?: boolean; start?: number; mark?: number | null; cursor?: Cursor | null; /** A text caret you can place and move but nothing can be typed: reports where it is (and the line is lit). */ onCaret?: (at: { line: number; col: number } | null) => void; /** solc's errors and warnings in this file: a wavy underline, the message under the line. */ diagnostics?: Diagnostic[]; gutter?: Map<number, GutterMark>; /** 0-based lines tinted as one block (the function the Proofs rail has picked), its numbers in `text`'s colour. */ band?: { from: number; to: number; text?: string } | null }) {
 	const lines = useHighlightedCode(text, EXT[path.split(".").pop() ?? ""] ?? "text");
 	const marked = useRef<HTMLSpanElement | null>(null);
 	useEffect(() => {
@@ -235,15 +250,53 @@ export function FileView({ path, text, big, start = 1, mark, cursor, diagnostics
 	useEffect(() => {
 		caret.current?.scrollIntoView({ block: "nearest", inline: "nearest" });
 	}, [cursor?.line, cursor?.col]);
+	// The read-only caret: the browser's own (click, arrows, ⌥/⌘-arrows, shift to select), with every edit refused.
+	const pre = useRef<HTMLPreElement | null>(null);
+	const [lit, setLit] = useState<number | null>(null);
+	useEffect(() => {
+		if (!onCaret) return;
+		const moved = () => {
+			if (!pre.current || document.activeElement !== pre.current) return;
+			const at = caretIn(pre.current);
+			setLit(at?.line ?? null);
+			onCaret(at);
+		};
+		document.addEventListener("selectionchange", moved);
+		return () => document.removeEventListener("selectionchange", moved);
+	}, [onCaret]);
+	const readOnly = onCaret
+		? {
+				contentEditable: true,
+				suppressContentEditableWarning: true,
+				spellCheck: false,
+				role: "textbox",
+				"aria-readonly": true,
+				"aria-multiline": true,
+				onBeforeInput: (e: React.FormEvent) => e.preventDefault(),
+				onPaste: (e: React.ClipboardEvent) => e.preventDefault(),
+				onCut: (e: React.ClipboardEvent) => e.preventDefault(),
+				onDrop: (e: React.DragEvent) => e.preventDefault(),
+				// An input method would write into the page before anything can refuse it.
+				onCompositionStart: (e: React.CompositionEvent<HTMLPreElement>) => e.currentTarget.blur(),
+				onKeyDown: (e: React.KeyboardEvent) => {
+					if (e.key === "Enter" || e.key === "Backspace" || e.key === "Delete" || e.key === "Tab") e.preventDefault();
+				},
+				onBlur: () => {
+					setLit(null);
+					onCaret(null);
+				},
+			}
+		: {};
 	return (
-		<pre className={`overflow-x-auto py-2 font-mono ${big ? "text-[12.5px] leading-6" : "text-[11px] leading-5"}`}>
+		<pre ref={pre} {...readOnly} className={`overflow-x-auto py-2 font-mono outline-none ${onCaret ? "caret-foreground" : ""} ${big ? "text-[12.5px] leading-6" : "text-[11px] leading-5"}`}>
 			{lines.map((line, i) => (
-				<span key={i} ref={i === mark ? marked : undefined} data-line={i} className={`relative block whitespace-pre pr-3 ${i === mark ? "bg-amber-300/25" : cursor?.line === i ? "bg-muted/60" : band && i >= band.from && i <= band.to ? "bg-foreground/[0.035]" : ""}`}>
-					{band && i >= band.from && i <= band.to ? <span aria-hidden className={`absolute inset-y-0 left-0 w-0.5 bg-current opacity-70 ${band.text ?? "text-foreground/25"}`} /> : null}
+				<span key={i} ref={i === mark ? marked : undefined} data-line={i} className={`relative block whitespace-pre pr-3 ${i === mark ? "bg-amber-300/25" : cursor?.line === i || lit === i ? "bg-muted/60" : band && i >= band.from && i <= band.to ? "bg-foreground/[0.035]" : ""}`}>
+					{band && i >= band.from && i <= band.to ? <span aria-hidden contentEditable={false} className={`absolute inset-y-0 left-0 w-0.5 bg-current opacity-70 ${band.text ?? "text-foreground/25"}`} /> : null}
 					{/* A marked line's number takes its status colour and picks it; the others stay muted. */}
 					{gutter?.get(i) ? (
 						<button
 							type="button"
+							contentEditable={false}
 							title={gutter.get(i)!.title}
 							aria-label={gutter.get(i)!.title}
 							onClick={(e) => {
@@ -255,7 +308,7 @@ export function FileView({ path, text, big, start = 1, mark, cursor, diagnostics
 							{i + start}
 						</button>
 					) : (
-						<span className={`mr-3 inline-block w-9 select-none text-right ${band?.text && i >= band.from && i <= band.to ? `font-medium ${band.text}` : "text-muted-foreground/60"}`}>{i + start}</span>
+						<span contentEditable={false} className={`mr-3 inline-block w-9 select-none text-right ${band?.text && i >= band.from && i <= band.to ? `font-medium ${band.text}` : "text-muted-foreground/60"}`}>{i + start}</span>
 					)}
 					<span data-code>{line}</span>
 					{cursor?.line === i ? <span ref={caret} data-vim-cursor className="pointer-events-none absolute top-0 h-full w-[1ch] bg-foreground/35" style={{ left: `calc(3rem + ${cursor.col}ch)` }} /> : null}
@@ -1739,6 +1792,9 @@ export function SwarmPanel({ folder, name, scan, bridge, session, file: openPath
 	// Vim keys (a setting): a cursor over the read-only file.
 	const vim = useVimMode();
 	const [cursor, setCursor] = useState<Cursor>({ line: 0, col: 0 });
+	// Where the read-only caret is in the open file (Vim off), for the file bar.
+	const [caretAt, setCaretAt] = useState<{ line: number; col: number } | null>(null);
+	useEffect(() => setCaretAt(null), [file?.path]);
 	const [vimSearchText, setVimSearchText] = useState<string | null>(null);
 	const lastSearch = useRef("");
 	const pending = useRef("");
@@ -2464,6 +2520,11 @@ export function SwarmPanel({ folder, name, scan, bridge, session, file: openPath
 												})}
 											</span>
 										) : null}
+										{caretAt && !vim ? (
+											<span className="mr-1 font-mono text-[11px] text-muted-foreground/70">
+												Ln {caretAt.line + 1}, Col {caretAt.col + 1}
+											</span>
+										) : null}
 										<button
 											type="button"
 											onClick={() => {
@@ -2533,6 +2594,7 @@ export function SwarmPanel({ folder, name, scan, bridge, session, file: openPath
 											big
 											mark={markLine ? markLine - 1 : null}
 											cursor={vim ? cursor : null}
+											onCaret={vim ? undefined : setCaretAt}
 											gutter={solProofs.data ? proofGutter(solProofs.data, solProofs.functions, pickProof) : undefined}
 											band={pickedFn && solProofs.data ? { from: pickedFn.line - 1, to: pickedFn.endLine - 1, text: fnStatus(pickedFn, solProofs.data.theorems).text } : null}
 										/>
