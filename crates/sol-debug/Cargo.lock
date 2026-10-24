@@ -1672,7 +1672,7 @@ dependencies = [
 
 [[package]]
 name = "formal-ast"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "anyhow",
  "clap",
@@ -3850,6 +3850,7 @@ dependencies = [
  "ratatui",
  "revm",
  "serde_json",
+ "toml",
  "tree-sitter-highlight",
  "tree-sitter-solidity",
  "ureq",

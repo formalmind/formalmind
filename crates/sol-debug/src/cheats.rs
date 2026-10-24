@@ -41,7 +41,7 @@ struct ExpectRevert {
     depth: usize,
 }
 
-#[derive(Default)]
+#[derive(Default, Clone)]
 pub struct Cheats {
     prank: Option<Prank>,
     expect_revert: Option<ExpectRevert>,

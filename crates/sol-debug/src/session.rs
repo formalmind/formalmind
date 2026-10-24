@@ -87,6 +87,14 @@ impl Run {
     }
 }
 
+/// See [`Session::snapshot`].
+pub struct Snapshot {
+    db: CacheDB<Backend>,
+    cheats: crate::cheats::Cheats,
+    block: revm::context::BlockEnv,
+    libraries: HashMap<usize, Address>,
+}
+
 /// A Foundry test run: `setUp()` (not traced unless asked) and the test function.
 pub struct TestRun {
     pub address: Address,
@@ -99,6 +107,18 @@ impl Session {
     pub fn compile(root: &Path, entry: &str) -> Result<Self> {
         let project = Project::load(root)?;
         let output = solc::compile(&project, entry)?;
+        Self::from_output(project, &output)
+    }
+
+    /// Compiles several entry files in one solc run (a test suite), with these settings.
+    pub fn compile_with(root: &Path, entries: &[String], settings: &solc::Settings) -> Result<Self> {
+        let project = Project::load(root)?;
+        let output = solc::compile_entries(&project, entries, settings)?;
+        Self::from_output(project, &output)
+    }
+
+    fn from_output(project: Project, output: &serde_json::Value) -> Result<Self> {
+        let output = output.clone();
         let sources = Sources::load(&output, &project.root, &project.remappings);
         let mut artifacts = Vec::new();
         let mut selectors = HashMap::new();
@@ -321,6 +341,46 @@ impl Session {
     /// The chain id `block.chainid` reads (31337 by default, as in forge).
     pub fn set_chain_id(&mut self, id: u64) {
         self.evm.ctx.cfg.chain_id = id;
+    }
+
+    /// The chain and the cheatcode state, to come back to.
+    pub fn snapshot(&self) -> Snapshot {
+        Snapshot {
+            db: self.evm.ctx.db().clone(),
+            cheats: self.evm.inspector.cheats.clone(),
+            block: self.evm.ctx.block.clone(),
+            libraries: self.libraries.clone(),
+        }
+    }
+
+    pub fn restore(&mut self, s: &Snapshot) {
+        *self.evm.ctx.db_mut() = s.db.clone();
+        self.evm.inspector.cheats = s.cheats.clone();
+        self.evm.ctx.block = s.block.clone();
+        self.libraries = s.libraries.clone();
+    }
+
+    /// Deploys a Foundry test contract the way forge does (funded, labelled) and runs its `setUp()`, untraced.
+    pub fn deploy_test(&mut self, contract: &str) -> Result<Address> {
+        let ci = self.artifact(contract)?;
+        self.serve_get_code()?;
+        let init = self.linked_init(ci)?;
+        let deploy = self.transact_quiet(SENDER, TxKind::Create, init.into(), U256::ZERO)?;
+        let address = deploy
+            .created
+            .ok_or_else(|| anyhow!("deploying {contract} failed: {}", deploy.revert_reason().unwrap_or_else(|| format!("0x{}", hex::encode(&deploy.output)))))?;
+        let mut info = self.evm.ctx.db().basic_ref(address)?.unwrap_or_default();
+        info.balance = U256::from(1) << 96;
+        self.evm.ctx.db_mut().insert_account_info(address, info);
+        let name = self.artifacts[ci].name.clone();
+        self.evm.inspector.cheats.labels.insert(address, name);
+        if self.artifacts[ci].methods.values().any(|s| s == "setUp()") {
+            let setup = self.transact_quiet(SENDER, TxKind::Call(address), keccak256("setUp()".as_bytes())[..4].to_vec().into(), U256::ZERO)?;
+            if !setup.success {
+                bail!("setUp() reverted: {}", setup.revert_reason().unwrap_or_else(|| format!("0x{}", hex::encode(&setup.output))));
+            }
+        }
+        Ok(address)
     }
 
     /// Runs a Foundry test: deploys the test contract, runs `setUp()` (traced only when asked), then the test.

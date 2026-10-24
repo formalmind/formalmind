@@ -83,12 +83,110 @@ pub struct Trace {
     pub codes: HashMap<B256, Bytes>,
 }
 
+/// What ran at the target of a call.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum Callee {
+    /// Code, by its index in [`Coverage::codes`].
+    Code(usize),
+    /// A call with calldata to an address with no code: the program it meant to call isn't there.
+    NoCode(Address),
+    Precompile(Address),
+    /// Answered by the session (forge's `vm`, console.log).
+    Cheatcode,
+}
+
+/// Hits per pc and taken/not-taken counts per `JUMPI`, for one piece of code.
+#[derive(Debug, Clone)]
+pub struct CodeHits {
+    pub hash: B256,
+    pub code: Bytes,
+    /// Times each pc ran (indexed by pc; non-instruction bytes stay 0).
+    pub pcs: Vec<u32>,
+    /// `JUMPI` pc → (jumped, fell through).
+    pub jumps: HashMap<usize, (u64, u64)>,
+}
+
+#[derive(Debug, Clone, Default)]
+struct CovFrame {
+    code: Option<usize>,
+    pc: usize,
+    target: Address,
+    answered: bool,
+    has_input: bool,
+    /// The caller's code and the pc of its CALL.
+    caller: Option<(usize, usize)>,
+}
+
+/// Coverage mode: kept across transactions (a whole test suite), whether or not steps are recorded.
+#[derive(Debug, Clone, Default)]
+pub struct Coverage {
+    pub codes: Vec<CodeHits>,
+    pub index: HashMap<B256, usize>,
+    /// (caller code, caller pc, what ran there) → how many times.
+    pub calls: HashMap<(usize, usize, Callee), u64>,
+    open: Vec<CovFrame>,
+}
+
+impl Coverage {
+    fn enter(&mut self, target: Address, answered: bool, has_input: bool) {
+        let caller = self.open.last().and_then(|f| f.code.map(|c| (c, f.pc)));
+        self.open.push(CovFrame { target, answered, has_input, caller, ..Default::default() });
+    }
+
+    fn code(&mut self, code: &[u8]) {
+        let hash = keccak256(code);
+        let i = *self.index.entry(hash).or_insert_with(|| {
+            self.codes.push(CodeHits { hash, code: Bytes::copy_from_slice(code), pcs: vec![0; code.len()], jumps: HashMap::new() });
+            self.codes.len() - 1
+        });
+        if self.open.is_empty() {
+            self.open.push(CovFrame::default());
+        }
+        self.open.last_mut().unwrap().code = Some(i);
+    }
+
+    fn step(&mut self, pc: usize, op: u8, stack: &[U256]) {
+        let Some(f) = self.open.last_mut() else { return };
+        let Some(c) = f.code else { return };
+        f.pc = pc;
+        let hits = &mut self.codes[c];
+        if let Some(n) = hits.pcs.get_mut(pc) {
+            *n = n.saturating_add(1);
+        }
+        if op == opcode::JUMPI && stack.len() >= 2 {
+            let e = hits.jumps.entry(pc).or_default();
+            if stack[stack.len() - 2].is_zero() {
+                e.1 += 1;
+            } else {
+                e.0 += 1;
+            }
+        }
+    }
+
+    fn exit(&mut self) {
+        let Some(f) = self.open.pop() else { return };
+        let Some((code, pc)) = f.caller else { return };
+        let precompile = f.target <= Address::with_last_byte(0x11) || f.target == revm::primitives::address!("0000000000000000000000000000000000000100");
+        let callee = match f.code {
+            Some(c) => Callee::Code(c),
+            None if f.answered => Callee::Cheatcode,
+            None if precompile => Callee::Precompile(f.target),
+            None if f.has_input => Callee::NoCode(f.target),
+            // A plain transfer to an account without code.
+            None => return,
+        };
+        *self.calls.entry((code, pc, callee)).or_default() += 1;
+    }
+}
+
 /// The inspector. Clear it with [`Recorder::take`] between transactions.
 pub struct Recorder {
     pub trace: Trace,
     /// Off: cheatcodes still work, but no steps are kept (setUp, deploying fixtures).
     pub enabled: bool,
     pub cheats: Cheats,
+    /// Coverage mode (None: off).
+    pub coverage: Option<Coverage>,
     /// Open frames, innermost last.
     open: Vec<usize>,
     /// Per depth: the memory as the frame's previous step left it, and that step's index.
@@ -103,6 +201,7 @@ impl Default for Recorder {
             trace: Trace::default(),
             enabled: true,
             cheats: Cheats::new(),
+            coverage: None,
             open: vec![],
             memory: HashMap::new(),
             seen: HashMap::new(),
@@ -132,6 +231,9 @@ fn writes_memory(op: u8) -> bool {
 
 impl Inspector<Ctx> for Recorder {
     fn initialize_interp(&mut self, interp: &mut Interpreter, _: &mut Ctx) {
+        if let Some(c) = &mut self.coverage {
+            c.code(interp.bytecode.bytecode_slice());
+        }
         self.memory.remove(&interp.input.depth());
         if !self.enabled {
             return;
@@ -145,6 +247,9 @@ impl Inspector<Ctx> for Recorder {
     }
 
     fn step(&mut self, interp: &mut Interpreter, context: &mut Ctx) {
+        if let Some(c) = &mut self.coverage {
+            c.step(interp.bytecode.pc(), interp.bytecode.opcode(), interp.stack.data());
+        }
         if !self.enabled {
             return;
         }
@@ -255,6 +360,9 @@ impl Inspector<Ctx> for Recorder {
         let depth = context.journal_mut().depth();
         let input = inputs.input.bytes(context);
         let answered = self.cheats.call(context, inputs, &input, depth);
+        if let Some(c) = &mut self.coverage {
+            c.enter(inputs.target_address, answered.is_some(), !input.is_empty());
+        }
         if !self.enabled {
             return answered;
         }
@@ -282,6 +390,9 @@ impl Inspector<Ctx> for Recorder {
 
     fn call_end(&mut self, _: &mut Ctx, _: &CallInputs, outcome: &mut CallOutcome) {
         self.cheats.frame_end(&mut outcome.result);
+        if let Some(c) = &mut self.coverage {
+            c.exit();
+        }
         if !self.enabled {
             return;
         }
@@ -294,6 +405,9 @@ impl Inspector<Ctx> for Recorder {
     fn create(&mut self, context: &mut Ctx, inputs: &mut CreateInputs) -> Option<CreateOutcome> {
         let depth = context.journal_mut().depth();
         self.cheats.create(inputs, depth);
+        if let Some(c) = &mut self.coverage {
+            c.enter(Address::ZERO, false, false);
+        }
         if !self.enabled {
             return None;
         }
@@ -316,6 +430,9 @@ impl Inspector<Ctx> for Recorder {
 
     fn create_end(&mut self, _: &mut Ctx, _: &CreateInputs, outcome: &mut CreateOutcome) {
         self.cheats.frame_end(&mut outcome.result);
+        if let Some(c) = &mut self.coverage {
+            c.exit();
+        }
         if !self.enabled {
             return;
         }

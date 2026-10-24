@@ -8,19 +8,20 @@ use revm::primitives::{keccak256, Address, StorageKey, StorageValue, B256, U256}
 use revm::state::AccountInfo;
 use serde_json::{json, Value};
 use std::convert::Infallible;
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 
-#[derive(Default)]
+#[derive(Default, Clone)]
 pub struct Backend {
     rpc: Option<Rpc>,
 }
 
+#[derive(Clone)]
 struct Rpc {
     url: String,
     /// The pinned block, as the RPC wants it (`0x1a2b`).
     block: String,
     agent: ureq::Agent,
-    errors: Mutex<Vec<String>>,
+    errors: Arc<Mutex<Vec<String>>>,
 }
 
 /// What a fork is pinned to: chain id, block number and timestamp.
@@ -34,7 +35,7 @@ impl Backend {
     /// A fork of the chain at `url`, pinned to its latest block.
     pub fn fork(url: &str) -> anyhow::Result<(Backend, ForkInfo)> {
         let agent = ureq::AgentBuilder::new().timeout(std::time::Duration::from_secs(30)).build();
-        let rpc = Rpc { url: url.to_string(), block: "latest".into(), agent, errors: Mutex::new(vec![]) };
+        let rpc = Rpc { url: url.to_string(), block: "latest".into(), agent, errors: Arc::new(Mutex::new(vec![])) };
         let chain = rpc.call("eth_chainId", json!([])).ok_or_else(|| anyhow::anyhow!("{} didn't answer eth_chainId{}", url, rpc.last_error()))?;
         let head = rpc.call("eth_getBlockByNumber", json!(["latest", false])).ok_or_else(|| anyhow::anyhow!("{} didn't answer eth_getBlockByNumber", url))?;
         let num = |v: &Value| v.as_str().and_then(|s| u64::from_str_radix(s.trim_start_matches("0x"), 16).ok()).unwrap_or(0);
