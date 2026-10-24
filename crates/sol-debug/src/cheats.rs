@@ -28,6 +28,10 @@ pub const CONSOLE: Address = address!("000000000000000000636F6e736F6c652e6c6f67"
 struct Prank {
     sender: Address,
     origin: Option<Address>,
+    /// `prank(…, true)`: the prank applies to a DELEGATECALL the caller makes.
+    delegate: bool,
+    /// tx.origin before the prank changed it, restored when the prank ends.
+    prior_origin: Option<Address>,
     /// Only calls made by this address, at this depth, are pranked.
     caller: Address,
     depth: usize,
@@ -39,6 +43,24 @@ struct ExpectRevert {
     data: Option<Bytes>,
     caller: Address,
     depth: usize,
+    /// The open frame that called expectRevert (an index into the frame stack): if it reverts itself, that is the
+    /// expected revert too.
+    frame: usize,
+}
+
+impl ExpectRevert {
+    /// As in forge: the data matches as bytes, or a reason string given as bytes matches an Error(string).
+    fn matches(&self, output: &[u8]) -> bool {
+        self.data.as_ref().is_none_or(|d| output.starts_with(d) || error_message(output).is_some_and(|m| m.as_bytes() == &d[..]))
+    }
+}
+
+/// What the inspector does when a frame ends, for the cheatcodes.
+pub struct FrameEnd {
+    /// The frame was one of the test contract's own top-level calls (forge clears transient storage after each).
+    pub clear_transient: bool,
+    /// A single prank set tx.origin for this call: put it back.
+    pub restore_origin: Option<Address>,
 }
 
 /// Slots read and written, as `vm.accesses` returns them.
@@ -92,8 +114,18 @@ pub struct Cheats {
     /// one of the test contract's top-level calls.
     pub test_contract: Option<Address>,
     top_calls: Vec<bool>,
+    origin_restore: Vec<Option<Address>>,
+    /// Folders a test may write to (foundry.toml's read-write `fs_permissions`, absolute). Empty: writes are
+    /// skipped.
+    pub writable: Vec<std::path::PathBuf>,
     /// `recordLogs()`: the logs emitted since, until `getRecordedLogs` takes them.
     logs: Option<Vec<revm::primitives::Log>>,
+    /// `setEnv`: variables set by the test, read before the process's.
+    env_set: HashMap<String, String>,
+    /// `_expectCheatcodeRevert`: the next cheatcode call must revert (with these bytes, when given).
+    expect_cheat_revert: Option<Option<Vec<u8>>>,
+    /// The `random*` cheatcodes' generator (`setSeed` resets it).
+    rng: Option<u64>,
     /// `expectCall`s accepted but not checked (the runner doesn't verify them yet).
     pub unchecked_expect_calls: usize,
     /// One entry per open call or create: whether a pending expectRevert is aimed at it.
@@ -111,6 +143,139 @@ const SIGNATURES: &[&str] = &[
     "etch(address,bytes)",
     "getCode(string)",
     "warp(uint256)",
+    "assertApproxEqAbs(int256,int256,uint256)",
+    "assertApproxEqAbs(int256,int256,uint256,string)",
+    "assertApproxEqAbsDecimal(int256,int256,uint256,uint256)",
+    "assertApproxEqAbsDecimal(int256,int256,uint256,uint256,string)",
+    "assertApproxEqAbsDecimal(uint256,uint256,uint256,uint256)",
+    "assertApproxEqAbsDecimal(uint256,uint256,uint256,uint256,string)",
+    "assertApproxEqRel(int256,int256,uint256)",
+    "assertApproxEqRel(int256,int256,uint256,string)",
+    "assertApproxEqRelDecimal(int256,int256,uint256,uint256)",
+    "assertApproxEqRelDecimal(int256,int256,uint256,uint256,string)",
+    "assertApproxEqRelDecimal(uint256,uint256,uint256,uint256)",
+    "assertApproxEqRelDecimal(uint256,uint256,uint256,uint256,string)",
+    "assertEq(address[],address[])",
+    "assertEq(address[],address[],string)",
+    "assertEq(bool[],bool[])",
+    "assertEq(bool[],bool[],string)",
+    "assertEq(bytes32[],bytes32[])",
+    "assertEq(bytes32[],bytes32[],string)",
+    "assertEq(bytes[],bytes[])",
+    "assertEq(bytes[],bytes[],string)",
+    "assertEq(int256[],int256[])",
+    "assertEq(int256[],int256[],string)",
+    "assertEq(string[],string[])",
+    "assertEq(string[],string[],string)",
+    "assertEq(uint256[],uint256[])",
+    "assertEq(uint256[],uint256[],string)",
+    "assertEqDecimal(int256,int256,uint256)",
+    "assertEqDecimal(int256,int256,uint256,string)",
+    "assertEqDecimal(uint256,uint256,uint256)",
+    "assertEqDecimal(uint256,uint256,uint256,string)",
+    "assertGe(int256,int256)",
+    "assertGe(int256,int256,string)",
+    "assertGeDecimal(int256,int256,uint256)",
+    "assertGeDecimal(int256,int256,uint256,string)",
+    "assertGeDecimal(uint256,uint256,uint256)",
+    "assertGeDecimal(uint256,uint256,uint256,string)",
+    "assertGtDecimal(int256,int256,uint256)",
+    "assertGtDecimal(int256,int256,uint256,string)",
+    "assertGtDecimal(uint256,uint256,uint256)",
+    "assertGtDecimal(uint256,uint256,uint256,string)",
+    "assertLe(int256,int256)",
+    "assertLe(int256,int256,string)",
+    "assertLeDecimal(int256,int256,uint256)",
+    "assertLeDecimal(int256,int256,uint256,string)",
+    "assertLeDecimal(uint256,uint256,uint256)",
+    "assertLeDecimal(uint256,uint256,uint256,string)",
+    "assertLtDecimal(int256,int256,uint256)",
+    "assertLtDecimal(int256,int256,uint256,string)",
+    "assertLtDecimal(uint256,uint256,uint256)",
+    "assertLtDecimal(uint256,uint256,uint256,string)",
+    "assertNotEq(address[],address[])",
+    "assertNotEq(address[],address[],string)",
+    "assertNotEq(bool,bool)",
+    "assertNotEq(bool,bool,string)",
+    "assertNotEq(bool[],bool[])",
+    "assertNotEq(bool[],bool[],string)",
+    "assertNotEq(bytes,bytes)",
+    "assertNotEq(bytes,bytes,string)",
+    "assertNotEq(bytes32[],bytes32[])",
+    "assertNotEq(bytes32[],bytes32[],string)",
+    "assertNotEq(bytes[],bytes[])",
+    "assertNotEq(bytes[],bytes[],string)",
+    "assertNotEq(int256,int256)",
+    "assertNotEq(int256,int256,string)",
+    "assertNotEq(int256[],int256[])",
+    "assertNotEq(int256[],int256[],string)",
+    "assertNotEq(string,string)",
+    "assertNotEq(string,string,string)",
+    "assertNotEq(string[],string[])",
+    "assertNotEq(string[],string[],string)",
+    "assertNotEq(uint256[],uint256[])",
+    "assertNotEq(uint256[],uint256[],string)",
+    "assertNotEqDecimal(int256,int256,uint256)",
+    "assertNotEqDecimal(int256,int256,uint256,string)",
+    "assertNotEqDecimal(uint256,uint256,uint256)",
+    "assertNotEqDecimal(uint256,uint256,uint256,string)",
+    "setEnv(string,string)",
+    "_expectCheatcodeRevert()",
+    "_expectCheatcodeRevert(bytes)",
+    "_expectCheatcodeRevert(bytes4)",
+    "expectSafeMemory(uint64,uint64)",
+    "expectSafeMemoryCall(uint64,uint64)",
+    "stopExpectSafeMemory()",
+    "skip(bool)",
+    "skip(bool,string)",
+    "fee(uint256)",
+    "txGasPrice(uint256)",
+    "prevrandao(uint256)",
+    "prevrandao(bytes32)",
+    "difficulty(uint256)",
+    "coinbase(address)",
+    "getBlockTimestamp()",
+    "getBlockNumber()",
+    "readCallers()",
+    "setNonce(address,uint64)",
+    "setNonceUnsafe(address,uint64)",
+    "resetNonce(address)",
+    "createWallet(uint256)",
+    "createWallet(string)",
+    "createWallet(uint256,string)",
+    "setSeed(uint256)",
+    "randomUint()",
+    "randomUint(uint256)",
+    "randomUint(uint256,uint256)",
+    "randomInt()",
+    "randomInt(uint256)",
+    "randomAddress()",
+    "randomBool()",
+    "randomBytes(uint256)",
+    "randomBytes4()",
+    "randomBytes8()",
+    "snapshot()",
+    "revertTo(uint256)",
+    "revertToAndDelete(uint256)",
+    "deleteSnapshot(uint256)",
+    "deleteSnapshots()",
+    "deleteStateSnapshots()",
+    "getLabel(address)",
+    "pauseGasMetering()",
+    "resumeGasMetering()",
+    "resetGasMetering()",
+    "computeCreate2Address(bytes32,bytes32,address)",
+    "computeCreate2Address(bytes32,bytes32)",
+    "parseUint(string)",
+    "parseInt(string)",
+    "parseBool(string)",
+    "parseAddress(string)",
+    "parseBytes32(string)",
+    "parseBytes(string)",
+    "prank(address,bool)",
+    "prank(address,address,bool)",
+    "startPrank(address,bool)",
+    "startPrank(address,address,bool)",
     "store(address,bytes32,bytes32)",
     "load(address,bytes32)",
     "record()",
@@ -298,6 +463,7 @@ impl Cheats {
         let aimed = inputs.target_address != HEVM
             && self.expect_revert.as_ref().is_some_and(|e| e.depth == depth && e.caller == inputs.caller);
         self.top_calls.push(self.armed.len() == 1 && self.test_contract == Some(inputs.caller) && inputs.target_address != HEVM);
+        self.origin_restore.push(None);
         self.armed.push(aimed);
         if inputs.target_address == CONSOLE {
             let line = self.console_line(input);
@@ -305,23 +471,57 @@ impl Cheats {
             return Some(outcome(inputs, InstructionResult::Return, Bytes::new()));
         }
         if inputs.target_address != HEVM {
-            if let Some(p) = &self.prank {
-                if p.depth == depth && inputs.caller == p.caller {
+            if let Some(p) = &mut self.prank {
+                let delegated = p.delegate && inputs.scheme == revm::interpreter::CallScheme::DelegateCall && inputs.target_address == p.caller;
+                if p.depth == depth && (inputs.caller == p.caller || delegated) {
                     inputs.caller = p.sender;
                     // revm moves a call's value from its caller, which it loaded before this hook ran: load the
                     // pranked sender too, or a pranked call with value finds no account to debit.
                     let _ = revm::context::ContextTr::journal_mut(ctx).load_account(p.sender);
                     if let Some(o) = p.origin {
+                        p.prior_origin.get_or_insert(ctx.tx.caller);
                         ctx.tx.caller = o;
                     }
                     if p.single {
-                        self.prank = None;
+                        // tx.origin comes back when this call ends.
+                        if let Some(prior) = self.prank.take().and_then(|p| p.prior_origin) {
+                            if let Some(last) = self.origin_restore.last_mut() {
+                                *last = Some(prior);
+                            }
+                        }
                     }
                 }
             }
             return self.mocked(inputs, input);
         }
-        let answer = self.answer(ctx, inputs.caller, input, depth);
+        let expecting = self.expect_cheat_revert.take();
+        let pending = self.expect_revert.as_ref().is_some_and(|e| e.depth == depth && e.caller == inputs.caller);
+        let mut answer = self.answer(ctx, inputs.caller, input, depth);
+        if pending && expecting.is_none() {
+            if let Answer::Revert(msg) = &answer {
+                let e = self.expect_revert.take().unwrap();
+                answer = if e.matches(&error_string(msg)) { Answer::Ok(vec![]) } else { Answer::Revert(format!("Error != expected error: {msg}")) };
+            }
+        }
+        if let Some(want) = expecting {
+            // `_expectCheatcodeRevert` itself arms it again; any other cheatcode settles it.
+            if self.expect_cheat_revert.is_none() {
+                answer = match answer {
+                    Answer::Revert(msg) => {
+                        let data = error_string(&msg);
+                        let ok = want.as_ref().is_none_or(|w| data.starts_with(w) || msg.as_bytes() == &w[..] || error_message(w).is_some_and(|m| m == msg));
+                        if ok {
+                            Answer::Ok(vec![])
+                        } else {
+                            Answer::Revert(format!("Error != expected error: {msg} != {}", want.as_ref().and_then(|w| error_message(w).or_else(|| String::from_utf8(w.clone()).ok())).unwrap_or_default()))
+                        }
+                    }
+                    Answer::Ok(_) => Answer::Revert("next call did not revert as expected".into()),
+                };
+            } else {
+                self.expect_cheat_revert = Some(want);
+            }
+        }
         Some(match answer {
             Answer::Ok(out) => outcome(inputs, InstructionResult::Return, out.into()),
             Answer::Revert(msg) => outcome(inputs, InstructionResult::Revert, error_string(&msg)),
@@ -364,6 +564,7 @@ impl Cheats {
     pub fn create(&mut self, inputs: &mut revm::interpreter::CreateInputs, depth: usize) {
         let aimed = self.expect_revert.as_ref().is_some_and(|e| e.depth == depth && e.caller == inputs.caller());
         self.top_calls.push(self.armed.len() == 1 && self.test_contract == Some(inputs.caller()));
+        self.origin_restore.push(None);
         self.armed.push(aimed);
         if let Some(p) = &self.prank {
             if p.depth == depth && inputs.caller() == p.caller {
@@ -378,20 +579,29 @@ impl Cheats {
     /// After a call or create: settle an expectRevert aimed at it.
     /// Returns whether the frame was one of the test contract's own top-level calls: forge runs each of those as
     /// its own transaction, so transient storage is cleared after it (and kept within it).
-    pub fn frame_end(&mut self, result: &mut InterpreterResult) -> bool {
+    pub fn frame_end(&mut self, result: &mut InterpreterResult) -> FrameEnd {
         let top = self.top_calls.pop().unwrap_or(false);
+        let origin = self.origin_restore.pop().flatten();
         self.settle_expect_revert(result);
-        top
+        FrameEnd { clear_transient: top, restore_origin: origin }
     }
 
     fn settle_expect_revert(&mut self, result: &mut InterpreterResult) {
-        if !self.armed.pop().unwrap_or(false) {
+        // The frame that called expectRevert reverting is the expected revert too (`vm.expectRevert(…); revert(…);`).
+        let this = self.armed.len().saturating_sub(1);
+        let own = self.expect_revert.as_ref().is_some_and(|e| e.frame == this) && !result.result.is_ok();
+        if !self.armed.pop().unwrap_or(false) && !own {
             return;
         }
         let Some(e) = self.expect_revert.take() else { return };
         let reverted = !result.result.is_ok();
-        // As in forge: the data matches as bytes, or a reason string given as bytes matches an Error(string).
-        let data_ok = e.data.as_ref().is_none_or(|d| result.output.starts_with(d) || error_message(&result.output).is_some_and(|m| m.as_bytes() == &d[..]));
+        // A halt matches as forge names it: `EvmError: OutOfGas`.
+        let output = if reverted && !result.result.is_revert() {
+            Bytes::from(format!("EvmError: {:?}", result.result).into_bytes())
+        } else {
+            result.output.clone()
+        };
+        let data_ok = e.matches(&output);
         if reverted && data_ok {
             // forge answers a matched expectRevert with 8192 zero bytes, so the caller's ABI decoder finds a value
             // of any return type (an empty output would make `manager.initialize(...)`'s int24 fail to decode).
@@ -472,7 +682,7 @@ impl Cheats {
                     },
                     _ => DEFAULT_SENDER,
                 };
-                self.prank = Some(Prank { sender, origin: Some(sender), caller, depth, single: name == "broadcast" });
+                self.prank = Some(Prank { sender, origin: Some(sender), delegate: false, prior_origin: None, caller, depth, single: name == "broadcast" });
                 Answer::Ok(vec![])
             }
             "stopBroadcast" => {
@@ -499,7 +709,37 @@ impl Cheats {
                 }
             }
             // Debugging never writes to the project.
-            "writeFile" | "writeJson" | "createDir" => Answer::Ok(vec![]),
+            "writeFile" | "writeJson" | "createDir" => {
+                if self.writable.is_empty() {
+                    return Answer::Ok(vec![]);
+                }
+                // writeFile(path, data), writeJson(json, path), createDir(path, recursive).
+                let (path, data) = match name {
+                    "writeJson" => (text(1), text(0)),
+                    "createDir" => (text(0), String::new()),
+                    _ => (text(0), text(1)),
+                };
+                let full = self.ffi_dir.join(&path);
+                let parent = full.parent().map(|p| p.to_path_buf()).unwrap_or_default();
+                let inside = |p: &std::path::Path| {
+                    let p = p.canonicalize().unwrap_or_else(|_| p.to_path_buf());
+                    self.writable.iter().any(|w| p.starts_with(w))
+                };
+                if name == "createDir" {
+                    if !inside(&full) && !inside(&parent) {
+                        return Answer::Revert(format!("the path {path} is not allowed to be accessed for write operations"));
+                    }
+                    let _ = std::fs::create_dir_all(&full);
+                    return Answer::Ok(vec![]);
+                }
+                if !inside(&parent) {
+                    return Answer::Revert(format!("the path {path} is not allowed to be accessed for write operations"));
+                }
+                match std::fs::write(&full, data) {
+                    Ok(()) => Answer::Ok(vec![]),
+                    Err(e) => Answer::Revert(format!("sol-debug: {name} {path}: {e}")),
+                }
+            }
             n if n.starts_with("serialize") => {
                 let (obj, key) = (text(0), text(1));
                 let value = match &args[2] {
@@ -565,7 +805,9 @@ impl Cheats {
             "prank" | "startPrank" => {
                 self.prank = Some(Prank {
                     sender: addr(0),
-                    origin: (args.len() > 1).then(|| addr(1)),
+                    origin: args.get(1).and_then(|v| v.as_address()),
+                    delegate: args.last().and_then(|v| v.as_bool()).unwrap_or(false),
+                    prior_origin: None,
                     caller,
                     depth,
                     single: name == "prank",
@@ -573,7 +815,9 @@ impl Cheats {
                 Answer::Ok(vec![])
             }
             "stopPrank" => {
-                self.prank = None;
+                if let Some(o) = self.prank.take().and_then(|p| p.prior_origin) {
+                    ctx.tx.caller = o;
+                }
                 Answer::Ok(vec![])
             }
             "deal" => {
@@ -588,8 +832,14 @@ impl Cheats {
                 Answer::Ok(vec![])
             }
             "getCode" => {
-                let what = args[0].as_str().unwrap_or("");
-                match self.code.get(what) {
+                let what = artifact_name(args[0].as_str().unwrap_or(""));
+                if what.ends_with(".json") {
+                    return match artifact_file(&self.ffi_dir, &what, false) {
+                        Some(code) => Answer::Ok(DynSolValue::Bytes(code).abi_encode()),
+                        None => Answer::Revert(format!("sol-debug: getCode: no bytecode in {what}")),
+                    };
+                }
+                match self.code.get(&what) {
                     Some(code) => Answer::Ok(DynSolValue::Bytes(code.clone()).abi_encode()),
                     None => Answer::Revert(format!("sol-debug: getCode: no compiled contract {what:?} (compile the file that imports it)")),
                 }
@@ -638,12 +888,22 @@ impl Cheats {
                 ctx.cfg.chain_id = uint(0).saturating_to();
                 Answer::Ok(vec![])
             }
-            "snapshotState" => {
+            "snapshotState" | "snapshot" => {
                 let j = &ctx.journaled_state.inner;
                 self.states.push(Some((j.state.clone(), j.transient_storage.clone(), ctx.block.clone())));
                 Answer::Ok(DynSolValue::Uint(U256::from(self.states.len() - 1), 256).abi_encode())
             }
-            "revertToState" | "revertToStateAndDelete" | "deleteStateSnapshot" => {
+            "deleteStateSnapshots" | "deleteSnapshots" => {
+                self.states.iter_mut().for_each(|s| *s = None);
+                Answer::Ok(vec![])
+            }
+            "revertToState" | "revertToStateAndDelete" | "deleteStateSnapshot" | "revertTo" | "revertToAndDelete" | "deleteSnapshot" => {
+                let name = match name {
+                    "revertTo" => "revertToState",
+                    "revertToAndDelete" => "revertToStateAndDelete",
+                    "deleteSnapshot" => "deleteStateSnapshot",
+                    n => n,
+                };
                 let id = uint(0).saturating_to::<usize>();
                 let Some(Some((state, transient, block))) = self.states.get(id).cloned() else {
                     return Answer::Ok(DynSolValue::Bool(false).abi_encode());
@@ -662,7 +922,13 @@ impl Cheats {
                 self.unchecked_expect_calls += 1;
                 Answer::Ok(vec![])
             }
-            "getDeployedCode" => match self.deployed.get(args[0].as_str().unwrap_or("")) {
+            "getDeployedCode" if artifact_name(args[0].as_str().unwrap_or("")).ends_with(".json") => {
+                match artifact_file(&self.ffi_dir, &artifact_name(args[0].as_str().unwrap_or("")), true) {
+                    Some(code) => Answer::Ok(DynSolValue::Bytes(code).abi_encode()),
+                    None => Answer::Revert(format!("sol-debug: getDeployedCode: no bytecode in {}", text(0))),
+                }
+            }
+            "getDeployedCode" => match self.deployed.get(&artifact_name(args[0].as_str().unwrap_or(""))) {
                 Some(code) => Answer::Ok(DynSolValue::Bytes(code.clone()).abi_encode()),
                 None => Answer::Revert(format!("sol-debug: getDeployedCode: no contract {}", text(0))),
             },
@@ -674,6 +940,165 @@ impl Cheats {
             // Gas and dumps only.
             "cool" | "coolSlot" | "dumpState" => Answer::Ok(vec![]),
             "createFork" | "selectFork" => Answer::Revert("sol-debug: createFork inside a test isn't supported (run on a fork)".into()),
+            "setEnv" => {
+                self.env_set.insert(text(0), text(1));
+                Answer::Ok(vec![])
+            }
+            "_expectCheatcodeRevert" => {
+                self.expect_cheat_revert = Some(args.first().and_then(|a| match a {
+                    DynSolValue::Bytes(b) => Some(b.clone()),
+                    DynSolValue::FixedBytes(b, n) => Some(b[..*n].to_vec()),
+                    _ => None,
+                }));
+                Answer::Ok(vec![])
+            }
+            // Memory-safety and gas-metering checks don't change what a test computes.
+            "expectSafeMemory" | "expectSafeMemoryCall" | "stopExpectSafeMemory" | "pauseGasMetering" | "resumeGasMetering" | "resetGasMetering" => {
+                Answer::Ok(vec![])
+            }
+            "skip" => {
+                if args[0].as_bool() == Some(true) {
+                    let why = args.get(1).and_then(|v| v.as_str()).unwrap_or("");
+                    Answer::Revert(format!("sol-debug: skip {why}"))
+                } else {
+                    Answer::Ok(vec![])
+                }
+            }
+            "fee" => {
+                ctx.block.basefee = uint(0).saturating_to();
+                Answer::Ok(vec![])
+            }
+            "txGasPrice" => {
+                ctx.tx.gas_price = uint(0).saturating_to();
+                Answer::Ok(vec![])
+            }
+            "prevrandao" => {
+                ctx.block.prevrandao = Some(B256::from(word(&args[0])));
+                Answer::Ok(vec![])
+            }
+            "difficulty" => {
+                ctx.block.difficulty = uint(0);
+                Answer::Ok(vec![])
+            }
+            "coinbase" => {
+                ctx.block.beneficiary = addr(0);
+                Answer::Ok(vec![])
+            }
+            "getBlockTimestamp" => Answer::Ok(DynSolValue::Uint(ctx.block.timestamp, 256).abi_encode()),
+            "getBlockNumber" => Answer::Ok(DynSolValue::Uint(ctx.block.number, 256).abi_encode()),
+            // (CallerMode, msg.sender, tx.origin): None 0, Broadcast 1, RecurrentBroadcast 2, Prank 3, RecurrentPrank 4.
+            "readCallers" => {
+                let (mode, sender, origin) = match &self.prank {
+                    Some(p) => (if p.single { 3u8 } else { 4 }, p.sender, p.origin.unwrap_or(ctx.tx.caller)),
+                    None => (0, DEFAULT_SENDER, ctx.tx.caller),
+                };
+                Answer::Ok(DynSolValue::Tuple(vec![DynSolValue::Uint(U256::from(mode), 8), DynSolValue::Address(sender), DynSolValue::Address(origin)]).abi_encode_params())
+            }
+            "setNonce" | "setNonceUnsafe" | "resetNonce" => {
+                let a = addr(0);
+                let Ok(mut acc) = ctx.journaled_state.load_account_mut(a);
+                let current = acc.nonce();
+                let new = if name == "resetNonce" { 0 } else { uint(1).saturating_to::<u64>() };
+                if name == "setNonce" && new < current {
+                    return Answer::Revert(format!("vm.setNonce: new nonce ({new}) must be strictly equal to or higher than the account's current nonce ({current})"));
+                }
+                acc.set_nonce(new);
+                Answer::Ok(vec![])
+            }
+            "createWallet" => {
+                let pk = match &args[0] {
+                    DynSolValue::String(name) => U256::from_be_bytes(keccak256(name.as_bytes()).0),
+                    v => word(v),
+                };
+                let Some(k) = signing_key(pk) else { return Answer::Revert("vm.createWallet: bad private key".into()) };
+                let a = key_address(&k);
+                if let Some(label) = args.iter().find_map(|v| v.as_str()) {
+                    self.labels.insert(a, label.to_string());
+                }
+                let point = k.verifying_key().to_encoded_point(false);
+                let (x, y) = (U256::from_be_slice(point.x().unwrap()), U256::from_be_slice(point.y().unwrap()));
+                Answer::Ok(
+                    DynSolValue::Tuple(vec![DynSolValue::Address(a), DynSolValue::Uint(x, 256), DynSolValue::Uint(y, 256), DynSolValue::Uint(pk, 256)])
+                        .abi_encode_params(),
+                )
+            }
+            "setSeed" => {
+                self.rng = Some(uint(0).as_limbs()[0] | 1);
+                Answer::Ok(vec![])
+            }
+            n if n.starts_with("random") => {
+                let mut word_ = || -> U256 {
+                    let r = self.rng.get_or_insert(0x5eed_cafe_f00d_u64);
+                    let mut next = || {
+                        *r ^= *r << 13;
+                        *r ^= *r >> 7;
+                        *r ^= *r << 17;
+                        *r
+                    };
+                    U256::from_limbs([next(), next(), next(), next()])
+                };
+                let w = word_();
+                match (n, args.len()) {
+                    ("randomUint", 0) => Answer::Ok(DynSolValue::Uint(w, 256).abi_encode()),
+                    ("randomUint", 1) => {
+                        let bits = uint(0).saturating_to::<usize>().min(256);
+                        let v = if bits == 256 { w } else { w & ((U256::from(1) << bits) - U256::from(1)) };
+                        Answer::Ok(DynSolValue::Uint(v, 256).abi_encode())
+                    }
+                    ("randomUint", _) => {
+                        let (lo, hi) = (uint(0), uint(1));
+                        if lo > hi {
+                            return Answer::Revert("vm.randomUint: min must be less than or equal to max".to_string());
+                        }
+                        let span = hi - lo;
+                        let v = if span == U256::MAX { w } else { lo + w % (span + U256::from(1)) };
+                        Answer::Ok(DynSolValue::Uint(v, 256).abi_encode())
+                    }
+                    ("randomInt", 0) => Answer::Ok(DynSolValue::Int(revm::primitives::I256::from_raw(w), 256).abi_encode()),
+                    ("randomInt", _) => {
+                        let bits = uint(0).saturating_to::<usize>().clamp(1, 256);
+                        let v = revm::primitives::I256::from_raw(w << (256 - bits)).asr(256 - bits);
+                        Answer::Ok(DynSolValue::Int(v, 256).abi_encode())
+                    }
+                    ("randomAddress", _) => Answer::Ok(DynSolValue::Address(Address::from_slice(&w.to_be_bytes::<32>()[12..])).abi_encode()),
+                    ("randomBool", _) => Answer::Ok(DynSolValue::Bool(w.bit(0)).abi_encode()),
+                    ("randomBytes", _) => {
+                        let len = uint(0).saturating_to::<usize>().min(1 << 20);
+                        let mut out = vec![];
+                        while out.len() < len {
+                            out.extend_from_slice(&word_().to_be_bytes::<32>());
+                        }
+                        out.truncate(len);
+                        Answer::Ok(DynSolValue::Bytes(out).abi_encode_params())
+                    }
+                    ("randomBytes4", _) => Answer::Ok(DynSolValue::FixedBytes(B256::from(w & (U256::MAX << 224)), 4).abi_encode()),
+                    ("randomBytes8", _) => Answer::Ok(DynSolValue::FixedBytes(B256::from(w & (U256::MAX << 192)), 8).abi_encode()),
+                    _ => Answer::Revert(format!("sol-debug: unsupported cheatcode {n}")),
+                }
+            }
+            "getLabel" => {
+                let a = addr(0);
+                let l = self.labels.get(&a).cloned().unwrap_or_else(|| format!("unlabeled:{}", a.to_checksum(None)));
+                Answer::Ok(DynSolValue::String(l).abi_encode_params())
+            }
+            "computeCreate2Address" => {
+                let deployer = if args.len() > 2 { addr(2) } else { address!("4e59b44847b379578588920cA78FbF26c0B4956C") };
+                Answer::Ok(DynSolValue::Address(deployer.create2(B256::from(word(&args[0])), B256::from(word(&args[1])))).abi_encode())
+            }
+            "parseUint" | "parseInt" | "parseBool" | "parseAddress" | "parseBytes32" | "parseBytes" => {
+                let ty = match name {
+                    "parseUint" => "uint256",
+                    "parseInt" => "int256",
+                    "parseBool" => "bool",
+                    "parseAddress" => "address",
+                    "parseBytes32" => "bytes32",
+                    _ => "bytes",
+                };
+                match parse_env(ty, &text(0)) {
+                    Some(v) => Answer::Ok(v.abi_encode_params()),
+                    None => Answer::Revert(format!("failed parsing {:?} as type `{ty}`", text(0))),
+                }
+            }
             "warp" => {
                 ctx.block.timestamp = uint(0);
                 Answer::Ok(vec![])
@@ -721,7 +1146,7 @@ impl Cheats {
                     DynSolValue::FixedBytes(b, n) => Bytes::copy_from_slice(&b[..*n]),
                     other => Bytes::from(other.as_bytes().unwrap_or_default().to_vec()),
                 });
-                self.expect_revert = Some(ExpectRevert { data, caller, depth });
+                self.expect_revert = Some(ExpectRevert { data, caller, depth, frame: self.armed.len().saturating_sub(2) });
                 Answer::Ok(vec![])
             }
             "expectEmit" => Answer::Ok(vec![]),
@@ -756,7 +1181,7 @@ impl Cheats {
     /// Runs an allowed program like forge's ffi: stdout that is hex (with or without 0x) comes back decoded.
     fn ffi(&mut self, argv: &[String]) -> Result<(i32, Vec<u8>, Vec<u8>), String> {
         let Some(program) = argv.first() else { return Err("ffi: empty command".into()) };
-        if !self.ffi_allow.iter().any(|p| p == program) {
+        if !self.ffi_allow.iter().any(|p| p == program || p == "*") {
             return Err(format!("sol-debug: ffi refused {program:?}; allowed: {:?}", self.ffi_allow));
         }
         if let Some(hit) = self.ffi_cache.get(argv) {
@@ -795,52 +1220,115 @@ fn find_program(name: &str) -> std::path::PathBuf {
     dirs.into_iter().map(|d| d.join(name)).find(|p| p.is_file()).unwrap_or_else(|| name.into())
 }
 
+/// `vm.assert*`, with forge's messages: `assertion failed: a != b`, or `msg: a != b` with a message; `assertion
+/// failed` (or the message) for assertTrue/assertFalse. The `Decimal` variants print values with their decimals,
+/// and assertApproxEqRel prints its deltas as percentages (1e18 is 100%).
 fn assert(name: &str, args: &[DynSolValue]) -> Answer {
-    let operands = match name {
+    let decimal = name.ends_with("Decimal");
+    let base = name.trim_end_matches("Decimal");
+    let values = match base {
         "assertTrue" | "assertFalse" => 1,
         "assertApproxEqAbs" | "assertApproxEqRel" => 3,
         _ => 2,
     };
-    let msg = args.get(operands).and_then(|m| m.as_str()).map(|m| format!("{m}: ")).unwrap_or_default();
-    let show = |v: &DynSolValue| match v {
-        DynSolValue::Uint(u, _) => u.to_string(),
-        DynSolValue::Int(i, _) => i.to_string(),
-        DynSolValue::Address(a) => a.to_checksum(None),
-        DynSolValue::Bool(b) => b.to_string(),
-        DynSolValue::String(s) => format!("{s:?}"),
-        other => format!("0x{}", revm::primitives::hex::encode(other.abi_encode_packed())),
+    let decimals = decimal.then(|| args.get(values).and_then(|d| d.as_uint()).map(|(u, _)| u.saturating_to::<usize>()).unwrap_or(0));
+    let msg = args.get(values + decimal as usize).and_then(|m| m.as_str());
+    let fmt = |v: &DynSolValue| -> String {
+        if let Some(d) = decimals {
+            match v {
+                DynSolValue::Uint(u, _) => return with_decimals(*u, d, false),
+                DynSolValue::Int(i, _) => return with_decimals(i.unsigned_abs(), d, i.is_negative()),
+                _ => {}
+            }
+        }
+        to_string(v)
     };
     let ord = |a: &DynSolValue, b: &DynSolValue| match (a, b) {
         (DynSolValue::Uint(x, _), DynSolValue::Uint(y, _)) => x.cmp(y),
         (DynSolValue::Int(x, _), DynSolValue::Int(y, _)) => x.cmp(y),
         _ => std::cmp::Ordering::Equal,
     };
-    let (ok, why) = match name {
-        "assertTrue" => (args[0].as_bool() == Some(true), "expected true".to_string()),
-        "assertFalse" => (args[0].as_bool() == Some(false), "expected false".to_string()),
-        "assertEq" => (args[0] == args[1], format!("{} != {}", show(&args[0]), show(&args[1]))),
-        "assertNotEq" => (args[0] != args[1], format!("both {}", show(&args[0]))),
-        "assertGt" => (ord(&args[0], &args[1]).is_gt(), format!("{} <= {}", show(&args[0]), show(&args[1]))),
-        "assertGe" => (ord(&args[0], &args[1]).is_ge(), format!("{} < {}", show(&args[0]), show(&args[1]))),
-        "assertLt" => (ord(&args[0], &args[1]).is_lt(), format!("{} >= {}", show(&args[0]), show(&args[1]))),
-        "assertLe" => (ord(&args[0], &args[1]).is_le(), format!("{} > {}", show(&args[0]), show(&args[1]))),
-        "assertApproxEqAbs" | "assertApproxEqRel" => {
-            let (a, b, max) = (args[0].as_uint().unwrap().0, args[1].as_uint().unwrap().0, args[2].as_uint().unwrap().0);
-            let delta = if a > b { a - b } else { b - a };
-            let within = if name == "assertApproxEqAbs" {
-                delta <= max
+    let fail = |why: String| Answer::Revert(match msg {
+        Some(m) => format!("{m}: {why}"),
+        None => format!("assertion failed: {why}"),
+    });
+    let (a, b) = (&args[0], args.get(1).unwrap_or(&args[0]));
+    match base {
+        "assertTrue" | "assertFalse" => {
+            if a.as_bool() == Some(base == "assertTrue") {
+                Answer::Ok(vec![])
             } else {
-                b.is_zero() && a.is_zero() || !b.is_zero() && delta * U256::from(10).pow(U256::from(18)) / b <= max
-            };
-            (within, format!("{a} vs {b}, off by {delta} (max {max})"))
+                Answer::Revert(msg.unwrap_or("assertion failed").to_string())
+            }
         }
-        _ => (true, String::new()),
-    };
-    if ok {
-        Answer::Ok(vec![])
-    } else {
-        Answer::Revert(format!("{msg}assertion failed: {why}"))
+        "assertEq" if a != b => fail(format!("{} != {}", fmt(a), fmt(b))),
+        "assertNotEq" if a == b => fail(format!("{} == {}", fmt(a), fmt(b))),
+        "assertGt" if !ord(a, b).is_gt() => fail(format!("{} <= {}", fmt(a), fmt(b))),
+        "assertGe" if !ord(a, b).is_ge() => fail(format!("{} < {}", fmt(a), fmt(b))),
+        "assertLt" if !ord(a, b).is_lt() => fail(format!("{} >= {}", fmt(a), fmt(b))),
+        "assertLe" if !ord(a, b).is_le() => fail(format!("{} > {}", fmt(a), fmt(b))),
+        "assertApproxEqAbs" | "assertApproxEqRel" => {
+            // |a - b| for uint or int operands.
+            let (delta, bmag) = match (a, b) {
+                (DynSolValue::Int(x, _), DynSolValue::Int(y, _)) => {
+                    let d = if x > y { x.wrapping_sub(*y) } else { y.wrapping_sub(*x) };
+                    (d.unsigned_abs(), y.unsigned_abs())
+                }
+                _ => {
+                    let (x, y) = (a.as_uint().map(|v| v.0).unwrap_or_default(), b.as_uint().map(|v| v.0).unwrap_or_default());
+                    (if x > y { x - y } else { y - x }, y)
+                }
+            };
+            let max = args[2].as_uint().map(|v| v.0).unwrap_or_default();
+            if base == "assertApproxEqAbs" {
+                if delta <= max {
+                    return Answer::Ok(vec![]);
+                }
+                return fail(format!("{} !~= {} (max delta: {}, real delta: {})", fmt(a), fmt(b), fmt(&DynSolValue::Uint(max, 256)), fmt(&DynSolValue::Uint(delta, 256))));
+            }
+            if bmag.is_zero() {
+                if delta.is_zero() {
+                    return Answer::Ok(vec![]);
+                }
+                return fail(format!("{} !~= {} (right is 0)", fmt(a), fmt(b)));
+            }
+            let rel = delta * U256::from(10).pow(U256::from(18)) / bmag;
+            if rel <= max {
+                return Answer::Ok(vec![]);
+            }
+            let pct = |x: U256| format!("{}%", with_decimals(x, 16, false));
+            fail(format!("{} !~= {} (max delta: {}, real delta: {})", fmt(a), fmt(b), pct(max), pct(rel)))
+        }
+        _ => Answer::Ok(vec![]),
     }
+}
+
+/// A value as `vm.toString` prints it.
+fn to_string(v: &DynSolValue) -> String {
+    match v {
+        DynSolValue::Uint(u, _) => u.to_string(),
+        DynSolValue::Int(i, _) => i.to_string(),
+        DynSolValue::Address(a) => a.to_checksum(None),
+        DynSolValue::Bool(b) => b.to_string(),
+        DynSolValue::String(s) => s.clone(),
+        DynSolValue::FixedBytes(b, n) => format!("0x{}", revm::primitives::hex::encode(&b[..*n])),
+        DynSolValue::Bytes(b) => format!("0x{}", revm::primitives::hex::encode(b)),
+        DynSolValue::Array(v) | DynSolValue::FixedArray(v) => format!("[{}]", v.iter().map(to_string).collect::<Vec<_>>().join(", ")),
+        other => format!("0x{}", revm::primitives::hex::encode(other.abi_encode_packed())),
+    }
+}
+
+/// `value` with `decimals` decimal places, zero-padded (`1.000500`).
+fn with_decimals(value: U256, decimals: usize, negative: bool) -> String {
+    let s = value.to_string();
+    let out = if decimals == 0 {
+        s
+    } else if s.len() > decimals {
+        format!("{}.{}", &s[..s.len() - decimals], &s[s.len() - decimals..])
+    } else {
+        format!("0.{}{s}", "0".repeat(decimals - s.len()))
+    };
+    if negative { format!("-{out}") } else { out }
 }
 
 fn outcome(inputs: &CallInputs, result: InstructionResult, output: Bytes) -> CallOutcome {
@@ -878,6 +1366,22 @@ fn restore_state(ctx: &mut Ctx, snap: revm::state::EvmState) {
             acc.storage.entry(key).or_insert(slot);
         }
     }
+}
+
+/// An artifact name as forge takes it, without a compiler version suffix (`File.sol:Contract:0.8.18`).
+fn artifact_name(what: &str) -> String {
+    match what.rsplit_once(':') {
+        Some((head, v)) if v.split('.').count() == 3 && v.split('.').all(|p| p.chars().all(|c| c.is_ascii_digit())) => head.to_string(),
+        _ => what.to_string(),
+    }
+}
+
+/// Creation or runtime code from an artifact JSON file: forge's (`bytecode.object`) or Hardhat's (`bytecode`).
+fn artifact_file(root: &std::path::Path, path: &str, deployed: bool) -> Option<Vec<u8>> {
+    let v: serde_json::Value = serde_json::from_slice(&std::fs::read(root.join(path)).ok()?).ok()?;
+    let key = if deployed { "deployedBytecode" } else { "bytecode" };
+    let hex = v[key]["object"].as_str().or_else(|| v[key].as_str())?;
+    revm::primitives::hex::decode(hex.trim_start_matches("0x")).ok()
 }
 
 /// The message of `Error(string)` revert data.
@@ -925,6 +1429,9 @@ const DEFAULT_SENDER: Address = address!("1804c8AB1F12E6bbf3894d4083f33e07309d1f
 impl Cheats {
     /// An environment variable: the process's, else the project's `.env` (as Foundry loads it).
     fn env(&mut self, key: &str) -> Option<String> {
+        if let Some(v) = self.env_set.get(key) {
+            return Some(v.clone());
+        }
         if let Ok(v) = std::env::var(key) {
             return Some(v);
         }

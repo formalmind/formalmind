@@ -399,8 +399,12 @@ impl Inspector<Ctx> for Recorder {
     }
 
     fn call_end(&mut self, context: &mut Ctx, _: &CallInputs, outcome: &mut CallOutcome) {
-        if self.cheats.frame_end(&mut outcome.result) {
+        let end = self.cheats.frame_end(&mut outcome.result);
+        if end.clear_transient {
             context.journaled_state.inner.transient_storage.clear();
+        }
+        if let Some(o) = end.restore_origin {
+            context.tx.caller = o;
         }
         if let Some(c) = &mut self.coverage {
             c.exit();
@@ -443,8 +447,12 @@ impl Inspector<Ctx> for Recorder {
     }
 
     fn create_end(&mut self, context: &mut Ctx, _: &CreateInputs, outcome: &mut CreateOutcome) {
-        if self.cheats.frame_end(&mut outcome.result) {
+        let end = self.cheats.frame_end(&mut outcome.result);
+        if end.clear_transient {
             context.journaled_state.inner.transient_storage.clear();
+        }
+        if let Some(o) = end.restore_origin {
+            context.tx.caller = o;
         }
         if let Some(c) = &mut self.coverage {
             c.exit();

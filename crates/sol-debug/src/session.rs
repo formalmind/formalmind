@@ -226,7 +226,9 @@ impl Session {
     fn run_tx(&mut self, from: Address, kind: TxKind, data: Bytes, value: U256) -> Result<Run> {
         // The transaction's chain id must be the chain's.
         let chain = self.evm.ctx.cfg.chain_id;
-        let tx = TxEnv::builder().caller(from).kind(kind).data(data).value(value).gas_limit(TX_GAS).chain_id(Some(chain)).build_fill();
+        // Priced at the base fee, which `vm.fee` may have raised: forge doesn't reject a test for its gas price.
+        let price = self.evm.ctx.block.basefee as u128;
+        let tx = TxEnv::builder().caller(from).kind(kind).data(data).value(value).gas_limit(TX_GAS).gas_price(price).chain_id(Some(chain)).build_fill();
         let result = self.evm.inspect_tx_commit(tx).map_err(|e| anyhow!("transaction failed to run: {e:?}"))?;
         let trace = self.evm.inspector.take();
         Ok(match result {
