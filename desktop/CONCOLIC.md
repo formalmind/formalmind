@@ -1,5 +1,8 @@
 # The concolic tracer: run it for real, solve for the branch you missed
 
+**It lives in its own repo: [formalmind/concolity](https://github.com/formalmind/concolity)** (public, MIT), and depends on
+`sol-debug` from crates.io. Its DESIGN.md is the canonical copy. This note is how it plugs into Formal Mind.
+
 **Same rule as the debugger and the audit engine: only the code counts.** The tracer runs the bytecode solc (or hnc)
 produced in revm, with real state (a local chain or a fork) and real cheatcodes. Next to every concrete value it keeps
 an expression over the inputs. At every `JUMPI` it records the branch condition. Afterwards it flips one condition,
@@ -45,7 +48,7 @@ path with some predicates replaced, which is how a branch gets flipped.
 
 The EVM has no operators to overload, so the same idea moves from values into the interpreter. The mapping:
 
-| Fuzzing Book | sol-concolic |
+| Fuzzing Book | concolity |
 |---|---|
 | `zint` / `zbool` / `zstr` (`v` + `z`) | revm's concrete stack, memory and storage, plus a shadow `Option<ExprId>` next to each word or byte (§3) |
 | operator overloads build `z` | `step` / `step_end` build a node per op (`ADD` → `bvadd`, `LT` → `bvult`, …) |
@@ -74,7 +77,7 @@ seed (a test, a call sequence, or empty calldata)
   → oracles on every run                           panics, assert, invariants, attacker balance
 ```
 
-## 3. The Shadow inspector (`crates/sol-concolic`)
+## 3. The Shadow inspector (`concolity`)
 
 A second revm `Inspector`, built the same way as `trace.rs`'s `Recorder` and run alongside it (or alone, for speed).
 
@@ -144,12 +147,12 @@ the way solc-js runs today.
 
 ## 8. Skills and agents
 
-The tracer is a CLI first (`sol-concolic`) and a skill for the swarm's agents and for Claude Code users:
+The tracer is a CLI first (`concolity`) and a skill for the swarm's agents and for Claude Code users:
 
 ```
-sol-concolic explore . test/Vault.t.sol --contract VaultTest --seed test_deposit --depth 3 --fork $RPC
-sol-concolic branch  . src/Vault.sol:71 --true          # solve for one branch side
-sol-concolic replay  out/concolic/0007.json --tui      # open a solution in the debugger
+concolity explore . test/Vault.t.sol --contract VaultTest --seed test_deposit --depth 3 --fork $RPC
+concolity branch  . src/Vault.sol:71 --true          # solve for one branch side
+concolity replay  out/concolic/0007.json --tui      # open a solution in the debugger
 ```
 
 **Skill: `concolic`.** Teaches an agent:
@@ -167,7 +170,7 @@ branches the prover assumed unreachable reject that theorem.
 
 ## 9. Build order
 
-1. **MVP, one transaction.** `crates/sol-concolic`: shadow stack and memory, symbolic calldata only, storage concrete,
+1. **MVP, one transaction.** `concolity`: shadow stack and memory, symbolic calldata only, storage concrete,
    arithmetic / comparison / bitwise / shift ops, `CALLDATALOAD` / `CALLDATACOPY`, `JUMPI` paths, z3 subprocess,
    the trace tree. Port the book's examples (its `factorial`, `cgi_decode` and triangle classifiers, written in
    Solidity) as the first fixtures, so each result can be checked against the book's. Done when it solves a fixture with `if (x == 0x5eed1e55 && y * 3 == z + 7) assert(false)`
