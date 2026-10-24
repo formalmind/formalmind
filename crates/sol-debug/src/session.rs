@@ -153,6 +153,9 @@ impl Session {
         // ffi runs only compilers a test needs to build its contracts (a Huff port compiles with hnc).
         evm.inspector.cheats.ffi_allow = vec!["hnc".into()];
         evm.inspector.cheats.ffi_dir = project.root.clone();
+        evm.inspector.cheats.contracts = std::sync::Arc::new(
+            artifacts.iter().map(|a| (format!("{}:{}", a.file, a.name), a.runtime.code.clone(), a.runtime_holes.clone(), a.storage_layout.clone())).collect(),
+        );
         Ok(Session { project, sources, artifacts, libraries: HashMap::new(), code_index: HashMap::new(), selectors, evm, served: None })
     }
 

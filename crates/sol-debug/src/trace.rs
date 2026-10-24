@@ -254,6 +254,11 @@ impl Inspector<Ctx> for Recorder {
             c.step(interp.bytecode.pc(), interp.bytecode.opcode(), interp.stack.data());
         }
         let op = interp.bytecode.opcode();
+        if let Some(r) = &mut self.cheats.diffs {
+            let depth = context.journal_mut().depth();
+            r.step(&mut CtxState(context), interp, op, depth);
+            r.mapping_step(interp, op);
+        }
         if op == opcode::SLOAD || op == opcode::SSTORE {
             if let Some(&slot) = interp.stack.data().last() {
                 self.cheats.storage_access(interp.input.target_address(), slot, op == opcode::SSTORE);
@@ -370,6 +375,9 @@ impl Inspector<Ctx> for Recorder {
         let depth = context.journal_mut().depth();
         let input = inputs.input.bytes(context);
         let answered = self.cheats.call(context, inputs, &input, depth);
+        if let Some(r) = &mut self.cheats.diffs {
+            r.call(&mut CtxState(context), inputs, &input, depth, answered.is_some());
+        }
         if let Some(c) = &mut self.coverage {
             c.enter(inputs.target_address, answered.is_some(), !input.is_empty());
         }
@@ -398,7 +406,12 @@ impl Inspector<Ctx> for Recorder {
         answered
     }
 
-    fn call_end(&mut self, context: &mut Ctx, _: &CallInputs, outcome: &mut CallOutcome) {
+    fn call_end(&mut self, context: &mut Ctx, inputs: &CallInputs, outcome: &mut CallOutcome) {
+        // State diffs see the call's own result, before expectRevert rewrites it.
+        if let Some(r) = &mut self.cheats.diffs {
+            let depth = context.journal_mut().depth();
+            r.call_end(&mut CtxState(context), inputs, &outcome.result, depth);
+        }
         let end = self.cheats.frame_end(&mut outcome.result);
         if end.clear_transient {
             context.journaled_state.inner.transient_storage.clear();
@@ -423,6 +436,13 @@ impl Inspector<Ctx> for Recorder {
         self.cheats.create(inputs, depth);
         // A pranked deployer must be loaded for revm to debit the create's value (see Cheats::call).
         let _ = context.journal_mut().load_account(inputs.caller());
+        if let Some(r) = &mut self.cheats.diffs {
+            // The new address from the deployer's nonce before the create increments it (as revm computes it).
+            let mut st = CtxState(context);
+            let nonce = crate::statediff::State::account(&mut st, inputs.caller()).nonce;
+            let address = inputs.created_address(nonce);
+            r.create(&mut st, inputs, address, depth);
+        }
         if let Some(c) = &mut self.coverage {
             c.enter(Address::ZERO, false, false);
         }
@@ -447,6 +467,10 @@ impl Inspector<Ctx> for Recorder {
     }
 
     fn create_end(&mut self, context: &mut Ctx, _: &CreateInputs, outcome: &mut CreateOutcome) {
+        if let Some(r) = &mut self.cheats.diffs {
+            let depth = context.journal_mut().depth();
+            r.create_end(&mut CtxState(context), &outcome.result, outcome.address, depth);
+        }
         let end = self.cheats.frame_end(&mut outcome.result);
         if end.clear_transient {
             context.journaled_state.inner.transient_storage.clear();
@@ -488,4 +512,37 @@ fn diff(before: &[u8], after: &[u8]) -> Vec<(usize, Vec<u8>)> {
         at = end;
     }
     out
+}
+
+/// The chain as the state-diff recording reads it: the journal's view where the account is loaded, else the
+/// database's, without loading (and so warming) anything.
+struct CtxState<'a>(&'a mut Ctx);
+
+impl crate::statediff::State for CtxState<'_> {
+    fn account(&mut self, a: Address) -> crate::statediff::Peek {
+        use revm::DatabaseRef;
+        let info = match self.0.journaled_state.inner.state.get(&a) {
+            Some(acc) => Some(acc.info.clone()),
+            None => self.0.journaled_state.database.basic_ref(a).ok().flatten(),
+        };
+        let info = info.unwrap_or_default();
+        crate::statediff::Peek {
+            exists: info.exists(),
+            balance: info.balance,
+            nonce: info.nonce,
+            code: info.code.as_ref().map(|c| c.original_bytes()).unwrap_or_default(),
+        }
+    }
+
+    fn slot(&mut self, a: Address, slot: U256) -> U256 {
+        use revm::DatabaseRef;
+        if let Some(v) = self.0.journaled_state.inner.state.get(&a).and_then(|acc| acc.storage.get(&slot)) {
+            return v.present_value;
+        }
+        self.0.journaled_state.database.storage_ref(a, slot).unwrap_or_default()
+    }
+
+    fn chain_id(&self) -> u64 {
+        self.0.cfg.chain_id
+    }
 }

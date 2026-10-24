@@ -289,7 +289,7 @@ fn holes(obj: &Value) -> Vec<(usize, usize)> {
     out
 }
 
-fn same_outside(a: &[u8], b: &[u8], holes: &[(usize, usize)]) -> bool {
+pub fn same_outside(a: &[u8], b: &[u8], holes: &[(usize, usize)]) -> bool {
     let mut mask = vec![false; b.len()];
     for &(s, l) in holes {
         for m in mask.iter_mut().skip(s).take(l) {

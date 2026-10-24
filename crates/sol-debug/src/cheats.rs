@@ -63,6 +63,10 @@ pub struct FrameEnd {
     pub restore_origin: Option<Address>,
 }
 
+/// A compiled contract as state diffs need it: identifier (`file:Name`), runtime code, the byte ranges a deploy
+/// fills in (immutables, libraries), storage layout.
+pub type KnownContract = (String, Vec<u8>, Vec<(usize, usize)>, serde_json::Value);
+
 /// Slots read and written, as `vm.accesses` returns them.
 type Accesses = (Vec<B256>, Vec<B256>);
 
@@ -123,6 +127,11 @@ pub struct Cheats {
     pub readable: Vec<std::path::PathBuf>,
     /// `readLine`: the next line per file.
     line_cursor: HashMap<std::path::PathBuf, usize>,
+    /// The compile's contracts, to name code and find storage layouts (state diffs): identifier
+    /// (`file:Name`), runtime code, the byte ranges a deploy fills in, and the storage layout.
+    pub contracts: std::sync::Arc<Vec<KnownContract>>,
+    /// `startStateDiffRecording()`: the account accesses since.
+    pub diffs: Option<crate::statediff::Recording>,
     /// `recordLogs()`: the logs emitted since, until `getRecordedLogs` takes them.
     logs: Option<Vec<revm::primitives::Log>>,
     /// `setEnv`: variables set by the test, read before the process's.
@@ -148,6 +157,18 @@ const SIGNATURES: &[&str] = &[
     "etch(address,bytes)",
     "getCode(string)",
     "warp(uint256)",
+    "contains(string,string)",
+    "indexOf(string,string)",
+    "replace(string,string,string)",
+    "split(string,string)",
+    "toLowercase(string)",
+    "toUppercase(string)",
+    "trim(string)",
+    "getStateDiff()",
+    "getStateDiffJson()",
+    "startStateDiffRecording()",
+    "stopAndReturnStateDiff()",
+    "getStorageAccesses()",
     "closeFile(string)",
     "copyFile(string,string)",
     "exists(string)",
@@ -1074,6 +1095,56 @@ impl Cheats {
             }
             "dumpState" => Answer::Ok(vec![]),
             "createFork" | "selectFork" => Answer::Revert("sol-debug: createFork inside a test isn't supported (run on a fork)".into()),
+            "startStateDiffRecording" => {
+                self.diffs = Some(Default::default());
+                Answer::Ok(vec![])
+            }
+            "stopAndReturnStateDiff" => {
+                let all = self.diffs.as_mut().map(|r| r.take()).unwrap_or_default();
+                Answer::Ok(DynSolValue::Array(all.iter().map(|a| a.token()).collect()).abi_encode())
+            }
+            "contains" => Answer::Ok(DynSolValue::Bool(text(0).contains(&text(1))).abi_encode()),
+            "indexOf" => {
+                let i = text(0).find(&text(1)).map_or(U256::MAX, U256::from);
+                Answer::Ok(DynSolValue::Uint(i, 256).abi_encode())
+            }
+            "replace" => Answer::Ok(DynSolValue::String(text(0).replace(&text(1), &text(2))).abi_encode()),
+            "split" => {
+                let parts = text(0).split(&text(1)).map(|p| DynSolValue::String(p.to_string())).collect();
+                Answer::Ok(DynSolValue::Array(parts).abi_encode())
+            }
+            "toLowercase" => Answer::Ok(DynSolValue::String(text(0).to_lowercase()).abi_encode()),
+            "toUppercase" => Answer::Ok(DynSolValue::String(text(0).to_uppercase()).abi_encode()),
+            "trim" => Answer::Ok(DynSolValue::String(text(0).trim().to_string()).abi_encode()),
+            "getStateDiff" | "getStateDiffJson" => {
+                let contracts = self.contracts.clone();
+                let mut code_of = |a: Address| -> Option<(String, serde_json::Value)> {
+                    use revm::DatabaseRef;
+                    let code = match ctx.journaled_state.inner.state.get(&a) {
+                        Some(acc) => acc.info.code.clone(),
+                        None => ctx.journaled_state.database.basic_ref(a).ok().flatten().and_then(|i| i.code),
+                    }?
+                    .original_bytes();
+                    if code.is_empty() {
+                        return None;
+                    }
+                    contracts.iter().find(|(_, runtime, holes, _)| {
+                        let mut holes = holes.clone();
+                        if runtime.first() == Some(&0x73) {
+                            holes.push((1, 20));
+                        }
+                        runtime.len() == code.len() && crate::solc::same_outside(&code, runtime, &holes)
+                    }).map(|(id, _, _, layout)| (id.clone(), layout.clone()))
+                };
+                let Some(r) = &self.diffs else { return Answer::Ok(DynSolValue::String(String::new()).abi_encode()) };
+                let diffs = r.diffs(&self.labels, &mut code_of);
+                let out = if name == "getStateDiff" { crate::statediff::diffs_text(&diffs) } else { crate::statediff::diffs_json(&diffs) };
+                Answer::Ok(DynSolValue::String(out).abi_encode())
+            }
+            "getStorageAccesses" => {
+                let all = self.diffs.as_ref().map(|r| r.accesses()).unwrap_or_default();
+                Answer::Ok(DynSolValue::Array(all.iter().flat_map(|a| a.storage.iter().map(|s| s.token())).collect()).abi_encode())
+            }
             "setEnv" => {
                 self.env_set.insert(text(0), text(1));
                 Answer::Ok(vec![])

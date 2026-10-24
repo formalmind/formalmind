@@ -11,7 +11,7 @@ keywords = ["solidity", "debugger", "evm", "revm", "tui"]
 categories = ["development-tools::debugging", "command-line-utilities"]
 
 [dependencies]
-alloy-dyn-abi = "1"
+alloy-dyn-abi = { version = "1", features = ["eip712"] }
 anyhow = "1"
 clap = { version = "4", features = ["derive"] }
 k256 = { version = "0.13", features = ["ecdsa"] }
