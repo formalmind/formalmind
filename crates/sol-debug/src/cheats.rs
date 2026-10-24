@@ -88,6 +88,10 @@ pub struct Cheats {
     recording: Option<HashMap<Address, Accesses>>,
     /// `snapshotState()`: the accounts, transient storage and the block, by id.
     states: Vec<Option<(revm::state::EvmState, revm::state::TransientStorage, revm::context::BlockEnv)>>,
+    /// The test contract being run (forge's rules for its own calls apply to it), and per open frame whether it is
+    /// one of the test contract's top-level calls.
+    pub test_contract: Option<Address>,
+    top_calls: Vec<bool>,
     /// `recordLogs()`: the logs emitted since, until `getRecordedLogs` takes them.
     logs: Option<Vec<revm::primitives::Log>>,
     /// `expectCall`s accepted but not checked (the runner doesn't verify them yet).
@@ -293,6 +297,7 @@ impl Cheats {
     pub fn call(&mut self, ctx: &mut Ctx, inputs: &mut CallInputs, input: &Bytes, depth: usize) -> Option<CallOutcome> {
         let aimed = inputs.target_address != HEVM
             && self.expect_revert.as_ref().is_some_and(|e| e.depth == depth && e.caller == inputs.caller);
+        self.top_calls.push(self.armed.len() == 1 && self.test_contract == Some(inputs.caller) && inputs.target_address != HEVM);
         self.armed.push(aimed);
         if inputs.target_address == CONSOLE {
             let line = self.console_line(input);
@@ -358,6 +363,7 @@ impl Cheats {
     /// Before a create: prank the deployer.
     pub fn create(&mut self, inputs: &mut revm::interpreter::CreateInputs, depth: usize) {
         let aimed = self.expect_revert.as_ref().is_some_and(|e| e.depth == depth && e.caller == inputs.caller());
+        self.top_calls.push(self.armed.len() == 1 && self.test_contract == Some(inputs.caller()));
         self.armed.push(aimed);
         if let Some(p) = &self.prank {
             if p.depth == depth && inputs.caller() == p.caller {
@@ -370,7 +376,15 @@ impl Cheats {
     }
 
     /// After a call or create: settle an expectRevert aimed at it.
-    pub fn frame_end(&mut self, result: &mut InterpreterResult) {
+    /// Returns whether the frame was one of the test contract's own top-level calls: forge runs each of those as
+    /// its own transaction, so transient storage is cleared after it (and kept within it).
+    pub fn frame_end(&mut self, result: &mut InterpreterResult) -> bool {
+        let top = self.top_calls.pop().unwrap_or(false);
+        self.settle_expect_revert(result);
+        top
+    }
+
+    fn settle_expect_revert(&mut self, result: &mut InterpreterResult) {
         if !self.armed.pop().unwrap_or(false) {
             return;
         }
@@ -849,9 +863,8 @@ fn restore_state(ctx: &mut Ctx, snap: revm::state::EvmState) {
                 }
             }
             None => {
-                if let Ok(Some(info)) = db.basic_ref(*addr) {
-                    acc.info = info;
-                }
+                // An account the database doesn't have is the empty account.
+                acc.info = db.basic_ref(*addr).ok().flatten().unwrap_or_default();
                 for slot in acc.storage.values_mut() {
                     slot.present_value = slot.original_value;
                 }

@@ -182,6 +182,8 @@ pub struct Artifact {
     pub storage_layout: Value,
     /// Libraries the init code needs: (library file, library name, byte offsets of the 20-byte placeholders).
     pub links: Vec<(String, String, Vec<usize>)>,
+    /// The same for the runtime code (what `vm.getDeployedCode` must fill in).
+    pub runtime_links: Vec<(String, String, Vec<usize>)>,
     /// Byte ranges of the runtime code that differ once deployed: immutables and library addresses.
     pub runtime_holes: Vec<(usize, usize)>,
 }
@@ -200,13 +202,18 @@ impl Artifact {
             }
             Ok(hex::decode(s)?)
         };
-        let mut links = Vec::new();
-        for (lib_file, libs) in c["evm"]["bytecode"]["linkReferences"].as_object().into_iter().flatten() {
-            for (lib, refs) in libs.as_object().into_iter().flatten() {
-                let at = refs.as_array().into_iter().flatten().filter_map(|r| r["start"].as_u64().map(|s| s as usize)).collect();
-                links.push((lib_file.clone(), lib.clone(), at));
+        let link_refs = |v: &Value| {
+            let mut links = Vec::new();
+            for (lib_file, libs) in v.as_object().into_iter().flatten() {
+                for (lib, refs) in libs.as_object().into_iter().flatten() {
+                    let at = refs.as_array().into_iter().flatten().filter_map(|r| r["start"].as_u64().map(|s| s as usize)).collect();
+                    links.push((lib_file.clone(), lib.clone(), at));
+                }
             }
-        }
+            links
+        };
+        let links = link_refs(&c["evm"]["bytecode"]["linkReferences"]);
+        let runtime_links = link_refs(&c["evm"]["deployedBytecode"]["linkReferences"]);
         let init = code(&c["evm"]["bytecode"]["object"])?;
         if init.is_empty() {
             bail!("{name} has no bytecode (abstract contract or interface?)");
@@ -225,6 +232,7 @@ impl Artifact {
             runtime: CodeMap::new(runtime, c["evm"]["deployedBytecode"]["sourceMap"].as_str().unwrap_or(""), sources),
             storage_layout: c["storageLayout"].clone(),
             links,
+            runtime_links,
             runtime_holes: holes(&c["evm"]["deployedBytecode"]),
         })
     }

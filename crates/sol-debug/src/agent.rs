@@ -122,6 +122,7 @@ fn call_json(s: &Session, i: usize, f: &Frame) -> Value {
         "to": if f.kind == "DELEGATECALL" { format!("{} ⇒ {}", s.name_of(f.target), s.name_of(f.code_address)) } else { s.name_of(f.target) },
         "call": s.describe_call(f.code_address, &f.input),
         "ok": f.success,
+        "returns": if f.success == Some(true) && !f.output.is_empty() { json!(format!("0x{}", hex::encode(&f.output[..f.output.len().min(96)]))) } else { Value::Null },
         "first_step": f.first_step,
         "revert": if f.success == Some(false) { json!(decode_revert(s, &f.output)) } else { Value::Null },
     })

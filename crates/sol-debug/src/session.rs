@@ -379,6 +379,7 @@ impl Session {
         self.evm.ctx.db_mut().insert_account_info(address, info);
         let name = self.artifacts[ci].name.clone();
         self.evm.inspector.cheats.labels.insert(address, name);
+        self.evm.inspector.cheats.test_contract = Some(address);
         if self.artifacts[ci].methods.values().any(|s| s == "setUp()") {
             let setup = self.transact_quiet(SENDER, TxKind::Call(address), keccak256("setUp()".as_bytes())[..4].to_vec().into(), U256::ZERO)?;
             if !setup.success {
@@ -403,6 +404,7 @@ impl Session {
         self.evm.ctx.db_mut().insert_account_info(address, info);
         let name = self.artifacts[ci].name.clone();
         self.evm.inspector.cheats.labels.insert(address, name);
+        self.evm.inspector.cheats.test_contract = Some(address);
 
         let has_setup = self.artifacts[ci].methods.values().any(|s| s == "setUp()");
         let setup_data: Bytes = keccak256("setUp()".as_bytes())[..4].to_vec().into();
@@ -437,11 +439,21 @@ impl Session {
             }
         }
         self.evm.inspector.cheats.code = std::sync::Arc::new(code);
+        // Runtime code with the deployed libraries' addresses in it, as forge's getDeployedCode returns it.
         let mut deployed = HashMap::new();
         for a in &self.artifacts {
+            let mut runtime = a.runtime.code.clone();
+            for (file, lib, at) in &a.runtime_links {
+                let Some(addr) = self.artifact(&format!("{file}:{lib}")).ok().and_then(|li| self.libraries.get(&li)) else { continue };
+                for &s in at {
+                    if let Some(slot) = runtime.get_mut(s..s + 20) {
+                        slot.copy_from_slice(addr.as_slice());
+                    }
+                }
+            }
             let base = a.file.rsplit('/').next().unwrap_or(&a.file).to_string();
             for key in [base.clone(), format!("{base}:{}", a.name), a.file.clone(), format!("{}:{}", a.file, a.name), a.name.clone()] {
-                deployed.entry(key).or_insert_with(|| a.runtime.code.clone());
+                deployed.entry(key).or_insert_with(|| runtime.clone());
             }
         }
         self.evm.inspector.cheats.deployed = std::sync::Arc::new(deployed);
