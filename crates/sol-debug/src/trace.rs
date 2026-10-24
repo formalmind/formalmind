@@ -428,6 +428,7 @@ impl Inspector<Ctx> for Recorder {
             let depth = context.journal_mut().depth();
             r.call_end(&mut CtxState(context), inputs, &outcome.result, depth);
         }
+        let failed = !outcome.result.result.is_ok();
         let end = self.cheats.frame_end(&mut outcome.result);
         if end.clear_transient {
             context.journaled_state.inner.transient_storage.clear();
@@ -436,7 +437,15 @@ impl Inspector<Ctx> for Recorder {
             context.tx.caller = o;
         }
         if let Some(x) = &mut self.extra {
-            x.call_end(context, inputs, outcome);
+            // revm already rolled back a frame expectRevert turned into a success: the other inspector sees it
+            // failed (a halt: nothing of its output carries over), with the output the caller actually got.
+            if failed && outcome.result.result.is_ok() {
+                let mut seen = outcome.clone();
+                seen.result.result = revm::interpreter::InstructionResult::OutOfGas;
+                x.call_end(context, inputs, &mut seen);
+            } else {
+                x.call_end(context, inputs, outcome);
+            }
         }
         if let Some(c) = &mut self.coverage {
             c.exit();
@@ -493,6 +502,7 @@ impl Inspector<Ctx> for Recorder {
             let depth = context.journal_mut().depth();
             r.create_end(&mut CtxState(context), &outcome.result, outcome.address, depth);
         }
+        let failed = !outcome.result.result.is_ok();
         let end = self.cheats.frame_end(&mut outcome.result);
         if end.clear_transient {
             context.journaled_state.inner.transient_storage.clear();
@@ -501,7 +511,13 @@ impl Inspector<Ctx> for Recorder {
             context.tx.caller = o;
         }
         if let Some(x) = &mut self.extra {
-            x.create_end(context, inputs, outcome);
+            if failed && outcome.result.result.is_ok() {
+                let mut seen = outcome.clone();
+                seen.result.result = revm::interpreter::InstructionResult::OutOfGas;
+                x.create_end(context, inputs, &mut seen);
+            } else {
+                x.create_end(context, inputs, outcome);
+            }
         }
         if let Some(c) = &mut self.coverage {
             c.exit();
