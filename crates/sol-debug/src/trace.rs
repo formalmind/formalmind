@@ -187,6 +187,9 @@ pub struct Recorder {
     pub cheats: Cheats,
     /// Coverage mode (None: off).
     pub coverage: Option<Coverage>,
+    /// Another inspector that sees every step and frame of the run (concolity's symbolic Shadow): calls after
+    /// pranks are applied, results after expectRevert has settled them.
+    pub extra: Option<Box<dyn revm::Inspector<Ctx> + Send>>,
     /// Open frames, innermost last.
     open: Vec<usize>,
     /// Per depth: the memory as the frame's previous step left it, and that step's index.
@@ -202,6 +205,7 @@ impl Default for Recorder {
             enabled: true,
             cheats: Cheats::new(),
             coverage: None,
+            extra: None,
             open: vec![],
             memory: HashMap::new(),
             seen: HashMap::new(),
@@ -233,7 +237,10 @@ fn writes_memory(op: u8) -> bool {
 }
 
 impl Inspector<Ctx> for Recorder {
-    fn initialize_interp(&mut self, interp: &mut Interpreter, _: &mut Ctx) {
+    fn initialize_interp(&mut self, interp: &mut Interpreter, context: &mut Ctx) {
+        if let Some(x) = &mut self.extra {
+            x.initialize_interp(interp, context);
+        }
         if let Some(c) = &mut self.coverage {
             c.code(interp.bytecode.bytecode_slice());
         }
@@ -250,6 +257,9 @@ impl Inspector<Ctx> for Recorder {
     }
 
     fn step(&mut self, interp: &mut Interpreter, context: &mut Ctx) {
+        if let Some(x) = &mut self.extra {
+            x.step(interp, context);
+        }
         if let Some(c) = &mut self.coverage {
             c.step(interp.bytecode.pc(), interp.bytecode.opcode(), interp.stack.data());
         }
@@ -341,7 +351,10 @@ impl Inspector<Ctx> for Recorder {
         });
     }
 
-    fn step_end(&mut self, interp: &mut Interpreter, _: &mut Ctx) {
+    fn step_end(&mut self, interp: &mut Interpreter, context: &mut Ctx) {
+        if let Some(x) = &mut self.extra {
+            x.step_end(interp, context);
+        }
         if !self.enabled {
             return;
         }
@@ -375,6 +388,9 @@ impl Inspector<Ctx> for Recorder {
         let depth = context.journal_mut().depth();
         let input = inputs.input.bytes(context);
         let answered = self.cheats.call(context, inputs, &input, depth);
+        if let Some(x) = &mut self.extra {
+            x.call(context, inputs);
+        }
         if let Some(r) = &mut self.cheats.diffs {
             r.call(&mut CtxState(context), inputs, &input, depth, answered.is_some());
         }
@@ -419,6 +435,9 @@ impl Inspector<Ctx> for Recorder {
         if let Some(o) = end.restore_origin {
             context.tx.caller = o;
         }
+        if let Some(x) = &mut self.extra {
+            x.call_end(context, inputs, outcome);
+        }
         if let Some(c) = &mut self.coverage {
             c.exit();
         }
@@ -434,6 +453,9 @@ impl Inspector<Ctx> for Recorder {
     fn create(&mut self, context: &mut Ctx, inputs: &mut CreateInputs) -> Option<CreateOutcome> {
         let depth = context.journal_mut().depth();
         self.cheats.create(inputs, depth);
+        if let Some(x) = &mut self.extra {
+            x.create(context, inputs);
+        }
         // A pranked deployer must be loaded for revm to debit the create's value (see Cheats::call).
         let _ = context.journal_mut().load_account(inputs.caller());
         if let Some(r) = &mut self.cheats.diffs {
@@ -466,7 +488,7 @@ impl Inspector<Ctx> for Recorder {
         None
     }
 
-    fn create_end(&mut self, context: &mut Ctx, _: &CreateInputs, outcome: &mut CreateOutcome) {
+    fn create_end(&mut self, context: &mut Ctx, inputs: &CreateInputs, outcome: &mut CreateOutcome) {
         if let Some(r) = &mut self.cheats.diffs {
             let depth = context.journal_mut().depth();
             r.create_end(&mut CtxState(context), &outcome.result, outcome.address, depth);
@@ -477,6 +499,9 @@ impl Inspector<Ctx> for Recorder {
         }
         if let Some(o) = end.restore_origin {
             context.tx.caller = o;
+        }
+        if let Some(x) = &mut self.extra {
+            x.create_end(context, inputs, outcome);
         }
         if let Some(c) = &mut self.coverage {
             c.exit();
