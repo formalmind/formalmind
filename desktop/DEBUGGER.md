@@ -272,6 +272,44 @@ The swarm's fuzzers and mutation runs produce **call sequences**. The debugger t
 - **Coverage for agents:** `pcs_for_node` over all traced steps gives per-node coverage. The planner uses it to see
   which branches a fuzzer never reached.
 
+## 7b. Agent mode: questions, not a TUI
+
+Most debugging is done by agents, not by someone at the TUI. An agent doesn't need a screen: it asks one question
+about a run and gets JSON, then asks the next. `sol_debug::agent` holds those questions; any CLI wraps them (today
+`concolity debug <root> <test file> Contract::test <query>`):
+
+| Query | Answer |
+|---|---|
+| `summary` | ok or not, the revert decoded (`Error`, `Panic` with its meaning, or a custom error from any compiled ABI), gas, the calls (decoded, with each failed call's revert), named storage writes, and **missing bytecode**: calls with calldata to an account with no code |
+| `lines` | the Solidity lines that ran, consecutive repeats collapsed, each with its effects (`call check(0, 2, 2)`, `write total: 0 → 100`, `emit`, `revert Error("not a side")`). The dispatcher has no line of its own, and a function's header shows once, when it is entered. `--function` filters, `--limit` caps |
+| `revert` | the frame the revert came from (the deepest failed frame that returned the same data), its line, the call stack, and **why**: the last `JUMPI` before the revert and the comparisons that made its condition, with operand values and their source |
+| `writes` | storage writes by variable name (`--var` filters), with old and new values and the line |
+| `step --n N` | one step in full: pc, op, stack, memory written, storage, gas |
+
+Every answer names steps by index, so an agent can go from `revert` to `step` without re-running anything by hand.
+
+For people, `lines --text` is the simple view: one row per Solidity line, effects after an arrow, no stack or memory.
+On fixtures/triangle-project in concolity:
+
+```
+Failing.t.sol:14             function test_zeroSide() public view {   ⟶ call test_zeroSide()
+Failing.t.sol:15             t.check(0, 2, 2);
+  Triangle.sol:20              function check(int256 a, int256 b, int256 c) external view {   ⟶ call check(0, 2, 2)
+  Triangle.sol:21              this.triangle(a, b, c);
+    Triangle.sol:9               function triangle(int256 a, int256 b, int256 c) external pure returns (Kind) {   ⟶ call triangle(0, 2, 2)
+    Triangle.sol:10              if (a == b) {
+    Triangle.sol:14              if (b == c) return Kind.Isosceles;
+  Triangle.sol:21              this.triangle(a, b, c);
+  Triangle.sol:22              require(a > 0 && b > 0 && c > 0, "not a side");   ⟶ revert Error("not a side")
+Failing.t.sol:15             t.check(0, 2, 2);   ⟶ revert Error("not a side")
+```
+
+and `revert` explains it: `SGT` with operands `0, 0` from `a > 0`, in `Triangle.check`, reached through
+`test_zeroSide() → check(0, 2, 2)`.
+
+Next: a compile cache keyed by the sources (an agent asks many questions about one run, and big suites compile for
+minutes), replaying a call sequence JSON (§7) through the same queries, and an MCP server over them.
+
 ## 7a. Differential equivalence: a protocol and its port
 
 Async Swap exists twice: Solidity (`asyncswap/contracts`) and a Huff port (`asyncswap/v2-raff`, compiled by `hnc`)

@@ -250,6 +250,9 @@ impl Cheats {
             if let Some(p) = &self.prank {
                 if p.depth == depth && inputs.caller == p.caller {
                     inputs.caller = p.sender;
+                    // revm moves a call's value from its caller, which it loaded before this hook ran: load the
+                    // pranked sender too, or a pranked call with value finds no account to debit.
+                    let _ = revm::context::ContextTr::journal_mut(ctx).load_account(p.sender);
                     if let Some(o) = p.origin {
                         ctx.tx.caller = o;
                     }

@@ -213,6 +213,9 @@ impl Recorder {
     /// The trace so far; the recorder is ready for the next transaction (cheatcode state carries over).
     pub fn take(&mut self) -> Trace {
         self.open.clear();
+        if let Some(c) = &mut self.coverage {
+            c.open.clear();
+        }
         self.memory.clear();
         self.seen.clear();
         std::mem::take(&mut self.trace)
@@ -405,6 +408,8 @@ impl Inspector<Ctx> for Recorder {
     fn create(&mut self, context: &mut Ctx, inputs: &mut CreateInputs) -> Option<CreateOutcome> {
         let depth = context.journal_mut().depth();
         self.cheats.create(inputs, depth);
+        // A pranked deployer must be loaded for revm to debit the create's value (see Cheats::call).
+        let _ = context.journal_mut().load_account(inputs.caller());
         if let Some(c) = &mut self.coverage {
             c.enter(Address::ZERO, false, false);
         }

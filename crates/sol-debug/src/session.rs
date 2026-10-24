@@ -117,8 +117,8 @@ impl Session {
         Self::from_output(project, &output)
     }
 
-    fn from_output(project: Project, output: &serde_json::Value) -> Result<Self> {
-        let output = output.clone();
+    /// A session over an existing solc output (one compile shared by several sessions, e.g. one per thread).
+    pub fn from_output(project: Project, output: &serde_json::Value) -> Result<Self> {
         let sources = Sources::load(&output, &project.root, &project.remappings);
         let mut artifacts = Vec::new();
         let mut selectors = HashMap::new();
