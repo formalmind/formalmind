@@ -253,6 +253,12 @@ impl Inspector<Ctx> for Recorder {
         if let Some(c) = &mut self.coverage {
             c.step(interp.bytecode.pc(), interp.bytecode.opcode(), interp.stack.data());
         }
+        let op = interp.bytecode.opcode();
+        if op == opcode::SLOAD || op == opcode::SSTORE {
+            if let Some(&slot) = interp.stack.data().last() {
+                self.cheats.storage_access(interp.input.target_address(), slot, op == opcode::SSTORE);
+            }
+        }
         if !self.enabled {
             return;
         }
@@ -353,6 +359,7 @@ impl Inspector<Ctx> for Recorder {
     }
 
     fn log_full(&mut self, _: &mut Interpreter, _: &mut Ctx, log: Log) {
+        self.cheats.on_log(&log);
         if !self.enabled {
             return;
         }

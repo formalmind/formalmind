@@ -41,6 +41,18 @@ struct ExpectRevert {
     depth: usize,
 }
 
+/// Slots read and written, as `vm.accesses` returns them.
+type Accesses = (Vec<B256>, Vec<B256>);
+
+#[derive(Debug, Clone)]
+struct Mock {
+    target: Address,
+    value: Option<U256>,
+    data: Vec<u8>,
+    returns: Vec<Vec<u8>>,
+    revert: bool,
+}
+
 #[derive(Default, Clone)]
 pub struct Cheats {
     prank: Option<Prank>,
@@ -48,7 +60,7 @@ pub struct Cheats {
     /// `vm.label` names, shown in the trace.
     pub labels: HashMap<Address, String>,
     /// Creation code by every name `getCode` might be given (`AsyncSwap.sol`, `AsyncSwap.sol:AsyncSwap`, the path).
-    pub code: HashMap<String, Vec<u8>>,
+    pub code: std::sync::Arc<HashMap<String, Vec<u8>>>,
     /// Unsupported cheatcodes that were called (for the summary).
     pub missing: Vec<String>,
     /// What `console.log` printed, in order (setUp's and the run's).
@@ -67,6 +79,19 @@ pub struct Cheats {
     /// Bytecode a compiler printed through ffi, by the source file it named (`src/AsyncSwap.huff`): lets the session
     /// name code that solc didn't build.
     pub compiled: Vec<(String, Vec<u8>)>,
+    /// Runtime code by the names `getCode` takes, for `getDeployedCode`.
+    pub deployed: std::sync::Arc<HashMap<String, Vec<u8>>>,
+    /// `mockCall`s, newest last: a call to `target` whose calldata starts with `data` (and whose value matches, when
+    /// given) is answered with the next of `returns` (the last one repeats), as a return or a revert.
+    mocks: Vec<Mock>,
+    /// `record()`: slots read and written per address, until `accesses` is asked.
+    recording: Option<HashMap<Address, Accesses>>,
+    /// `snapshotState()`: the accounts, transient storage and the block, by id.
+    states: Vec<Option<(revm::state::EvmState, revm::state::TransientStorage, revm::context::BlockEnv)>>,
+    /// `recordLogs()`: the logs emitted since, until `getRecordedLogs` takes them.
+    logs: Option<Vec<revm::primitives::Log>>,
+    /// `expectCall`s accepted but not checked (the runner doesn't verify them yet).
+    pub unchecked_expect_calls: usize,
     /// One entry per open call or create: whether a pending expectRevert is aimed at it.
     armed: Vec<bool>,
     signatures: HashMap<[u8; 4], &'static str>,
@@ -82,6 +107,34 @@ const SIGNATURES: &[&str] = &[
     "etch(address,bytes)",
     "getCode(string)",
     "warp(uint256)",
+    "store(address,bytes32,bytes32)",
+    "load(address,bytes32)",
+    "record()",
+    "accesses(address)",
+    "mockCall(address,bytes,bytes)",
+    "mockCall(address,uint256,bytes,bytes)",
+    "mockCallRevert(address,bytes,bytes)",
+    "mockCallRevert(address,uint256,bytes,bytes)",
+    "mockCalls(address,bytes,bytes[])",
+    "clearMockedCalls()",
+    "chainId(uint256)",
+    "snapshotState()",
+    "revertToState(uint256)",
+    "revertToStateAndDelete(uint256)",
+    "deleteStateSnapshot(uint256)",
+    "expectCall(address,bytes)",
+    "expectCall(address,uint256,bytes)",
+    "expectCall(address,bytes,uint64)",
+    "expectCall(address,uint256,bytes,uint64)",
+    "getDeployedCode(string)",
+    "getNonce(address)",
+    "computeCreateAddress(address,uint256)",
+    "cool(address)",
+    "coolSlot(address,bytes32)",
+    "dumpState(string)",
+    "createFork(string,uint256)",
+    "createFork(string)",
+    "selectFork(uint256)",
     "roll(uint256)",
     "addr(uint256)",
     "sign(uint256,bytes32)",
@@ -261,13 +314,45 @@ impl Cheats {
                     }
                 }
             }
-            return None;
+            return self.mocked(inputs, input);
         }
         let answer = self.answer(ctx, inputs.caller, input, depth);
         Some(match answer {
             Answer::Ok(out) => outcome(inputs, InstructionResult::Return, out.into()),
             Answer::Revert(msg) => outcome(inputs, InstructionResult::Revert, error_string(&msg)),
         })
+    }
+
+    /// A mocked answer for this call, if a `mockCall` covers it: the longest matching calldata wins, as in forge.
+    fn mocked(&mut self, inputs: &CallInputs, input: &Bytes) -> Option<CallOutcome> {
+        let value = inputs.value.get();
+        let m = self
+            .mocks
+            .iter_mut()
+            .filter(|m| m.target == inputs.target_address && input.starts_with(&m.data) && m.value.is_none_or(|v| v == value))
+            .max_by_key(|m| m.data.len())?;
+        let out = if m.returns.len() > 1 { m.returns.remove(0) } else { m.returns[0].clone() };
+        let result = if m.revert { InstructionResult::Revert } else { InstructionResult::Return };
+        Some(outcome(inputs, result, out.into()))
+    }
+
+    /// A log, kept while `recordLogs()` is on.
+    pub fn on_log(&mut self, log: &revm::primitives::Log) {
+        if let Some(l) = &mut self.logs {
+            l.push(log.clone());
+        }
+    }
+
+    /// `record()`: a storage access by the code running at `address` (SSTORE counts as a read too, as in forge).
+    pub fn storage_access(&mut self, address: Address, slot: U256, write: bool) {
+        if let Some(r) = &mut self.recording {
+            let e = r.entry(address).or_default();
+            let slot = B256::from(slot);
+            e.0.push(slot);
+            if write {
+                e.1.push(slot);
+            }
+        }
     }
 
     /// Before a create: prank the deployer.
@@ -291,16 +376,24 @@ impl Cheats {
         }
         let Some(e) = self.expect_revert.take() else { return };
         let reverted = !result.result.is_ok();
-        let data_ok = e.data.as_ref().is_none_or(|d| result.output.starts_with(d));
+        // As in forge: the data matches as bytes, or a reason string given as bytes matches an Error(string).
+        let data_ok = e.data.as_ref().is_none_or(|d| result.output.starts_with(d) || error_message(&result.output).is_some_and(|m| m.as_bytes() == &d[..]));
         if reverted && data_ok {
+            // forge answers a matched expectRevert with 8192 zero bytes, so the caller's ABI decoder finds a value
+            // of any return type (an empty output would make `manager.initialize(...)`'s int24 fail to decode).
             result.result = InstructionResult::Return;
-            result.output = Bytes::new();
+            result.output = Bytes::from(vec![0u8; 8192]);
         } else {
             result.result = InstructionResult::Revert;
-            result.output = error_string(if reverted {
-                "sol-debug: call reverted with different data than expectRevert wanted"
+            let hexs = |b: &[u8]| format!("0x{}", revm::primitives::hex::encode(&b[..b.len().min(100)]));
+            result.output = error_string(&if reverted {
+                format!(
+                    "sol-debug: call reverted with different data than expectRevert wanted (got {}, wanted {})",
+                    hexs(&result.output),
+                    e.data.as_deref().map(|d| hexs(d)).unwrap_or_default()
+                )
             } else {
-                "sol-debug: call did not revert as expected"
+                "sol-debug: call did not revert as expected".to_string()
             });
         }
     }
@@ -324,6 +417,11 @@ impl Cheats {
         let addr = |i: usize| args[i].as_address().unwrap_or_default();
         let uint = |i: usize| args[i].as_uint().map(|(u, _)| u).unwrap_or_default();
         let text = |i: usize| args[i].as_str().unwrap_or_default().to_string();
+        let word = |v: &DynSolValue| match v {
+            DynSolValue::FixedBytes(b, _) => U256::from_be_bytes(b.0),
+            DynSolValue::Uint(u, _) => *u,
+            _ => U256::ZERO,
+        };
         match name {
             n if n.starts_with("env") => {
                 let key = text(0);
@@ -431,7 +529,25 @@ impl Cheats {
                 }
             }
             // Logs aren't kept: an empty list.
-            "getRecordedLogs" => Answer::Ok(DynSolValue::Array(vec![]).abi_encode_params()),
+            // Vm.Log[]: (bytes32[] topics, bytes data, address emitter), and the recording starts over.
+            "getRecordedLogs" => {
+                let logs = self.logs.as_mut().map(std::mem::take).unwrap_or_default();
+                let list = logs
+                    .into_iter()
+                    .map(|l| {
+                        DynSolValue::Tuple(vec![
+                            DynSolValue::Array(l.topics().iter().map(|t| DynSolValue::FixedBytes(*t, 32)).collect()),
+                            DynSolValue::Bytes(l.data.data.to_vec()),
+                            DynSolValue::Address(l.address),
+                        ])
+                    })
+                    .collect();
+                Answer::Ok(DynSolValue::Tuple(vec![DynSolValue::Array(list)]).abi_encode_params())
+            }
+            "recordLogs" => {
+                self.logs = Some(vec![]);
+                Answer::Ok(vec![])
+            }
             "prank" | "startPrank" => {
                 self.prank = Some(Prank {
                     sender: addr(0),
@@ -464,6 +580,86 @@ impl Cheats {
                     None => Answer::Revert(format!("sol-debug: getCode: no compiled contract {what:?} (compile the file that imports it)")),
                 }
             }
+            "store" => {
+                let (a, slot, v) = (addr(0), word(&args[1]), word(&args[2]));
+                let _ = ctx.journaled_state.load_account(a);
+                let _ = ctx.journaled_state.sstore(a, slot, v);
+                Answer::Ok(vec![])
+            }
+            "load" => {
+                let a = addr(0);
+                let _ = ctx.journaled_state.load_account(a);
+                let v = ctx.journaled_state.sload(a, word(&args[1])).map(|l| l.data).unwrap_or_default();
+                Answer::Ok(DynSolValue::FixedBytes(B256::from(v), 32).abi_encode())
+            }
+            "record" => {
+                self.recording = Some(HashMap::new());
+                Answer::Ok(vec![])
+            }
+            "accesses" => {
+                let (reads, writes) = self.recording.as_ref().and_then(|r| r.get(&addr(0)).cloned()).unwrap_or_default();
+                let list = |v: Vec<B256>| DynSolValue::Array(v.into_iter().map(|b| DynSolValue::FixedBytes(b, 32)).collect());
+                Answer::Ok(DynSolValue::Tuple(vec![list(reads), list(writes)]).abi_encode_params())
+            }
+            "mockCall" | "mockCallRevert" | "mockCalls" => {
+                let with_value = matches!(args.len(), 4);
+                let at = |i: usize| if with_value { i + 1 } else { i };
+                let data = args[at(1)].as_bytes().unwrap_or_default().to_vec();
+                let returns = match &args[at(2)] {
+                    DynSolValue::Array(v) => v.iter().map(|b| b.as_bytes().unwrap_or_default().to_vec()).collect(),
+                    b => vec![b.as_bytes().unwrap_or_default().to_vec()],
+                };
+                let value = with_value.then(|| uint(1));
+                let m = Mock { target: addr(0), value, data, returns, revert: name == "mockCallRevert" };
+                // A newer mock of the same call replaces the older one.
+                self.mocks.retain(|o| !(o.target == m.target && o.data == m.data && o.value == m.value));
+                self.mocks.push(m);
+                Answer::Ok(vec![])
+            }
+            "clearMockedCalls" => {
+                self.mocks.clear();
+                Answer::Ok(vec![])
+            }
+            "chainId" => {
+                ctx.cfg.chain_id = uint(0).saturating_to();
+                Answer::Ok(vec![])
+            }
+            "snapshotState" => {
+                let j = &ctx.journaled_state.inner;
+                self.states.push(Some((j.state.clone(), j.transient_storage.clone(), ctx.block.clone())));
+                Answer::Ok(DynSolValue::Uint(U256::from(self.states.len() - 1), 256).abi_encode())
+            }
+            "revertToState" | "revertToStateAndDelete" | "deleteStateSnapshot" => {
+                let id = uint(0).saturating_to::<usize>();
+                let Some(Some((state, transient, block))) = self.states.get(id).cloned() else {
+                    return Answer::Ok(DynSolValue::Bool(false).abi_encode());
+                };
+                if name != "deleteStateSnapshot" {
+                    restore_state(ctx, state);
+                    ctx.journaled_state.inner.transient_storage = transient;
+                    ctx.block = block;
+                }
+                if name != "revertToState" {
+                    self.states[id] = None;
+                }
+                Answer::Ok(DynSolValue::Bool(true).abi_encode())
+            }
+            "expectCall" => {
+                self.unchecked_expect_calls += 1;
+                Answer::Ok(vec![])
+            }
+            "getDeployedCode" => match self.deployed.get(args[0].as_str().unwrap_or("")) {
+                Some(code) => Answer::Ok(DynSolValue::Bytes(code.clone()).abi_encode()),
+                None => Answer::Revert(format!("sol-debug: getDeployedCode: no contract {}", text(0))),
+            },
+            "getNonce" => {
+                let nonce = ctx.journaled_state.load_account(addr(0)).map(|a| a.data.info.nonce).unwrap_or(0);
+                Answer::Ok(DynSolValue::Uint(U256::from(nonce), 64).abi_encode())
+            }
+            "computeCreateAddress" => Answer::Ok(DynSolValue::Address(addr(0).create(uint(1).saturating_to())).abi_encode()),
+            // Gas and dumps only.
+            "cool" | "coolSlot" | "dumpState" => Answer::Ok(vec![]),
+            "createFork" | "selectFork" => Answer::Revert("sol-debug: createFork inside a test isn't supported (run on a fork)".into()),
             "warp" => {
                 ctx.block.timestamp = uint(0);
                 Answer::Ok(vec![])
@@ -514,7 +710,7 @@ impl Cheats {
                 self.expect_revert = Some(ExpectRevert { data, caller, depth });
                 Answer::Ok(vec![])
             }
-            "expectEmit" | "recordLogs" => Answer::Ok(vec![]),
+            "expectEmit" => Answer::Ok(vec![]),
             "ffi" | "tryFfi" => {
                 let argv: Vec<String> = args[0].as_array().unwrap_or_default().iter().filter_map(|v| v.as_str().map(str::to_string)).collect();
                 match self.ffi(&argv) {
@@ -635,6 +831,51 @@ fn assert(name: &str, args: &[DynSolValue]) -> Answer {
 
 fn outcome(inputs: &CallInputs, result: InstructionResult, output: Bytes) -> CallOutcome {
     CallOutcome::new(InterpreterResult::new(result, output, Gas::new(inputs.gas_limit)), inputs.return_memory_offset.clone())
+}
+
+/// `revertToState` inside a transaction. revm still holds undo entries for the frames that are open, and they name
+/// accounts and slots loaded after the snapshot, so the state map isn't swapped: every account and slot stays, with
+/// the value it had at the snapshot. One loaded after it had the committed value then (its original value, or the
+/// database's account).
+fn restore_state(ctx: &mut Ctx, snap: revm::state::EvmState) {
+    use revm::DatabaseRef;
+    let db = &ctx.journaled_state.database;
+    for (addr, acc) in ctx.journaled_state.inner.state.iter_mut() {
+        match snap.get(addr) {
+            Some(then) => {
+                acc.info = then.info.clone();
+                for (key, slot) in acc.storage.iter_mut() {
+                    slot.present_value = then.storage.get(key).map_or(slot.original_value, |s| s.present_value);
+                }
+            }
+            None => {
+                if let Ok(Some(info)) = db.basic_ref(*addr) {
+                    acc.info = info;
+                }
+                for slot in acc.storage.values_mut() {
+                    slot.present_value = slot.original_value;
+                }
+            }
+        }
+    }
+    for (addr, then) in snap {
+        let state = &mut ctx.journaled_state.inner.state;
+        let acc = state.entry(addr).or_insert_with(|| then.clone());
+        for (key, slot) in then.storage {
+            acc.storage.entry(key).or_insert(slot);
+        }
+    }
+}
+
+/// The message of `Error(string)` revert data.
+fn error_message(data: &[u8]) -> Option<String> {
+    if data.len() < 4 || data[..4] != keccak256("Error(string)".as_bytes())[..4] {
+        return None;
+    }
+    match DynSolType::Tuple(vec![DynSolType::String]).abi_decode_params(&data[4..]).ok()? {
+        DynSolValue::Tuple(v) => v.first()?.as_str().map(str::to_string),
+        _ => None,
+    }
 }
 
 /// `Error(string)` revert data.

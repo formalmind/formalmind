@@ -254,11 +254,13 @@ pub fn lines_text(v: &Value) -> String {
 /// The frame the revert started in: the deepest failed frame whose revert data is what the run returned (a revert
 /// bubbled up unchanged), else the top frame.
 fn origin_frame(run: &Run) -> Option<usize> {
+    // Frames that ran code: a failing cheatcode (forge-std's assertEq is `vm.assertEq`) has no steps, so the revert
+    // is placed in the code that called it.
     run.trace
         .frames
         .iter()
         .enumerate()
-        .filter(|(_, f)| f.success == Some(false) && f.output == run.output)
+        .filter(|(_, f)| f.success == Some(false) && f.output == run.output && f.code_hash.is_some())
         .max_by_key(|(i, f)| (f.depth, *i))
         .map(|(i, _)| i)
         .or_else(|| (!run.trace.frames.is_empty()).then_some(0))

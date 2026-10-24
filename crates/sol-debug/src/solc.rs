@@ -44,6 +44,8 @@ pub fn compile_entries(project: &Project, entries: &[String], opts: &Settings) -
     let entry_source = std::fs::read_to_string(project.root.join(entry)).with_context(|| format!("can't read {entry}"))?;
     let version = project.solc_version.clone().or_else(|| pragma_version(&entry_source));
     let solc = solc_binary(version.as_deref())?;
+    // Only what the session reads: `evm.deployedBytecode.opcodes` (solc's text disassembly) alone cost ~20 s of 97 on
+    // asyncswap/contracts' suite, and the TUI disassembles the bytecode itself.
     let wanted = [
         "abi",
         "evm.bytecode.object",
@@ -53,7 +55,6 @@ pub fn compile_entries(project: &Project, entries: &[String], opts: &Settings) -
         "evm.deployedBytecode.sourceMap",
         "evm.deployedBytecode.linkReferences",
         "evm.deployedBytecode.immutableReferences",
-        "evm.deployedBytecode.opcodes",
         "evm.methodIdentifiers",
         "storageLayout",
     ];

@@ -49,6 +49,8 @@ pub struct Session {
     /// solc didn't build (a Huff port called through its Solidity interfaces).
     pub selectors: HashMap<String, String>,
     pub evm: Evm,
+    /// The libraries `getCode`'s map was built with: it is rebuilt only when they change.
+    served: Option<HashMap<usize, Address>>,
 }
 
 /// Where a step is in the Solidity source.
@@ -93,6 +95,7 @@ pub struct Snapshot {
     cheats: crate::cheats::Cheats,
     block: revm::context::BlockEnv,
     libraries: HashMap<usize, Address>,
+    served: Option<HashMap<usize, Address>>,
 }
 
 /// A Foundry test run: `setUp()` (not traced unless asked) and the test function.
@@ -119,7 +122,7 @@ impl Session {
 
     /// A session over an existing solc output (one compile shared by several sessions, e.g. one per thread).
     pub fn from_output(project: Project, output: &serde_json::Value) -> Result<Self> {
-        let sources = Sources::load(&output, &project.root, &project.remappings);
+        let sources = Sources::load(output, &project.root, &project.remappings);
         let mut artifacts = Vec::new();
         let mut selectors = HashMap::new();
         for (file, contracts) in output["contracts"].as_object().into_iter().flatten() {
@@ -128,7 +131,7 @@ impl Session {
                     selectors.entry(sel.as_str().unwrap_or("").to_string()).or_insert_with(|| sig.clone());
                 }
                 if c["evm"]["bytecode"]["object"].as_str().is_some_and(|s| !s.is_empty()) {
-                    artifacts.push(Artifact::load(&output, &sources, file, name)?);
+                    artifacts.push(Artifact::load(output, &sources, file, name)?);
                 }
             }
         }
@@ -150,7 +153,7 @@ impl Session {
         // ffi runs only compilers a test needs to build its contracts (a Huff port compiles with hnc).
         evm.inspector.cheats.ffi_allow = vec!["hnc".into()];
         evm.inspector.cheats.ffi_dir = project.root.clone();
-        Ok(Session { project, sources, artifacts, libraries: HashMap::new(), code_index: HashMap::new(), selectors, evm })
+        Ok(Session { project, sources, artifacts, libraries: HashMap::new(), code_index: HashMap::new(), selectors, evm, served: None })
     }
 
     /// A contract by name, or `File.sol:Name` when the name is ambiguous.
@@ -350,6 +353,7 @@ impl Session {
             cheats: self.evm.inspector.cheats.clone(),
             block: self.evm.ctx.block.clone(),
             libraries: self.libraries.clone(),
+            served: self.served.clone(),
         }
     }
 
@@ -358,6 +362,7 @@ impl Session {
         self.evm.inspector.cheats = s.cheats.clone();
         self.evm.ctx.block = s.block.clone();
         self.libraries = s.libraries.clone();
+        self.served = s.served.clone();
     }
 
     /// Deploys a Foundry test contract the way forge does (funded, labelled) and runs its `setUp()`, untraced.
@@ -418,7 +423,10 @@ impl Session {
     }
 
     /// Makes `vm.getCode` answer with this compile's (linked) creation code, by file, name or both.
-    fn serve_get_code(&mut self) -> Result<()> {
+    pub fn serve_get_code(&mut self) -> Result<()> {
+        if self.served.as_ref() == Some(&self.libraries) && !self.evm.inspector.cheats.code.is_empty() {
+            return Ok(());
+        }
         let mut code = HashMap::new();
         for i in 0..self.artifacts.len() {
             let init = self.linked_init(i)?;
@@ -428,7 +436,16 @@ impl Session {
                 code.entry(key).or_insert_with(|| init.clone());
             }
         }
-        self.evm.inspector.cheats.code = code;
+        self.evm.inspector.cheats.code = std::sync::Arc::new(code);
+        let mut deployed = HashMap::new();
+        for a in &self.artifacts {
+            let base = a.file.rsplit('/').next().unwrap_or(&a.file).to_string();
+            for key in [base.clone(), format!("{base}:{}", a.name), a.file.clone(), format!("{}:{}", a.file, a.name), a.name.clone()] {
+                deployed.entry(key).or_insert_with(|| a.runtime.code.clone());
+            }
+        }
+        self.evm.inspector.cheats.deployed = std::sync::Arc::new(deployed);
+        self.served = Some(self.libraries.clone());
         Ok(())
     }
 
