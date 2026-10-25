@@ -508,6 +508,15 @@ pub fn swarm_queue(folder: String) -> Result<Value, String> {
 // ---- roles ----
 
 fn system(role: &str, folder: &str, goal: &str) -> String {
+    // The hunter tests the bytecode; the swarm's Lean setup (models, theorems, the plan) isn't its business.
+    if role == "hunter" {
+        let _ = goal;
+        return format!(
+            "You are Formal Mind's hunter, working in the Foundry project at {folder} (paths are relative to it). Tools run here, on the maintainer's machine: \
+coverage, explore, debug_open, debug_run, debug_move, debug_break, debug_watch, debug_look, tag, report_bug, read_file and write_file (the project's files), and run (`forge test` and `forge build` only). \
+The maintainer watches your debugger while you work.\n\n{HUNTER}"
+        );
+    }
     let root = Path::new(folder);
     let lake = crate::swarm_ctx::lake_dir(root).map(|d| d.strip_prefix(root).map(|p| p.to_string_lossy().to_string()).unwrap_or_default()).map(|d| if d.is_empty() { ".".to_string() } else { d });
     let lean = match &lake {
@@ -548,6 +557,17 @@ pub(crate) fn report_bug_tool() -> Value {
 
 fn tools(role: &str) -> Value {
     let s = |props: Value, req: Vec<&str>| json!({ "type": "object", "properties": props, "required": req, "additionalProperties": false });
+    // The hunter's kit: the bytecode tools, the project's files, forge, and reporting. No formal-ast slices, Lean or plan.
+    if role == "hunter" {
+        let mut t = vec![
+            json!({ "name": "read_file", "description": "Read a text file in the project (Solidity, tests, the test setup a PoC needs). Long files come back in numbered slices: pass start_line and end_line (up to 300 lines at a time).", "input_schema": s(json!({ "path": { "type": "string" }, "start_line": { "type": "integer" }, "end_line": { "type": "integer" } }), vec!["path"]) }),
+            json!({ "name": "write_file", "description": "Create or overwrite a file in the project (a PoC under test/formal/).", "input_schema": s(json!({ "path": { "type": "string" }, "content": { "type": "string" } }), vec!["path", "content"]) }),
+            json!({ "name": "run", "description": "Run `forge build` or `forge test [args]` in the project. Returns exit code and output.", "input_schema": s(json!({ "command": { "type": "string" } }), vec!["command"]) }),
+            report_bug_tool(),
+        ];
+        t.extend(crate::analysis::tools());
+        return Value::Array(t);
+    }
     let mut t = vec![
         json!({ "name": "functions", "description": "Every function in scope, from formal-ast (solc's AST): the contracts the Foundry scripts deploy or call and their bases, each function with its Lean def, place, footprint and status on the Proofs page.", "input_schema": s(json!({}), vec![]) }),
         json!({ "name": "function", "description": "One function's slice from formal-ast: its guards, the storage it reads and writes, the state declarations it touches, its code and its callees' code. By name (`Contract.fn`) or Lean def.", "input_schema": s(json!({ "name": { "type": "string" } }), vec!["name"]) }),
@@ -1708,6 +1728,20 @@ pub fn swarm_running(swarms: State<'_, Swarms>, folder: String) -> Vec<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The hunter tests the bytecode: no formal-ast slices, Lean search or plan talk in its kit or its prompt.
+    #[test]
+    fn the_hunter_has_its_own_kit() {
+        let names: Vec<String> = tools("hunter").as_array().unwrap().iter().map(|t| t["name"].as_str().unwrap().to_string()).collect();
+        for gone in ["functions", "function", "search", "record_property", "verdict"] {
+            assert!(!names.iter().any(|n| n == gone), "{gone} in {names:?}");
+        }
+        for has in ["coverage", "explore", "debug_run", "tag", "report_bug", "read_file", "write_file", "run"] {
+            assert!(names.iter().any(|n| n == has), "{has} missing from {names:?}");
+        }
+        let sys = system("hunter", "/p", "");
+        assert!(!sys.contains("Lean") && !sys.contains("theorem") && sys.contains("coverage"), "{sys}");
+    }
 
     #[test]
     fn a_claimed_item_is_left_to_its_session() {
