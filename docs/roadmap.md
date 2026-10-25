@@ -1,32 +1,6 @@
-# Formal Mind
+# Roadmap
 
-Formal Mind is a swarm of AI agents that writes a Lean 4 model of a Solidity protocol, proves its money invariants,
-and re-checks them on every commit. When a change breaks a proof, the swarm repairs it or names the gap. A claim
-about the code counts only when Lean accepts the proof.
-
-![Formal Mind 0.1.41 on asyncswap/contracts: the Swarm canvas with the plan (158/192 items), the agents in their role colours, the ledger and context notebooks, and the main session's chat](images/formal-mind-0.1.41-swarm.webp)
-
-## The problem
-
-DeFi users lose money to logic and accounting bugs: code that compiles, passes its tests and audits, and still lets an
-attacker withdraw more than was deposited. Hacken's 2025 report puts losses from code logic errors at $512 million that
-year, including heavily audited and battle-tested codebases. The largest, Balancer v2 in November 2025, lost
-$128 million to a rounding error in pool math, the kind of invariant a proof checks.
-
-Formal verification rules out whole classes of these bugs, but a proof is only as good as its match to the deployed
-code. Protocols change weekly, specs don't, and few teams can afford a verification engineer on every pull request.
-Formal Mind keeps the proofs in step with the code: every commit is checked against invariants such as "escrow always
-equals open orders" and "no match creates or destroys tokens".
-
-## Focus
-
-**Prove money invariants, and test on Solidity protocols on GitHub.**
-
-- **Money invariants first.** Conservation (no call creates or destroys tokens), solvency (what the contract holds
-  covers what it owes), escrow (locked funds equal open obligations), and fees and rounding that never favour the
-  caller. These are what users lose money to; other properties wait.
-- **Tested on real protocols.** Beyond Async Swap, the swarm runs on public Solidity protocols on GitHub, and each run
-  reports which money invariants were proved, which failed with a counterexample, and what was left unmodelled.
+What Formal Mind is, the problem it solves and its focus: [README.md](../README.md).
 
 ## Standing rules
 
