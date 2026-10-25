@@ -1938,7 +1938,8 @@ export function SwarmPanel({ folder, name, scan, bridge, session, file: openPath
 					) : block.e.kind === "you" ? (
 						<Message align="end">
 							<MessageContent>
-								<div className="ml-10 w-fit whitespace-pre-wrap rounded-2xl bg-muted px-3 py-2.5 text-foreground">{block.e.text}</div>
+								{/* Your message: on the right, as wide as its text up to most of the chat, wrapping long words. */}
+								<div className="max-w-[85%] self-end whitespace-pre-wrap break-words rounded-2xl bg-muted px-3 py-2 text-foreground">{block.e.text}</div>
 							</MessageContent>
 						</Message>
 					) : (
