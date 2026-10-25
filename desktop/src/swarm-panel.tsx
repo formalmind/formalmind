@@ -4,7 +4,7 @@ import { createPortal } from "react-dom";
 import { NvimTerminal } from "./nvim-terminal";
 import { reportError } from "@/lib/report-error";
 import { JsonTree } from "./json-tree";
-import { ArrowDown, Bug, Check, ChevronDown, Code2, Copy, Crosshair, FileCode2, FileDown, Network, Play, Plus, ScanSearch, Square, Terminal, ThumbsDown, ThumbsUp, WandSparkles } from "lucide-react";
+import { ArrowDown, Bug, Check, ChevronDown, Code2, Copy, Crosshair, FileCode2, FileDown, Network, Plus, ScanSearch, Terminal, ThumbsDown, ThumbsUp, WandSparkles } from "lucide-react";
 
 // The project roadmap (GitHub Projects-style), the same view the web app had on its own page.
 import { motion as vimMotion, search as vimSearch, setVimMode, useVimMode, type Cursor } from "@/components/vim-mode";
@@ -118,7 +118,10 @@ export function Steps({ steps, running }: { steps: { call: Ev; result?: Ev }[]; 
 							<p className="truncate font-mono text-[11px] text-foreground/80">› {s.call.text}</p>
 							{s.result?.text.trim() ? (
 								<ToolOutput call={s.call.text} text={s.result.text} />
-							) : null}
+							) : (
+								// No output yet: still running (coverage runs the whole suite), or the session stopped first.
+								<p className="pl-3 font-mono text-[11px] text-muted-foreground">{running && i === steps.length - 1 ? "running…" : "no result: the session stopped before it finished"}</p>
+							)}
 						</div>
 					))}
 				</TraceCollapsibleContent>
@@ -1712,7 +1715,7 @@ export function SwarmPanel({ folder, name, scan, bridge, session, file: openPath
 	const run = viewing && runs.includes(viewing) ? viewing : null;
 	// Grouped once per change of the events (a long session has about a thousand): typing in the composer re-renders the
 	// panel, and must not regroup the history, rebuild the board or redraw every message.
-	const chatBlocks = useMemo(() => blocks(events.filter((e) => e.kind !== "status" && e.kind !== "context")), [events]);
+	const chatBlocks = useMemo(() => blocks(events.filter((e) => e.kind !== "status" && e.kind !== "context" && !(concolic && e.kind === "start"))), [events, concolic]);
 	const scrubItems = useMemo(
 		() =>
 			chatBlocks.map((b) =>
@@ -1832,7 +1835,7 @@ export function SwarmPanel({ folder, name, scan, bridge, session, file: openPath
 	// Sessions are picked from the chat card's title (the sidebar holds the folder's files).
 	// Switching between Swarm and Concolic opens the latest session of that tab's kind (or an empty one).
 	useEffect(() => {
-		if (!canvas || isHunt(viewing) === concolic) return;
+		if (!canvas || session === "new" || isHunt(viewing) === concolic) return;
 		const latest = sessions.find((x) => isHunt(x.run) === concolic);
 		if (latest) load(latest.run);
 		else {
@@ -2190,8 +2193,14 @@ export function SwarmPanel({ folder, name, scan, bridge, session, file: openPath
 						value={run ? say : goal}
 						onChange={(e) => (run ? setSay(e.target.value) : setGoal(e.target.value))}
 						onSubmit={() => void (run ? send() : start())}
-						onStop={() => {}}
-						isLoading={false}
+						// One button: ↑ starts (Concolic: once you've said what to look at) and sends; while it runs, an empty box
+						// makes it Stop, which stops the session.
+						onStop={() => void invoke("swarm_stop", { folder, run })}
+						isLoading={Boolean(run)}
+						allowEmpty={!run && !concolic}
+						sendClassName="btn-dark !px-0"
+						sendDisabled={!run && ((Boolean(ownKey) && !hasKey) || claudeCodeOnly)}
+						sendTitle={run ? (say.trim() ? "Send" : "Stop the session") : ownKey && !hasKey ? `Add your ${ownKey} key in Settings first` : claudeCodeOnly ? "Claude Code runs the Concolic hunter only: pick credits or a key in Settings for the formal agents" : concolic ? "Start the bug search with this message" : "Start the swarm"}
 						modelPicker={{
 							value: pickedModel,
 							options: models,
@@ -2201,23 +2210,9 @@ export function SwarmPanel({ folder, name, scan, bridge, session, file: openPath
 								store.set("fm:model", m);
 							},
 						}}
-						placeholder={run ? "Talk to the agents: a question, a new focus, an idea to check…" : concolic ? "What should the hunter look at? (optional: Router.swap, the fee path…) ↑ starts it" : "What should the swarm focus on? (optional) ↑ starts it"}
-						// The composer's top left: the run control (Stop while it runs; Start, or Resume with plan items left,
-						// when it doesn't), then the project this chat talks to.
-						context={
-							<span className="inline-flex items-center gap-1.5">
-								{run ? (
-									<button type="button" onClick={() => void invoke("swarm_stop", { folder, run })} title="Stop the swarm" className="inline-flex h-8 items-center gap-1.5 rounded-full px-3 text-[13px] font-medium text-red-600 hover:bg-red-500/10 dark:text-red-400">
-										<Square className="size-2.5 fill-current" />Stop
-									</button>
-								) : (
-									<button type="button" onClick={() => void start()} disabled={(Boolean(ownKey) && !hasKey) || claudeCodeOnly} title={ownKey && !hasKey ? `Add your ${ownKey} key in Settings first` : claudeCodeOnly ? "Claude Code runs the Concolic hunter only: pick credits or a key in Settings for the formal agents" : concolic ? provider === "claude-code" ? "Start a bug search on Claude Code (your Claude plan)" : "Start a bug search: the hunter alone" : "Start the swarm"} className="btn-dark inline-flex h-8 items-center gap-1.5 px-3 text-[13px] disabled:opacity-50">
-										<Play className="size-3" />{concolic ? "Hunt" : plan.some((i) => i.mark === " ") ? "Resume" : "Start"}
-									</button>
-								)}
-								<span className="inline-flex h-8 items-center gap-1.5 rounded-full bg-secondary px-3 text-[13px] font-medium text-secondary-foreground">{name}</span>
-							</span>
-						}
+						placeholder={run ? (concolic ? "Talk to the hunter: a question, a lead, where to look next…" : "Talk to the agents: a question, a new focus, an idea to check…") : concolic ? "What should the hunter look at? Router.swap, the fee path, settlement…" : "What should the swarm focus on? (optional) ↑ starts it"}
+						// The composer's top left: the project this chat talks to.
+						context={<span className="inline-flex h-8 items-center gap-1.5 rounded-full bg-secondary px-3 text-[13px] font-medium text-secondary-foreground">{name}</span>}
 						extra={run ? (
 							<button type="button" onClick={() => void draft()} disabled={drafting} title="Draft a reply for me" className="inline-flex h-8 shrink-0 items-center whitespace-nowrap gap-1.5 rounded-full px-2.5 text-sm text-muted-foreground hover:bg-muted hover:text-foreground disabled:opacity-50">
 								<WandSparkles className={`size-3.5 ${drafting ? "animate-pulse" : ""}`} />

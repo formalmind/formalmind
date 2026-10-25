@@ -53,6 +53,13 @@ export interface ChatComposerProps {
 	textareaRef?: React.Ref<HTMLTextAreaElement>;
 	/** The composer's corner radius class; a container sets it so its own corners nest around it. */
 	rounded?: string;
+	/** The send button works with nothing typed (it starts a session; what you type is optional). */
+	allowEmpty?: boolean;
+	/** The send button's look when it's enabled, in place of the primary colour. */
+	sendClassName?: string;
+	sendDisabled?: boolean;
+	/** The send button's tooltip (what it does now: start, send, stop, or why it can't). */
+	sendTitle?: string;
 }
 
 export function ChatComposer({
@@ -72,6 +79,10 @@ export function ChatComposer({
 	placeholder = "Ask about this repo…",
 	textareaRef,
 	rounded = "rounded-[28px]",
+	allowEmpty = false,
+	sendClassName = "bg-primary text-primary-foreground",
+	sendDisabled = false,
+	sendTitle,
 }: ChatComposerProps) {
 	const innerRef = React.useRef<HTMLTextAreaElement | null>(null);
 	const setRefs = React.useCallback(
@@ -97,7 +108,7 @@ export function ChatComposer({
 	const hasContent = value.trim().length > 0;
 	// While the model is responding and the box is empty, the send button becomes stop.
 	const stopMode = isLoading && !hasContent;
-	const sendEnabled = stopMode || hasContent;
+	const sendEnabled = !sendDisabled && (stopMode || hasContent || allowEmpty);
 
 	const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
 		if (e.key !== "Enter" || e.shiftKey || e.nativeEvent.isComposing) return;
@@ -109,8 +120,9 @@ export function ChatComposer({
 		<form
 			onSubmit={(e) => {
 				e.preventDefault();
+				if (sendDisabled) return;
 				if (stopMode) onStop();
-				else if (hasContent) onSubmit();
+				else if (hasContent || allowEmpty) onSubmit();
 			}}
 			className={`${rounded} border border-border bg-card shadow-sm focus-within:border-ring/40 transition-colors motion-reduce:transition-none`}
 		>
@@ -207,9 +219,10 @@ export function ChatComposer({
 					type="submit"
 					disabled={!sendEnabled}
 					aria-label={stopMode ? "Stop" : "Send"}
+					title={sendTitle}
 					className={cn(
 						"flex h-8 w-8 items-center justify-center rounded-full transition-colors motion-reduce:transition-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2",
-						sendEnabled ? "bg-primary text-primary-foreground" : "bg-secondary text-muted-foreground",
+						sendEnabled ? sendClassName : "bg-secondary text-muted-foreground",
 					)}
 				>
 					{stopMode ? <Square className="h-3.5 w-3.5 fill-current" /> : <ArrowUp className="h-4 w-4" strokeWidth={2.5} />}

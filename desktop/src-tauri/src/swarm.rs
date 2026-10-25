@@ -23,7 +23,8 @@ const DEFAULT_MODEL: &str = "claude-opus-5-5";
 const MAX_STEPS: usize = 40;
 const PROVER_STEPS: usize = 90;
 /// The hunter's instructions (the API's system prompt and Claude Code's appended one).
-pub(crate) const HUNTER: &str = "You hunt for vulnerabilities in the contracts by testing the bytecode, not by reading alone. Work in this order. \
+pub(crate) const HUNTER: &str = "You hunt for vulnerabilities in the contracts by testing the bytecode, not by reading alone. \
+Given a focus (a function, a flow such as the fee path), start there: read the code it names, then go to step 2 with the fuzz tests that reach it, and use coverage (cached when the code hasn't changed) to see what the suite misses in it. Without a focus, work in this order. \
 1. `coverage`: which lines and branch sides of src/ no test reaches, which tests fail, and which calls reach an address with no code (an interface no test bound to an implementation: everything after that call is untested). \
 2. `explore`, narrowed with `only` to the fuzz tests that reach the security-relevant gaps (guards, access control, fee and price arithmetic, settlement, accounting): its findings are inputs, already reduced, that make a test fail; its solved sides are inputs that take a branch no test took; unsat sides are unreachable from that test. \
 3. For each finding and each suspicious solved side, debug it: debug_open the test file, debug_run the test with the inputs as `args`, debug_look revert and lines, debug_watch the storage the property is about and debug_move continue to its writes, until you know exactly what the bytecode did and why. \
@@ -1271,6 +1272,13 @@ async fn run_swarm(turn: &Turn<'_>) -> String {
         };
 
         let outcome = match job.kind.as_str() {
+            // In a bug search you talk to the hunter (on Claude Code: its conversation, resumed); elsewhere, the assistant.
+            "answer" if turn.run.starts_with("hunt-") && turn.req.provider.as_deref() == Some("claude-code") => {
+                crate::claude_code::hunt(turn.app, &turn.req.folder, turn.run, job.id, resumed, "", turn.req.model.as_deref(), &turn.swarm.stop, Some(&job.text))
+                    .await
+                    .map(|(summary, bug)| Outcome { summary, bug, ..Default::default() })
+            }
+            "answer" if turn.run.starts_with("hunt-") => turn.agent("hunter", "you", format!("The maintainer says:\n\n{}{resume_note}", job.text)).await,
             "answer" => turn.agent("assistant", "you", format!("The maintainer says:\n\n{}{resume_note}", job.text)).await,
             // An audit report to read: a PDF goes to the model as a document; Markdown and text as text.
             "triage" => {
@@ -1292,7 +1300,7 @@ async fn run_swarm(turn: &Turn<'_>) -> String {
                 turn.emit("status", "hunter", "hunt", if job.text.is_empty() { "hunting: coverage first".into() } else { format!("hunting: {}", job.text) });
                 let focus = if job.text.is_empty() { "the contracts in src/".to_string() } else { job.text.clone() };
                 if turn.req.provider.as_deref() == Some("claude-code") {
-                    crate::claude_code::hunt(turn.app, &turn.req.folder, turn.run, job.id, resumed, &focus, turn.req.model.as_deref(), &turn.swarm.stop)
+                    crate::claude_code::hunt(turn.app, &turn.req.folder, turn.run, job.id, resumed, &focus, turn.req.model.as_deref(), &turn.swarm.stop, None)
                         .await
                         .map(|(summary, bug)| Outcome { summary, bug, ..Default::default() })
                 } else {
@@ -1488,11 +1496,14 @@ pub fn swarm_start(app: AppHandle, swarms: State<'_, Swarms>, request: SwarmRequ
     let spent = load_queue(&qf).spent;
     // A bug search queues the hunt and nothing else; otherwise what you typed before starting is a message too: the
     // assistant answers it first (as with one sent while it runs).
+    // A new hunt's message (the chat's first, in a bug search): shown as yours once the session has started.
+    let mut asked: Option<String> = None;
     if let Some(focus) = request.hunt.as_deref() {
         // Resuming a bug search carries on its hunt; only a session with none waiting gets a new one.
         with_queue(&qf, |q| {
             if !q.jobs.iter().any(|j| j.kind == "hunt" && (j.state == "queued" || j.state == "running")) {
                 enqueue(q, "hunt", 0, focus.trim(), 1, "");
+                asked = Some(focus.trim().to_string()).filter(|f| !f.is_empty());
             }
         });
     } else if let Some(text) = request.goal.as_deref().map(str::trim).filter(|t| !t.is_empty()) {
@@ -1513,6 +1524,9 @@ pub fn swarm_start(app: AppHandle, swarms: State<'_, Swarms>, request: SwarmRequ
             None => request.goal.clone().unwrap_or_default(),
         };
         turn.emit("start", "swarm", "", title);
+        if let Some(text) = asked {
+            turn.emit("you", "you", "", text);
+        }
         turn.emit("status", "swarm", "", "resuming".into());
         let outcome = run_swarm(&turn).await;
         turn.emit("done", "swarm", "", outcome);

@@ -196,10 +196,53 @@ fn ranges(mut lines: Vec<usize>) -> String {
     out.join(", ")
 }
 
+fn fnv64(bytes: &[u8]) -> u64 {
+    bytes.iter().fold(0xcbf2_9ce4_8422_2325u64, |h, b| (h ^ *b as u64).wrapping_mul(0x0100_0000_01b3))
+}
+
+/// What the suite's result depends on: the commit, every change to tracked files, and the untracked files (by size and
+/// time). None outside git: no cache.
+fn tree_key(folder: &str) -> Option<String> {
+    let git = |args: &[&str]| std::process::Command::new("git").arg("-C").arg(folder).args(args).output().ok().filter(|o| o.status.success()).map(|o| o.stdout);
+    let head = git(&["rev-parse", "HEAD"])?;
+    let diff = git(&["diff", "HEAD", "--binary"])?;
+    let untracked = git(&["ls-files", "--others", "--exclude-standard", "-z"])?;
+    let mut stamp = Vec::new();
+    for f in untracked.split(|b| *b == 0).filter(|f| !f.is_empty()) {
+        let path = std::path::Path::new(folder).join(String::from_utf8_lossy(f).as_ref());
+        if let Ok(m) = std::fs::metadata(&path) {
+            stamp.extend_from_slice(f);
+            stamp.extend_from_slice(&m.len().to_le_bytes());
+            if let Ok(t) = m.modified().map(|t| t.duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_nanos()) {
+                stamp.extend_from_slice(&t.to_le_bytes());
+            }
+        }
+    }
+    Some(format!("{:016x}{:016x}{:016x}", fnv64(&head), fnv64(&diff), fnv64(&stamp)))
+}
+
+/// Coverage, cached by the tree and the options (~/.formalmind/cache/coverage/): a second hunt on unchanged code gets
+/// it at once instead of running the suite again.
 async fn coverage(folder: &str, input: &Value) -> Result<Value, String> {
     if !crate::local::read()?.allows(folder) {
         return Err("Add the folder first".into());
     }
+    let key = tree_key(folder).map(|t| format!("{t}-{:016x}", fnv64(json!({ "include": input["include"], "skip": input["skip"] }).to_string().as_bytes())));
+    let file = key.as_ref().and_then(|k| crate::local::home().ok().map(|h| h.join("cache").join("coverage").join(format!("{:016x}", fnv64(folder.as_bytes()))).join(format!("{k}.json"))));
+    if let Some(hit) = file.as_ref().and_then(|f| std::fs::read_to_string(f).ok()).and_then(|t| serde_json::from_str::<Value>(&t).ok()) {
+        let mut v = hit;
+        v["cached"] = json!("the code hasn't changed since this run; it wasn't run again");
+        return Ok(v);
+    }
+    let v = coverage_fresh(folder, input).await?;
+    if let Some(f) = &file {
+        let _ = std::fs::create_dir_all(f.parent().unwrap());
+        let _ = std::fs::write(f, v.to_string());
+    }
+    Ok(v)
+}
+
+async fn coverage_fresh(folder: &str, input: &Value) -> Result<Value, String> {
     let opts = coverage_opts(folder, input);
     let report = tauri::async_runtime::spawn_blocking(move || concolity::coverage::run(&opts)).await.map_err(|e| e.to_string())?.map_err(|e| format!("{e:#}"))?;
     let files: Vec<Value> = report

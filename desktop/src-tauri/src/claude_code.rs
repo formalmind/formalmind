@@ -270,9 +270,10 @@ fn events_of(line: &Value) -> Vec<(&'static str, String)> {
     out
 }
 
-/// Runs the hunt on Claude Code; returns the summary and the last bug filed.
+/// Runs the hunt on Claude Code; returns the summary and the last bug filed. With `message` (the maintainer wrote in the
+/// bug search's chat), the session's Claude conversation is resumed with it instead.
 #[allow(clippy::too_many_arguments)]
-pub async fn hunt(app: &AppHandle, folder: &str, run: &str, job: u64, resumed: bool, focus: &str, model: Option<&str>, stop: &AtomicBool) -> Result<(String, Option<String>), String> {
+pub async fn hunt(app: &AppHandle, folder: &str, run: &str, job: u64, resumed: bool, focus: &str, model: Option<&str>, stop: &AtomicBool, message: Option<&str>) -> Result<(String, Option<String>), String> {
     use tokio::io::AsyncBufReadExt;
     let emit = |kind: &'static str, text: String| crate::swarm::emit_as(app, folder, run, kind, ROLE, ITEM, text);
     // The project itself, resolved (symlinks, /tmp → /private/tmp), so the check below compares like with like.
@@ -286,7 +287,13 @@ pub async fn hunt(app: &AppHandle, folder: &str, run: &str, job: u64, resumed: b
     // The Claude session this job talks in: kept with the run, so a resumed hunt picks the same conversation.
     let session_file = state.join("session.json");
     let saved: Option<Value> = std::fs::read_to_string(&session_file).ok().and_then(|t| serde_json::from_str(&t).ok());
-    let sid = saved.as_ref().filter(|v| v["job"] == job).and_then(|v| v["session_id"].as_str().map(str::to_string)).unwrap_or_else(|| session_id(folder, run, job));
+    // A message continues the session's conversation (whichever job started it); a hunt has its own.
+    let sid = match message {
+        Some(_) => saved.as_ref().and_then(|v| v["session_id"].as_str().map(str::to_string)).ok_or("Start the hunt first: there's no Claude Code conversation in this bug search yet")?,
+        None => saved.as_ref().filter(|v| v["job"] == job).and_then(|v| v["session_id"].as_str().map(str::to_string)).unwrap_or_else(|| session_id(folder, run, job)),
+    };
+    let job = if message.is_some() { saved.as_ref().and_then(|v| v["job"].as_u64()).unwrap_or(job) } else { job };
+    let resumed = resumed || message.is_some();
     let started = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0);
     write_private(&session_file, &serde_json::to_string_pretty(&json!({ "session_id": sid, "job": job, "project": root, "run": run, "resumed": resumed, "started": started })).unwrap_or_default())?;
     let open_log = |name: &str| std::fs::OpenOptions::new().create(true).append(true).open(state.join(name)).map_err(|e| format!("{name}: {e}"));
@@ -295,7 +302,11 @@ pub async fn hunt(app: &AppHandle, folder: &str, run: &str, job: u64, resumed: b
     let mut cmd = tokio::process::Command::new(claude());
     cmd.current_dir(&root)
         .arg("-p")
-        .arg(if resumed { "The app quit and this hunt is being resumed. Carry on from where you were; don't redo finished work." } else { task.as_str() })
+        .arg(match message {
+            Some(m) => format!("The maintainer says:\n\n{m}"),
+            None if resumed => "The app quit and this hunt is being resumed. Carry on from where you were; don't redo finished work.".to_string(),
+            None => task.clone(),
+        })
         .args(["--output-format", "stream-json", "--verbose"])
         .arg("--append-system-prompt")
         .arg(system_prompt(folder))
