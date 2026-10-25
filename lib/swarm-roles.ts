@@ -13,3 +13,7 @@ export const ROLE_COLORS: Record<SwarmRole, string> = {
 	assistant: "#eab308",
 	hunter: "#f97316",
 };
+
+/** What people see a role called, where it isn't the role's id (the hunter is the Bug Hunter). */
+export const ROLE_NAMES: Partial<Record<SwarmRole, string>> = { hunter: "Bug Hunter" };
+export const roleName = (role: string) => ROLE_NAMES[role as SwarmRole] ?? role;

@@ -162,6 +162,8 @@ struct SwarmEvent {
     item: String,
     text: String,
     spent: f64,
+    /// When it happened (ms since the epoch): the chat times each tool step from its call to its result.
+    at: u64,
 }
 
 /// An event to the app (the `swarm` event; the relay passes it on to the phone) and to the session's log,
@@ -170,7 +172,7 @@ struct SwarmEvent {
 /// session's spend so the chat's header doesn't jump.
 pub(crate) fn emit_as(app: &AppHandle, folder: &str, run: &str, kind: &'static str, role: &str, item: &str, text: String) {
     let spent = app.state::<Swarms>().0.lock().unwrap().get(&key(folder, run)).map(|s| *s.spent.lock().unwrap()).unwrap_or(0.0);
-    emit_event(app, SwarmEvent { folder: folder.into(), run: run.into(), kind, role: role.into(), item: item.into(), text, spent });
+    emit_event(app, SwarmEvent { folder: folder.into(), run: run.into(), kind, role: role.into(), item: item.into(), text, spent, at: now_ms() as u64 });
 }
 
 fn emit_event(app: &AppHandle, ev: SwarmEvent) {
@@ -513,7 +515,7 @@ fn system(role: &str, folder: &str, goal: &str) -> String {
     if role == "hunter" {
         let _ = goal;
         return format!(
-            "You are Formal Mind's hunter, working in the Foundry project at {folder} (paths are relative to it). Tools run here, on the maintainer's machine: \
+            "You are Formal Mind's Bug Hunter, working in the Foundry project at {folder} (paths are relative to it). Tools run here, on the maintainer's machine: \
 coverage, explore, debug_open, debug_run, debug_move, debug_break, debug_watch, debug_look, tag, report_bug, read_file and write_file (the project's files), and run (`forge test` and `forge build` only). \
 The maintainer watches your debugger while you work.\n\n{HUNTER}"
         );
@@ -663,7 +665,7 @@ impl Turn<'_> {
 
     fn emit(&self, kind: &'static str, role: &str, item: &str, text: String) {
         let spent = *self.swarm.spent.lock().unwrap();
-        emit_event(self.app, SwarmEvent { folder: self.req.folder.clone(), run: self.run.into(), kind, role: role.into(), item: item.into(), text, spent });
+        emit_event(self.app, SwarmEvent { folder: self.req.folder.clone(), run: self.run.into(), kind, role: role.into(), item: item.into(), text, spent, at: now_ms() as u64 });
     }
 
     async fn session(&self, role: &str, item: &str) -> Result<(String, String), String> {
@@ -1630,7 +1632,7 @@ pub fn swarm_say(app: AppHandle, swarms: State<'_, Swarms>, folder: String, run:
             enqueue(q, "answer", 0, &text, 1, "");
         }
     });
-    emit_event(&app, SwarmEvent { folder, run, kind: "you", role: "you".into(), item: String::new(), text, spent });
+    emit_event(&app, SwarmEvent { folder, run, kind: "you", role: "you".into(), item: String::new(), text, spent, at: now_ms() as u64 });
     Ok(())
 }
 
@@ -1693,7 +1695,7 @@ pub fn pause_all(app: &AppHandle) {
     for (k, s) in swarms.0.lock().unwrap().iter() {
         s.stop.store(true, Ordering::SeqCst);
         let run = k.rsplit('\n').next().unwrap_or(k);
-        let ev = SwarmEvent { folder: s.folder.clone(), run: run.to_string(), kind: "done", role: "swarm".into(), item: String::new(), text: "paused: the app quit. Resume to carry on from the plan.".into(), spent: *s.spent.lock().unwrap() };
+        let ev = SwarmEvent { folder: s.folder.clone(), run: run.to_string(), kind: "done", role: "swarm".into(), item: String::new(), text: "paused: the app quit. Resume to carry on from the plan.".into(), spent: *s.spent.lock().unwrap(), at: now_ms() as u64 };
         if let Ok(line) = serde_json::to_string(&ev) {
             use std::io::Write;
             let _ = std::fs::OpenOptions::new().append(true).open(runs_dir(&s.folder).join(format!("{run}.jsonl"))).and_then(|mut f| writeln!(f, "{line}"));

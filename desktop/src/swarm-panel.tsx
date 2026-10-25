@@ -4,7 +4,7 @@ import { createPortal } from "react-dom";
 import { NvimTerminal } from "./nvim-terminal";
 import { reportError } from "@/lib/report-error";
 import { JsonTree } from "./json-tree";
-import { ArrowDown, Bug, Check, ChevronDown, Code2, Copy, Crosshair, FileCode2, FileDown, Network, Plus, ScanSearch, Terminal, ThumbsDown, ThumbsUp, WandSparkles } from "lucide-react";
+import { ArrowDown, Bug, Check, ChevronDown, ChevronRight, Code2, Copy, Crosshair, FileCode2, FileDown, Network, Plus, ScanSearch, ThumbsDown, ThumbsUp, WandSparkles } from "lucide-react";
 
 // The project roadmap (GitHub Projects-style), the same view the web app had on its own page.
 import { motion as vimMotion, search as vimSearch, setVimMode, useVimMode, type Cursor } from "@/components/vim-mode";
@@ -20,9 +20,8 @@ import { ChatMarkdown } from "@/components/chat-markdown";
 import { CodeBlock, CodeBlockContent } from "@/components/ui/code-block";
 import { useHighlightedCode } from "@/hooks/use-highlighted-code";
 import { Message, MessageContent, MessageHeader } from "@/components/ui/message";
-import { Trace, TraceCollapsible, TraceCollapsibleContent, TraceCollapsibleTrigger, TraceIcon, TraceLine, TraceTitle } from "@/components/ui/trace";
 import { SwarmCanvas } from "@/components/swarm/swarm-canvas";
-import { ROLE_COLORS } from "@/lib/swarm-roles";
+import { ROLE_COLORS, roleName } from "@/lib/swarm-roles";
 import { localBoard } from "./local-board";
 import { ContextBody, ContextPanel, parseContext } from "./context-panel";
 import type { Scan } from "./local";
@@ -36,7 +35,7 @@ export type Bridge = {
 
 import type { Diagnostic } from "@/lib/ast/run";
 
-export type Ev = { folder?: string; run: string; kind: "start" | "status" | "context" | "say" | "tool" | "result" | "you" | "bug" | "plan" | "done" | "error"; role: string; item: string; text: string; spent: number };
+export type Ev = { folder?: string; run: string; kind: "start" | "status" | "context" | "say" | "tool" | "result" | "you" | "bug" | "plan" | "done" | "error"; role: string; item: string; text: string; spent: number; /** ms since the epoch (newer logs) */ at?: number };
 type Item = { index: number; mark: string; text: string };
 export type Bug = { file: string; title: string; body: string };
 type Provider = "formal" | "anthropic" | "openai" | "claude-code";
@@ -81,52 +80,128 @@ const colorOf = (role: string) => (ROLE_COLORS as Record<string, string>)[role] 
 const store = { get: (k: string) => { try { return localStorage.getItem(k); } catch { return null; } }, set: (k: string, v: string) => { try { localStorage.setItem(k, v); } catch { /* not kept */ } } };
 
 
-type Block = { e: Ev } | { steps: { call: Ev; result?: Ev }[] };
+/** A row of an activity group: the agent's note on what it's about to do, or a tool call with its result. */
+type Row = { note: Ev } | { call: Ev; result?: Ev };
+type Block = { e: Ev } | { steps: Row[] };
 
-/** The chat as blocks: messages stand alone; a run of tool calls (each with its result) folds into one trace. */
+/**
+ * The chat as blocks. Messages stand alone, except an agent's note right before a tool call: it joins the call's
+ * activity group, so the group reads as what it did and why ("Coverage first…", Ran coverage, "Two guards…", Ran …).
+ */
 export function blocks(events: Ev[]): Block[] {
 	const out: Block[] = [];
 	for (const e of events) {
 		const last = out.at(-1);
 		if (e.kind === "tool") {
-			if (last && "steps" in last) last.steps.push({ call: e });
-			else out.push({ steps: [{ call: e }] });
+			let group = last && "steps" in last ? last : null;
+			if (!group && last && "e" in last && last.e.kind === "say" && last.e.role === e.role) {
+				out.pop();
+				const prev = out.at(-1);
+				group = prev && "steps" in prev ? prev : null;
+				if (group) group.steps.push({ note: last.e });
+				else {
+					group = { steps: [{ note: last.e }] };
+					out.push(group);
+				}
+			}
+			if (!group) {
+				group = { steps: [] };
+				out.push(group);
+			}
+			group.steps.push({ call: e });
 		} else if (e.kind === "result") {
-			const step = last && "steps" in last ? last.steps.at(-1) : undefined;
-			if (step && !step.result) step.result = e;
+			const row = last && "steps" in last ? [...last.steps].reverse().find((r): r is { call: Ev; result?: Ev } => "call" in r) : undefined;
+			if (row && !row.result) row.result = e;
 		} else if (e.text.trim()) out.push({ e });
 		// A line with nothing to say (a start without a focus) isn't shown.
 	}
 	return out;
 }
 
-/** A run of tool calls: "Used 4 tools", opening to each call and the start of its output. */
-export function Steps({ steps, running }: { steps: { call: Ev; result?: Ev }[]; running: boolean }) {
-	const one = steps.length === 1 ? steps[0].call.text : null;
+/** 12s, 1m 05s. */
+const took = (ms: number) => {
+	const s = Math.max(0, Math.round(ms / 1000));
+	return s < 60 ? `${s}s` : `${Math.floor(s / 60)}m ${String(s % 60).padStart(2, "0")}s`;
+};
+
+/** What a call is, for its row: a shell command by its command line, a tool by its name and arguments. */
+const callLabel = (text: string) => {
+	const [tool, ...rest] = text.split(" ");
+	return tool === "run" ? { what: "a command", line: rest.join(" ") || "a command" } : { what: tool, line: text };
+};
+
+/**
+ * An activity group, collapsed to one line ("Running 2 commands · 14s", "Ran coverage · 12s"); open, a list of what the
+ * agent said and ran in order. Each note opens to its full text; each call to its command line and output.
+ */
+export function Steps({ steps, running }: { steps: Row[]; running: boolean }) {
+	const calls = steps.filter((r): r is { call: Ev; result?: Ev } => "call" in r);
+	const [open, setOpen] = useState(false);
+	const [now, setNow] = useState(() => Date.now());
+	useEffect(() => {
+		if (!running) return;
+		const t = setInterval(() => setNow(Date.now()), 1000);
+		return () => clearInterval(t);
+	}, [running]);
+	const first = calls[0]?.call.at;
+	const lastAt = calls.at(-1)?.result?.at ?? (running ? now : undefined);
+	const elapsed = first && lastAt ? took(lastAt - first) : null;
+	const verb = running ? "Running" : "Ran";
+	const title = calls.length === 1 ? `${verb} ${callLabel(calls[0].call.text).what === "a command" ? "a command" : callLabel(calls[0].call.text).what}` : `${verb} ${calls.length} ${calls.every((c) => c.call.text.startsWith("run ")) ? "commands" : "tools"}`;
 	return (
-		<Trace className="pl-1">
-			<TraceCollapsible>
-				<TraceCollapsibleTrigger>
-					<TraceLine status={running ? "running" : undefined}>
-						<TraceIcon><Terminal className="size-3.5" /></TraceIcon>
-						<TraceTitle className="font-mono text-[11px]">{one ?? `Used ${steps.length} tools`}</TraceTitle>
-					</TraceLine>
-				</TraceCollapsibleTrigger>
-				<TraceCollapsibleContent className="ml-2 space-y-2">
-					{steps.map((s, i) => (
-						<div key={i} className="space-y-1">
-							<p className="truncate font-mono text-[11px] text-foreground/80">› {s.call.text}</p>
-							{s.result?.text.trim() ? (
-								<ToolOutput call={s.call.text} text={s.result.text} />
-							) : (
-								// No output yet: still running (coverage runs the whole suite), or the session stopped first.
-								<p className="pl-3 font-mono text-[11px] text-muted-foreground">{running && i === steps.length - 1 ? "running…" : "no result: the session stopped before it finished"}</p>
-							)}
-						</div>
-					))}
-				</TraceCollapsibleContent>
-			</TraceCollapsible>
-		</Trace>
+		<div className="pl-1 text-[13px]">
+			<button type="button" onClick={() => setOpen(!open)} aria-expanded={open} className="inline-flex items-center gap-1.5 text-muted-foreground hover:text-foreground">
+				{running ? <span className="size-1.5 animate-pulse rounded-full bg-current" aria-hidden /> : null}
+				<span>{title}</span>
+				{elapsed ? <span className="tabular-nums text-muted-foreground/70">· {elapsed}</span> : null}
+				<ChevronDown className={`size-3.5 transition-transform ${open ? "" : "-rotate-90"}`} />
+			</button>
+			{open ? (
+				<ul className="mt-1.5 divide-y overflow-hidden rounded-xl border">
+					{steps.map((r, i) => ("note" in r ? <NoteRow key={i} e={r.note} /> : <CallRow key={i} row={r} running={running && r === calls.at(-1) && !r.result} now={now} />))}
+				</ul>
+			) : null}
+		</div>
+	);
+}
+
+function NoteRow({ e }: { e: Ev }) {
+	const [open, setOpen] = useState(false);
+	return (
+		<li>
+			<button type="button" onClick={() => setOpen(!open)} aria-expanded={open} className="flex w-full items-center gap-2 px-3 py-2 text-left text-muted-foreground hover:bg-muted/50">
+				<span className={`min-w-0 flex-1 ${open ? "whitespace-pre-wrap" : "truncate"}`}>{e.text}</span>
+				{open ? null : <ChevronRight className="size-3.5 shrink-0" />}
+			</button>
+		</li>
+	);
+}
+
+function CallRow({ row, running, now }: { row: { call: Ev; result?: Ev }; running: boolean; now: number }) {
+	const [open, setOpen] = useState(false);
+	const { line } = callLabel(row.call.text);
+	const end = row.result?.at ?? (running ? now : undefined);
+	const elapsed = row.call.at && end ? took(end - row.call.at) : null;
+	return (
+		<li>
+			<button type="button" onClick={() => setOpen(!open)} aria-expanded={open} className="flex w-full items-center gap-2 px-3 py-2 text-left text-muted-foreground hover:bg-muted/50">
+				<span className="shrink-0">{running ? "Running" : "Ran"}</span>
+				<span className="min-w-0 truncate font-mono text-[12px] text-foreground">{line}</span>
+				{elapsed ? <span className="shrink-0 tabular-nums text-muted-foreground/70">{elapsed}</span> : null}
+				<ChevronRight className={`ml-auto size-3.5 shrink-0 transition-transform ${open ? "rotate-90" : ""}`} />
+			</button>
+			{open ? (
+				<div className="space-y-1.5 border-t bg-muted/30 px-3 py-2">
+					<p className="whitespace-pre-wrap break-all font-mono text-[11px] text-foreground/80">$ {line}</p>
+					{row.result?.text.trim() ? (
+						<ToolOutput call={row.call.text} text={row.result.text} />
+					) : (
+						// No output yet: still running (coverage runs the whole suite), or the session stopped first.
+						<p className="font-mono text-[11px] text-muted-foreground">{running ? "running…" : "no result: the session stopped before it finished"}</p>
+					)}
+				</div>
+			) : null}
+		</li>
 	);
 }
 
@@ -195,7 +270,7 @@ export function AgentMessage({ e, onBug }: { e: Ev; onBug: () => void }) {
 			<MessageContent className="gap-1">
 				{/* The name in its colour says who it is. */}
 				<MessageHeader className="gap-1.5 px-0 capitalize" style={{ color }}>
-					{e.kind === "bug" ? "bug reported" : e.role}
+					{e.kind === "bug" ? "bug reported" : roleName(e.role)}
 					{/^\d+$/.test(e.item) ? <span className="font-normal normal-case text-muted-foreground">· item {e.item}</span> : null}
 				</MessageHeader>
 				{e.kind === "bug" ? (
@@ -1720,8 +1795,8 @@ export function SwarmPanel({ folder, name, scan, bridge, session, file: openPath
 		() =>
 			chatBlocks.map((b) =>
 				"steps" in b
-					? { label: `${b.steps.length} tool step${b.steps.length === 1 ? "" : "s"}`, text: b.steps.map((st) => st.call.text).join(" · ") }
-					: { label: b.e.kind === "you" ? "You" : `${b.e.role[0]?.toUpperCase() ?? ""}${b.e.role.slice(1)}${b.e.item ? ` · item ${b.e.item}` : ""}`, text: b.e.text },
+					? { label: `${b.steps.filter((r) => "call" in r).length} tool step${b.steps.filter((r) => "call" in r).length === 1 ? "" : "s"}`, text: b.steps.map((r) => ("call" in r ? r.call.text : r.note.text)).join(" · ") }
+					: { label: b.e.kind === "you" ? "You" : `${roleName(b.e.role)[0]?.toUpperCase() ?? ""}${roleName(b.e.role).slice(1)}${b.e.item ? ` · item ${b.e.item}` : ""}`, text: b.e.text },
 			),
 		[chatBlocks],
 	);
@@ -1991,7 +2066,7 @@ export function SwarmPanel({ folder, name, scan, bridge, session, file: openPath
 												{working && working.item === String(i.index) && activity ? (
 													<span className="mt-0.5 flex items-center gap-1.5 truncate text-[11px] text-muted-foreground" title={activity.text}>
 														<span className="truncate">
-															<span className="font-medium" style={{ color: colorOf(working.role) }}>{working.role}</span> · {activity.text}
+															<span className="font-medium" style={{ color: colorOf(working.role) }}>{roleName(working.role)}</span> · {activity.text}
 														</span>
 													</span>
 												) : null}
@@ -2103,7 +2178,7 @@ export function SwarmPanel({ folder, name, scan, bridge, session, file: openPath
 					</DropdownMenu>
 					{working && ctx && ctxPct !== null ? (
 						<DropdownMenu>
-							<DropdownMenuTrigger className="inline-flex h-7 shrink-0 items-center gap-1.5 rounded-md px-1.5 text-[11px] tabular-nums text-muted-foreground outline-none hover:bg-background hover:text-foreground" title={`The ${working.role}'s context window`}>
+							<DropdownMenuTrigger className="inline-flex h-7 shrink-0 items-center gap-1.5 rounded-md px-1.5 text-[11px] tabular-nums text-muted-foreground outline-none hover:bg-background hover:text-foreground" title={`The ${roleName(working.role)}'s context window`}>
 								<span className="h-1 w-8 overflow-hidden rounded-full bg-muted">
 									<span className="block h-full rounded-full" style={{ width: `${ctxPct}%`, backgroundColor: colorOf(working.role) }} />
 								</span>
@@ -2166,7 +2241,7 @@ export function SwarmPanel({ folder, name, scan, bridge, session, file: openPath
 								<i />
 								<i />
 							</span>
-							<span className="font-medium" style={{ color: colorOf(working.role) }}>{working.role}</span>
+							<span className="font-medium" style={{ color: colorOf(working.role) }}>{roleName(working.role)}</span>
 							<span className="truncate">{working.text}</span>
 						</p>
 					) : null}
@@ -2477,7 +2552,7 @@ export function SwarmPanel({ folder, name, scan, bridge, session, file: openPath
 					</section>
 					{debugging && !watchDebug ? (
 						<button type="button" onClick={() => setWatchDebug(true)} className="pointer-events-auto absolute bottom-3 left-1/2 z-10 -translate-x-1/2 rounded-full border bg-muted/90 px-3 py-1.5 text-[12px] shadow-pop backdrop-blur hover:bg-muted">
-							<span className="font-medium" style={{ color: colorOf(debugging) }}>{debugging}</span> is debugging · watch
+							<span className="font-medium" style={{ color: colorOf(debugging) }}>{roleName(debugging)}</span> is debugging · watch
 						</button>
 					) : null}
 				</>

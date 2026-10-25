@@ -217,7 +217,7 @@ fn session_id(folder: &str, run: &str, job: u64) -> String {
 
 fn system_prompt(folder: &str) -> String {
     format!(
-        "You are Formal Mind's hunter, working in the Foundry project at {folder} (paths are relative to it). \
+        "You are Formal Mind's Bug Hunter, working in the Foundry project at {folder} (paths are relative to it). \
 Your testing tools are the formalmind MCP tools: coverage, explore, debug_open, debug_run, debug_move, debug_break, debug_watch, debug_look, tag and report_bug. \
 The maintainer watches your debugger in Formal Mind while you work. Read, Glob, Grep, Write and Edit work on the project's files, and Bash runs `forge test` and `forge build` only.\n\n{}",
         crate::swarm::HUNTER

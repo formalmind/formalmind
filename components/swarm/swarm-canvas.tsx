@@ -6,7 +6,7 @@ import { Link } from "react-router";
 import * as DialogPrimitive from "@radix-ui/react-dialog";
 import { useIsMobile } from "@/hooks/use-mobile";
 import type { SwarmItem, SwarmProject, SwarmRole, SwarmRun, SwarmState } from "@/lib/swarm";
-import { ROLE_COLORS } from "@/lib/swarm-roles";
+import { ROLE_COLORS, roleName } from "@/lib/swarm-roles";
 
 export { ROLE_COLORS };
 
@@ -1482,7 +1482,7 @@ export function SwarmCursor({ role, x, y, say, turn, thinking, where, onWhereEnt
 					const pill = (
 						<>
 							{turn ? <span className="size-1.5 animate-pulse rounded-full bg-white" aria-hidden /> : null}
-							{role}
+							{roleName(role)}
 							{/* Working right now: a small spinner by the name. */}
 							{thinking ? <span className="size-2 animate-spin rounded-full border border-white/25 border-t-white/80 [animation-duration:1.4s] motion-reduce:animate-none" aria-label="working" /> : null}
 							{turn ? <span className="font-normal opacity-80">· turn</span> : null}
@@ -1491,7 +1491,7 @@ export function SwarmCursor({ role, x, y, say, turn, thinking, where, onWhereEnt
 					const style = { backgroundColor: color };
 					const cls = "pointer-events-auto inline-flex items-center gap-1 whitespace-nowrap rounded-full px-2 py-0.5 text-[12px] font-medium text-white shadow-sm";
 					return onTalk ? (
-						<button type="button" data-component onClick={() => onTalk(role)} title={`Talk to the ${role}`} aria-label={`Talk to the ${role}`} className={`${cls} cursor-pointer transition-transform hover:scale-105 active:scale-95`} style={style}>
+						<button type="button" data-component onClick={() => onTalk(role)} title={`Talk to the ${roleName(role)}`} aria-label={`Talk to the ${roleName(role)}`} className={`${cls} cursor-pointer transition-transform hover:scale-105 active:scale-95`} style={style}>
 							{pill}
 						</button>
 					) : (

@@ -9,6 +9,7 @@ import { Bug, ChevronDown, ChevronRight, Columns2, FileCode2, FlaskConical, Fold
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { useHighlightedCode } from "@/hooks/use-highlighted-code";
 import { useFolders, type Scan } from "./local";
+import { roleName } from "@/lib/swarm-roles";
 
 /**
  * Debug mode: a local folder's Foundry test, one EVM step at a time, on the sol-debug engine (src-tauri/src/debug.rs).
@@ -429,7 +430,7 @@ export function AgentDebugger({ folder, onActive, onClose, colorOf }: { folder: 
 	return (
 		<div className="flex min-h-0 flex-1 flex-col gap-2">
 			<header className="flex shrink-0 items-center gap-2 px-1 text-[12px]">
-				<span className="font-medium" style={colorOf ? { color: colorOf(state.role) } : undefined}>{state.role}</span>
+				<span className="font-medium" style={colorOf ? { color: colorOf(state.role) } : undefined}>{roleName(state.role)}</span>
 				<span className="text-muted-foreground">is debugging {state.run ? state.run.title : state.file}</span>
 				{onClose ? (
 					<button type="button" onClick={onClose} aria-label="Hide the agent's debugger" className="ml-auto rounded p-1 text-muted-foreground hover:bg-muted hover:text-foreground">
