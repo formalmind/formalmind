@@ -9,7 +9,7 @@ import { AuditFolders, EntryPoints } from "@/components/audit-folders";
 import { useFolders } from "./local";
 import { relayOn } from "./relay";
 
-type Provider = "formal" | "anthropic" | "openai";
+type Provider = "formal" | "anthropic" | "openai" | "claude-code";
 const read = (k: string) => {
 	try {
 		return localStorage.getItem(k);
@@ -75,8 +75,13 @@ type SectionId = (typeof SECTIONS)[number]["id"];
 export function SettingsPage() {
 	const [provider, setProvider] = useState<Provider>(() => {
 		const p = read("fm:provider");
-		return p === "anthropic" || p === "openai" ? p : "formal";
+		return p === "anthropic" || p === "openai" || p === "claude-code" ? p : "formal";
 	});
+	// Claude Code on this computer: its version, or why it can't run (for the hunter on your own Claude plan).
+	const [claudeCode, setClaudeCode] = useState<{ ok: boolean; text: string } | null>(null);
+	useEffect(() => {
+		void invoke<string>("claude_code_status").then((v) => setClaudeCode({ ok: true, text: v }), (e) => setClaudeCode({ ok: false, text: String(e) }));
+	}, []);
 	const [base, setBase] = useState(apiBase());
 	const [saved, setSaved] = useState<string | null>(null);
 	const [params, setParams] = useSearchParams();
@@ -137,14 +142,20 @@ export function SettingsPage() {
 						<label className="flex items-center justify-between gap-4">
 							<span>
 								<span className="font-medium">Run agents via</span>
-								<span className="block text-xs text-muted-foreground">Credits run Claude, metered by formal.team and shown in Billing. Your own key goes straight to Anthropic (Claude) or OpenAI (GPT-5).</span>
+								<span className="block text-xs text-muted-foreground">Credits run Claude, metered by formal.team and shown in Billing. Your own key goes straight to Anthropic (Claude) or OpenAI (GPT-5). Claude Code runs the Concolic hunter on your own Claude plan (Max or Pro), with the `claude` you're logged in to.</span>
 							</span>
 							<select value={provider} onChange={(e) => pick(e.target.value as Provider)} className="h-8 rounded-lg border bg-background px-2 text-sm">
 								<option value="formal">formal.team credits</option>
 								<option value="anthropic">My Anthropic key</option>
 								<option value="openai">My OpenAI key</option>
+								<option value="claude-code" disabled={claudeCode?.ok === false}>Claude Code (my Claude plan)</option>
 							</select>
 						</label>
+						{claudeCode ? (
+							<p className={`text-xs ${claudeCode.ok ? "text-muted-foreground" : "text-amber-600"}`}>
+								{claudeCode.ok ? `Claude Code ${claudeCode.text} is installed. With it picked, the Concolic hunter runs on it; the formal agents need credits or a key.` : claudeCode.text}
+							</p>
+						) : null}
 						<ApiKey vendor="anthropic" name="Anthropic" placeholder="sk-ant-…" onSaved={() => flash("Key saved")} />
 						<ApiKey vendor="openai" name="OpenAI" placeholder="sk-…" onSaved={() => flash("Key saved")} />
 					</Section> : null}

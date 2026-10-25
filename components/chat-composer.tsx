@@ -51,6 +51,8 @@ export interface ChatComposerProps {
 	/** Extra controls in the bottom row, after the model picker. */
 	extra?: React.ReactNode;
 	textareaRef?: React.Ref<HTMLTextAreaElement>;
+	/** The composer's corner radius class; a container sets it so its own corners nest around it. */
+	rounded?: string;
 }
 
 export function ChatComposer({
@@ -69,6 +71,7 @@ export function ChatComposer({
 	modelPicker,
 	placeholder = "Ask about this repo…",
 	textareaRef,
+	rounded = "rounded-[28px]",
 }: ChatComposerProps) {
 	const innerRef = React.useRef<HTMLTextAreaElement | null>(null);
 	const setRefs = React.useCallback(
@@ -109,7 +112,7 @@ export function ChatComposer({
 				if (stopMode) onStop();
 				else if (hasContent) onSubmit();
 			}}
-			className="rounded-[28px] border border-border bg-card shadow-sm focus-within:border-ring/40 transition-colors motion-reduce:transition-none"
+			className={`${rounded} border border-border bg-card shadow-sm focus-within:border-ring/40 transition-colors motion-reduce:transition-none`}
 		>
 			{/* Shelf: context chips */}
 			<div className="flex items-center gap-2 px-3 pt-3">

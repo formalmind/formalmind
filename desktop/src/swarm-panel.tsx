@@ -39,7 +39,7 @@ import type { Diagnostic } from "@/lib/ast/run";
 export type Ev = { folder?: string; run: string; kind: "start" | "status" | "context" | "say" | "tool" | "result" | "you" | "bug" | "plan" | "done" | "error"; role: string; item: string; text: string; spent: number };
 type Item = { index: number; mark: string; text: string };
 export type Bug = { file: string; title: string; body: string };
-type Provider = "formal" | "anthropic" | "openai";
+type Provider = "formal" | "anthropic" | "openai" | "claude-code";
 type Proof = { item: string; files: string[]; summary: string; at: string };
 
 /** Copies text (or what `get` resolves to), showing a tick for a moment. */
@@ -1435,7 +1435,7 @@ export function SwarmPanel({ folder, name, scan, bridge, session, file: openPath
 	// Set in Settings (desktop/src/settings.tsx).
 	const [provider] = useState<Provider>(() => {
 		const p = store.get("fm:provider");
-		return p === "anthropic" || p === "openai" ? p : "formal";
+		return p === "anthropic" || p === "openai" || p === "claude-code" ? p : "formal";
 	});
 	// The models for how the agents are run: GPT on your OpenAI key, Claude otherwise.
 	const models = provider === "openai" ? OPENAI_MODELS : MODELS;
@@ -1560,6 +1560,8 @@ export function SwarmPanel({ folder, name, scan, bridge, session, file: openPath
 	// Swarm and Concolic share the canvas, the chat and the agent's debugger; Concolic's sessions are bug searches.
 	const canvas = mode === "swarm" || mode === "concolic";
 	const concolic = mode === "concolic";
+	// Claude Code runs the hunter only; the formal agents need credits or a key.
+	const claudeCodeOnly = provider === "claude-code" && !concolic;
 	// The main contract's entry points, read from the AST, so the plan can name the ones each item covers.
 	const [entryUnits, setEntryUnits] = useState<AstUnit[]>([]);
 	const mainSource = (scan?.solidity ?? []).find((f) => f.startsWith("src/") && !f.endsWith(".t.sol") && !f.endsWith(".s.sol")) ?? null;
@@ -2074,7 +2076,10 @@ export function SwarmPanel({ folder, name, scan, bridge, session, file: openPath
 	// The conversation with the swarm: its sessions, budget and Stop on a gray bar, the messages and composer under it.
 	const chatPanel = (
 		<>
-				<div className="flex h-8 shrink-0 items-center gap-2 pl-2 pr-0.5">
+				<div className="flex h-8 shrink-0 items-center gap-1 pl-3 pr-0.5">
+					<button type="button" onClick={() => pickSession("new")} aria-label="New chat" title={concolic ? "New bug search" : "New chat"} className="grid size-7 shrink-0 place-items-center rounded-full text-muted-foreground hover:bg-background hover:text-foreground">
+						<Plus className="size-3.5" />
+					</button>
 					<DropdownMenu>
 						<DropdownMenuTrigger className="flex min-w-0 flex-1 items-center gap-1 rounded-md text-left text-[12px] text-muted-foreground outline-none hover:text-foreground" title={`${title} — switch sessions`}>
 							<span className="truncate">{title}</span>
@@ -2090,10 +2095,6 @@ export function SwarmPanel({ folder, name, scan, bridge, session, file: openPath
 									{x.run === viewing ? <Check className={`size-3.5 shrink-0 ${runs.includes(x.run) ? "" : "ml-auto"}`} /> : null}
 								</DropdownMenuItem>
 							))}
-							<DropdownMenuSeparator />
-							<DropdownMenuItem onSelect={() => pickSession("new")} className="text-[13px]">
-								<Plus className="size-3.5" /> New session
-							</DropdownMenuItem>
 						</DropdownMenuContent>
 					</DropdownMenu>
 					{working && ctx && ctxPct !== null ? (
@@ -2134,7 +2135,8 @@ export function SwarmPanel({ folder, name, scan, bridge, session, file: openPath
 						<ChevronDown className="size-3.5" />
 					</button>
 				</div>
-				<div className="mt-1 flex min-h-0 flex-1 flex-col overflow-hidden rounded-xl border bg-card">
+				{/* Corners nest: the panel 28px, inset 4px; this card 24px; the composer 16px, inset 8px. */}
+				<div className="mt-1 flex min-h-0 flex-1 flex-col overflow-hidden rounded-[24px] border bg-card">
 				{/* The scrubber: a tick per message along the left edge, to preview and jump through the chat. */}
 				<div className="relative flex min-h-0 flex-1 flex-col">
 				<ChatScrubber
@@ -2180,10 +2182,11 @@ export function SwarmPanel({ folder, name, scan, bridge, session, file: openPath
 				</button>
 				</div>
 
-				<div className="shrink-0 space-y-2 p-3">
+				<div className="shrink-0 space-y-2 p-2">
 					{error ? <p className="text-xs text-red-600">{error}</p> : null}
 					{/* The Swarm page's composer: steer while it runs; before that, what you type is its focus and ↑ starts it. */}
 					<ChatComposer
+						rounded="rounded-2xl"
 						value={run ? say : goal}
 						onChange={(e) => (run ? setSay(e.target.value) : setGoal(e.target.value))}
 						onSubmit={() => void (run ? send() : start())}
@@ -2208,7 +2211,7 @@ export function SwarmPanel({ folder, name, scan, bridge, session, file: openPath
 										<Square className="size-2.5 fill-current" />Stop
 									</button>
 								) : (
-									<button type="button" onClick={() => void start()} disabled={Boolean(ownKey) && !hasKey} title={ownKey && !hasKey ? `Add your ${ownKey} key in Settings first` : concolic ? "Start a bug search: the hunter alone" : "Start the swarm"} className="btn-dark inline-flex h-8 items-center gap-1.5 px-3 text-[13px] disabled:opacity-50">
+									<button type="button" onClick={() => void start()} disabled={(Boolean(ownKey) && !hasKey) || claudeCodeOnly} title={ownKey && !hasKey ? `Add your ${ownKey} key in Settings first` : claudeCodeOnly ? "Claude Code runs the Concolic hunter only: pick credits or a key in Settings for the formal agents" : concolic ? provider === "claude-code" ? "Start a bug search on Claude Code (your Claude plan)" : "Start a bug search: the hunter alone" : "Start the swarm"} className="btn-dark inline-flex h-8 items-center gap-1.5 px-3 text-[13px] disabled:opacity-50">
 										<Play className="size-3" />{concolic ? "Hunt" : plan.some((i) => i.mark === " ") ? "Resume" : "Start"}
 									</button>
 								)}
@@ -2493,7 +2496,7 @@ export function SwarmPanel({ folder, name, scan, bridge, session, file: openPath
 					{/* One box: the chat when open, the round button at its corner when closed. It switches at once, no animation. */}
 					<aside
 						ref={chatBox}
-						className={`pointer-events-auto absolute bottom-3 right-3 z-20 overflow-hidden border shadow-pop backdrop-blur ${chatOpen ? "rounded-2xl bg-muted/80" : "cursor-pointer rounded-[24px] border-transparent bg-foreground hover:opacity-90"}`}
+						className={`pointer-events-auto absolute bottom-3 right-3 z-20 overflow-hidden border shadow-pop backdrop-blur ${chatOpen ? "rounded-[28px] bg-muted/80" : "cursor-pointer rounded-[24px] border-transparent bg-foreground hover:opacity-90"}`}
 						style={{
 							width: chatOpen ? `min(${chatSize.w}px, calc(100% - 1.5rem))` : 48,
 							height: chatOpen ? (chatSize.h ? `min(${chatSize.h}px, calc(100% - max(var(--fm-top), 2.75rem) - 1rem))` : "calc(100% - max(var(--fm-top), 2.75rem) - 4rem)") : 48,

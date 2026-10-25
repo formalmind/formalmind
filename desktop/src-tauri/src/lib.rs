@@ -6,6 +6,7 @@
 mod anvil;
 mod analysis;
 mod ast;
+mod claude_code;
 mod debug;
 mod executor;
 mod swarm;
@@ -187,6 +188,7 @@ pub fn run() {
             swarm::swarm_say,
             swarm::swarm_triage,
             swarm::swarm_hunt,
+            claude_code::claude_code_status,
             swarm::swarm_running,
             swarm::swarm_suggest,
             swarm::swarm_plan,

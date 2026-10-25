@@ -98,21 +98,24 @@ pub async fn call(app: &AppHandle, folder: &str, role: &str, session: Option<u32
             let r = debug::agent_look(&state, id, input["query"].as_str().unwrap_or("here").to_string(), input["filter"].as_str().map(str::to_string), input["n"].as_u64().map(|n| n as usize)).await;
             (text(r), None)
         }
-        "tag" => {
-            let (file, line) = (input["file"].as_str().unwrap_or("").trim_start_matches("./"), input["line"].as_u64().unwrap_or(0) as usize);
-            let kind = input["kind"].as_str().unwrap_or("suspicion");
-            let note = input["note"].as_str().unwrap_or("").trim();
-            if file.is_empty() || line == 0 || note.is_empty() {
-                return ("error: file, line and note are required".into(), None);
-            }
-            match sarif_add(std::path::Path::new(folder), &format!("formal-mind/tag/{kind}"), "note", file, line, format!("{kind} ({role}): {note}"), json!({ "kind": kind, "by": role })) {
-                Ok(()) => (format!("tagged {file}:{line}"), None),
-                Err(e) => (format!("error: {e}"), None),
-            }
-        }
+        "tag" => (tag(folder, role, input), None),
         "coverage" => (text(coverage(folder, input).await), None),
         "explore" => (text(explore(folder, input).await), None),
         _ => (format!("error: no tool {name}"), None),
+    }
+}
+
+/// The tag tool: a note on a line, in the swarm's run of `.formal/findings.sarif`.
+pub fn tag(folder: &str, role: &str, input: &Value) -> String {
+    let (file, line) = (input["file"].as_str().unwrap_or("").trim_start_matches("./"), input["line"].as_u64().unwrap_or(0) as usize);
+    let kind = input["kind"].as_str().unwrap_or("suspicion");
+    let note = input["note"].as_str().unwrap_or("").trim();
+    if file.is_empty() || line == 0 || note.is_empty() {
+        return "error: file, line and note are required".into();
+    }
+    match sarif_add(std::path::Path::new(folder), &format!("formal-mind/tag/{kind}"), "note", file, line, format!("{kind} ({role}): {note}"), json!({ "kind": kind, "by": role })) {
+        Ok(()) => format!("tagged {file}:{line}"),
+        Err(e) => format!("error: {e}"),
     }
 }
 
