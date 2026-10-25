@@ -2,7 +2,9 @@
 //! instead of formal.team credits or an API key. The app serves the hunter's tools (its debugger, coverage, explore, tag,
 //! report_bug) over MCP on 127.0.0.1 for the one run, with a token, so Claude Code drives the same debugger sessions the
 //! Concolic tab follows; Claude Code's own Read/Write/Edit/Glob/Grep and `forge` do the rest. Its stream-json output
-//! becomes the session's events (the chat and the canvas).
+//! becomes the session's events (the chat and the canvas). The run's own state (the MCP config with its token, the
+//! Claude session id, the raw stream and stderr) lives in ~/.formalmind/claude-code/, not in the project; what the
+//! project keeps is what it needs: the session's events (.formal/runs), findings and PoCs.
 
 use serde_json::{json, Value};
 use std::collections::hash_map::DefaultHasher;
@@ -180,6 +182,27 @@ fn rand64() -> u64 {
 
 // ---- The run ---------------------------------------------------------------------------------------------------------
 
+/// FNV-1a: a short name for a folder that stays the same across Rust versions (DefaultHasher doesn't promise that).
+fn fnv(bytes: &[u8]) -> u32 {
+    bytes.iter().fold(0x811c_9dc5u32, |h, b| (h ^ *b as u32).wrapping_mul(0x0100_0193))
+}
+
+/// A run's state folder under `base` (~/.formalmind): claude-code/<project>-<hash>/<session>/.
+fn state_dir_in(base: &std::path::Path, root: &std::path::Path, run: &str) -> PathBuf {
+    let name = root.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_else(|| "project".into());
+    base.join("claude-code").join(format!("{name}-{:08x}", fnv(root.to_string_lossy().as_bytes()))).join(run)
+}
+
+/// Writes a file only you can read (the MCP config carries the run's token).
+fn write_private(path: &std::path::Path, text: &str) -> Result<(), String> {
+    use std::io::Write;
+    let mut o = std::fs::OpenOptions::new();
+    o.write(true).create(true).truncate(true);
+    #[cfg(unix)]
+    std::os::unix::fs::OpenOptionsExt::mode(&mut o, 0o600);
+    o.open(path).and_then(|mut f| f.write_all(text.as_bytes())).map_err(|e| format!("{}: {e}", path.display()))
+}
+
 /// The Claude Code session id for a job (stable, so an interrupted hunt resumes the same conversation).
 fn session_id(folder: &str, run: &str, job: u64) -> String {
     let half = |seed: u8| {
@@ -255,8 +278,19 @@ pub async fn hunt(app: &AppHandle, folder: &str, run: &str, job: u64, resumed: b
     // The project itself, resolved (symlinks, /tmp → /private/tmp), so the check below compares like with like.
     let root = std::fs::canonicalize(folder).map_err(|e| format!("{folder}: {e}"))?;
     let server = serve(Some(app.clone()), folder.to_string(), run.to_string())?;
+    let state = state_dir_in(&crate::local::home()?, &root, run);
+    std::fs::create_dir_all(&state).map_err(|e| format!("{}: {e}", state.display()))?;
     let mcp = json!({ "mcpServers": { "formalmind": { "type": "http", "url": server.url, "headers": { "Authorization": format!("Bearer {}", server.token) } } } });
-    let sid = session_id(folder, run, job);
+    let mcp_file = state.join("mcp.json");
+    write_private(&mcp_file, &serde_json::to_string_pretty(&mcp).unwrap_or_default())?;
+    // The Claude session this job talks in: kept with the run, so a resumed hunt picks the same conversation.
+    let session_file = state.join("session.json");
+    let saved: Option<Value> = std::fs::read_to_string(&session_file).ok().and_then(|t| serde_json::from_str(&t).ok());
+    let sid = saved.as_ref().filter(|v| v["job"] == job).and_then(|v| v["session_id"].as_str().map(str::to_string)).unwrap_or_else(|| session_id(folder, run, job));
+    let started = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0);
+    write_private(&session_file, &serde_json::to_string_pretty(&json!({ "session_id": sid, "job": job, "project": root, "run": run, "resumed": resumed, "started": started })).unwrap_or_default())?;
+    let open_log = |name: &str| std::fs::OpenOptions::new().create(true).append(true).open(state.join(name)).map_err(|e| format!("{name}: {e}"));
+    let mut stream_log = open_log("stream.jsonl")?;
     let task = format!("Hunt for vulnerabilities in {focus}.");
     let mut cmd = tokio::process::Command::new(claude());
     cmd.current_dir(&root)
@@ -266,7 +300,7 @@ pub async fn hunt(app: &AppHandle, folder: &str, run: &str, job: u64, resumed: b
         .arg("--append-system-prompt")
         .arg(system_prompt(folder))
         .arg("--mcp-config")
-        .arg(mcp.to_string())
+        .arg(&mcp_file)
         .arg("--strict-mcp-config")
         // The project's settings only: your own hooks, plugins and permission rules stay out of the hunter's session.
         .args(["--setting-sources", "project,local"])
@@ -281,7 +315,7 @@ pub async fn hunt(app: &AppHandle, folder: &str, run: &str, job: u64, resumed: b
         .env_remove("ANTHROPIC_API_KEY")
         .stdin(std::process::Stdio::null())
         .stdout(std::process::Stdio::piped())
-        .stderr(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::from(open_log("stderr.log")?))
         .kill_on_drop(true);
     if let Some(m) = model.filter(|m| m.starts_with("claude-")) {
         cmd.arg("--model").arg(m);
@@ -302,6 +336,10 @@ pub async fn hunt(app: &AppHandle, folder: &str, run: &str, job: u64, resumed: b
             Ok(Ok(Some(l))) => l,
             Ok(Ok(None)) | Ok(Err(_)) => break,
         };
+        {
+            use std::io::Write;
+            let _ = writeln!(stream_log, "{line}");
+        }
         let Ok(v) = serde_json::from_str::<Value>(&line) else { continue };
         // It must be working in the project: anywhere else, its edits and `forge test` would land in the wrong place.
         if v["type"] == "system" && v["subtype"] == "init" {
@@ -324,12 +362,9 @@ pub async fn hunt(app: &AppHandle, folder: &str, run: &str, job: u64, resumed: b
     }
     let status = child.wait().await.map_err(|e| e.to_string())?;
     if !status.success() && summary.is_empty() {
-        let mut err = String::new();
-        if let Some(mut e) = child.stderr.take() {
-            use tokio::io::AsyncReadExt;
-            let _ = e.read_to_string(&mut err).await;
-        }
-        return Err(format!("Claude Code exited with {status}: {}", err.trim().chars().take(400).collect::<String>()));
+        let err = std::fs::read_to_string(state.join("stderr.log")).unwrap_or_default();
+        let tail: String = err.trim().chars().rev().take(400).collect::<Vec<_>>().into_iter().rev().collect();
+        return Err(format!("Claude Code exited with {status}: {tail} (logs in {})", state.display()));
     }
     if let Some(f) = failed {
         emit("status", f);
@@ -370,11 +405,14 @@ mod tests {
         std::fs::write(dir.join("src/A.sol"), "contract A {}\n").unwrap();
         let server = serve(None, dir.display().to_string(), "hunt-test".into()).unwrap();
         let mcp = json!({ "mcpServers": { "formalmind": { "type": "http", "url": server.url, "headers": { "Authorization": format!("Bearer {}", server.token) } } } });
+        // As hunt() passes it: a private file, not the JSON inline.
+        let mcp_file = std::env::temp_dir().join(format!("fm-claude-mcp-{}.json", std::process::id()));
+        write_private(&mcp_file, &mcp.to_string()).unwrap();
         let out = std::process::Command::new(claude())
             .current_dir(&dir)
             .args(["--setting-sources", "project,local"])
             .args(["-p", "Call the formalmind tag tool once with file src/A.sol, line 1, kind todo, note \"checked by the test\". Then reply with the single word done.", "--output-format", "stream-json", "--verbose", "--strict-mcp-config", "--allowedTools", "mcp__formalmind", "--mcp-config"])
-            .arg(mcp.to_string())
+            .arg(&mcp_file)
             .env("PATH", crate::platform::tool_path(None))
             .env_remove("ANTHROPIC_API_KEY")
             .output()
@@ -388,6 +426,27 @@ mod tests {
         let sarif = std::fs::read_to_string(dir.join(".formal/findings.sarif")).unwrap();
         assert!(sarif.contains("checked by the test") && sarif.contains("formal-mind/tag/todo"), "{sarif}");
         let _ = std::fs::remove_dir_all(dir);
+        let _ = std::fs::remove_file(mcp_file);
+    }
+
+    #[test]
+    fn state_lives_under_formalmind_by_project_and_session() {
+        let base = std::path::Path::new("/home/me/.formalmind");
+        let a = state_dir_in(base, std::path::Path::new("/work/contracts"), "hunt-1");
+        assert!(a.to_string_lossy().starts_with("/home/me/.formalmind/claude-code/contracts-"), "{}", a.display());
+        assert!(a.ends_with("hunt-1"));
+        assert_ne!(a.parent(), state_dir_in(base, std::path::Path::new("/other/contracts"), "hunt-1").parent(), "two projects of the same name");
+        assert_eq!(fnv(b"a"), 0xe40c292c, "FNV-1a, stable");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn the_mcp_config_is_private() {
+        use std::os::unix::fs::PermissionsExt;
+        let p = std::env::temp_dir().join(format!("fm-mcp-{}.json", std::process::id()));
+        write_private(&p, "{}").unwrap();
+        assert_eq!(std::fs::metadata(&p).unwrap().permissions().mode() & 0o777, 0o600);
+        let _ = std::fs::remove_file(p);
     }
 
     #[test]
