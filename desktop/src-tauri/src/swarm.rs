@@ -22,6 +22,8 @@ const DEFAULT_MODEL: &str = "claude-opus-5-5";
 /// Tool steps per agent turn; proofs take more than plans and reviews.
 const MAX_STEPS: usize = 40;
 const PROVER_STEPS: usize = 90;
+/// A hunt runs coverage, explore and many debugger moves before it writes a PoC.
+const HUNTER_STEPS: usize = 150;
 const MAX_ATTEMPTS: usize = 3;
 
 pub struct Swarm {
@@ -501,6 +503,14 @@ Be brief; end with one short paragraph saying what you did and what's next.{}",
     let job = match role {
         "prover" => "Take the plan item you're given and prove it against the generated def named in your task: read the def in the model and the function's slice (call `function` for any callee you need), state the property as a theorem that names the def fully qualified, prove it, and check with `lake build <Module>`. When it checks, call record_property with the notes for Formal Mind's report: what the proof establishes (third person, what holds), its assumptions and the theorems' names. Reuse the project's existing lemmas (search the Lake project for simp lemmas about the monad). If the property is false, that's a bug: show it with a Foundry PoC and call report_bug, with its scenario, impact and recommendation written as an audit report states them. Address the reviewer's notes if there are any.",
         "auditor" => "You are turning an audit report (attached, or in your task) into the standard audit format (formalmind.audit/v1) that the app shows on its Bugs page. First call record_report once with the report's facts: its title, the auditing firm, the authors, the date (YYYY-MM-DD), the commit and repository it reviewed, the files in scope, and a two-sentence summary. Then call record_finding once per finding, in the report's order, for every finding it lists including informational and gas ones: the report's own ID (H-01, M-2, L-03…; number them F-01, F-02… when it has none), the title, the severity as the report rates it, the full description (the report's words, cleaned of page headers and footers), its impact, its recommendation, the team's response if the report gives one, the locations (repository paths like src/PoolManager.sol with the line when given), the page it starts on, and the status the report gave (reportStatus). Then check the current code for each finding and set `status`: fixed (the issue is gone; say what changed in evidence and name the test that covers it), works as expected (intended, or invalid for this code; say why), acknowledged (accepted, as the report or code says), or open (still there). Use `functions`, `function`, read_file and `forge test --match-path …` for that. Don't fix code or write tests. End with one line: how many findings, and how many of each status.",
+        "hunter" => "You hunt for vulnerabilities in the contracts by testing the bytecode, not by reading alone. Work in this order. \
+1. `coverage`: which lines and branch sides of src/ no test reaches, which tests fail, and which calls reach an address with no code (an interface no test bound to an implementation: everything after that call is untested). \
+2. `explore`, narrowed with `only` to the fuzz tests that reach the security-relevant gaps (guards, access control, fee and price arithmetic, settlement, accounting): its findings are inputs, already reduced, that make a test fail; its solved sides are inputs that take a branch no test took; unsat sides are unreachable from that test. \
+3. For each finding and each suspicious solved side, debug it: debug_open the test file, debug_run the test with the inputs as `args`, debug_look revert and lines, debug_watch the storage the property is about and debug_move continue to its writes, until you know exactly what the bytecode did and why. \
+Look for: arithmetic that overflows, truncates, rounds in the wrong party's favour or divides by zero; guards a caller shouldn't pass (access control, executor or owner checks); storage written to the wrong slot or field, or read stale; state left behind in transient storage across calls of one transaction; accounting that doesn't balance (escrow, fees, claims); reentrancy and calls to untrusted code before state is final; anything an attacker profits from or that locks users' funds. \
+4. A real bug: write a Foundry PoC under test/formal/ (reuse the repo's test setup under test/) with the inputs as constants, whose test passes by demonstrating the issue; run it with `forge test --match-path <file>`; then report_bug with the scenario, impact and recommendation written as an audit report states a finding, and `location` as file:line. It lands on the Bugs page and on that line in the maintainer's editor. \
+5. What you suspect but can't confirm, an assumption the code relies on, or an invariant that must hold: `tag` the line. Not a bug report. \
+Don't change the contracts or the existing tests. A test that fails because the test itself is wrong is not a bug in the contracts: say so and move on. End with one paragraph: what you covered, the bugs you reported (IDs), and what you tagged.",
         "reviewer" => "Review the prover's work on the plan item: does the Lean statement really say what the Solidity does (read the def in the generated model and the function's slice, in your task), is it about the generated def rather than a restatement, does it check, is there any sorry/admit/axiom? Then call verdict exactly once: approve, or changes with concrete notes. Check the prover's notes for the report too (in your task): does the statement say exactly what the theorems prove about the Solidity, no more, are the assumptions complete, and is it written as a report states a property (third person, what holds, never \"no bug found\")? When you approve, they go into Formal Mind's audit file; pass `statement`, `assumptions` or `theorems` only to correct them, or to write them if the prover gave none. Do not edit proofs yourself. If you spot a real bug in the contract, say so in your notes; the prover writes the PoC.",
         _ => "The maintainer wrote to the swarm. Answer them directly and briefly, using the tools to look things up. If they ask for a change of focus or a new property, update .formal/plan.md accordingly.",
     };
@@ -633,6 +643,20 @@ impl Turn<'_> {
         }
         let tail: String = { let l: Vec<&str> = forge.lines().collect(); l[l.len().saturating_sub(40)..].join("\n") };
         let (id, file) = crate::swarm_ctx::file_finding(root, input, &poc, &tail)?;
+        // On its line in the maintainer's editor too (solidity-language-server reads .formal/findings.sarif).
+        if let Some((src, line)) = crate::analysis::location(input["location"].as_str().unwrap_or("")) {
+            let severity = input["severity"].as_str().unwrap_or("medium");
+            let level = match severity {
+                "critical" | "high" => "error",
+                "medium" => "warning",
+                _ => "note",
+            };
+            let title = input["title"].as_str().unwrap_or("bug");
+            let props = json!({ "id": id, "severity": severity, "poc": poc, "by": role, "scenario": input["scenario"], "impact": input["impact"], "recommendation": input["recommendation"] });
+            if let Err(e) = crate::analysis::sarif_add(root, "formal-mind/finding", level, &src, line, format!("{id} ({severity}): {title}. PoC: {poc}"), props) {
+                eprintln!("findings.sarif: {e}");
+            }
+        }
         self.emit("bug", role, item, format!("{id} {} — {poc}", input["title"].as_str().unwrap_or("bug")));
         Ok((id, file))
     }
@@ -672,7 +696,7 @@ impl Turn<'_> {
             "messages": messages, "tools": tools(role),
             // Automatic prompt caching: the stable prefix (system, tools, history) is read back cheaply each step.
             "cache_control": { "type": "ephemeral" },
-            "output_config": { "effort": if role == "prover" { "high" } else { "medium" } },
+            "output_config": { "effort": if role == "prover" || role == "hunter" { "high" } else { "medium" } },
         });
         if let Some(c) = compaction {
             body["compaction"] = c;
@@ -798,7 +822,11 @@ impl Turn<'_> {
         keep(&messages);
         let mut out = Outcome::default();
         self.emit("status", role, item, format!("{role} is working"));
-        let steps = if role == "prover" { PROVER_STEPS } else { MAX_STEPS };
+        let steps = match role {
+            "prover" => PROVER_STEPS,
+            "hunter" => HUNTER_STEPS,
+            _ => MAX_STEPS,
+        };
         let window = context_window(model_of(self.req));
         // What the last reply said the conversation takes; unknown (0) after a resume. Each step's reply sets it.
         let mut used: u64 = 0;
@@ -1225,6 +1253,12 @@ async fn run_swarm(turn: &Turn<'_>) -> String {
                 };
                 turn.agent("auditor", "report", content).await
             }
+            // A hunt for vulnerabilities: coverage, explore, the debugger, PoCs and report_bug (`text` is an optional focus).
+            "hunt" => {
+                turn.emit("status", "hunter", "hunt", if job.text.is_empty() { "hunting: coverage first".into() } else { format!("hunting: {}", job.text) });
+                let focus = if job.text.is_empty() { "the contracts in src/".to_string() } else { job.text.clone() };
+                turn.agent("hunter", "hunt", format!("Hunt for vulnerabilities in {focus}.{resume_note}")).await
+            }
             "plan" => {
                 let _ = &resume_note;
                 let added = sync_plan(turn, &root).await;
@@ -1353,6 +1387,7 @@ async fn run_swarm(turn: &Turn<'_>) -> String {
             ("prove", None, _) if gate.is_some() => turn.emit("plan", "prover", &id, format!("item {id}: the check failed, back to the prover")),
             ("prove", None, _) => turn.emit("plan", "prover", &id, format!("item {id} checks; to review")),
             ("triage", _, _) => turn.emit("plan", "auditor", "report", format!("read {}: its findings are in Bugs", job.text)),
+            ("hunt", _, _) => turn.emit("plan", "hunter", "hunt", format!("hunt done{}", out.bug.as_ref().map(|b| format!(": last bug {b}")).unwrap_or_default())),
             _ => {}
         }
     }
@@ -1471,6 +1506,19 @@ pub fn swarm_triage(folder: String, path: String, session: Option<String>) -> Re
     let qf = queue_file(&root, session.as_deref().unwrap_or("swarm"));
     with_queue(&qf, |q| {
         enqueue(q, "triage", 0, &path, 1, "");
+    });
+    Ok(())
+}
+
+/// Queues a hunt for vulnerabilities (the hunter role), optionally focused (`Router.swap`, `the fee path`).
+#[tauri::command]
+pub fn swarm_hunt(folder: String, focus: Option<String>, session: Option<String>) -> Result<(), String> {
+    if !local::read()?.allows(&folder) {
+        return Err("Add the folder first".into());
+    }
+    let qf = queue_file(Path::new(&folder), session.as_deref().unwrap_or("swarm"));
+    with_queue(&qf, |q| {
+        enqueue(q, "hunt", 0, focus.as_deref().unwrap_or("").trim(), 1, "");
     });
     Ok(())
 }

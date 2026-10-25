@@ -1,13 +1,14 @@
 //! The swarm agents' testing tools: the debugger (the same sessions the Debug view shows, which follows the agent's
 //! cursor), solc coverage of the Foundry suite and concolic exploration of its untaken branches (concolity). The
-//! agent gets compact JSON; the person sees the agent's debugger move and what it concluded.
+//! agent gets compact JSON; the person sees the agent's debugger move and what it concluded. What the swarm finds or
+//! suspects goes to `.formal/findings.sarif` too ([`sarif_add`]), where solidity-language-server shows it on the line.
 
 use crate::debug::{self, Debuggers};
 use serde_json::{json, Value};
 use std::path::PathBuf;
 use tauri::{AppHandle, Manager};
 
-const TOOLS: [&str; 8] = ["debug_open", "debug_run", "debug_move", "debug_break", "debug_watch", "debug_look", "coverage", "explore"];
+const TOOLS: [&str; 9] = ["debug_open", "debug_run", "debug_move", "debug_break", "debug_watch", "debug_look", "coverage", "explore", "tag"];
 
 pub fn is_tool(name: &str) -> bool {
     TOOLS.contains(&name)
@@ -23,6 +24,7 @@ pub fn tools() -> Vec<Value> {
         json!({ "name": "debug_watch", "description": "Watch storage writes whose named path contains `text` (e.g. priceBooks, orderCount); `continue` stops on each. `on: false` removes it.", "input_schema": s(json!({ "text": { "type": "string" }, "on": { "type": "boolean" } }), vec!["text"]) }),
         json!({ "name": "debug_look", "description": "Read the run without moving: here (the current step), summary (verdict, calls, events), lines (every Solidity line it ran, in order; `filter` keeps functions whose name contains it, e.g. AsyncSwap.beforeSwap), revert (why and where it reverted, decoded), writes (every storage write, named; `filter` keeps variables containing it), step (step `n` in full: stack, memory, storage).", "input_schema": s(json!({ "query": { "type": "string", "enum": ["here", "summary", "lines", "revert", "writes", "step"] }, "filter": { "type": "string" }, "n": { "type": "integer" } }), vec!["query"]) }),
         json!({ "name": "coverage", "description": "Run the Foundry suite in revm with solc's own compile (the optimized bytecode that ships) and report line and branch coverage of src/: per file the lines never run and the JUMPI sides never taken, the tests that failed, and calls into addresses with no code (an interface no test bound to an implementation). Takes about a minute on a large suite.", "input_schema": s(json!({ "include": { "type": "array", "items": { "type": "string" }, "description": "Only files under these prefixes (default src/)" }, "skip": { "type": "array", "items": { "type": "string" }, "description": "Leave out test files whose path contains one of these" } }), vec![]) }),
+        json!({ "name": "tag", "description": "Tag a line of the Solidity with a short note the maintainer sees on that line in their editor and that the next agent reads: a suspicion you couldn't confirm yet, an assumption the code makes, an invariant that must hold there, or a todo. Not for confirmed bugs (report_bug those).", "input_schema": s(json!({ "file": { "type": "string", "description": "e.g. src/AsyncSwap.sol" }, "line": { "type": "integer" }, "kind": { "type": "string", "enum": ["suspicion", "assumption", "invariant", "todo"] }, "note": { "type": "string", "description": "One sentence, third person, e.g. \"Rounds in the taker's favour when amountIn < price\"" } }), vec!["file", "line", "kind", "note"]) }),
         json!({ "name": "explore", "description": "Concolic exploration: every JUMPI side coverage never took is a target; fuzz tests are the harnesses; z3 solves for inputs that take the side. Returns, by source line: solved (the inputs, ready for debug_run's args), unsat (unreachable from that test: a dead guard or a test-design gap), unknown, and findings (solved inputs that make a test fail: open them with debug_run). Slow on a whole suite (minutes): narrow it with `only`.", "input_schema": s(json!({ "only": { "type": "string", "description": "Only fuzz tests whose Contract::name contains this" }, "include": { "type": "array", "items": { "type": "string" } }, "skip": { "type": "array", "items": { "type": "string" } }, "timeout_ms": { "type": "integer", "description": "Per solver call (default 1000)" } }), vec![]) }),
     ]
 }
@@ -96,10 +98,67 @@ pub async fn call(app: &AppHandle, folder: &str, role: &str, session: Option<u32
             let r = debug::agent_look(&state, id, input["query"].as_str().unwrap_or("here").to_string(), input["filter"].as_str().map(str::to_string), input["n"].as_u64().map(|n| n as usize)).await;
             (text(r), None)
         }
+        "tag" => {
+            let (file, line) = (input["file"].as_str().unwrap_or("").trim_start_matches("./"), input["line"].as_u64().unwrap_or(0) as usize);
+            let kind = input["kind"].as_str().unwrap_or("suspicion");
+            let note = input["note"].as_str().unwrap_or("").trim();
+            if file.is_empty() || line == 0 || note.is_empty() {
+                return ("error: file, line and note are required".into(), None);
+            }
+            match sarif_add(std::path::Path::new(folder), &format!("formal-mind/tag/{kind}"), "note", file, line, format!("{kind} ({role}): {note}"), json!({ "kind": kind, "by": role })) {
+                Ok(()) => (format!("tagged {file}:{line}"), None),
+                Err(e) => (format!("error: {e}"), None),
+            }
+        }
         "coverage" => (text(coverage(folder, input).await), None),
         "explore" => (text(explore(folder, input).await), None),
         _ => (format!("error: no tool {name}"), None),
     }
+}
+
+/// Adds one result to the swarm's run in `<root>/.formal/findings.sarif` (SARIF 2.1.0; concolity's runs in the same
+/// file are kept). The same rule, place and message again replaces it rather than adding a copy.
+pub fn sarif_add(root: &std::path::Path, rule: &str, level: &str, file: &str, line: usize, message: String, properties: Value) -> Result<(), String> {
+    const RUN: &str = "formal-mind/swarm/";
+    let path = root.join(".formal").join("findings.sarif");
+    let mut doc: Value = std::fs::read_to_string(&path).ok().and_then(|t| serde_json::from_str(&t).ok()).unwrap_or_else(|| {
+        json!({ "$schema": "https://json.schemastore.org/sarif-2.1.0.json", "version": "2.1.0", "runs": [] })
+    });
+    let runs = doc["runs"].as_array_mut().ok_or("findings.sarif has no runs")?;
+    if !runs.iter().any(|r| r["automationDetails"]["id"] == RUN) {
+        runs.push(json!({
+            "tool": { "driver": { "name": "formal-mind", "informationUri": "https://formal.team", "rules": [] } },
+            "automationDetails": { "id": RUN },
+            "originalUriBaseIds": { "PROJECT": { "description": { "text": "The project root" } } },
+            "results": [],
+        }));
+    }
+    let run = runs.iter_mut().find(|r| r["automationDetails"]["id"] == RUN).expect("just added");
+    let rules = run["tool"]["driver"]["rules"].as_array_mut().ok_or("bad rules")?;
+    if !rules.iter().any(|r| r["id"] == rule) {
+        rules.push(json!({ "id": rule, "defaultConfiguration": { "level": level } }));
+    }
+    let print = format!("{rule}:{file}:{line}:{message}");
+    let results = run["results"].as_array_mut().ok_or("bad results")?;
+    results.retain(|r| r["partialFingerprints"]["formal-mind/v1"] != print.as_str());
+    results.push(json!({
+        "ruleId": rule,
+        "level": level,
+        "message": { "text": message },
+        "locations": [{ "physicalLocation": { "artifactLocation": { "uri": file, "uriBaseId": "PROJECT" }, "region": { "startLine": line.max(1) } } }],
+        "partialFingerprints": { "formal-mind/v1": print },
+        "properties": properties,
+    }));
+    std::fs::create_dir_all(path.parent().unwrap()).map_err(|e| e.to_string())?;
+    std::fs::write(&path, serde_json::to_string_pretty(&doc).unwrap_or_default()).map_err(|e| e.to_string())
+}
+
+/// `src/AsyncSwap.sol:446` (or `src/AsyncSwap.sol#L446`) as (file, line); a bare file is line 1.
+pub fn location(s: &str) -> Option<(String, usize)> {
+    let s = s.trim().trim_matches('`').trim_start_matches("./");
+    let (file, line) = s.rsplit_once(":L").or_else(|| s.rsplit_once("#L")).or_else(|| s.rsplit_once(':')).unwrap_or((s, "1"));
+    let line = line.split(|c: char| !c.is_ascii_digit()).next().and_then(|n| n.parse().ok()).unwrap_or(1);
+    (file.ends_with(".sol") || file.ends_with(".huff")).then(|| (file.to_string(), line))
 }
 
 fn o_id(o: &debug::Opened) -> u32 {
@@ -228,6 +287,27 @@ mod tests {
         let f = v["files"].as_array().unwrap().iter().find(|f| f["file"] == "src/AsyncSwap.sol").expect("AsyncSwap.sol covered");
         assert!(f["uncovered_lines"].is_string() && f["untaken_sides"].is_array(), "{f}");
         eprintln!("{}", serde_json::to_string(&v).unwrap().len());
+    }
+
+    #[test]
+    fn locations_parse() {
+        assert_eq!(super::location("src/AsyncSwap.sol:446"), Some(("src/AsyncSwap.sol".into(), 446)));
+        assert_eq!(super::location("`./src/Router.sol#L116`"), Some(("src/Router.sol".into(), 116)));
+        assert_eq!(super::location("src/Router.sol:116-120"), Some(("src/Router.sol".into(), 116)));
+        assert_eq!(super::location("the router"), None);
+    }
+
+    #[test]
+    fn swarm_results_keep_concolity_runs() {
+        let root = std::env::temp_dir().join(format!("fm-sarif-{}", std::process::id()));
+        std::fs::create_dir_all(root.join(".formal")).unwrap();
+        std::fs::write(root.join(".formal/findings.sarif"), r#"{"version":"2.1.0","runs":[{"automationDetails":{"id":"concolity/explore/"},"results":[1]}]}"#).unwrap();
+        super::sarif_add(&root, "formal-mind/tag/suspicion", "note", "src/A.sol", 3, "x".into(), serde_json::json!({})).unwrap();
+        super::sarif_add(&root, "formal-mind/tag/suspicion", "note", "src/A.sol", 3, "x".into(), serde_json::json!({})).unwrap();
+        let doc: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(root.join(".formal/findings.sarif")).unwrap()).unwrap();
+        assert_eq!(doc["runs"].as_array().unwrap().len(), 2);
+        assert_eq!(doc["runs"][1]["results"].as_array().unwrap().len(), 1, "the same tag twice is one result");
+        let _ = std::fs::remove_dir_all(root);
     }
 
     #[test]

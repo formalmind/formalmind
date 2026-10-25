@@ -11,4 +11,5 @@ export const ROLE_COLORS: Record<SwarmRole, string> = {
 	editor: "#d946ef",
 	chief: "#f43f5e",
 	assistant: "#eab308",
+	hunter: "#f97316",
 };

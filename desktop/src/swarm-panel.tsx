@@ -634,12 +634,14 @@ export function useAuditFindings(folder: string, files: string[], invoke: Bridge
 	return { reports, indexes, findings, loaded: loadedKey === key };
 }
 
-export function BugsView({ folder, files, invoke, apiBase, bugs, openBug, setOpenBug, withPoc, onOpenFile, reload = 0, onTriage, onFilesChanged }: { folder: string; files: string[]; invoke: Bridge["invoke"]; apiBase: Bridge["apiBase"]; bugs: Bug[]; openBug: string | null; setOpenBug: (f: string | null) => void; withPoc: (body: string) => Promise<string>; onOpenFile: (path: string) => void; reload?: number; onTriage?: (path: string) => Promise<void>; onFilesChanged?: () => void }) {
+export function BugsView({ folder, files, invoke, apiBase, bugs, openBug, setOpenBug, withPoc, onOpenFile, reload = 0, onTriage, onHunt, onFilesChanged }: { folder: string; files: string[]; invoke: Bridge["invoke"]; apiBase: Bridge["apiBase"]; bugs: Bug[]; openBug: string | null; setOpenBug: (f: string | null) => void; withPoc: (body: string) => Promise<string>; onOpenFile: (path: string) => void; reload?: number; onTriage?: (path: string) => Promise<void>; onHunt?: (focus: string) => Promise<void>; onFilesChanged?: () => void }) {
 	const dirs = useReportDirs(folder);
 	// Generate report: the findings, Proofs coverage and in-scope code as an AsciiDoc report (and its PDF) in the audit
 	// folder; `generated` ticks so a PDF already open is read again.
 	const [generating, setGenerating] = useState<{ busy: boolean; note?: string } | null>(null);
 	const [generated, setGenerated] = useState(0);
+	// Hunt for bugs: the hunter tests the bytecode (coverage, explore, its debugger) and files what it proves with a PoC.
+	const [hunt, setHunt] = useState<{ open: boolean; focus: string; note?: string }>({ open: false, focus: "" });
 	// The confirm step: the report costs credits once per repository and commit, so ask first with the numbers.
 	const [quote, setQuote] = useState<ReportQuote | "loading" | null>(null);
 	const ask = async () => {
@@ -754,6 +756,17 @@ export function BugsView({ folder, files, invoke, apiBase, bugs, openBug, setOpe
 			<div className="flex h-8 shrink-0 items-center gap-2 px-1.5">
 				<span className="pl-1 font-mono text-[11px] font-medium uppercase tracking-wider text-muted-foreground">Bugs</span>
 				<span className="ml-auto text-[11px] text-muted-foreground">{reports.length} report{reports.length === 1 ? "" : "s"} · {findings.length} finding{findings.length === 1 ? "" : "s"}</span>
+				{onHunt ? (
+					<button
+						type="button"
+						onClick={() => setHunt((h) => ({ ...h, open: !h.open, note: undefined }))}
+						title="The hunter runs coverage and concolic explore, debugs what they turn up, and files each bug it can prove with a Foundry PoC"
+						className="inline-flex h-7 items-center gap-1.5 rounded-lg px-2 text-[12px] text-muted-foreground hover:bg-background hover:text-foreground"
+					>
+						<Bug className="size-3.5" />
+						Hunt for bugs
+					</button>
+				) : null}
 				<button
 					type="button"
 					disabled={generating?.busy}
@@ -765,6 +778,37 @@ export function BugsView({ folder, files, invoke, apiBase, bugs, openBug, setOpe
 					{generating?.busy ? "Generating…" : quote === "loading" ? "Pricing…" : "Generate report"}
 				</button>
 			</div>
+			{onHunt && hunt.open ? (
+				<form
+					className="mx-1 mb-1 flex flex-wrap items-center gap-2 rounded-xl border bg-card px-3 py-2 text-[12px]"
+					onSubmit={(e) => {
+						e.preventDefault();
+						void onHunt(hunt.focus).then(
+							() => setHunt({ open: false, focus: "", note: "The hunter is on it: watch it on the Swarm page. Each bug it proves shows up here with its PoC." }),
+							(err) => setHunt((h) => ({ ...h, note: String(err) })),
+						);
+					}}
+				>
+					<span className="font-medium" style={{ color: ROLE_COLORS.hunter }}>hunter</span>
+					<input
+						value={hunt.focus}
+						onChange={(e) => setHunt((h) => ({ ...h, focus: e.target.value }))}
+						placeholder="Focus (optional): Router.swap, the fee path, settlement…"
+						className="h-7 min-w-48 flex-1 rounded-md border bg-background px-2 outline-none focus-visible:ring-2 focus-visible:ring-ring"
+					/>
+					<button type="submit" className="inline-flex h-7 items-center rounded-md bg-foreground px-2.5 font-medium text-background hover:opacity-90">
+						Start
+					</button>
+				</form>
+			) : null}
+			{hunt.note ? (
+				<div className="mx-1 mb-1 flex items-start gap-2 rounded-xl border bg-card px-3 py-2 text-[12px]">
+					<p className="min-w-0 flex-1">{hunt.note}</p>
+					<button type="button" onClick={() => setHunt((h) => ({ ...h, note: undefined }))} className="shrink-0 rounded-md px-1.5 text-muted-foreground hover:bg-muted hover:text-foreground">
+						×
+					</button>
+				</div>
+			) : null}
 			{quote && quote !== "loading" ? <ReportConfirm quote={quote} onGenerate={() => void generate()} onCancel={() => setQuote(null)} /> : null}
 			{generating?.note ? (
 				<div className="mx-1 mb-1 flex items-start gap-2 rounded-xl border bg-card px-3 py-2 text-[12px]">
@@ -2419,6 +2463,11 @@ export function SwarmPanel({ folder, name, scan, bridge, session, file: openPath
 						// Queued for the swarm's auditor; a stopped swarm starts just for it (and stops after).
 						onTriage={async (path) => {
 							await invoke("swarm_triage", { folder, path, session: viewing && viewing !== "new" ? viewing : "swarm" });
+							if (!run) await start(true);
+						}}
+						// Queued for the hunter, like a report for the auditor: a stopped swarm starts just for it.
+						onHunt={async (focus) => {
+							await invoke("swarm_hunt", { folder, focus: focus.trim() || null, session: viewing && viewing !== "new" ? viewing : "swarm" });
 							if (!run) await start(true);
 						}}
 					/>

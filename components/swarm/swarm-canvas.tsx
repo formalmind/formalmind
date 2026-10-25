@@ -148,14 +148,15 @@ type Scene = {
 
 const HOME_X: Record<SwarmRole, number> = {
 	dispatcher: 640,
-	planner: 120,
-	prover: 290,
-	rebuilder: 460,
-	editor: 590,
-	reviewer: 720,
-	merger: 860,
-	assistant: 980,
-	chief: 1110,
+	planner: 110,
+	prover: 245,
+	rebuilder: 380,
+	editor: 500,
+	reviewer: 620,
+	merger: 740,
+	assistant: 860,
+	chief: 980,
+	hunter: 1110,
 };
 
 /**
