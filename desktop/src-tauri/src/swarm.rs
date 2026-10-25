@@ -491,6 +491,7 @@ fn system(role: &str, folder: &str, goal: &str) -> String {
     let common = format!(
         "You are the formalmind {role}, one agent of a small swarm verifying the Ethereum smart contracts in a local folder ({folder}). \
 Paths are relative to that folder. Tools run here, on the maintainer's machine. What you know about the Solidity comes from formal-ast, which reads solc's AST: `functions` lists every function in scope (the contracts the Foundry scripts deploy or call, with their bases), each with its Lean def, place and status on the Proofs page; `function` gives one function's slice (its guards, the storage it reads and writes, the state it touches, its code and its callees' code). Don't list or grep the Solidity sources. The other tools: read_file (numbered line ranges; for Lean files and the test setup a PoC needs), search (regex over the Lean project's .lean files, for lemmas), write_file, run (only lake/forge, no shell), report_bug. Proofs must be pure Lean: no #eval or IO. \
+To see what the bytecode actually does, debug it yourself: debug_open a test file, debug_run a test (a fuzz test with args), then debug_move (over, into, out, continue, back), debug_break, debug_watch a storage variable and debug_look (revert, writes, lines) until you know why; the maintainer watches your debugger. coverage shows which lines and branch sides no test reaches, and explore solves for inputs that reach them (its findings are inputs that make a test fail: debug_run them, then write the PoC). \
 The shared state is .formal/: plan.md is the checklist (`- [ ]` todo, `- [x]` proven, `- [!]` blocked or a bug). {lean} \
 Never leave `sorry`, `admit`, `native_decide` or new axioms. \
 If you find a real bug (a reachable violation of an intended property, loss of funds, broken accounting, access control), first write a Foundry PoC test under test/formal/ (e.g. test/formal/RouterMatchBook.t.sol, reusing the repo's test setup under test/) whose test passes by demonstrating the exploit, run it with `forge test --match-path <file>`, then call report_bug with that path: it is filed in audit/README.md as an open finding. \
@@ -545,6 +546,9 @@ fn tools(role: &str) -> Value {
             "evidence": { "type": "string", "description": "Anything else: the Lean counterexample, the property it breaks" } }), vec!["title", "severity", "location", "scenario", "poc"]) }));
         t.push(json!({ "name": "write_file", "description": "Create or overwrite a file in the folder.", "input_schema": s(json!({ "path": { "type": "string" }, "content": { "type": "string" } }), vec!["path", "content"]) }));
     }
+    if role != "auditor" {
+        t.extend(crate::analysis::tools());
+    }
     if role == "prover" {
         t.push(json!({ "name": "record_property", "description": "Once your proof checks, write the notes that go into Formal Mind's report for this property (audit/formal-mind.audit.json). The reviewer checks them against the Solidity and your proof before they count. Call it again to replace them.", "input_schema": s(json!({
             "statement": { "type": "string", "description": "What the proof establishes about the function, as an audit report states a verified property: third person, present tense, what holds (e.g. \"`Router.swap` reverts unless the caller owns the order; on success it writes only …\"). Markdown; a bulleted list of what each theorem says is fine. No first person, no build, plan or next-step talk, and never a statement of what wasn't found." },
@@ -586,6 +590,8 @@ struct Turn<'a> {
     queue: PathBuf,
     /// formal-ast's view of the folder for the current job (read again at each job, and after a proof).
     ctx: Mutex<Option<Arc<crate::swarm_ctx::Context>>>,
+    /// Each agent's debugger: a session in the app's `Debuggers` (the Debug view follows it), by role.
+    debug: Mutex<HashMap<String, u32>>,
 }
 
 impl Turn<'_> {
@@ -899,6 +905,16 @@ impl Turn<'_> {
                                 self.emit("tool", role, item, format!("search {shown}"));
                                 let lake = crate::swarm_ctx::lake_dir(&root).map(|d| d.strip_prefix(&root).map(|p| p.to_string_lossy().to_string()).unwrap_or_default()).unwrap_or_default();
                                 let r = crate::executor::search_in(&root, input["pattern"].as_str().unwrap_or(""), &lake, &[".lean"]).unwrap_or_else(|e| format!("error: {e}"));
+                                self.emit("result", role, item, r.chars().take(500).collect());
+                                r
+                            }
+                            n if crate::analysis::is_tool(n) => {
+                                self.emit("tool", role, item, format!("{name} {shown}"));
+                                let session = self.debug.lock().unwrap().get(role).copied();
+                                let (r, opened) = crate::analysis::call(self.app, &self.req.folder, role, session, name, input).await;
+                                if let Some(id) = opened {
+                                    self.debug.lock().unwrap().insert(role.to_string(), id);
+                                }
                                 self.emit("result", role, item, r.chars().take(500).collect());
                                 r
                             }
@@ -1406,7 +1422,7 @@ pub fn swarm_start(app: AppHandle, swarms: State<'_, Swarms>, request: SwarmRequ
     let id = run.clone();
     tauri::async_runtime::spawn(async move {
         let client = reqwest::Client::builder().timeout(Duration::from_secs(600)).build().unwrap_or_default();
-        let turn = Turn { app: &app, run: &id, req: &request, swarm: &swarm, client, job: Mutex::new(None), queue: swarm.queue.clone(), ctx: Mutex::new(None) };
+        let turn = Turn { app: &app, run: &id, req: &request, swarm: &swarm, client, job: Mutex::new(None), queue: swarm.queue.clone(), ctx: Mutex::new(None), debug: Mutex::new(HashMap::new()) };
         // The session's title: the focus it was given (the latest start's focus wins).
         turn.emit("start", "swarm", "", request.goal.clone().unwrap_or_default());
         turn.emit("status", "swarm", "", "resuming".into());

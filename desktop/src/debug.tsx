@@ -239,7 +239,7 @@ function Storage({ view, go }: { view: StepView; go: (step: number) => void }) {
 }
 
 /** The debugger for one run: the panes, the vim keys and the `:` / `/` line. */
-function Debugger({ id, run, onView, side = false, focused = true, label, typing, onFocus, onMoved, actions }: {
+function Debugger({ id, run, onView, side = false, focused = true, label, typing, onFocus, onMoved, actions, follow = false }: {
 	id: number;
 	run: RunView;
 	onView: (v: StepView) => void;
@@ -254,6 +254,8 @@ function Debugger({ id, run, onView, side = false, focused = true, label, typing
 	/** After a move (not a breakpoint or watch): the page keeps the other side in step. */
 	onMoved?: () => void;
 	actions?: React.ReactNode;
+	/** An agent's debugger, watched: the view follows the agent's moves and the keys and clicks do nothing. */
+	follow?: boolean;
 }) {
 	const view = run.view;
 	const [files, setFiles] = useState<Record<number, { name: string; text: string }>>({});
@@ -272,7 +274,7 @@ function Debugger({ id, run, onView, side = false, focused = true, label, typing
 
 	const call = useCallback(
 		async (cmd: string, args: Record<string, unknown>) => {
-			if (busy.current) return;
+			if (busy.current || follow) return;
 			busy.current = true;
 			try {
 				onView(await invoke<StepView>(cmd, { id, b: side, ...args }));
@@ -284,7 +286,7 @@ function Debugger({ id, run, onView, side = false, focused = true, label, typing
 				busy.current = false;
 			}
 		},
-		[id, onView, side, onMoved],
+		[id, onView, side, onMoved, follow],
 	);
 	const move = useCallback((to: string, back = false, arg?: string) => call("debug_nav", { to, back, arg: arg ?? null }), [call]);
 	const go = useCallback((step: number) => void move("step", false, String(step)), [move]);
@@ -312,7 +314,7 @@ function Debugger({ id, run, onView, side = false, focused = true, label, typing
 
 	useEffect(() => {
 		const onKey = (e: KeyboardEvent) => {
-			if (!focused || e.metaKey || e.ctrlKey || e.altKey) return;
+			if (follow || !focused || e.metaKey || e.ctrlKey || e.altKey) return;
 			const t = e.target as HTMLElement | null;
 			if (t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.isContentEditable)) return;
 			// The `:` / `/` line takes every key until Enter or Escape, as in the terminal UI.
@@ -393,10 +395,49 @@ function Debugger({ id, run, onView, side = false, focused = true, label, typing
 				) : (
 					<>
 						<span className={`min-w-0 flex-1 truncate ${error ? "text-red-600" : "text-sky-700 dark:text-sky-400"}`}>{error ?? view.status}</span>
-						<span className="hidden shrink-0 truncate text-muted-foreground lg:inline">{KEYS}</span>
+						{follow ? null : <span className="hidden shrink-0 truncate text-muted-foreground lg:inline">{KEYS}</span>}
 					</>
 				)}
 			</footer>
+		</div>
+	);
+}
+
+type AgentEvent = { folder: string; role: string; id: number; kind: "opened" | "ran" | "moved"; payload: unknown };
+
+/**
+ * An agent's debugger, watched live: the swarm's debug_* tools drive a session in Rust and say what they did
+ * (`debug:agent`); this shows that session as the Debug view does, following each move. Nothing here moves it.
+ */
+export function AgentDebugger({ folder, onActive, onClose, colorOf }: { folder: string; onActive?: (role: string) => void; onClose?: () => void; colorOf?: (role: string) => string }) {
+	const [state, setState] = useState<{ id: number; role: string; file: string; run: RunView | null } | null>(null);
+	useEffect(() => {
+		const off = listen<AgentEvent>("debug:agent", ({ payload: e }) => {
+			if (e.folder !== folder) return;
+			onActive?.(e.role);
+			setState((cur) => {
+				if (e.kind === "opened") return { id: e.id, role: e.role, file: (e.payload as { file: string }).file, run: null };
+				const base = cur && cur.id === e.id ? cur : { id: e.id, role: e.role, file: "", run: null };
+				if (e.kind === "ran") return { ...base, run: e.payload as RunView };
+				return base.run ? { ...base, run: { ...base.run, view: e.payload as StepView } } : base;
+			});
+		});
+		return () => void off.then((f) => f());
+	}, [folder, onActive]);
+	const noop = useCallback(() => {}, []);
+	if (!state) return <p className="m-auto p-6 text-center text-[13px] text-muted-foreground">When an agent opens a test in its debugger, you'll see it here, moving as the agent moves.</p>;
+	return (
+		<div className="flex min-h-0 flex-1 flex-col gap-2">
+			<header className="flex shrink-0 items-center gap-2 px-1 text-[12px]">
+				<span className="font-medium" style={colorOf ? { color: colorOf(state.role) } : undefined}>{state.role}</span>
+				<span className="text-muted-foreground">is debugging {state.run ? state.run.title : state.file}</span>
+				{onClose ? (
+					<button type="button" onClick={onClose} aria-label="Hide the agent's debugger" className="ml-auto rounded p-1 text-muted-foreground hover:bg-muted hover:text-foreground">
+						<X className="size-3.5" />
+					</button>
+				) : null}
+			</header>
+			{state.run ? <Debugger id={state.id} run={state.run} onView={noop} follow /> : <p className="m-auto text-[13px] text-muted-foreground">Compiling {state.file}…</p>}
 		</div>
 	);
 }

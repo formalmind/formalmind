@@ -4,6 +4,7 @@
 //! mode over the sol-debug engine (debug.rs).
 
 mod anvil;
+mod analysis;
 mod ast;
 mod debug;
 mod executor;

@@ -24,6 +24,9 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 sol-debug = { path = "../../crates/sol-debug" }
 formal-ast = { path = "../../crates/formal-ast" }
+# The agents' coverage and explore tools. It depends on sol-debug and formal-ast from this repository on GitHub; the
+# [patch] below points those at the crates here, so there is one sol-debug.
+concolity = { git = "https://github.com/formalmind/concolity" }
 revm = { version = "43", default-features = false, features = ["std"] }
 regex = "1"
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
@@ -37,6 +40,8 @@ tokio = { version = "1", features = ["macros", "rt"] }
 [profile.dev.package.sol-debug]
 opt-level = 3
 [profile.dev.package.formal-ast]
+opt-level = 3
+[profile.dev.package.concolity]
 opt-level = 3
 [profile.dev.package.revm-interpreter]
 opt-level = 3
@@ -54,3 +59,7 @@ opt-level = 3
 opt-level = 3
 [profile.dev.package.alloy-primitives]
 opt-level = 3
+
+[patch."https://github.com/formalmind/formalmind"]
+sol-debug = { path = "../../crates/sol-debug" }
+formal-ast = { path = "../../crates/formal-ast" }

@@ -1,5 +1,5 @@
 import { MarkGithubIcon } from "@primer/octicons-react";
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { NvimTerminal } from "./nvim-terminal";
 import { reportError } from "@/lib/report-error";
@@ -1409,7 +1409,7 @@ export function AuditView({ folder, scan, invoke, onOpenFile, reload = 0 }: { fo
  * `defaultMode` is the tab without a ?mode; `onSwarm` sends the Swarm tab elsewhere (the website's imported repositories
  * keep their swarm on the project canvas).
  */
-export function SwarmPanel({ folder, name, scan, bridge, session, file: openPath, actions, debug, defaultMode, onSwarm }: { folder: string; name: string; scan: Scan | null; bridge: Bridge; session?: string | null; file?: string | null; actions?: React.ReactNode; debug?: (file: string | null, test: string | null, onPick: (file: string) => void) => React.ReactNode; defaultMode?: Mode; onSwarm?: () => void }) {
+export function SwarmPanel({ folder, name, scan, bridge, session, file: openPath, actions, debug, agentDebug, defaultMode, onSwarm }: { folder: string; name: string; scan: Scan | null; bridge: Bridge; session?: string | null; file?: string | null; actions?: React.ReactNode; debug?: (file: string | null, test: string | null, onPick: (file: string) => void) => React.ReactNode; agentDebug?: (props: { onActive: (role: string) => void; onClose: () => void; colorOf: (role: string) => string }) => React.ReactNode; defaultMode?: Mode; onSwarm?: () => void }) {
 	const { invoke, listen, apiBase } = bridge;
 	// Every session running in this folder: each is its own swarm, and they keep working while you read another.
 	const [runs, setRuns] = useState<string[]>([]);
@@ -1442,6 +1442,11 @@ export function SwarmPanel({ folder, name, scan, bridge, session, file: openPath
 	// `url`: a PDF, shown in the browser's own viewer instead of as text.
 	const [file, setFile] = useState<{ path: string; text: string; url?: string } | null>(null);
 	const [planOpen, setPlanOpen] = useState(false);
+	// The agent whose debugger is being watched (it opens when an agent starts debugging), and whether it's shown.
+	const [debugging, setDebugging] = useState<string | null>(null);
+	const [watchDebug, setWatchDebug] = useState(true);
+	const onDebugActive = useCallback((role: string) => setDebugging(role), []);
+	const hideDebug = useCallback(() => setWatchDebug(false), []);
 	const [chatOpen, setChatOpen] = useState(() => store.get("fm:chat-open") !== "0");
 	// How many agent messages you had seen when the chat was folded; the button counts the ones since.
 	const [seen, setSeen] = useState(0);
@@ -2424,6 +2429,24 @@ export function SwarmPanel({ folder, name, scan, bridge, session, file: openPath
 					</div>
 				) : null}
 			</div>
+
+			{/* An agent's debugger, watched: mounted in Swarm mode so it hears every move, shown once an agent debugs. */}
+			{mode === "swarm" && agentDebug ? (
+				<>
+					<section
+						aria-label="Agent's debugger"
+						className={`pointer-events-auto absolute bottom-3 left-3 z-10 flex flex-col overflow-hidden rounded-2xl border bg-background/95 p-2 shadow-pop backdrop-blur ${debugging && watchDebug ? "" : "hidden"}`}
+						style={{ top: "calc(var(--fm-top) + 2.75rem)", right: chatOpen ? `calc(min(${chatSize.w}px, 100% - 1.5rem) + 1.5rem)` : "4.5rem" }}
+					>
+						{agentDebug({ onActive: onDebugActive, onClose: hideDebug, colorOf })}
+					</section>
+					{debugging && !watchDebug ? (
+						<button type="button" onClick={() => setWatchDebug(true)} className="pointer-events-auto absolute bottom-3 left-1/2 z-10 -translate-x-1/2 rounded-full border bg-muted/90 px-3 py-1.5 text-[12px] shadow-pop backdrop-blur hover:bg-muted">
+							<span className="font-medium" style={{ color: colorOf(debugging) }}>{debugging}</span> is debugging · watch
+						</button>
+					) : null}
+				</>
+			) : null}
 
 			{/* The chat: start and steer the swarm, the plan, and the agents' messages. */}
 			{/* The chat floats over the canvas on the right: a gray title bar with the run's controls, the white chat inside.
