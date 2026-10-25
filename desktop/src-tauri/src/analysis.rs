@@ -227,7 +227,7 @@ async fn coverage(folder: &str, input: &Value) -> Result<Value, String> {
     if !crate::local::read()?.allows(folder) {
         return Err("Add the folder first".into());
     }
-    let key = tree_key(folder).map(|t| format!("{t}-{:016x}", fnv64(json!({ "include": input["include"], "skip": input["skip"] }).to_string().as_bytes())));
+    let key = tree_key(folder).map(|t| format!("{t}-{:016x}", fnv64(json!({ "include": input["include"], "skip": input["skip"], "format": 2 }).to_string().as_bytes())));
     let file = key.as_ref().and_then(|k| crate::local::home().ok().map(|h| h.join("cache").join("coverage").join(format!("{:016x}", fnv64(folder.as_bytes()))).join(format!("{k}.json"))));
     if let Some(hit) = file.as_ref().and_then(|f| std::fs::read_to_string(f).ok()).and_then(|t| serde_json::from_str::<Value>(&t).ok()) {
         let mut v = hit;
@@ -252,13 +252,22 @@ async fn coverage_fresh(folder: &str, input: &Value) -> Result<Value, String> {
             let (lh, lt) = f.lines_hit();
             let (bh, bt) = f.sides_hit();
             let uncovered = f.lines.iter().filter(|(_, n)| **n == 0).map(|(l, _)| *l).collect();
-            let mut untaken: Vec<String> = f
-                .branches
+            // Untaken sides by line: one line can hold several JUMPIs (and appear in several contracts' bytecode).
+            let mut by_line: std::collections::BTreeMap<usize, (usize, usize)> = Default::default();
+            for ((line, _, _), (j, fl)) in &f.branches {
+                let e = by_line.entry(*line).or_default();
+                e.0 += (*j == 0) as usize;
+                e.1 += (*fl == 0) as usize;
+            }
+            let untaken: Vec<String> = by_line
                 .iter()
-                .flat_map(|((line, _, _), (j, fl))| [(*j == 0).then(|| format!("{line} jump")), (*fl == 0).then(|| format!("{line} fall"))])
-                .flatten()
+                .filter(|(_, (j, fl))| j + fl > 0)
+                .map(|(line, (j, fl))| match (j, fl) {
+                    (0, n) => format!("{line}: {n} fall-through side{} never taken", if *n == 1 { "" } else { "s" }),
+                    (n, 0) => format!("{line}: {n} jump side{} never taken", if *n == 1 { "" } else { "s" }),
+                    (a, b) => format!("{line}: {a} jump and {b} fall-through sides never taken"),
+                })
                 .collect();
-            untaken.dedup();
             json!({ "file": file, "lines": format!("{lh}/{lt}"), "sides": format!("{bh}/{bt}"), "uncovered_lines": ranges(uncovered), "untaken_sides": untaken })
         })
         .collect();
