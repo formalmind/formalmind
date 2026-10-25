@@ -14,13 +14,13 @@ categories = ["development-tools::debugging", "command-line-utilities"]
 alloy-dyn-abi = "1"
 anyhow = "1"
 clap = { version = "4", features = ["derive"] }
-k256 = { version = "0.13", features = ["ecdsa"] }
+k256 = { version = "0.14", features = ["ecdsa"] }
 formal-ast = { version = "0.1.0", path = "../formal-ast" }
 ratatui = "0.30"
 revm = { version = "43", default-features = false, features = ["std"] }
 opaline = { version = "0.4.1", default-features = false, features = ["builtin-themes"] }
 serde_json = "1"
-tree-sitter-highlight = "0.25"
+tree-sitter-highlight = "0.27"
 tree-sitter-solidity = "1.2.13"
 ureq = "2"
 

@@ -5,6 +5,10 @@ routes in `server/routes/`), and a Tauri 2 Mac app in `desktop/` that reuses the
 Check `bunx tsc --noEmit -p .` and `bun run build` before committing.
 
 UI follows [DESIGN.md](DESIGN.md): tokens, type scale, layout patterns, the Mac app's title bar and shortcuts, copy.
+## Follow the roadmap
+
+`docs/roadmap.md` is what Formal Mind is for and the plan to get there, and work follows it strictly. Keep the UI, keep the swarm's
+one-item-per-function loop working the same, and keep the skills (`worker/skills.ts`, the role prompts) as they are.
 
 `crates/formal-ast` (solc's AST → graph, units, Lean coverage) runs natively in the Mac app and as wasm on the website's
 Proofs tab (`crates/formal-ast-wasm`, with solc-js in a Web Worker: `lib/ast/`). The wasm build is committed in
