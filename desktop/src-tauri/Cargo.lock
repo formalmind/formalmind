@@ -2505,7 +2505,7 @@ dependencies = [
 
 [[package]]
 name = "formalmind-desktop"
-version = "0.1.41"
+version = "0.2.0"
 dependencies = [
  "concolity",
  "formal-ast",
