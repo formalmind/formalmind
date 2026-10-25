@@ -18,6 +18,16 @@ code. Protocols change weekly, specs don't, and few teams can afford a verificat
 Formal Mind keeps the proofs in step with the code: every commit is checked against invariants such as "escrow always
 equals open orders" and "no match creates or destroys tokens".
 
+## Focus
+
+**Prove money invariants, and test on Solidity protocols on GitHub.**
+
+- **Money invariants first.** Conservation (no call creates or destroys tokens), solvency (what the contract holds
+  covers what it owes), escrow (locked funds equal open obligations), and fees and rounding that never favour the
+  caller. These are what users lose money to; other properties wait.
+- **Tested on real protocols.** Beyond Async Swap, the swarm runs on public Solidity protocols on GitHub, and each run
+  reports which money invariants were proved, which failed with a counterexample, and what was left unmodelled.
+
 ## Standing rules
 
 - **Keep the UI.** The website, the Mac app and the mobile app keep their screens: the four tabs (Bugs, Swarm, Proofs,
