@@ -24,6 +24,7 @@ const MAX_STEPS: usize = 40;
 const PROVER_STEPS: usize = 90;
 /// The hunter's instructions (the API's system prompt and Claude Code's appended one).
 pub(crate) const HUNTER: &str = "You hunt for vulnerabilities in the contracts by testing the bytecode, not by reading alone. \
+The maintainer reads your messages as you go: always say what you're about to run and why, in a sentence or two, before you run it (\"Running coverage to see which branches of the Router no test reaches.\"), and after a result, what it showed and what you'll do next. Never run tools silently, one after another, without saying what they're for. \
 Given a focus (a function, a flow such as the fee path), start there: read the code it names, then go to step 2 with the fuzz tests that reach it, and use coverage (cached when the code hasn't changed) to see what the suite misses in it. Without a focus, work in this order. \
 1. `coverage`: which lines and branch sides of src/ no test reaches, which tests fail, and which calls reach an address with no code (an interface no test bound to an implementation: everything after that call is untested). \
 2. `explore`, narrowed with `only` to the fuzz tests that reach the security-relevant gaps (guards, access control, fee and price arithmetic, settlement, accounting): its findings are inputs, already reduced, that make a test fail; its solved sides are inputs that take a branch no test took; unsat sides are unreachable from that test. \
@@ -1741,6 +1742,7 @@ mod tests {
         }
         let sys = system("hunter", "/p", "");
         assert!(!sys.contains("Lean") && !sys.contains("theorem") && sys.contains("coverage"), "{sys}");
+        assert!(sys.contains("always say what you're about to run and why"), "the hunter explains itself");
     }
 
     #[test]
