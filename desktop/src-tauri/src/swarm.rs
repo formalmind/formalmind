@@ -34,7 +34,8 @@ The maintainer reads your messages as you go: always say what you're about to do
 - ordering and inputs: front-running a price or a match, a zero or max value that skips a guard, an empty array, a duplicate entry, a token that returns false, takes a fee on transfer or reenters; \
 - trust: an external call to an address a caller supplies, a return value not checked, assumptions about a hook, an oracle or the PoolManager that the code doesn't enforce. \
 Tag each hypothesis on its line (`tag`, kind suspicion) as you form it, so the maintainer sees what you're chasing. \
-3. Test the hypotheses, most damaging first. `coverage` (cached when the code hasn't changed) shows whether the suite even reaches that code and which branch sides it never takes; `explore`, narrowed with `only` to the fuzz tests that reach it, solves for inputs that take those sides and finds inputs that make a test fail (already reduced); the debugger shows exactly what the bytecode does: debug_open the test file, debug_run a test (with explore's inputs as `args`), debug_look revert and lines, debug_watch the storage the hypothesis is about and debug_move continue to its writes. \
+Long tasks run in the background so you can keep reading: run_in_background starts coverage, explore or a forge command and gives you a task number; background_results lists your tasks, and with an id returns the result (wait: true waits for it). Coverage of the whole suite is already running as task 1 when you start. \
+3. Test the hypotheses, most damaging first. `coverage` (with no arguments it waits for task 1 rather than running again; cached when the code hasn't changed) shows whether the suite even reaches that code and which branch sides it never takes; `explore`, narrowed with `only` to the fuzz tests that reach it, solves for inputs that take those sides and finds inputs that make a test fail (already reduced); the debugger shows exactly what the bytecode does: debug_open the test file, debug_run a test (with explore's inputs as `args`), debug_look revert and lines, debug_watch the storage the hypothesis is about and debug_move continue to its writes. \
 4. A real bug: write a Foundry PoC under test/formal/ (reuse the repo's test setup under test/) with the inputs as constants, whose test passes by demonstrating the issue; run it with `forge test --match-path <file>`; then report_bug with the scenario, impact and recommendation written as an audit report states a finding, and `location` as file:line. It lands on the Bugs page and on that line in the maintainer's editor. A hypothesis the tests refute: say why, and retag it (kind assumption or invariant) if what you learned is worth keeping. \
 Don't change the contracts or the existing tests. A test that fails because the test itself is wrong is not a bug in the contracts: say so and move on. End with one paragraph: the hypotheses you chased, the bugs you reported (IDs), and what's left open.";
 
@@ -172,6 +173,14 @@ struct SwarmEvent {
 
 /// An event to the app (the `swarm` event; the relay passes it on to the phone) and to the session's log,
 /// .formal/runs/<run>.jsonl.
+/// An event for the running bug search in a folder (a background task finishing): its hunt-* session, if one runs.
+pub(crate) fn emit_in_folder(app: &AppHandle, folder: &str, kind: &'static str, role: &str, item: &str, text: String) {
+    let run = app.state::<Swarms>().0.lock().unwrap().keys().filter_map(|k| k.strip_prefix(&format!("{folder}\n")).map(str::to_string)).find(|r| r.starts_with("hunt-"));
+    if let Some(run) = run {
+        emit_as(app, folder, &run, kind, role, item, text);
+    }
+}
+
 /// An event of a running session, from outside its Turn (the Claude Code hunter and its MCP server), with the
 /// session's spend so the chat's header doesn't jump.
 pub(crate) fn emit_as(app: &AppHandle, folder: &str, run: &str, kind: &'static str, role: &str, item: &str, text: String) {
@@ -1065,6 +1074,23 @@ impl Turn<'_> {
             if results.is_empty() || reply["stop_reason"].as_str() != Some("tool_use") {
                 return Ok(out);
             }
+            // In a bug search, what you write while the Bug Hunter works reaches it at its next step, not after its turn.
+            if self.run.starts_with("hunt-") {
+                let said: Vec<String> = with_queue(&self.queue, |q| {
+                    q.jobs
+                        .iter_mut()
+                        .filter(|j| j.kind == "answer" && j.state == "queued")
+                        .map(|j| {
+                            j.state = "done".into();
+                            j.summary = "read by the Bug Hunter while it worked".into();
+                            j.text.clone()
+                        })
+                        .collect()
+                });
+                for text in said {
+                    results.push(json!({ "type": "text", "text": format!("The maintainer says (while you work): {text}") }));
+                }
+            }
             messages.push(json!({ "role": "user", "content": results }));
             keep(&messages);
         }
@@ -1324,7 +1350,9 @@ async fn run_swarm(turn: &Turn<'_>) -> String {
             }
             // A hunt for vulnerabilities: coverage, explore, the debugger, PoCs and report_bug (`text` is an optional focus).
             "hunt" => {
-                turn.emit("status", "hunter", "hunt", if job.text.is_empty() { "hunting: coverage first".into() } else { format!("hunting: {}", job.text) });
+                turn.emit("status", "hunter", "hunt", if job.text.is_empty() { "hunting".into() } else { format!("hunting: {}", job.text) });
+                // Coverage of the whole suite takes minutes on a big one: it runs while the Bug Hunter reads.
+                crate::analysis::warm_coverage(turn.app, &turn.req.folder, turn.run);
                 let focus = if job.text.is_empty() { "the contracts in src/".to_string() } else { job.text.clone() };
                 if turn.req.provider.as_deref() == Some("claude-code") {
                     crate::claude_code::hunt(turn.app, &turn.req.folder, turn.run, job.id, resumed, &focus, turn.req.model.as_deref(), &turn.swarm.stop, None)

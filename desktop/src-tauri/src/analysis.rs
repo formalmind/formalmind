@@ -8,7 +8,7 @@ use serde_json::{json, Value};
 use std::path::PathBuf;
 use tauri::{AppHandle, Manager};
 
-const TOOLS: [&str; 9] = ["debug_open", "debug_run", "debug_move", "debug_break", "debug_watch", "debug_look", "coverage", "explore", "tag"];
+const TOOLS: [&str; 11] = ["debug_open", "debug_run", "debug_move", "debug_break", "debug_watch", "debug_look", "coverage", "explore", "tag", "run_in_background", "background_results"];
 
 pub fn is_tool(name: &str) -> bool {
     TOOLS.contains(&name)
@@ -25,6 +25,8 @@ pub fn tools() -> Vec<Value> {
         json!({ "name": "debug_look", "description": "Read the run without moving: here (the current step), summary (verdict, calls, events), lines (every Solidity line it ran, in order; `filter` keeps functions whose name contains it, e.g. AsyncSwap.beforeSwap), revert (why and where it reverted, decoded), writes (every storage write, named; `filter` keeps variables containing it), step (step `n` in full: stack, memory, storage).", "input_schema": s(json!({ "query": { "type": "string", "enum": ["here", "summary", "lines", "revert", "writes", "step"] }, "filter": { "type": "string" }, "n": { "type": "integer" } }), vec!["query"]) }),
         json!({ "name": "coverage", "description": "Run the Foundry suite in revm with solc's own compile (the optimized bytecode that ships) and report line and branch coverage of src/: per file the lines never run and the JUMPI sides never taken, the tests that failed, and calls into addresses with no code (an interface no test bound to an implementation). Takes about a minute on a large suite.", "input_schema": s(json!({ "include": { "type": "array", "items": { "type": "string" }, "description": "Only files under these prefixes (default src/)" }, "skip": { "type": "array", "items": { "type": "string" }, "description": "Leave out test files whose path contains one of these" } }), vec![]) }),
         json!({ "name": "tag", "description": "Tag a line of the Solidity with a short note the maintainer sees on that line in their editor and that the next agent reads: a suspicion you couldn't confirm yet, an assumption the code makes, an invariant that must hold there, or a todo. Not for confirmed bugs (report_bug those).", "input_schema": s(json!({ "file": { "type": "string", "description": "e.g. src/AsyncSwap.sol" }, "line": { "type": "integer" }, "kind": { "type": "string", "enum": ["suspicion", "assumption", "invariant", "todo"] }, "note": { "type": "string", "description": "One sentence, third person, e.g. \"Rounds in the taker's favour when amountIn < price\"" } }), vec!["file", "line", "kind", "note"]) }),
+        json!({ "name": "run_in_background", "description": "Start a long task and keep working while it runs: coverage (minutes on a big suite), explore, or a forge command (`forge test …`, `forge build`). Returns a task number at once; read the result later with background_results.", "input_schema": s(json!({ "tool": { "type": "string", "enum": ["coverage", "explore", "run"] }, "input": { "type": "object", "description": "The tool's own arguments: coverage {include, skip}, explore {only, include, skip, timeout_ms}, run {command}" } }), vec!["tool"]) }),
+        json!({ "name": "background_results", "description": "Your background tasks: with no id, each one's tool, status and time so far; with an id, that task's result once it's done (wait: true waits until it is).", "input_schema": s(json!({ "id": { "type": "integer" }, "wait": { "type": "boolean" } }), vec![]) }),
         json!({ "name": "explore", "description": "Concolic exploration: every JUMPI side coverage never took is a target; fuzz tests are the harnesses; z3 solves for inputs that take the side. Returns, by source line: solved (the inputs, ready for debug_run's args), unsat (unreachable from that test: a dead guard or a test-design gap), unknown, and findings (solved inputs that make a test fail: open them with debug_run). Slow on a whole suite (minutes): narrow it with `only`.", "input_schema": s(json!({ "only": { "type": "string", "description": "Only fuzz tests whose Contract::name contains this" }, "include": { "type": "array", "items": { "type": "string" } }, "skip": { "type": "array", "items": { "type": "string" } }, "timeout_ms": { "type": "integer", "description": "Per solver call (default 1000)" } }), vec![]) }),
     ]
 }
@@ -99,6 +101,8 @@ pub async fn call(app: &AppHandle, folder: &str, role: &str, session: Option<u32
             (text(r), None)
         }
         "tag" => (tag(folder, role, input), None),
+        "run_in_background" => (start_task(app, folder, input), None),
+        "background_results" => (task_results(folder, input).await, None),
         "coverage" => (text(coverage(folder, input).await), None),
         "explore" => (text(explore(folder, input).await), None),
         _ => (format!("error: no tool {name}"), None),
@@ -221,12 +225,106 @@ fn tree_key(folder: &str) -> Option<String> {
     Some(format!("{:016x}{:016x}{:016x}", fnv64(&head), fnv64(&diff), fnv64(&stamp)))
 }
 
+/// One run at a time per folder and options: a call while another (the background warm-up) runs waits for it and
+/// reads its result from the cache instead of running the suite a second time.
+fn coverage_lock(key: &str) -> std::sync::Arc<tokio::sync::Mutex<()>> {
+    static LOCKS: std::sync::OnceLock<std::sync::Mutex<std::collections::HashMap<String, std::sync::Arc<tokio::sync::Mutex<()>>>>> = std::sync::OnceLock::new();
+    LOCKS.get_or_init(Default::default).lock().unwrap().entry(key.to_string()).or_default().clone()
+}
+
+// ---- Background tasks ------------------------------------------------------------------------------------------------
+
+/// A task the agent started in the background: what it is, when it started, and its result once done.
+struct Task {
+    what: String,
+    started: std::time::Instant,
+    done: tokio::sync::watch::Receiver<Option<String>>,
+}
+
+/// Each folder's background tasks, by number (one list per folder: the bug search's tasks).
+fn tasks() -> &'static std::sync::Mutex<std::collections::HashMap<String, Vec<Task>>> {
+    static TASKS: std::sync::OnceLock<std::sync::Mutex<std::collections::HashMap<String, Vec<Task>>>> = std::sync::OnceLock::new();
+    TASKS.get_or_init(Default::default)
+}
+
+/// Runs coverage, explore or a forge command in the background; returns its task number.
+fn spawn_task(app: &AppHandle, folder: &str, tool: &str, input: Value) -> Result<usize, String> {
+    if !matches!(tool, "coverage" | "explore" | "run") {
+        return Err(format!("{tool} can't run in the background: coverage, explore or run"));
+    }
+    let what = match tool {
+        "run" => input["command"].as_str().unwrap_or("").to_string(),
+        t => format!("{t} {}", input.as_object().map(|o| o.iter().map(|(k, v)| format!("{k}={v}")).collect::<Vec<_>>().join(" ")).unwrap_or_default()).trim().to_string(),
+    };
+    let (tx, rx) = tokio::sync::watch::channel(None);
+    let id = {
+        let mut all = tasks().lock().unwrap();
+        let list = all.entry(folder.to_string()).or_default();
+        list.push(Task { what: what.clone(), started: std::time::Instant::now(), done: rx });
+        list.len()
+    };
+    let (app, folder, tool) = (app.clone(), folder.to_string(), tool.to_string());
+    tauri::async_runtime::spawn(async move {
+        let started = std::time::Instant::now();
+        let out = match tool.as_str() {
+            "coverage" => coverage(&folder, &input).await.map(|v| v.to_string()).unwrap_or_else(|e| format!("error: {e}")),
+            "explore" => explore(&folder, &input).await.map(|v| v.to_string()).unwrap_or_else(|e| format!("error: {e}")),
+            _ => crate::executor::run_command(std::path::Path::new(&folder), input["command"].as_str().unwrap_or("")).await.unwrap_or_else(|e| format!("error: {e}")),
+        };
+        let _ = tx.send(Some(out));
+        // Tell the chat; the session that started it is whichever hunt runs in this folder.
+        crate::swarm::emit_in_folder(&app, &folder, "status", "hunter", "hunt", format!("background task {id} finished in {}: {what}", took_s(started.elapsed().as_secs())));
+    });
+    Ok(id)
+}
+
+fn took_s(s: u64) -> String {
+    if s < 60 { format!("{s}s") } else { format!("{}m {:02}s", s / 60, s % 60) }
+}
+
+fn start_task(app: &AppHandle, folder: &str, input: &Value) -> String {
+    let tool = input["tool"].as_str().unwrap_or("");
+    match spawn_task(app, folder, tool, input.get("input").cloned().unwrap_or(json!({}))) {
+        Ok(id) => {
+            crate::swarm::emit_in_folder(app, folder, "status", "hunter", "hunt", format!("started in the background (task {id}): {tool}"));
+            format!("started background task {id} ({tool}); keep working, and read it with background_results {{\"id\": {id}}} (wait: true to wait for it)")
+        }
+        Err(e) => format!("error: {e}"),
+    }
+}
+
+async fn task_results(folder: &str, input: &Value) -> String {
+    let Some(id) = input["id"].as_u64().map(|n| n as usize) else {
+        let all = tasks().lock().unwrap();
+        let list: Vec<Value> = all.get(folder).map(|l| l.iter().enumerate().map(|(i, t)| json!({ "id": i + 1, "task": t.what, "status": if t.done.borrow().is_some() { "done" } else { "running" }, "seconds": t.started.elapsed().as_secs() })).collect()).unwrap_or_default();
+        return if list.is_empty() { "no background tasks".into() } else { Value::Array(list).to_string() };
+    };
+    let rx = tasks().lock().unwrap().get(folder).and_then(|l| l.get(id.wrapping_sub(1))).map(|t| t.done.clone());
+    let Some(mut rx) = rx else { return format!("error: no background task {id}") };
+    if input["wait"].as_bool().unwrap_or(false) {
+        let _ = rx.wait_for(|v| v.is_some()).await;
+    }
+    let done = rx.borrow().clone();
+    done.unwrap_or_else(|| format!("task {id} is still running; call again with wait: true to wait for it"))
+}
+
+/// Starts coverage of the whole suite as background task 1 when a hunt begins, so it's ready (cached) by the time the
+/// Bug Hunter asks; `coverage` itself waits for it rather than running the suite twice.
+pub fn warm_coverage(app: &AppHandle, folder: &str, run: &str) {
+    let _ = run;
+    if let Ok(id) = spawn_task(app, folder, "coverage", json!({})) {
+        crate::swarm::emit_in_folder(app, folder, "status", "hunter", "hunt", format!("coverage running in the background (task {id})"));
+    }
+}
+
 /// Coverage, cached by the tree and the options (~/.formalmind/cache/coverage/): a second hunt on unchanged code gets
 /// it at once instead of running the suite again.
 async fn coverage(folder: &str, input: &Value) -> Result<Value, String> {
     if !crate::local::read()?.allows(folder) {
         return Err("Add the folder first".into());
     }
+    let lock = coverage_lock(&format!("{folder}\n{}\n{}", input["include"], input["skip"]));
+    let _one_at_a_time = lock.lock().await;
     let key = tree_key(folder).map(|t| format!("{t}-{:016x}", fnv64(json!({ "include": input["include"], "skip": input["skip"], "format": 2 }).to_string().as_bytes())));
     let file = key.as_ref().and_then(|k| crate::local::home().ok().map(|h| h.join("cache").join("coverage").join(format!("{:016x}", fnv64(folder.as_bytes()))).join(format!("{k}.json"))));
     if let Some(hit) = file.as_ref().and_then(|f| std::fs::read_to_string(f).ok()).and_then(|t| serde_json::from_str::<Value>(&t).ok()) {

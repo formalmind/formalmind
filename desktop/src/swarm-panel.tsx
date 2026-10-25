@@ -136,7 +136,8 @@ const callLabel = (text: string) => {
  */
 export function Steps({ steps, running }: { steps: Row[]; running: boolean }) {
 	const calls = steps.filter((r): r is { call: Ev; result?: Ev } => "call" in r);
-	const [open, setOpen] = useState(false);
+	// Open from the start: you see what the agent runs as it runs it (and can fold it away).
+	const [open, setOpen] = useState(true);
 	const [now, setNow] = useState(() => Date.now());
 	useEffect(() => {
 		if (!running) return;
@@ -158,7 +159,7 @@ export function Steps({ steps, running }: { steps: Row[]; running: boolean }) {
 			</button>
 			{open ? (
 				<ul className="mt-1.5 divide-y overflow-hidden rounded-xl border">
-					{steps.map((r, i) => ("note" in r ? <NoteRow key={i} e={r.note} /> : <CallRow key={i} row={r} running={running && r === calls.at(-1) && !r.result} now={now} />))}
+					{steps.map((r, i) => ("note" in r ? <NoteRow key={i} e={r.note} /> : <CallRow key={i} row={r} running={running && r === calls.at(-1) && !r.result} now={now} defaultOpen={r === calls.at(-1)} />))}
 				</ul>
 			) : null}
 		</div>
@@ -177,8 +178,9 @@ function NoteRow({ e }: { e: Ev }) {
 	);
 }
 
-function CallRow({ row, running, now }: { row: { call: Ev; result?: Ev }; running: boolean; now: number }) {
-	const [open, setOpen] = useState(false);
+function CallRow({ row, running, now, defaultOpen = false }: { row: { call: Ev; result?: Ev }; running: boolean; now: number; defaultOpen?: boolean }) {
+	// The newest call starts open, showing its command and its output as it arrives.
+	const [open, setOpen] = useState(defaultOpen);
 	const { line } = callLabel(row.call.text);
 	const end = row.result?.at ?? (running ? now : undefined);
 	const elapsed = row.call.at && end ? took(end - row.call.at) : null;
