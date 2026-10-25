@@ -143,6 +143,8 @@ pub fn run() {
                     model: env("FM_SWARM_MODEL"),
                     session: env("FM_SWARM_SESSION"),
                     only_queued: env("FM_SWARM_ONLY_QUEUED").map(|v| v == "1"),
+                    // A bug search (the hunter alone); set but empty means the whole codebase.
+                    hunt: std::env::var("FM_SWARM_HUNT").ok(),
                 };
                 if let Err(e) = swarm::swarm_start(app.handle().clone(), app.state::<swarm::Swarms>(), request) {
                     eprintln!("FM_SWARM_AUTOSTART: {e}");

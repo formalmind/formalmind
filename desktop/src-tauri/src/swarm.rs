@@ -90,6 +90,9 @@ pub struct SwarmRequest {
     pub session: Option<String>,
     /// Only the jobs already queued (e.g. reading an audit report), then stop, instead of going on to the plan.
     pub only_queued: Option<bool>,
+    /// A bug-search session: the hunter alone, on this focus ("" for the whole codebase). Nothing else is queued.
+    #[serde(default)]
+    pub hunt: Option<String>,
 }
 
 fn anthropic_entry() -> Result<keyring::Entry, String> {
@@ -452,17 +455,20 @@ fn enqueue(q: &mut Queue, kind: &str, item: usize, text: &str, attempt: usize, n
     id
 }
 
-fn transcript_path(root: &Path, job: u64) -> PathBuf {
-    root.join(".formal").join("jobs").join(format!("{job}.json"))
+/// A job's conversation. Job ids count per session's queue, so another session's are under its name (the default
+/// session's stay where they always were); otherwise a new session's job 1 would resume the main session's job 1.
+fn transcript_path(root: &Path, run: &str, job: u64) -> PathBuf {
+    let dir = root.join(".formal").join("jobs");
+    if run == "swarm" { dir.join(format!("{job}.json")) } else { dir.join(run).join(format!("{job}.json")) }
 }
 
 /// Everything the model and the tools said in one job, exactly as sent and received (thinking blocks included).
-fn load_transcript(root: &Path, job: u64) -> Option<Vec<Value>> {
-    std::fs::read_to_string(transcript_path(root, job)).ok().and_then(|t| serde_json::from_str(&t).ok())
+fn load_transcript(root: &Path, run: &str, job: u64) -> Option<Vec<Value>> {
+    std::fs::read_to_string(transcript_path(root, run, job)).ok().and_then(|t| serde_json::from_str(&t).ok())
 }
 
-fn save_transcript(root: &Path, job: u64, messages: &[Value]) {
-    let path = transcript_path(root, job);
+fn save_transcript(root: &Path, run: &str, job: u64, messages: &[Value]) {
+    let path = transcript_path(root, run, job);
     let _ = std::fs::create_dir_all(path.parent().unwrap_or(root));
     let tmp = path.with_extension("json.tmp");
     if std::fs::write(&tmp, serde_json::to_string(messages).unwrap_or_default()).is_ok() {
@@ -802,7 +808,7 @@ impl Turn<'_> {
         // The whole conversation is kept on disk (.formal/jobs/<job>.json) after every step, so a job interrupted by a
         // quit continues the same conversation instead of starting over.
         let job = *self.job.lock().unwrap();
-        let saved = job.and_then(|j| load_transcript(&root, j));
+        let saved = job.and_then(|j| load_transcript(&root, self.run, j));
         let mut messages = match saved {
             Some(mut m) if !m.is_empty() => {
                 // A reply whose tool calls never got results (the app quit mid-step) is dropped; the model redoes that step.
@@ -816,7 +822,7 @@ impl Turn<'_> {
         };
         let keep = |m: &Vec<Value>| {
             if let Some(j) = job {
-                save_transcript(&root, j, m);
+                save_transcript(&root, self.run, j, m);
             }
         };
         keep(&messages);
@@ -1173,8 +1179,11 @@ async fn check_proof(turn: &Turn<'_>, root: &Path, id: &str, text: &str, files: 
 async fn run_swarm(turn: &Turn<'_>) -> String {
     let root = PathBuf::from(&turn.req.folder);
     let _ = std::fs::create_dir_all(root.join(".formal"));
-    // The plan follows the AST: every function in scope that it doesn't list yet is added at each start.
-    sync_plan(turn, &root).await;
+    // The plan follows the AST: every function in scope that it doesn't list yet is added at each start. A bug search
+    // (the hunter alone, sessions hunt-*) has no plan.
+    if turn.req.hunt.is_none() && !turn.run.starts_with("hunt-") {
+        sync_plan(turn, &root).await;
+    }
     loop {
         if turn.swarm.stop.load(Ordering::SeqCst) {
             return "paused: resume anytime, the queue carries on".into();
@@ -1446,8 +1455,13 @@ pub fn swarm_start(app: AppHandle, swarms: State<'_, Swarms>, request: SwarmRequ
     merge_old_sessions(Path::new(&request.folder));
     let qf = queue_file(Path::new(&request.folder), &run);
     let spent = load_queue(&qf).spent;
-    // What you typed before starting is a message too: the assistant answers it first (as with one sent while it runs).
-    if let Some(text) = request.goal.as_deref().map(str::trim).filter(|t| !t.is_empty()) {
+    // A bug search queues the hunt and nothing else; otherwise what you typed before starting is a message too: the
+    // assistant answers it first (as with one sent while it runs).
+    if let Some(focus) = request.hunt.as_deref() {
+        with_queue(&qf, |q| {
+            enqueue(q, "hunt", 0, focus.trim(), 1, "");
+        });
+    } else if let Some(text) = request.goal.as_deref().map(str::trim).filter(|t| !t.is_empty()) {
         with_queue(&qf, |q| {
             enqueue(q, "answer", 0, text, 1, "");
         });
@@ -1459,7 +1473,12 @@ pub fn swarm_start(app: AppHandle, swarms: State<'_, Swarms>, request: SwarmRequ
         let client = reqwest::Client::builder().timeout(Duration::from_secs(600)).build().unwrap_or_default();
         let turn = Turn { app: &app, run: &id, req: &request, swarm: &swarm, client, job: Mutex::new(None), queue: swarm.queue.clone(), ctx: Mutex::new(None), debug: Mutex::new(HashMap::new()) };
         // The session's title: the focus it was given (the latest start's focus wins).
-        turn.emit("start", "swarm", "", request.goal.clone().unwrap_or_default());
+        let title = match request.hunt.as_deref().map(str::trim) {
+            Some("") => "Bug search".to_string(),
+            Some(f) => format!("Bug search: {f}"),
+            None => request.goal.clone().unwrap_or_default(),
+        };
+        turn.emit("start", "swarm", "", title);
         turn.emit("status", "swarm", "", "resuming".into());
         let outcome = run_swarm(&turn).await;
         turn.emit("done", "swarm", "", outcome);
@@ -1533,8 +1552,14 @@ pub fn swarm_say(app: AppHandle, swarms: State<'_, Swarms>, folder: String, run:
         let spent = *s.spent.lock().unwrap();
         (s.queue.clone(), spent)
     };
-    with_queue(&qf, |q| {
-        enqueue(q, "answer", 0, &text, 1, "");
+    // `@hunter <focus>` asks for a bug search: queued for the hunter, not answered by the assistant.
+    with_queue(&qf, |q| match text.trim().strip_prefix("@hunter") {
+        Some(focus) => {
+            enqueue(q, "hunt", 0, focus.trim(), 1, "");
+        }
+        None => {
+            enqueue(q, "answer", 0, &text, 1, "");
+        }
     });
     emit_event(&app, SwarmEvent { folder, run, kind: "you", role: "you".into(), item: String::new(), text, spent });
     Ok(())
@@ -1663,8 +1688,10 @@ mod tests {
         // Reloaded from disk, as after a quit: the job is still running and the spend kept.
         let q = load_queue(&qf);
         assert_eq!((q.jobs[0].state.as_str(), q.jobs[0].id, q.spent), ("running", id, 1.25));
-        save_transcript(&root, id, &[json!({"role": "user", "content": "go"}), json!({"role": "assistant", "content": [{"type": "tool_use"}]})]);
-        assert_eq!(load_transcript(&root, id).unwrap().len(), 2);
+        save_transcript(&root, "swarm", id, &[json!({"role": "user", "content": "go"}), json!({"role": "assistant", "content": [{"type": "tool_use"}]})]);
+        assert_eq!(load_transcript(&root, "swarm", id).unwrap().len(), 2);
+        // Another session's job with the same id is its own conversation.
+        assert!(load_transcript(&root, "hunt-1", id).is_none());
         std::fs::remove_dir_all(root).unwrap();
     }
 
