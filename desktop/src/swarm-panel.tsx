@@ -2161,7 +2161,8 @@ export function SwarmPanel({ folder, name, scan, bridge, session, file: openPath
 	const label = (u: AstUnit) => u.function || (u.name.split(".").pop() ?? u.name);
 	const named = (text: string) => entryUnits.filter((u) => u.function && new RegExp(`\\b${u.function}\\b`).test(text));
 	const inPlan = new Set(plan.flatMap((i) => named(i.text).map((u) => u.name)));
-	const finished = !run ? events.find((e) => e.kind === "done") : undefined;
+	// The latest end of the session (a resumed one has several), so the reason shown is the current one.
+	const finished = !run ? [...events].reverse().find((e) => e.kind === "done") : undefined;
 	const shown = chatBlocks;
 	// Concolic's board has no plan: the hunter alone, with its notebook and ledger.
 	const board = useMemo(() => localBoard(folder, concolic ? [] : plan, events, Boolean(run), budget), [folder, plan, events, run, budget, concolic]);
@@ -2467,7 +2468,12 @@ export function SwarmPanel({ folder, name, scan, bridge, session, file: openPath
 		</DropdownMenu>
 	) : null;
 	// The run's spend against its cap, with the cap's menu; in the Mac app it sits in the title bar.
-	const costMenu = (
+	const costMenu = provider === "claude-code" ? (
+		// On your Claude plan nothing is metered: no spend or cap, the plan's usage limit applies.
+		<span className="inline-flex h-7 shrink-0 items-center rounded-md border bg-background px-2 text-[11px] text-muted-foreground" title="The agents run on Claude Code with your Claude plan (Settings → Models)">
+			Claude plan
+		</span>
+	) : (
 		<DropdownMenu>
 			<DropdownMenuTrigger className="inline-flex h-7 shrink-0 items-center gap-1 rounded-md border bg-background px-2 text-[11px] tabular-nums text-muted-foreground outline-none hover:text-foreground" title="Spending cap">
 				{run || viewing ? `$${spent.toFixed(2)} / $${budget}` : `Budget $${budget}`}

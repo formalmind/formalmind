@@ -1391,7 +1391,9 @@ async fn run_swarm(turn: &Turn<'_>) -> String {
         }
         let spent = *turn.swarm.spent.lock().unwrap();
         let budget = *turn.swarm.budget.lock().unwrap();
-        if spent >= budget {
+        // On Claude Code your Claude plan pays and nothing is metered, so the cap (on credits or a key) doesn't stop it;
+        // the plan's own usage limit pauses it instead.
+        if spent >= budget && turn.req.provider.as_deref() != Some("claude-code") {
             // A start below what's already spent is held at the spend: name the cap that was asked for.
             let cap = if turn.req.budget_usd < budget { turn.req.budget_usd } else { budget };
             return format!("budget reached (${spent:.2} spent of ${cap:.2}); raise it and resume to carry on");
