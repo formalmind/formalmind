@@ -240,8 +240,12 @@ export function ReachView({ folder, scan, invoke, listen, onOpenFile }: { folder
 	return (
 		<div className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-xl bg-card">
 			{/* What the map is of, the protocol's sides at a glance, and what to run. */}
-			<div className="flex h-10 shrink-0 items-center gap-3 border-b px-3 text-[12px]">
-				<label className="relative inline-flex h-7 max-w-64 items-center gap-1.5 rounded-md border bg-background pl-2 pr-6 text-[12px]">
+			{/* One line at any width: a narrow pane scrolls it sideways, under a fade at either edge. */}
+			<div
+				className="flex h-10 shrink-0 items-center gap-3 overflow-x-auto whitespace-nowrap border-b px-3 text-[12px] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+				style={{ maskImage: "linear-gradient(to right, transparent, black 12px, black calc(100% - 12px), transparent)" }}
+			>
+				<label className="relative inline-flex h-7 max-w-64 shrink-0 items-center gap-1.5 rounded-md border bg-background pl-2 pr-6 text-[12px]">
 					<Crosshair className="size-3.5 shrink-0 text-muted-foreground" />
 					<span className="truncate whitespace-nowrap">{entry ?? "No Solidity sources"}</span>
 					<ChevronDown className="pointer-events-none absolute right-1.5 size-3.5 text-muted-foreground" />
@@ -260,13 +264,9 @@ export function ReachView({ folder, scan, invoke, listen, onOpenFile }: { folder
 						))}
 					</select>
 				</label>
-				{/* One line whatever the width: what doesn't fit scrolls sideways under a fade at either edge. */}
-				<div className="flex min-w-0 flex-1 items-center gap-3">
+				<div className="flex flex-1 items-center gap-3">
 					{sideCount ? <SideBar counts={totals} n={sideCount} className="w-32 shrink-0" /> : null}
-					<span
-						className="flex min-w-0 flex-1 gap-3 overflow-x-auto whitespace-nowrap px-3 text-muted-foreground [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
-						style={{ maskImage: "linear-gradient(to right, transparent, black 12px, black calc(100% - 12px), transparent)" }}
-					>
+					<span className="flex gap-3 text-muted-foreground">
 						{STATUSES.filter((s) => totals[s.id]).map((s) => (
 							<span key={s.id} className="inline-flex shrink-0 items-center gap-1" title={s.what}>
 								<i className="size-2 rounded-sm" style={{ backgroundColor: s.color }} />
