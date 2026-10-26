@@ -434,6 +434,90 @@ function parseAsk(text: string): { question: string; replies: string[] } {
 	}
 }
 
+const askKey = (e: Ev) => `${e.run}:${e.at ?? ""}:${e.text}`;
+
+/** The agents' questions still waiting for you: asked, and not answered by a later message of yours. */
+export function useOpenQuestions(folder: string, events: Ev[]) {
+	const key = `fm:answered:${folder}`;
+	const [answered, setAnswered] = useState<string[]>(() => {
+		try {
+			return JSON.parse(store.get(key) ?? "[]") as string[];
+		} catch {
+			return [];
+		}
+	});
+	const open = useMemo(() => {
+		const said = new Set(events.filter((e) => e.kind === "you").map((e) => e.text.trim()));
+		return events.filter((e) => e.kind === "ask" && !answered.includes(askKey(e)) && !parseAsk(e.text).replies.some((r) => said.has(r.trim())));
+	}, [events, answered]);
+	const markAnswered = (asks: Ev[]) => {
+		const next = [...answered, ...asks.map(askKey)].slice(-500);
+		setAnswered(next);
+		store.set(key, JSON.stringify(next));
+	};
+	return { open, markAnswered };
+}
+
+/**
+ * The agents' open questions, above the composer where you see them: one at a time, a choice from the replies the
+ * agent drafted, Next to the following one, and Send to answer them all at once.
+ */
+export function QuestionStack({ asks, onSend, onSkip, onWrite }: { asks: Ev[]; /** Your picks, one message each, in order. */ onSend: (answers: { ask: Ev; text: string }[]) => void; /** Questions you chose not to answer. */ onSkip: (asks: Ev[]) => void; /** Answer in your own words: the composer takes it. */ onWrite: (ask: Ev) => void }) {
+	const [at, setAt] = useState(0);
+	const [picks, setPicks] = useState<Record<string, string>>({});
+	const i = Math.min(at, asks.length - 1);
+	if (!asks.length) return null;
+	const e = asks[i];
+	const ask = parseAsk(e.text);
+	const picked = picks[askKey(e)];
+	const last = i === asks.length - 1;
+	const chosen = asks.filter((a) => picks[askKey(a)]);
+	const send = () => {
+		onSend(chosen.map((a) => ({ ask: a, text: picks[askKey(a)] })));
+		const skipped = asks.filter((a) => !picks[askKey(a)]);
+		if (skipped.length) onSkip(skipped);
+		setPicks({});
+		setAt(0);
+	};
+	return (
+		<div className="rounded-2xl border bg-card shadow-sm">
+			<div className="flex items-center gap-2 border-b px-3 py-2 text-[12px]">
+				<span className="font-medium capitalize" style={{ color: colorOf(e.role) }}>{roleName(e.role)}</span>
+				<span className="text-muted-foreground">asks</span>
+				<span className="ml-auto tabular-nums text-muted-foreground">{asks.length > 1 ? `Question ${i + 1} of ${asks.length}` : "Question"}</span>
+			</div>
+			<div className="max-h-56 overflow-y-auto border-b px-3 py-2">
+				<ChatMarkdown>{ask.question}</ChatMarkdown>
+			</div>
+			<div className="flex flex-col gap-0.5 p-1.5" role="radiogroup" aria-label="Your answer">
+				{ask.replies.map((r) => (
+					<button key={r} type="button" role="radio" aria-checked={picked === r} onClick={() => setPicks({ ...picks, [askKey(e)]: r })} className={`flex items-start gap-2 rounded-xl px-2.5 py-1.5 text-left text-[13px] ${picked === r ? "bg-muted" : "hover:bg-muted/60"}`}>
+						<Check className={`mt-0.5 size-3.5 shrink-0 ${picked === r ? "" : "invisible"}`} />
+						<span>{r}</span>
+					</button>
+				))}
+				<button type="button" onClick={() => onWrite(e)} className="rounded-xl px-2.5 py-1.5 pl-8 text-left text-[13px] text-muted-foreground hover:bg-muted/60 hover:text-foreground">
+					Something else…
+				</button>
+			</div>
+			<div className="flex items-center gap-1 border-t px-2 py-1.5">
+				<button type="button" onClick={() => setAt(i - 1)} disabled={i === 0} className="h-7 rounded-full px-2.5 text-[12px] text-muted-foreground hover:bg-muted hover:text-foreground disabled:opacity-40">Back</button>
+				<button type="button" onClick={() => (last ? (chosen.length ? send() : onSkip(asks)) : setAt(i + 1))} className="h-7 rounded-full px-2.5 text-[12px] text-muted-foreground hover:bg-muted hover:text-foreground">
+					{last && !chosen.length ? (asks.length > 1 ? "Skip all" : "Skip") : "Skip"}
+				</button>
+				<span className="ml-auto" />
+				{last ? (
+					<button type="button" onClick={send} disabled={!chosen.length} className="btn-dark h-7 px-3 text-[12px] disabled:opacity-50">
+						{chosen.length > 1 ? `Send ${chosen.length} answers` : "Send"}
+					</button>
+				) : (
+					<button type="button" onClick={() => setAt(i + 1)} disabled={!picked} className="btn-dark h-7 px-3 text-[12px] disabled:opacity-50">Next</button>
+				)}
+			</div>
+		</div>
+	);
+}
+
 export function AgentMessage({ e, onBug, onReply }: { e: Ev; onBug: () => void; /** A drafted reply picked: it goes to the composer to edit or send. */ onReply?: (text: string) => void }) {
 	const color = e.kind === "bug" ? "#dc2626" : colorOf(e.role);
 	return (
@@ -2277,6 +2361,7 @@ export function SwarmPanel({ folder, name, scan, bridge, session, file: openPath
 			.catch((e) => setError(String(e)))
 			.finally(() => setDrafting(false));
 	};
+	const questions = useOpenQuestions(folder, events);
 	const send = async () => {
 		const text = say.trim();
 		if (!text || !run) return;
@@ -2788,6 +2873,22 @@ export function SwarmPanel({ folder, name, scan, bridge, session, file: openPath
 
 				<div className="shrink-0 space-y-2 p-2">
 					{error ? <p className="text-xs text-red-600">{error}</p> : null}
+					{run ? (
+						<QuestionStack
+							asks={questions.open}
+							onSend={(answers) => {
+								questions.markAnswered(answers.map((a) => a.ask));
+								void (async () => {
+									for (const a of answers) await invoke("swarm_say", { folder, run, text: a.text }).catch((e) => setError(String(e)));
+								})();
+							}}
+							onSkip={questions.markAnswered}
+							onWrite={(ask) => {
+								questions.markAnswered([ask]);
+								setSay(`About ${parseAsk(ask.text).question.match(/\*\*([^*]+)\*\*/)?.[1] ?? "your question"}: `);
+							}}
+						/>
+					) : null}
 					{/* The Swarm page's composer: steer while it runs; before that, what you type is its focus and ↑ starts it. */}
 					<ChatComposer
 						compact
