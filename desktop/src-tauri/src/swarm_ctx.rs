@@ -687,6 +687,26 @@ pub fn record_property(root: &Path, item: usize, item_text: &str, files: &[Strin
     update_internal(root, |doc| upsert(doc, "properties", p))
 }
 
+/// A proved statement (.formal/statements.md) in Formal Mind's audit file: `P-S01`, titled by the maintainer's words.
+pub fn record_statement_property(root: &Path, id: &str, title: &str, files: &[String], input: &Value) -> Result<String, String> {
+    let statement = input["statement"].as_str().unwrap_or("").trim();
+    if statement.is_empty() {
+        return Err("statement is required: what the proof establishes".into());
+    }
+    let assumptions = input["assumptions"].as_str().unwrap_or("").trim();
+    let description = if assumptions.is_empty() { statement.to_string() } else { format!("{statement}\n\n**Assumptions.** {assumptions}") };
+    let p = json!({
+        "id": format!("P-{}", id.replace('-', "")),
+        "statement": id,
+        "title": title,
+        "status": "verified",
+        "description": description,
+        "theorems": input["theorems"].as_array().into_iter().flatten().filter_map(|t| t.as_str()).map(|t| json!({ "name": t })).collect::<Vec<_>>(),
+        "files": files,
+    });
+    update_internal(root, |doc| upsert(doc, "properties", p))
+}
+
 #[cfg(test)]
 mod internal_tests {
     use super::*;

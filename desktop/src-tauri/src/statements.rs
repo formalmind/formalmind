@@ -476,6 +476,182 @@ pub fn waiting_note(root: &Path) -> String {
     format!("\n\nStatements waiting for the maintainer to confirm what they mean:\n{}\nIf the message answers one, call confirm_statement.", list.join("\n"))
 }
 
+// ---- proving: each obligation is a plan-like item through the prove → check → review loop ----
+
+/// The next obligation to prove: of a confirmed statement (open or working, of a kind the swarm proves), the first
+/// one not proved or blocked. Its number counts from 1 within the statement. The loop asks only when its queue has
+/// nothing queued or running, so one marked working then lost its job (a queue cleared by hand) and is taken again.
+pub fn next_obligation(root: &Path) -> Option<(Statement, usize)> {
+    load(root).ok()?.into_iter().filter(|s| (s.mark == " " || s.mark == "~") && kind(s).is_some_and(|k| PROVABLE.contains(&k))).find_map(|s| {
+        let n = s.obligations.iter().position(|o| o.mark == " " || o.mark == "~")? + 1;
+        Some((s, n))
+    })
+}
+
+/// A statement's own mark from its obligations': all proved is proved, one disproved (or blocked) is disproved,
+/// any progress is working.
+fn rolled_up(current: &str, obligations: &[Obligation]) -> char {
+    if !obligations.is_empty() && obligations.iter().all(|o| o.mark == "x") {
+        'x'
+    } else if obligations.iter().any(|o| o.mark == "!") {
+        '!'
+    } else if obligations.iter().any(|o| o.mark == "x" || o.mark == "~") {
+        '~'
+    } else {
+        current.chars().next().unwrap_or(' ')
+    }
+}
+
+/// Sets obligation `n`'s mark and the statement's own from them; returns the statement's new mark.
+pub fn set_obligation(root: &Path, id: &str, n: usize, mark: char) -> Result<char, String> {
+    let _held = LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let text = read(root);
+    let mut lines: Vec<String> = text.lines().map(str::to_string).collect();
+    let (i, end, mut s) = block(&lines, &text, id)?;
+    let o = s.obligations.get_mut(n.wrapping_sub(1)).ok_or_else(|| format!("{id} has no obligation {n}"))?;
+    o.mark = mark.to_string();
+    let target = o.text.clone();
+    let own = rolled_up(&s.mark, &s.obligations);
+    let mut seen = 0;
+    for l in lines.iter_mut().take(end).skip(i + 1) {
+        let t = l.trim_start();
+        if item(t).is_some() {
+            seen += 1;
+            if seen == n {
+                *l = format!("  - [{mark}] {target}");
+            }
+        }
+    }
+    lines[i] = format!("- [{own}] {} · {} · {}", s.id, s.author, s.text);
+    write(root, &lines)?;
+    Ok(own)
+}
+
+/// The theorem an obligation must prove, by name: `S01.Vault_setFee` for `Vault.setFee` in S-01.
+pub fn theorem_name(id: &str, lean: &str) -> String {
+    format!("{}.{}", id.replace('-', ""), lean.replace('.', "_"))
+}
+
+/// Where its proof goes, under the Lake project: `Refinement/Statements/S01/VaultSetFee.lean`.
+pub fn proof_file(id: &str, lean: &str) -> String {
+    let module: String = lean.split('.').map(|p| {
+        let p = p.trim_start_matches('_');
+        let mut c = p.chars();
+        c.next().map(|f| f.to_uppercase().collect::<String>() + c.as_str()).unwrap_or_default()
+    }).collect();
+    format!("Refinement/Statements/{}/{module}.lean", id.replace('-', ""))
+}
+
+/// The backticked def an obligation line names first.
+pub fn def_of(obligation: &str) -> Option<&str> {
+    obligation.split('`').nth(1).filter(|d| !d.is_empty())
+}
+
+/// What the prover gets on top of the function's brief: the statement, what it was confirmed to mean, and the theorem
+/// to prove by name and file.
+pub fn obligation_task(s: &Statement, n: usize, lib: &str) -> String {
+    let o = &s.obligations[n - 1];
+    let lean = def_of(&o.text).unwrap_or("");
+    let means = s.details.iter().find_map(|d| d.strip_prefix("means: ")).unwrap_or("");
+    let assumes: Vec<&str> = s.details.iter().filter_map(|d| d.strip_prefix("assumes: ")).collect();
+    format!(
+        "Statement {} ({} of {} functions): \"{}\"\nThe maintainer confirmed it means: {means}\n{}\nProve this about the function:\n\n> {}\n\n\
+Name the theorem `{}` exactly (write `theorem {} …`, not inside a namespace) and put it in `{lib}/{}`, not the file named below; its statement must name `{lean}` fully qualified. The swarm checks that the theorem exists under that name, has no `sorry` (Lean's `#print axioms`), and shows its type, as Lean reports it, to the reviewer.",
+        s.id,
+        n,
+        s.obligations.len(),
+        s.text,
+        if assumes.is_empty() { String::new() } else { format!("Assumptions it may use: {}.\n", assumes.join("; ")) },
+        o.text.split_once("): ").map_or(o.text.as_str(), |(_, w)| w),
+        theorem_name(&s.id, lean),
+        theorem_name(&s.id, lean),
+        proof_file(&s.id, lean),
+    )
+}
+
+/// What the reviewer gets on top: the statement and the theorem's type to check against it.
+pub fn review_task(s: &Statement, n: usize) -> String {
+    let o = &s.obligations[n - 1];
+    let means = s.details.iter().find_map(|d| d.strip_prefix("means: ")).unwrap_or("");
+    format!(
+        "This item is obligation {n} of {} for statement {}: \"{}\" (confirmed to mean: {means}). Approve only if the theorem's type, as Lean reports it in the prover's notes, says what the obligation says: {}",
+        s.obligations.len(),
+        s.id,
+        s.text,
+        o.text.split_once("): ").map_or(o.text.as_str(), |(_, w)| w)
+    )
+}
+
+/// The swarm's check of an obligation's theorem, after `lake build` passes: it exists under its name in the file it
+/// should be in, it depends on no `sorryAx`, and its type names the def. Returns the type as Lean prints it.
+pub async fn check_theorem(root: &Path, id: &str, lean: &str) -> Result<String, String> {
+    let name = theorem_name(id, lean);
+    let file = proof_file(id, lean);
+    let lake = crate::swarm_ctx::lake_dir(root).ok_or("there is no Lake project to check the theorem in")?;
+    let body = std::fs::read_to_string(lake.join(&file)).map_err(|_| format!("the proof isn't in {file}; write it there"))?;
+    if !body.lines().any(|l| l.trim_start().strip_prefix("theorem ").is_some_and(|r| r.starts_with(&format!("{name} ")) || r == name)) {
+        return Err(format!("{file} has no `theorem {name}`; name the theorem exactly that"));
+    }
+    let module = file.trim_end_matches(".lean").replace('/', ".");
+    let check = format!(".formal/check/{}.lean", name.replace('.', "_"));
+    let path = root.join(&check);
+    std::fs::create_dir_all(path.parent().unwrap_or(root)).map_err(|e| e.to_string())?;
+    std::fs::write(&path, format!("import {module}\n#check @{name}\n#print axioms {name}\n")).map_err(|e| e.to_string())?;
+    let out = crate::executor::call_tool(root, "run", &json!({ "command": format!("lake env lean {check}") })).await;
+    if !out.starts_with("exit 0") {
+        return Err(format!("Lean couldn't check `{name}`:\n{}", out.lines().skip(1).take(30).collect::<Vec<_>>().join("\n")));
+    }
+    if out.contains("sorryAx") {
+        return Err(format!("`{name}` depends on `sorry` (#print axioms lists sorryAx); finish the proof"));
+    }
+    let ty: String = out.lines().skip(1).take_while(|l| !l.contains("depends on") && !l.contains("does not depend")).collect::<Vec<_>>().join("\n").trim().to_string();
+    if !ty.contains(lean) {
+        return Err(format!("`{name}`'s statement doesn't mention `{lean}`; state it about `{lean}` itself, fully qualified. Lean reports:\n{ty}"));
+    }
+    Ok(ty)
+}
+
+/// .formal/statements.json: what proved each obligation (the theorems, the files, the approved notes), kept until the
+/// statement is proved and its property goes into the audit file.
+fn proofs_path(root: &Path) -> PathBuf {
+    root.join(".formal").join("statements.json")
+}
+
+pub fn record_obligation(root: &Path, id: &str, n: usize, theorem: &str, files: &[String], notes: Option<&Value>) {
+    let mut all: Value = std::fs::read_to_string(proofs_path(root)).ok().and_then(|t| serde_json::from_str(&t).ok()).unwrap_or(json!({}));
+    all[id][n.to_string()] = json!({ "theorem": theorem, "files": files, "notes": notes.cloned().unwrap_or(Value::Null) });
+    let _ = std::fs::create_dir_all(root.join(".formal"));
+    let _ = std::fs::write(proofs_path(root), serde_json::to_string_pretty(&all).unwrap_or_default());
+}
+
+/// A proved statement in Formal Mind's audit file, as `P-S01`: the maintainer's words as its title, what it was
+/// confirmed to mean and each function's approved notes as its description, every obligation's theorem.
+pub fn record_property(root: &Path, id: &str) -> Result<String, String> {
+    let s = load(root)?.into_iter().find(|s| s.id == id).ok_or_else(|| format!("no statement {id}"))?;
+    let all: Value = std::fs::read_to_string(proofs_path(root)).ok().and_then(|t| serde_json::from_str(&t).ok()).unwrap_or(json!({}));
+    let mut theorems = vec![];
+    let mut files: Vec<String> = vec![];
+    let mut lines = vec![];
+    for n in 1..=s.obligations.len() {
+        let p = &all[id][n.to_string()];
+        if let Some(t) = p["theorem"].as_str() {
+            theorems.push(t.to_string());
+        }
+        for f in p["files"].as_array().into_iter().flatten().filter_map(Value::as_str) {
+            if !files.iter().any(|x| x == f) {
+                files.push(f.to_string());
+            }
+        }
+        let fallback = s.obligations[n - 1].text.clone();
+        lines.push(format!("- {}", p["notes"]["statement"].as_str().filter(|t| !t.trim().is_empty()).map(str::to_string).unwrap_or(fallback)));
+    }
+    let means = s.details.iter().find_map(|d| d.strip_prefix("means: ")).unwrap_or("");
+    let assumes: Vec<&str> = s.details.iter().filter_map(|d| d.strip_prefix("assumes: ")).collect();
+    let statement = format!("{means}\n\n{}", lines.join("\n"));
+    let input = json!({ "statement": statement, "assumptions": assumes.join("; "), "theorems": theorems });
+    crate::swarm_ctx::record_statement_property(root, id, &s.text, &files, &input)
+}
+
 /// The agents' tool (the swarm's roles and Claude Code's hunter).
 pub fn tool() -> Value {
     json!({ "name": "add_statement", "description": "Add a claim about the code to the statements checklist (.formal/statements.md), for the swarm to prove or disprove: a property in plain words with contract, function and variable names, e.g. \"`Vault.totalSupply` always equals the sum of `balanceOf`\" or \"Only the owner can change `fee`\". Use it when the maintainer states a claim to check (from: maintainer, their words as they gave them), or when you see one worth settling (from: me; it waits in the list until the maintainer accepts it). Not for bugs you have shown (report_bug) or notes on a line (tag).", "input_schema": {
@@ -700,6 +876,105 @@ mod tests {
         let failed = load(&d).unwrap().into_iter().find(|x| x.id == t.id).unwrap();
         assert_eq!(failed.mark, "?");
         assert!(failed.details[0].starts_with("note: couldn't formalize it"));
+    }
+
+    /// S-01 confirmed on the fixture vault: two functions to prove.
+    fn confirmed(d: &Path) -> Statement {
+        let s = add(d, "you", "Only the owner can change `fee`.", ' ', &[]).unwrap();
+        let f = derive(&vault(), &json!({ "kind": "access", "variables": ["fee"], "callers": "the owner", "means": "Only the owner's calls write `fee`.", "assumptions": ["initialize runs once"] })).unwrap();
+        record(d, &s.id, &f).unwrap();
+        confirm(d, &s.id).unwrap();
+        load(d).unwrap().into_iter().find(|x| x.id == s.id).unwrap()
+    }
+
+    #[test]
+    fn obligations_are_proved_one_function_at_a_time() {
+        let d = folder("obligations");
+        // Not confirmed yet: nothing to prove.
+        let waiting = add(&d, "you", "deposit(0) reverts", ' ', &[]).unwrap();
+        record(&d, &waiting.id, &derive(&vault(), &json!({ "kind": "function", "function": "Vault.deposit", "obligation": "reverts when assets is 0", "means": "deposit(0) reverts" })).unwrap()).unwrap();
+        assert!(next_obligation(&d).is_none());
+        let s = confirmed(&d);
+        assert_eq!(next_obligation(&d).map(|(s, n)| (s.id, n)), Some((s.id.clone(), 1)));
+        assert_eq!(set_obligation(&d, &s.id, 1, '~').unwrap(), '~');
+        // Still the first: working and nothing queued means its job was lost.
+        assert_eq!(next_obligation(&d).map(|(_, n)| n), Some(1));
+        assert_eq!(set_obligation(&d, &s.id, 1, 'x').unwrap(), '~');
+        assert_eq!(next_obligation(&d).map(|(_, n)| n), Some(2));
+        assert_eq!(set_obligation(&d, &s.id, 2, 'x').unwrap(), 'x');
+        assert!(next_obligation(&d).is_none());
+        let done = load(&d).unwrap().into_iter().find(|x| x.id == s.id).unwrap();
+        assert_eq!(done.obligations.iter().map(|o| o.mark.as_str()).collect::<Vec<_>>(), vec!["x", "x"]);
+        assert_eq!(done.mark, "x");
+        // The obligation lines keep their words, so the plan's lookup still finds their functions.
+        assert_eq!(vault().target(&done.obligations[1].text).map(|u| u.name().to_string()).as_deref(), Some("Vault.initialize"));
+        // A blocked function leaves the statement blocked, never proved.
+        let b = folder("blocked");
+        let t = confirmed(&b);
+        set_obligation(&b, &t.id, 1, 'x').unwrap();
+        assert_eq!(set_obligation(&b, &t.id, 2, '!').unwrap(), '!');
+        assert!(next_obligation(&b).is_none());
+    }
+
+    #[test]
+    fn the_theorem_and_its_file_are_named_for_the_statement() {
+        assert_eq!(theorem_name("S-01", "Vault.setFee"), "S01.Vault_setFee");
+        assert_eq!(proof_file("S-01", "Vault._setFee"), "Refinement/Statements/S01/VaultSetFee.lean");
+        let s = confirmed(&folder("task"));
+        let t = obligation_task(&s, 2, "formal");
+        assert!(t.contains("`S01.Vault_initialize`") && t.contains("formal/Refinement/Statements/S01/VaultInitialize.lean"), "{t}");
+        assert!(t.contains("Only the owner's calls write `fee`.") && t.contains("initialize runs once"), "{t}");
+        assert!(review_task(&s, 1).contains("reverts unless the owner calls, before it writes fee"));
+    }
+
+    #[test]
+    fn a_proved_statement_is_one_property_in_the_audit_file() {
+        let d = folder("property");
+        let s = confirmed(&d);
+        record_obligation(&d, &s.id, 1, "S01.Vault_setFee", &["formal/Refinement/Statements/S01/VaultSetFee.lean".into()], Some(&json!({ "statement": "`Vault.setFee` reverts unless `owner` calls." })));
+        record_obligation(&d, &s.id, 2, "S01.Vault_initialize", &["formal/Refinement/Statements/S01/VaultInitialize.lean".into()], None);
+        let at = record_property(&d, &s.id).unwrap();
+        let doc: Value = serde_json::from_str(&std::fs::read_to_string(d.join(&at)).unwrap_or_else(|_| std::fs::read_to_string(&at).unwrap())).unwrap();
+        let p = doc["properties"].as_array().unwrap().iter().find(|p| p["id"] == "P-S01").expect("P-S01");
+        assert_eq!(p["title"], "Only the owner can change `fee`.");
+        assert_eq!(p["statement"], "S-01");
+        assert_eq!(p["theorems"], json!([{ "name": "S01.Vault_setFee" }, { "name": "S01.Vault_initialize" }]));
+        let desc = p["description"].as_str().unwrap();
+        assert!(desc.starts_with("Only the owner's calls write `fee`."), "{desc}");
+        assert!(desc.contains("- `Vault.setFee` reverts unless `owner` calls.") && desc.contains("**Assumptions.** initialize runs once"), "{desc}");
+        assert_eq!(p["files"].as_array().unwrap().len(), 2);
+    }
+
+    /// The theorem check on a real (tiny) Lake project: the right name and no sorry pass, with Lean's type; a sorry,
+    /// a wrong name or a statement about something else don't. Skipped without lake.
+    #[tokio::test(flavor = "current_thread")]
+    async fn the_theorem_check_asks_lean() {
+        if std::process::Command::new("lake").arg("--version").output().is_err() {
+            return;
+        }
+        let d = folder("lean");
+        let lake = d.join("formal");
+        std::fs::create_dir_all(lake.join("Refinement/Statements/S01")).unwrap();
+        std::fs::write(lake.join("lakefile.toml"), "name = \"fixture\"\ndefaultTargets = [\"Refinement\"]\n\n[[lean_lib]]\nname = \"Refinement\"\nglobs = [\"Refinement.+\"]\n").unwrap();
+        std::fs::write(lake.join("lean-toolchain"), "leanprover/lean4:v4.35.0\n").unwrap();
+        let file = lake.join(proof_file("S-01", "Vault.setFee"));
+        let write = |body: &str| std::fs::write(&file, format!("def Vault.setFee (owner sender fee : Nat) : Option Nat := if sender = owner then some fee else none\n\n{body}\n")).unwrap();
+        write("theorem S01.Vault_setFee (owner sender fee : Nat) (h : sender ≠ owner) : Vault.setFee owner sender fee = none := by\n  simp [Vault.setFee, h]");
+        let build = crate::executor::call_tool(&d, "run", &json!({ "command": "lake build" })).await;
+        assert!(build.starts_with("exit 0"), "{build}");
+        let ty = check_theorem(&d, "S-01", "Vault.setFee").await.unwrap();
+        assert!(ty.contains("Vault.setFee owner sender fee = none"), "{ty}");
+
+        write("theorem S01.Vault_setFee (owner sender fee : Nat) (h : sender ≠ owner) : Vault.setFee owner sender fee = none := by\n  sorry");
+        crate::executor::call_tool(&d, "run", &json!({ "command": "lake build" })).await;
+        assert!(check_theorem(&d, "S-01", "Vault.setFee").await.unwrap_err().contains("sorry"));
+
+        write("theorem S01.setFee (owner : Nat) : owner = owner := rfl");
+        assert!(check_theorem(&d, "S-01", "Vault.setFee").await.unwrap_err().contains("has no `theorem S01.Vault_setFee`"));
+
+        write("theorem S01.Vault_setFee (owner : Nat) : owner = owner := rfl");
+        crate::executor::call_tool(&d, "run", &json!({ "command": "lake build" })).await;
+        assert!(check_theorem(&d, "S-01", "Vault.setFee").await.unwrap_err().contains("doesn't mention `Vault.setFee`"));
     }
 
     #[test]
