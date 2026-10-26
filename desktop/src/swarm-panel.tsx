@@ -634,8 +634,42 @@ export function useAuditFindings(folder: string, files: string[], invoke: Bridge
 	return { reports, indexes, findings, loaded: loadedKey === key };
 }
 
+/**
+ * A side column's width, dragged from its card's right edge (double-click for the default) and kept per view. Returns
+ * the width and the handle, which goes inside the column (made `relative`).
+ */
+function useDragWidth(key: string, initial: number) {
+	const [width, setWidth] = useState(() => Number(store.get(key)) || initial);
+	const start = (e: React.PointerEvent<HTMLElement>) => {
+		e.preventDefault();
+		// The row holding the column: the other side keeps at least 280px.
+		const row = e.currentTarget.parentElement?.parentElement;
+		const max = (row?.clientWidth ?? 900) - 280;
+		const from = { x: e.clientX, w: width };
+		let last = width;
+		const move = (ev: PointerEvent) => {
+			last = Math.round(Math.min(max, Math.max(200, from.w + ev.clientX - from.x)));
+			setWidth(last);
+		};
+		const up = () => {
+			window.removeEventListener("pointermove", move);
+			window.removeEventListener("pointerup", up);
+			store.set(key, String(last));
+		};
+		window.addEventListener("pointermove", move);
+		window.addEventListener("pointerup", up);
+	};
+	const reset = () => {
+		setWidth(initial);
+		store.set(key, String(initial));
+	};
+	const handle = <div onPointerDown={start} onDoubleClick={reset} title="Drag to resize" className="absolute inset-y-0 right-0 z-10 w-2 cursor-col-resize max-sm:hidden" />;
+	return { width, handle };
+}
+
 export function BugsView({ folder, files, invoke, apiBase, bugs, openBug, setOpenBug, withPoc, onOpenFile, reload = 0, onTriage, onFilesChanged }: { folder: string; files: string[]; invoke: Bridge["invoke"]; apiBase: Bridge["apiBase"]; bugs: Bug[]; openBug: string | null; setOpenBug: (f: string | null) => void; withPoc: (body: string) => Promise<string>; onOpenFile: (path: string) => void; reload?: number; onTriage?: (path: string) => Promise<void>; onFilesChanged?: () => void }) {
 	const dirs = useReportDirs(folder);
+	const side = useDragWidth("fm:bugs-list-width", 320);
 	// Generate report: the findings, Proofs coverage and in-scope code as an AsciiDoc report (and its PDF) in the audit
 	// folder; `generated` ticks so a PDF already open is read again.
 	const [generating, setGenerating] = useState<{ busy: boolean; note?: string } | null>(null);
@@ -776,7 +810,8 @@ export function BugsView({ folder, files, invoke, apiBase, bugs, openBug, setOpe
 			) : null}
 			{/* On a phone the list sits above the report it opens. */}
 			<div className="flex min-h-0 flex-1 gap-1 max-sm:flex-col">
-				<nav className="flex w-80 shrink-0 flex-col overflow-y-auto rounded-xl border bg-card p-1.5 max-sm:max-h-[40%] max-sm:w-full">
+				<nav style={{ width: side.width }} className="relative flex shrink-0 flex-col overflow-y-auto rounded-xl border bg-card p-1.5 max-sm:max-h-[40%] max-sm:!w-full">
+					{side.handle}
 					{findings.length ? (
 						<div className="flex flex-wrap gap-1 px-2 pb-1 pt-2">
 							{(Object.keys(STATUS) as AuditFinding["status"][]).filter((k) => counts[k]).map((k) => {
@@ -1174,6 +1209,7 @@ const COVERAGE_FILTERS = [
  * translated (the model then holds for every behaviour of them).
  */
 function CoverageView({ data, scripts, onOpenFile }: { data: Formal; scripts: Scripts | null; onOpenFile: (path: string) => void }) {
+	const side = useDragWidth("fm:coverage-list-width", 288);
 	// The scripts that call a function, matched by its contract (or the contract it is inherited into) and name.
 	const contractOf = (f: FormalFn) => f.name.split(".").slice(0, -1).join(".");
 	const fnName = (f: FormalFn) => f.name.split(".").pop() ?? f.name;
@@ -1213,7 +1249,8 @@ function CoverageView({ data, scripts, onOpenFile }: { data: Formal; scripts: Sc
 			</div>
 			{/* On a phone the list sits above the function it opens. */}
 			<div className="flex min-h-0 flex-1 gap-1 max-sm:flex-col">
-				<nav className="flex w-72 shrink-0 flex-col overflow-hidden rounded-xl border bg-card max-sm:max-h-[42%] max-sm:w-full">
+				<nav style={{ width: side.width }} className="relative flex shrink-0 flex-col overflow-hidden rounded-xl border bg-card max-sm:max-h-[42%] max-sm:!w-full">
+					{side.handle}
 					<div className="flex shrink-0 flex-wrap items-center gap-1 border-b p-1.5">
 						{COVERAGE_FILTERS.map((f) => (
 							<button key={f.id} type="button" onClick={() => setFilter(f.id)} className={`h-6 rounded-md px-2 text-[11px] ${filter === f.id ? "bg-muted font-medium text-foreground" : "text-muted-foreground hover:text-foreground"}`}>
