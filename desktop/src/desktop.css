@@ -38,3 +38,9 @@
 .fm-shell :is([class*="text-lg"], [class*="text-xl"], [class*="text-2xl"], [class*="text-3xl"], [class*="text-4xl"], [class*="text-5xl"], [class*="text-6xl"], h1, h2, h3, h4):not(.katex *) {
 	line-height: 20px !important;
 }
+/* Monospace at 13px reads bigger than the file tree's 13px sans (as wide as sans at 15px), so on the Proofs page (the
+   function list, the Solidity, the Lean spec and proofs) it is 12px on 20px lines, and the page reads as one size. */
+.fm-shell [data-fm-proofs] :is(.font-mono, .font-mono *) {
+	font-size: 12px !important;
+	line-height: 20px !important;
+}
