@@ -102,7 +102,7 @@ export function ContextBody({ role, color, use, onCompact, rows: showRows = true
 export function ContextPanel({ role, color, use, onCompact }: { role: string; color: string; use: ContextUse; onCompact?: () => Promise<unknown> }) {
 	const [open, setOpen] = useState(true);
 	return (
-		<section className="w-72 rounded-2xl border bg-muted/60 p-1.5">
+		<section className="w-72 rounded-2xl border bg-muted p-1.5">
 			<button type="button" onClick={() => setOpen(!open)} className="flex h-8 w-full items-center gap-1.5 px-2.5 font-mono text-[11px] font-medium uppercase tracking-wider text-muted-foreground hover:text-foreground">
 				Context · {role}
 				<ChevronDown className={`ml-auto size-3.5 transition-transform ${open ? "" : "-rotate-90"}`} />
