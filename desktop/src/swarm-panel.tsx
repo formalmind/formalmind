@@ -2347,7 +2347,17 @@ export function SwarmPanel({ folder, name, scan, bridge, session, file: openPath
 					title: slot ? "Plan" : "Roadmap",
 					note: slot ? `${plan.length ? `${done}/${plan.length}` : ""}${entryUnits.length ? ` · ${inPlan.size}/${entryUnits.length} entry points` : ""}` : undefined,
 					height: 640,
-					node: <div className="min-h-0 flex-1 overflow-y-auto">{planList}{entryList}</div>,
+					// In the Mac app the folder's git tree lies beside the plan: where the swarm works, HEAD and its uncommitted proofs.
+					node: (
+						<div className="flex min-h-0 flex-1">
+							<div className="min-h-0 flex-1 overflow-y-auto">{planList}{entryList}</div>
+							{slot && scan?.git ? (
+								<div className="flex w-[26rem] shrink-0 flex-col border-l">
+									<GitTree folder={folder} invoke={invoke} working={Boolean(run)} flat />
+								</div>
+							) : null}
+						</div>
+					),
 				}}
 			/>
 		) : (
@@ -2355,8 +2365,6 @@ export function SwarmPanel({ folder, name, scan, bridge, session, file: openPath
 				<div className="absolute right-3 top-3 flex items-center gap-2">{actions}</div>
 			</div>
 		)}
-		{/* The Mac app's canvas shows where the swarm works: the folder's git tree, HEAD and the uncommitted proofs on it. */}
-		{mode === "swarm" && slot && scan?.git ? <GitTree folder={folder} invoke={invoke} working={Boolean(run)} /> : null}
 		{mode === "swarm" && !slot ? (
 			<section className={`pointer-events-auto absolute left-3 top-[max(var(--fm-top),0.75rem)] z-10 flex w-[min(20rem,calc(100%-1.5rem))] flex-col overflow-hidden rounded-2xl border bg-muted/80 p-1 shadow-pop backdrop-blur ${planOpen ? "max-h-[calc(100%-var(--fm-top)-1rem)]" : ""}`}>
 				<button type="button" onClick={() => setPlanOpen(!planOpen)} aria-expanded={planOpen} className="flex h-8 shrink-0 items-center gap-2 px-2.5 text-left">

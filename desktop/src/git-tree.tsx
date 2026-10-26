@@ -43,10 +43,11 @@ const y = (r: number) => r * ROW + ROW / 2;
  * The folder's git history on the canvas: every branch's latest commits as a graph, HEAD marked as where the swarm works,
  * and its uncommitted proofs and fixes as a row above it. Read-only (git log and status).
  */
-export function GitTree({ folder, invoke, working }: { folder: string; invoke: Bridge["invoke"]; working: boolean }) {
+export function GitTree({ folder, invoke, working, flat = false }: { folder: string; invoke: Bridge["invoke"]; working: boolean; /** Laid flat in a card on the canvas (no frame of its own, always open). */ flat?: boolean }) {
 	const [graph, setGraph] = useState<GitGraph | null>(null);
 	const [error, setError] = useState<string | null>(null);
-	const [open, setOpen] = useState(true);
+	const [openState, setOpen] = useState(true);
+	const open = flat || openState;
 	useEffect(() => {
 		const load = () => void invoke<GitGraph>("folder_git_graph", { path: folder }).then((g) => (setGraph(g), setError(null)), (e) => setError(String(e)));
 		load();
@@ -60,17 +61,17 @@ export function GitTree({ folder, invoke, working }: { folder: string; invoke: B
 	const { col, edges, width } = useMemo(() => layout(rows), [rows]);
 	const gutter = 8 + width * LANE;
 	return (
-		<section className="pointer-events-auto absolute left-3 top-3 z-10 flex max-h-[min(28rem,calc(100%-1.5rem))] w-[min(24rem,calc(100%-1.5rem))] flex-col overflow-hidden rounded-2xl border bg-muted/80 p-1 shadow-pop backdrop-blur">
-			<button type="button" onClick={() => setOpen(!open)} aria-expanded={open} className="flex h-8 shrink-0 items-center gap-2 px-2.5 text-left">
+		<section className={flat ? "flex min-h-0 flex-1 flex-col" : "pointer-events-auto absolute left-3 top-3 z-10 flex max-h-[min(28rem,calc(100%-1.5rem))] w-[min(24rem,calc(100%-1.5rem))] flex-col overflow-hidden rounded-2xl border bg-muted/80 p-1 shadow-pop backdrop-blur"}>
+			<button type="button" onClick={() => !flat && setOpen(!open)} aria-expanded={open} className="flex h-8 shrink-0 items-center gap-2 px-2.5 text-left">
 				<GitBranch className="size-3.5 text-muted-foreground" />
 				<span className="font-mono text-[11px] uppercase tracking-wider text-muted-foreground">Git</span>
 				<span className="truncate text-[11px] text-muted-foreground">
 					{graph ? `${graph.branch ?? "detached"}${graph.dirty ? ` · ${graph.dirty} uncommitted` : ""}` : error ? "not a git repository" : ""}
 				</span>
-				<ChevronDown className={`ml-auto size-3.5 text-muted-foreground transition-transform ${open ? "rotate-180" : ""}`} />
+				{flat ? null : <ChevronDown className={`ml-auto size-3.5 text-muted-foreground transition-transform ${open ? "rotate-180" : ""}`} />}
 			</button>
 			{open && rows.length ? (
-				<div className="min-h-0 overflow-y-auto rounded-xl border bg-card py-1">
+				<div className={flat ? "min-h-0 flex-1 overflow-y-auto py-1" : "min-h-0 overflow-y-auto rounded-xl border bg-card py-1"}>
 					<div className="relative" style={{ height: rows.length * ROW }}>
 						<svg className="absolute left-0 top-0" width={gutter} height={rows.length * ROW} aria-hidden>
 							{edges.map((e, i) => {
