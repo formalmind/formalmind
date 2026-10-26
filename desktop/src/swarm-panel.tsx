@@ -795,7 +795,8 @@ export function BugsView({ folder, files, invoke, apiBase, bugs, openBug, setOpe
 			(text) => setReport({ path: showingPath, text }),
 			(e) => setReport({ path: showingPath, text: `Couldn't read ${showingPath}: ${e}` }),
 		);
-	}, [folder, showingPath, invoke, generated]);
+		// `reload` is Refresh (and the swarm's writes): a report open here is read again too.
+	}, [folder, showingPath, invoke, generated, reload]);
 	const facts = selected ? bugFacts(selected.body) : null;
 	const head = "px-2 pb-1 pt-2 font-mono text-[10px] uppercase tracking-wider text-muted-foreground";
 	const reportItem = (r: string) => (
@@ -1883,6 +1884,18 @@ export function SwarmPanel({ folder, name, scan, bridge, session, file: openPath
 	const [tree, setTree] = useState<string[]>([]);
 	useEffect(() => {
 		void invoke<{ files: string[] }>("folder_tree", { path: folder }).then((t) => setTree(t.files), () => setTree([]));
+		// eslint-disable-next-line react-hooks/exhaustive-deps
+	}, [folder]);
+	// The Refresh button: the folder is read again, so reports and indexes added to the audit folders show in Bugs, and
+	// the findings, plan and bugs are read again too.
+	useEffect(() => {
+		const again = () => {
+			void invoke<{ files: string[] }>("folder_tree", { path: folder }).then((t) => setTree(t.files), () => {});
+			refresh();
+			setReload((n) => n + 1);
+		};
+		window.addEventListener("fm:refresh", again);
+		return () => window.removeEventListener("fm:refresh", again);
 		// eslint-disable-next-line react-hooks/exhaustive-deps
 	}, [folder]);
 	// The file picked in the sidebar's tree (or a proof link) is what the Code tab shows.
