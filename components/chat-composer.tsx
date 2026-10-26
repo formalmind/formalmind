@@ -138,7 +138,7 @@ export function ChatComposer({
 			/>
 
 			{/* Bottom row: model pill, send/stop */}
-			<div className="flex items-center gap-2 px-3 pb-3">
+			<div className="flex flex-wrap items-center gap-2 px-3 pb-3">
 				{model && onModelChange ? (
 				<DropdownMenu>
 						<DropdownMenuTrigger
@@ -205,7 +205,7 @@ export function ChatComposer({
 					disabled={!sendEnabled}
 					aria-label={stopMode ? "Stop" : "Send"}
 					className={cn(
-						"flex h-8 w-8 items-center justify-center rounded-full transition-colors motion-reduce:transition-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2",
+						"ml-auto flex h-8 w-8 shrink-0 items-center justify-center rounded-full transition-colors motion-reduce:transition-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2",
 						sendEnabled ? "bg-primary text-primary-foreground" : "bg-secondary text-muted-foreground",
 					)}
 				>

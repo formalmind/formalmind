@@ -1312,7 +1312,8 @@ function CoverageView({ data, scripts, onOpenFile }: { data: Formal; scripts: Sc
 							) : null}
 						</header>
 						<div className="min-h-0 flex-1 overflow-y-auto">
-							<div className="grid min-h-0 grid-cols-1 divide-y xl:grid-cols-2 xl:divide-x xl:divide-y-0">
+							{/* Side by side when the card is wide enough; stacked (Solidity above the Lean) when it is squeezed. */}
+							<div className="grid min-h-0 grid-cols-1 divide-y [@container(min-width:720px)]:grid-cols-2 [@container(min-width:720px)]:divide-x [@container(min-width:720px)]:divide-y-0">
 								<div className="min-w-0">
 									<p className="px-3 pt-2 font-mono text-[10px] uppercase tracking-wider text-muted-foreground">Solidity</p>
 									<FileView path="f.sol" text={current.solidity} start={current.line} />
