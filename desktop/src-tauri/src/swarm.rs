@@ -544,7 +544,7 @@ The maintainer watches your debugger while you work.\n\n{HUNTER}"
     };
     let common = format!(
         "You are the formalmind {role}, one agent of a small swarm verifying the Ethereum smart contracts in a local folder ({folder}). \
-Paths are relative to that folder. Tools run here, on the maintainer's machine. What you know about the Solidity comes from formal-ast, which reads solc's AST: `functions` lists every function in scope (the contracts the Foundry scripts deploy or call, with their bases), each with its Lean def, place and status on the Proofs page; `function` gives one function's slice (its guards, the storage it reads and writes, the state it touches, its code and its callees' code). Don't list or grep the Solidity sources. The other tools: read_file (numbered line ranges; for Lean files and the test setup a PoC needs), search (regex over the Lean project's .lean files, for lemmas), write_file, run (only lake/forge, no shell), report_bug. Proofs must be pure Lean: no #eval or IO. \
+Paths are relative to that folder. Tools run here, on the maintainer's machine. What you know about the Solidity comes from formal-ast, which reads solc's AST: `functions` lists every function in scope (the contracts the Foundry scripts deploy or call, with their bases), each with its Lean def, place and status on the Proofs page; `function` gives one function's slice (its guards, the storage it reads and writes, the state it touches, its code and its callees' code). Don't list or grep the Solidity sources. The other tools: read_file (numbered line ranges; for Lean files and the test setup a PoC needs), search (regex over the Lean project's .lean files, for lemmas), find (files by name, fuzzy), write_file, run (only lake/forge, no shell), report_bug. Proofs must be pure Lean: no #eval or IO. \
 To see what the bytecode actually does, debug it yourself: debug_open a test file, debug_run a test (a fuzz test with args), then debug_move (over, into, out, continue, back), debug_break, debug_watch a storage variable and debug_look (revert, writes, lines) until you know why; the maintainer watches your debugger. coverage shows which lines and branch sides no test reaches, and explore solves for inputs that reach them (its findings are inputs that make a test fail: debug_run them, then write the PoC). \
 The shared state is .formal/: plan.md is the checklist (`- [ ]` todo, `- [x]` proven, `- [!]` blocked or a bug). {lean} \
 Never leave `sorry`, `admit`, `native_decide` or new axioms. \
@@ -592,6 +592,7 @@ fn tools(role: &str) -> Value {
         json!({ "name": "function", "description": "One function's slice from formal-ast: its guards, the storage it reads and writes, the state declarations it touches, its code and its callees' code. By name (`Contract.fn`) or Lean def.", "input_schema": s(json!({ "name": { "type": "string" } }), vec!["name"]) }),
         json!({ "name": "read_file", "description": "Read a text file in the folder (Lean files, the generated model, the test setup a PoC needs). Long files come back in numbered slices: pass start_line and end_line (up to 300 lines at a time).", "input_schema": s(json!({ "path": { "type": "string" }, "start_line": { "type": "integer" }, "end_line": { "type": "integer" } }), vec!["path"]) }),
         json!({ "name": "search", "description": "Find lines matching a regex in the Lean project's .lean files (path:line: text), e.g. simp lemmas about the monad.", "input_schema": s(json!({ "pattern": { "type": "string" } }), vec!["pattern"]) }),
+        json!({ "name": "find", "description": "Find files by name or path, fuzzy (typos and gaps are fine, e.g. `refinement conservation` or `WP.lean`), best match first. Skips dependencies, build output and .lake.", "input_schema": s(json!({ "query": { "type": "string" } }), vec!["query"]) }),
         json!({ "name": "run", "description": "Run `lake build`, `lake env lean <file>`, `lake exe cache get`, `lake init|new <Name>`, `forge build` or `forge test [args]` in the folder. Returns exit code and output.", "input_schema": s(json!({ "command": { "type": "string" } }), vec!["command"]) }),
     ];
     if role == "auditor" {
@@ -927,6 +928,12 @@ impl Turn<'_> {
                     self.emit("tool", role, item, format!("search {shown}"));
                     let lake = crate::swarm_ctx::lake_dir(&root).map(|d| d.strip_prefix(&root).map(|p| p.to_string_lossy().to_string()).unwrap_or_default()).unwrap_or_default();
                     let r = crate::executor::search_in(&root, input["pattern"].as_str().unwrap_or(""), &lake, &[".lean"]).unwrap_or_else(|e| format!("error: {e}"));
+                    self.emit("result", role, item, r.chars().take(500).collect());
+                    r
+                }
+                "find" => {
+                    self.emit("tool", role, item, format!("find {shown}"));
+                    let r = crate::file_search::find(&root, input["query"].as_str().unwrap_or(""), 30).unwrap_or_else(|e| format!("error: {e}"));
                     self.emit("result", role, item, r.chars().take(500).collect());
                     r
                 }

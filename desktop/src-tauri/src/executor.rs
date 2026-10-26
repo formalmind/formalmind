@@ -119,6 +119,14 @@ fn search(root: &Path, pattern: &str, dir: &str) -> Result<String, String> {
 
 /// Lines matching a regex in the files under `dir` with one of `exts`, as path:line: text.
 pub(crate) fn search_in(root: &Path, pattern: &str, dir: &str, exts: &[&str]) -> Result<String, String> {
+    // fff's index first; the plain walk below if the folder can't be indexed.
+    match crate::file_search::grep(root, pattern, dir, exts) {
+        Err(e) if !e.starts_with("bad pattern") => walk_search(root, pattern, dir, exts),
+        r => r,
+    }
+}
+
+fn walk_search(root: &Path, pattern: &str, dir: &str, exts: &[&str]) -> Result<String, String> {
     let re = regex::Regex::new(pattern).map_err(|e| format!("bad pattern: {e}"))?;
     let files = list_files(root, if dir.is_empty() { "." } else { dir })?;
     let mut hits = vec![];
@@ -169,6 +177,7 @@ pub(crate) async fn call_tool(root: &Path, name: &str, args: &Value) -> String {
             }
         }),
         "search" => search(root, &s("pattern"), &s("dir")),
+        "find" => crate::file_search::find(root, &s("query"), 30),
         "write_file" => inside(root, &s("path")).and_then(|p| {
             if let Some(parent) = p.parent() {
                 std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;

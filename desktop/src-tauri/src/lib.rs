@@ -9,6 +9,7 @@ mod ast;
 mod claude_code;
 mod debug;
 mod executor;
+mod file_search;
 mod swarm;
 mod swarm_ctx;
 mod local;

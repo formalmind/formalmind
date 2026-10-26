@@ -29,6 +29,8 @@ formal-ast = { path = "../../crates/formal-ast" }
 concolity = { git = "https://github.com/formalmind/concolity" }
 revm = { version = "43", default-features = false, features = ["std"] }
 regex = "1"
+# The agents' file search: an index per folder, kept current by a watcher.
+fff-search = "=0.11.0"
 # A file write's diff for the chat.
 similar = "2"
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
