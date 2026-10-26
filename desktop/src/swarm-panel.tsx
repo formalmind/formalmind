@@ -636,14 +636,14 @@ export function useAuditFindings(folder: string, files: string[], invoke: Bridge
 
 /**
  * A side column's width, dragged from its card's right edge (double-click for the default) and kept per view. Returns
- * the width and the handle, which goes inside the column (made `relative`).
+ * the width and the handle, which goes right after the column in its row.
  */
 function useDragWidth(key: string, initial: number) {
 	const [width, setWidth] = useState(() => Number(store.get(key)) || initial);
 	const start = (e: React.PointerEvent<HTMLElement>) => {
 		e.preventDefault();
 		// The row holding the column: the other side keeps at least 280px.
-		const row = e.currentTarget.parentElement?.parentElement;
+		const row = e.currentTarget.parentElement;
 		const max = (row?.clientWidth ?? 900) - 280;
 		const from = { x: e.clientX, w: width };
 		let last = width;
@@ -663,7 +663,8 @@ function useDragWidth(key: string, initial: number) {
 		setWidth(initial);
 		store.set(key, String(initial));
 	};
-	const handle = <div onPointerDown={start} onDoubleClick={reset} title="Drag to resize" className="absolute inset-y-0 right-0 z-10 w-2 cursor-col-resize max-sm:hidden" />;
+	// Sits between the two cards, over the row's gap.
+	const handle = <div onPointerDown={start} onDoubleClick={reset} title="Drag to resize" className="-mx-1 w-3 shrink-0 cursor-col-resize self-stretch max-sm:hidden" />;
 	return { width, handle };
 }
 
@@ -810,8 +811,7 @@ export function BugsView({ folder, files, invoke, apiBase, bugs, openBug, setOpe
 			) : null}
 			{/* On a phone the list sits above the report it opens. */}
 			<div className="flex min-h-0 flex-1 gap-1 max-sm:flex-col">
-				<nav style={{ width: side.width }} className="relative flex shrink-0 flex-col overflow-y-auto rounded-xl border bg-card p-1.5 max-sm:max-h-[40%] max-sm:!w-full">
-					{side.handle}
+				<nav style={{ width: side.width }} className="flex shrink-0 flex-col overflow-y-auto rounded-xl border bg-card p-1.5 max-sm:max-h-[40%] max-sm:!w-full">
 					{findings.length ? (
 						<div className="flex flex-wrap gap-1 px-2 pb-1 pt-2">
 							{(Object.keys(STATUS) as AuditFinding["status"][]).filter((k) => counts[k]).map((k) => {
@@ -875,6 +875,7 @@ export function BugsView({ folder, files, invoke, apiBase, bugs, openBug, setOpe
 					</ul>
 					{otherGroups.map(findingGroup)}
 			</nav>
+				{side.handle}
 			<div className="flex min-w-0 flex-1 flex-col">
 			{picked ? (
 				<DetailCard label={`${picked.report} · ${picked.id}`}>
@@ -1249,8 +1250,7 @@ function CoverageView({ data, scripts, onOpenFile }: { data: Formal; scripts: Sc
 			</div>
 			{/* On a phone the list sits above the function it opens. */}
 			<div className="flex min-h-0 flex-1 gap-1 max-sm:flex-col">
-				<nav style={{ width: side.width }} className="relative flex shrink-0 flex-col overflow-hidden rounded-xl border bg-card max-sm:max-h-[42%] max-sm:!w-full">
-					{side.handle}
+				<nav style={{ width: side.width }} className="flex shrink-0 flex-col overflow-hidden rounded-xl border bg-card max-sm:max-h-[42%] max-sm:!w-full">
 					<div className="flex shrink-0 flex-wrap items-center gap-1 border-b p-1.5">
 						{COVERAGE_FILTERS.map((f) => (
 							<button key={f.id} type="button" onClick={() => setFilter(f.id)} className={`h-6 rounded-md px-2 text-[11px] ${filter === f.id ? "bg-muted font-medium text-foreground" : "text-muted-foreground hover:text-foreground"}`}>
@@ -1286,6 +1286,7 @@ function CoverageView({ data, scripts, onOpenFile }: { data: Formal; scripts: Sc
 						{groups.length === 0 ? <p className="p-2 text-[12px] text-muted-foreground">Nothing matches.</p> : null}
 					</div>
 				</nav>
+				{side.handle}
 				{current && status ? (
 					<section className="flex min-w-0 flex-1 flex-col overflow-hidden rounded-xl border bg-card" style={{ containerType: "inline-size" }}>
 						<header className="flex shrink-0 flex-wrap items-center gap-2 border-b px-3 py-2">
@@ -2551,7 +2552,7 @@ export function SwarmPanel({ folder, name, scan, bridge, session, file: openPath
 						<section className="relative flex min-h-0 shrink-0 flex-col overflow-hidden bg-background" style={{ width: paneWidth, "--fm-top": "0px" } as React.CSSProperties}>
 							<div className="absolute inset-0 flex flex-col overflow-hidden">{modeViews}</div>
 							{/* The view's card edge is the handle: drag the pane's left margin to resize, double-click for the default width. */}
-							<div onPointerDown={startPaneResize} onDoubleClick={resetPaneWidth} title="Drag to resize" className="absolute inset-y-0 left-0 z-30 w-4 cursor-col-resize" />
+							<div onPointerDown={startPaneResize} onDoubleClick={resetPaneWidth} title="Drag to resize" className="absolute inset-y-0 left-1 z-30 w-4 cursor-col-resize" />
 						</section>
 					</>
 				) : null}
