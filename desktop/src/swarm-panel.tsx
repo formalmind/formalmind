@@ -2557,10 +2557,10 @@ export function SwarmPanel({ folder, name, scan, bridge, session, file: openPath
 					<div className="absolute inset-0 flex flex-col overflow-hidden">{modeViews}</div>
 				</div>
 				{paneOpen ? (
-					<section className="relative flex min-h-0 shrink-0 flex-col px-3 pb-3 pt-2" style={{ width: paneWidth }}>
+					<section className="relative flex min-h-0 shrink-0 flex-col border-l px-3 pb-3 pt-2" style={{ width: paneWidth }}>
 						{chatPanel}
-						{/* Drag the pane's left margin to resize; double-click for the default width. */}
-						<div onPointerDown={startPaneResize} onDoubleClick={resetPaneWidth} title="Drag to resize" className="absolute inset-y-0 left-0 z-30 w-3 cursor-col-resize" />
+						{/* Drag the separator to resize; double-click for the default width. */}
+						<div onPointerDown={startPaneResize} onDoubleClick={resetPaneWidth} title="Drag to resize" className="absolute inset-y-0 -left-1.5 z-30 w-3 cursor-col-resize" />
 					</section>
 				) : null}
 			</div>
