@@ -2511,10 +2511,10 @@ export function SwarmPanel({ folder, name, scan, bridge, session, file: openPath
 				</div>
 				{paneOpen ? (
 					<>
-						{/* Drag to resize the pane; double-click for the default width. */}
-						<div onPointerDown={startPaneResize} onDoubleClick={resetPaneWidth} title="Drag to resize" className="w-1 shrink-0 cursor-col-resize bg-border/60 transition-colors hover:bg-ring/40" />
 						<section className="relative flex min-h-0 shrink-0 flex-col overflow-hidden bg-background" style={{ width: paneWidth, "--fm-top": "0px" } as React.CSSProperties}>
 							<div className="absolute inset-0 flex flex-col overflow-hidden">{modeViews}</div>
+							{/* The view's card edge is the handle: drag the pane's left margin to resize, double-click for the default width. */}
+							<div onPointerDown={startPaneResize} onDoubleClick={resetPaneWidth} title="Drag to resize" className="absolute inset-y-0 left-0 z-30 w-4 cursor-col-resize" />
 						</section>
 					</>
 				) : null}
