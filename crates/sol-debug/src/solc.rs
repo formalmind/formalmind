@@ -11,11 +11,41 @@ use serde_json::{json, Value};
 use std::collections::BTreeMap;
 use std::process::{Command, Stdio};
 
+/// How solc optimizes. The debugger's default is no optimizer, so source maps are exact to the statement; coverage
+/// uses the project's own settings, so it measures the bytecode that ships.
+#[derive(Clone, Debug, Default)]
+pub struct Settings {
+    /// Optimizer runs; None: the optimizer is off.
+    pub optimizer: Option<u64>,
+    pub via_ir: bool,
+}
+
+impl Settings {
+    /// `[profile.default]` of foundry.toml: `optimizer`, `optimizer_runs` (200 by default, as in forge), `via_ir`.
+    pub fn from_foundry(root: &std::path::Path) -> Settings {
+        let Ok(text) = std::fs::read_to_string(root.join("foundry.toml")) else { return Settings::default() };
+        let Ok(doc) = text.parse::<toml::Table>() else { return Settings::default() };
+        let p = doc.get("profile").and_then(|p| p.get("default"));
+        let get = |k: &str| p.and_then(|p| p.get(k));
+        let on = get("optimizer").and_then(|v| v.as_bool()).unwrap_or(false);
+        let runs = get("optimizer_runs").and_then(|v| v.as_integer()).unwrap_or(200) as u64;
+        Settings { optimizer: on.then_some(runs), via_ir: get("via_ir").and_then(|v| v.as_bool()).unwrap_or(false) }
+    }
+}
+
 /// Compiles the entry file (and its imports) with everything the debugger needs.
 pub fn compile(project: &Project, entry: &str) -> Result<Value> {
+    compile_entries(project, &[entry.to_string()], &Settings::default())
+}
+
+/// Compiles several entry files in one solc run (a whole test suite), with these settings.
+pub fn compile_entries(project: &Project, entries: &[String], opts: &Settings) -> Result<Value> {
+    let entry = entries.first().map(String::as_str).unwrap_or_default();
     let entry_source = std::fs::read_to_string(project.root.join(entry)).with_context(|| format!("can't read {entry}"))?;
     let version = project.solc_version.clone().or_else(|| pragma_version(&entry_source));
     let solc = solc_binary(version.as_deref())?;
+    // Only what the session reads: `evm.deployedBytecode.opcodes` (solc's text disassembly) alone cost ~20 s of 97 on
+    // asyncswap/contracts' suite, and the TUI disassembles the bytecode itself.
     let wanted = [
         "abi",
         "evm.bytecode.object",
@@ -25,20 +55,21 @@ pub fn compile(project: &Project, entry: &str) -> Result<Value> {
         "evm.deployedBytecode.sourceMap",
         "evm.deployedBytecode.linkReferences",
         "evm.deployedBytecode.immutableReferences",
-        "evm.deployedBytecode.opcodes",
         "evm.methodIdentifiers",
         "storageLayout",
     ];
     // No optimizer: the source maps are then exact to the statement. (An optimized build maps too, only coarser.)
     let mut settings = json!({
         "remappings": project.remappings,
-        "optimizer": { "enabled": false },
+        "optimizer": { "enabled": opts.optimizer.is_some(), "runs": opts.optimizer.unwrap_or(200) },
+        "viaIR": opts.via_ir,
         "outputSelection": { "*": { "*": wanted, "": ["ast"] } },
     });
     if let Some(evm) = &project.evm_version {
         settings["evmVersion"] = json!(evm);
     }
-    let input = json!({ "language": "Solidity", "sources": { entry: { "urls": [entry] } }, "settings": settings });
+    let sources: serde_json::Map<String, Value> = entries.iter().map(|e| (e.clone(), json!({ "urls": [e] }))).collect();
+    let input = json!({ "language": "Solidity", "sources": sources, "settings": settings });
     let mut child = Command::new(&solc)
         .args(["--standard-json", "--base-path", ".", "--allow-paths", "."])
         .current_dir(&project.root)
@@ -151,6 +182,8 @@ pub struct Artifact {
     pub storage_layout: Value,
     /// Libraries the init code needs: (library file, library name, byte offsets of the 20-byte placeholders).
     pub links: Vec<(String, String, Vec<usize>)>,
+    /// The same for the runtime code (what `vm.getDeployedCode` must fill in).
+    pub runtime_links: Vec<(String, String, Vec<usize>)>,
     /// Byte ranges of the runtime code that differ once deployed: immutables and library addresses.
     pub runtime_holes: Vec<(usize, usize)>,
 }
@@ -169,13 +202,18 @@ impl Artifact {
             }
             Ok(hex::decode(s)?)
         };
-        let mut links = Vec::new();
-        for (lib_file, libs) in c["evm"]["bytecode"]["linkReferences"].as_object().into_iter().flatten() {
-            for (lib, refs) in libs.as_object().into_iter().flatten() {
-                let at = refs.as_array().into_iter().flatten().filter_map(|r| r["start"].as_u64().map(|s| s as usize)).collect();
-                links.push((lib_file.clone(), lib.clone(), at));
+        let link_refs = |v: &Value| {
+            let mut links = Vec::new();
+            for (lib_file, libs) in v.as_object().into_iter().flatten() {
+                for (lib, refs) in libs.as_object().into_iter().flatten() {
+                    let at = refs.as_array().into_iter().flatten().filter_map(|r| r["start"].as_u64().map(|s| s as usize)).collect();
+                    links.push((lib_file.clone(), lib.clone(), at));
+                }
             }
-        }
+            links
+        };
+        let links = link_refs(&c["evm"]["bytecode"]["linkReferences"]);
+        let runtime_links = link_refs(&c["evm"]["deployedBytecode"]["linkReferences"]);
         let init = code(&c["evm"]["bytecode"]["object"])?;
         if init.is_empty() {
             bail!("{name} has no bytecode (abstract contract or interface?)");
@@ -194,6 +232,7 @@ impl Artifact {
             runtime: CodeMap::new(runtime, c["evm"]["deployedBytecode"]["sourceMap"].as_str().unwrap_or(""), sources),
             storage_layout: c["storageLayout"].clone(),
             links,
+            runtime_links,
             runtime_holes: holes(&c["evm"]["deployedBytecode"]),
         })
     }
@@ -250,7 +289,7 @@ fn holes(obj: &Value) -> Vec<(usize, usize)> {
     out
 }
 
-fn same_outside(a: &[u8], b: &[u8], holes: &[(usize, usize)]) -> bool {
+pub fn same_outside(a: &[u8], b: &[u8], holes: &[(usize, usize)]) -> bool {
     let mut mask = vec![false; b.len()];
     for &(s, l) in holes {
         for m in mask.iter_mut().skip(s).take(l) {

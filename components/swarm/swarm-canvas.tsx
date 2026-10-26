@@ -6,7 +6,7 @@ import { Link } from "react-router";
 import * as DialogPrimitive from "@radix-ui/react-dialog";
 import { useIsMobile } from "@/hooks/use-mobile";
 import type { SwarmItem, SwarmProject, SwarmRole, SwarmRun, SwarmState } from "@/lib/swarm";
-import { ROLE_COLORS } from "@/lib/swarm-roles";
+import { ROLE_COLORS, roleName } from "@/lib/swarm-roles";
 
 export { ROLE_COLORS };
 
@@ -148,14 +148,15 @@ type Scene = {
 
 const HOME_X: Record<SwarmRole, number> = {
 	dispatcher: 640,
-	planner: 120,
-	prover: 290,
-	rebuilder: 460,
-	editor: 590,
-	reviewer: 720,
-	merger: 860,
-	assistant: 980,
-	chief: 1110,
+	planner: 110,
+	prover: 245,
+	rebuilder: 380,
+	editor: 500,
+	reviewer: 620,
+	merger: 740,
+	assistant: 860,
+	chief: 980,
+	hunter: 1110,
 };
 
 /**
@@ -320,7 +321,7 @@ function buildScript(start: Scene): Step[] {
 	];
 }
 
-const COST_ROLES: Record<string, SwarmRole> = { plan: "planner", prove: "prover", rebuild: "rebuilder", review: "reviewer", merge: "merger", editor: "editor", chief: "chief", assistant: "assistant" };
+const COST_ROLES: Record<string, SwarmRole> = { plan: "planner", prove: "prover", rebuild: "rebuilder", review: "reviewer", merge: "merger", editor: "editor", chief: "chief", assistant: "assistant", hunt: "hunter" };
 
 /** Lane an open item sits in, from its fm: labels. */
 /** The role an open question on this item is waiting for, from its fm:ask-<role> label. */
@@ -634,8 +635,10 @@ function cloneScene(scene: Scene): Scene {
  * `fill` makes the board fill its parent, scaled to fit both ways and centred, below a strip kept clear
  * for the pinned controls; otherwise it scales to the width. `title` and `actions` are pinned top-left and top-right.
  */
-export function SwarmCanvas({ state, fill = false, contain = false, title, actions, repo, onTalk, local = false, below, beside, side, pace = 1 }: {
+export function SwarmCanvas({ state, fill = false, contain = false, title, actions, repo, onTalk, local = false, below, beside, side, pace = 1, roles }: {
 	state: SwarmState | null;
+	/** Only these agents are on the board (the app's Concolic tab: the hunter alone); all of them when unset. */
+	roles?: SwarmRole[];
 	/** How fast the replay plays: 2 is twice as lively (the phone's introduction); 1 is the landing page's pace. */
 	pace?: number;
 	/** A swarm running on this computer (the desktop app): no dispatcher schedule to show. */
@@ -1254,7 +1257,7 @@ export function SwarmCanvas({ state, fill = false, contain = false, title, actio
 						</Panel>
 					) : null}
 
-					{ROLES.map((role, i) => (
+					{ROLES.filter((r) => !roles || roles.includes(r)).map((role, i) => (
 						<SwarmCursor
 							key={role}
 							role={role}
@@ -1518,7 +1521,7 @@ export function SwarmCursor({ role, x, y, say, turn, thinking, where, onWhereEnt
 					const pill = (
 						<>
 							{/* Its turn or working: the name shimmers. */}
-							<span className={turn || thinking ? "fm-text-shimmer-light" : undefined}>{role}</span>
+							<span className={turn || thinking ? "fm-text-shimmer-light" : undefined}>{roleName(role)}</span>
 							{/* Working right now: a small spinner by the name. */}
 							{thinking ? <span className="size-2 animate-spin rounded-full border border-white/25 border-t-white/80 [animation-duration:1.4s] motion-reduce:animate-none" aria-label="working" /> : null}
 							{turn ? <span className="fm-text-shimmer-light font-normal">· turn</span> : null}
@@ -1527,7 +1530,7 @@ export function SwarmCursor({ role, x, y, say, turn, thinking, where, onWhereEnt
 					const style = { backgroundColor: color };
 					const cls = "pointer-events-auto inline-flex items-center gap-1 whitespace-nowrap rounded-full px-2 py-0.5 text-[12px] font-medium text-white shadow-sm";
 					return onTalk ? (
-						<button type="button" data-component onClick={() => onTalk(role)} title={`Talk to the ${role}`} aria-label={`Talk to the ${role}`} className={`${cls} cursor-pointer transition-transform hover:scale-105 active:scale-95`} style={style}>
+						<button type="button" data-component onClick={() => onTalk(role)} title={`Talk to the ${roleName(role)}`} aria-label={`Talk to the ${roleName(role)}`} className={`${cls} cursor-pointer transition-transform hover:scale-105 active:scale-95`} style={style}>
 							{pill}
 						</button>
 					) : (

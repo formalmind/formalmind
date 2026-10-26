@@ -59,7 +59,7 @@ async function run(cmd: RelayCommandRow) {
 			return invoke("swarm_stop", { folder: cmd.folder, run: cmd.run });
 		case "start": {
 			const p = store.get("fm:provider");
-			const provider = p === "anthropic" || p === "openai" ? p : "formal";
+			const provider = p === "anthropic" || p === "openai" || p === "claude-code" ? p : "formal";
 			const budget = cmd.budget ?? (Number(store.get(`fm:budget:${cmd.folder}`)) || 5);
 			const model = store.get("fm:model") ?? undefined;
 			return invoke("swarm_start", { request: { folder: cmd.folder, goal: cmd.goal?.trim() || null, budget_usd: budget, api_base: apiBase(), provider, model, session: cmd.run ?? "swarm", only_queued: false } });

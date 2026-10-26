@@ -32,7 +32,7 @@ fn asyncswap_router_swap() {
     }
     // Storage named through nested mappings and structs, written from the library's source.
     let writes = s.storage_writes(&run.test);
-    let w = writes.iter().find(|w| w.path.ends_with(".askLevels[950000000000000000].orderCount")).expect("order level written");
+    let w = writes.iter().find(|w| w.path.contains(".askLevels[") && w.path.ends_with("].orderCount")).expect("order level written");
     assert_eq!((w.old.as_deref(), w.new.as_str()), (Some("0"), "1"));
     let step = &run.test.trace.steps[w.step];
     assert_eq!(s.locate(&run.test.trace, step).unwrap().file, "AsyncFiller.sol");

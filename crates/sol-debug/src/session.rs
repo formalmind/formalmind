@@ -49,6 +49,8 @@ pub struct Session {
     /// solc didn't build (a Huff port called through its Solidity interfaces).
     pub selectors: HashMap<String, String>,
     pub evm: Evm,
+    /// The libraries `getCode`'s map was built with: it is rebuilt only when they change.
+    served: Option<HashMap<usize, Address>>,
 }
 
 /// Where a step is in the Solidity source.
@@ -87,6 +89,15 @@ impl Run {
     }
 }
 
+/// See [`Session::snapshot`].
+pub struct Snapshot {
+    db: CacheDB<Backend>,
+    cheats: crate::cheats::Cheats,
+    block: revm::context::BlockEnv,
+    libraries: HashMap<usize, Address>,
+    served: Option<HashMap<usize, Address>>,
+}
+
 /// A Foundry test run: `setUp()` (not traced unless asked) and the test function.
 pub struct TestRun {
     pub address: Address,
@@ -99,7 +110,19 @@ impl Session {
     pub fn compile(root: &Path, entry: &str) -> Result<Self> {
         let project = Project::load(root)?;
         let output = solc::compile(&project, entry)?;
-        let sources = Sources::load(&output, &project.root, &project.remappings);
+        Self::from_output(project, &output)
+    }
+
+    /// Compiles several entry files in one solc run (a test suite), with these settings.
+    pub fn compile_with(root: &Path, entries: &[String], settings: &solc::Settings) -> Result<Self> {
+        let project = Project::load(root)?;
+        let output = solc::compile_entries(&project, entries, settings)?;
+        Self::from_output(project, &output)
+    }
+
+    /// A session over an existing solc output (one compile shared by several sessions, e.g. one per thread).
+    pub fn from_output(project: Project, output: &serde_json::Value) -> Result<Self> {
+        let sources = Sources::load(output, &project.root, &project.remappings);
         let mut artifacts = Vec::new();
         let mut selectors = HashMap::new();
         for (file, contracts) in output["contracts"].as_object().into_iter().flatten() {
@@ -108,7 +131,7 @@ impl Session {
                     selectors.entry(sel.as_str().unwrap_or("").to_string()).or_insert_with(|| sig.clone());
                 }
                 if c["evm"]["bytecode"]["object"].as_str().is_some_and(|s| !s.is_empty()) {
-                    artifacts.push(Artifact::load(&output, &sources, file, name)?);
+                    artifacts.push(Artifact::load(output, &sources, file, name)?);
                 }
             }
         }
@@ -130,7 +153,10 @@ impl Session {
         // ffi runs only compilers a test needs to build its contracts (a Huff port compiles with hnc).
         evm.inspector.cheats.ffi_allow = vec!["hnc".into()];
         evm.inspector.cheats.ffi_dir = project.root.clone();
-        Ok(Session { project, sources, artifacts, libraries: HashMap::new(), code_index: HashMap::new(), selectors, evm })
+        evm.inspector.cheats.contracts = std::sync::Arc::new(
+            artifacts.iter().map(|a| (format!("{}:{}", a.file, a.name), a.runtime.code.clone(), a.runtime_holes.clone(), a.storage_layout.clone())).collect(),
+        );
+        Ok(Session { project, sources, artifacts, libraries: HashMap::new(), code_index: HashMap::new(), selectors, evm, served: None })
     }
 
     /// A contract by name, or `File.sol:Name` when the name is ambiguous.
@@ -203,7 +229,9 @@ impl Session {
     fn run_tx(&mut self, from: Address, kind: TxKind, data: Bytes, value: U256) -> Result<Run> {
         // The transaction's chain id must be the chain's.
         let chain = self.evm.ctx.cfg.chain_id;
-        let tx = TxEnv::builder().caller(from).kind(kind).data(data).value(value).gas_limit(TX_GAS).chain_id(Some(chain)).build_fill();
+        // Priced at the base fee, which `vm.fee` may have raised: forge doesn't reject a test for its gas price.
+        let price = self.evm.ctx.block.basefee as u128;
+        let tx = TxEnv::builder().caller(from).kind(kind).data(data).value(value).gas_limit(TX_GAS).gas_price(price).chain_id(Some(chain)).build_fill();
         let result = self.evm.inspect_tx_commit(tx).map_err(|e| anyhow!("transaction failed to run: {e:?}"))?;
         let trace = self.evm.inspector.take();
         Ok(match result {
@@ -323,6 +351,49 @@ impl Session {
         self.evm.ctx.cfg.chain_id = id;
     }
 
+    /// The chain and the cheatcode state, to come back to.
+    pub fn snapshot(&self) -> Snapshot {
+        Snapshot {
+            db: self.evm.ctx.db().clone(),
+            cheats: self.evm.inspector.cheats.clone(),
+            block: self.evm.ctx.block.clone(),
+            libraries: self.libraries.clone(),
+            served: self.served.clone(),
+        }
+    }
+
+    pub fn restore(&mut self, s: &Snapshot) {
+        *self.evm.ctx.db_mut() = s.db.clone();
+        self.evm.inspector.cheats = s.cheats.clone();
+        self.evm.ctx.block = s.block.clone();
+        self.libraries = s.libraries.clone();
+        self.served = s.served.clone();
+    }
+
+    /// Deploys a Foundry test contract the way forge does (funded, labelled) and runs its `setUp()`, untraced.
+    pub fn deploy_test(&mut self, contract: &str) -> Result<Address> {
+        let ci = self.artifact(contract)?;
+        self.serve_get_code()?;
+        let init = self.linked_init(ci)?;
+        let deploy = self.transact_quiet(SENDER, TxKind::Create, init.into(), U256::ZERO)?;
+        let address = deploy
+            .created
+            .ok_or_else(|| anyhow!("deploying {contract} failed: {}", deploy.revert_reason().unwrap_or_else(|| format!("0x{}", hex::encode(&deploy.output)))))?;
+        let mut info = self.evm.ctx.db().basic_ref(address)?.unwrap_or_default();
+        info.balance = U256::from(1) << 96;
+        self.evm.ctx.db_mut().insert_account_info(address, info);
+        let name = self.artifacts[ci].name.clone();
+        self.evm.inspector.cheats.labels.insert(address, name);
+        self.evm.inspector.cheats.test_contract = Some(address);
+        if self.artifacts[ci].methods.values().any(|s| s == "setUp()") {
+            let setup = self.transact_quiet(SENDER, TxKind::Call(address), keccak256("setUp()".as_bytes())[..4].to_vec().into(), U256::ZERO)?;
+            if !setup.success {
+                bail!("setUp() reverted: {}", setup.revert_reason().unwrap_or_else(|| format!("0x{}", hex::encode(&setup.output))));
+            }
+        }
+        Ok(address)
+    }
+
     /// Runs a Foundry test: deploys the test contract, runs `setUp()` (traced only when asked), then the test.
     pub fn run_test(&mut self, contract: &str, test: &str, trace_setup: bool) -> Result<TestRun> {
         let ci = self.artifact(contract)?;
@@ -338,6 +409,7 @@ impl Session {
         self.evm.ctx.db_mut().insert_account_info(address, info);
         let name = self.artifacts[ci].name.clone();
         self.evm.inspector.cheats.labels.insert(address, name);
+        self.evm.inspector.cheats.test_contract = Some(address);
 
         let has_setup = self.artifacts[ci].methods.values().any(|s| s == "setUp()");
         let setup_data: Bytes = keccak256("setUp()".as_bytes())[..4].to_vec().into();
@@ -358,7 +430,10 @@ impl Session {
     }
 
     /// Makes `vm.getCode` answer with this compile's (linked) creation code, by file, name or both.
-    fn serve_get_code(&mut self) -> Result<()> {
+    pub fn serve_get_code(&mut self) -> Result<()> {
+        if self.served.as_ref() == Some(&self.libraries) && !self.evm.inspector.cheats.code.is_empty() {
+            return Ok(());
+        }
         let mut code = HashMap::new();
         for i in 0..self.artifacts.len() {
             let init = self.linked_init(i)?;
@@ -368,7 +443,26 @@ impl Session {
                 code.entry(key).or_insert_with(|| init.clone());
             }
         }
-        self.evm.inspector.cheats.code = code;
+        self.evm.inspector.cheats.code = std::sync::Arc::new(code);
+        // Runtime code with the deployed libraries' addresses in it, as forge's getDeployedCode returns it.
+        let mut deployed = HashMap::new();
+        for a in &self.artifacts {
+            let mut runtime = a.runtime.code.clone();
+            for (file, lib, at) in &a.runtime_links {
+                let Some(addr) = self.artifact(&format!("{file}:{lib}")).ok().and_then(|li| self.libraries.get(&li)) else { continue };
+                for &s in at {
+                    if let Some(slot) = runtime.get_mut(s..s + 20) {
+                        slot.copy_from_slice(addr.as_slice());
+                    }
+                }
+            }
+            let base = a.file.rsplit('/').next().unwrap_or(&a.file).to_string();
+            for key in [base.clone(), format!("{base}:{}", a.name), a.file.clone(), format!("{}:{}", a.file, a.name), a.name.clone()] {
+                deployed.entry(key).or_insert_with(|| runtime.clone());
+            }
+        }
+        self.evm.inspector.cheats.deployed = std::sync::Arc::new(deployed);
+        self.served = Some(self.libraries.clone());
         Ok(())
     }
 

@@ -4,6 +4,7 @@
 //! mode over the sol-debug engine (debug.rs).
 
 mod anvil;
+mod analysis;
 mod ast;
 mod claude_code;
 mod debug;
@@ -143,6 +144,8 @@ pub fn run() {
                     model: env("FM_SWARM_MODEL"),
                     session: env("FM_SWARM_SESSION"),
                     only_queued: env("FM_SWARM_ONLY_QUEUED").map(|v| v == "1"),
+                    // A bug search (the hunter alone); set but empty means the whole codebase.
+                    hunt: std::env::var("FM_SWARM_HUNT").ok(),
                 };
                 if let Err(e) = swarm::swarm_start(app.handle().clone(), app.state::<swarm::Swarms>(), request) {
                     eprintln!("FM_SWARM_AUTOSTART: {e}");
@@ -185,6 +188,7 @@ pub fn run() {
             swarm::swarm_stop,
             swarm::swarm_say,
             swarm::swarm_triage,
+            swarm::swarm_hunt,
             claude_code::claude_code_status,
             swarm::swarm_running,
             swarm::swarm_suggest,
