@@ -4,7 +4,7 @@ import { createPortal } from "react-dom";
 import { NvimTerminal } from "./nvim-terminal";
 import { reportError } from "@/lib/report-error";
 import { JsonTree } from "./json-tree";
-import { ArrowDown, Bug, Check, ChevronDown, Code2, Copy, FileCode2, FileDown, Network, Play, Plus, ScanSearch, Square, Terminal, ThumbsDown, ThumbsUp, WandSparkles } from "lucide-react";
+import { ArrowDown, Bug, Check, ChevronDown, Code2, Copy, FileCode2, FileDown, Network, Play, Plus, ScanSearch, Terminal, ThumbsDown, ThumbsUp, WandSparkles } from "lucide-react";
 
 // The project roadmap (GitHub Projects-style), the same view the web app had on its own page.
 import { motion as vimMotion, search as vimSearch, setVimMode, useVimMode, type Cursor } from "@/components/vim-mode";
@@ -2165,7 +2165,7 @@ export function SwarmPanel({ folder, name, scan, bridge, session, file: openPath
 						</button>
 					)}
 				</div>
-				<div className="mt-1 flex min-h-0 flex-1 flex-col overflow-hidden rounded-xl border bg-card">
+				<div className={`mt-1 flex min-h-0 flex-1 flex-col overflow-hidden ${slot ? "" : "rounded-xl border bg-card"}`}>
 				{/* The scrubber: a tick per message along the left edge, to preview and jump through the chat. */}
 				<div className="relative flex min-h-0 flex-1 flex-col">
 				<ChatScrubber
@@ -2218,8 +2218,9 @@ export function SwarmPanel({ folder, name, scan, bridge, session, file: openPath
 						value={run ? say : goal}
 						onChange={(e) => (run ? setSay(e.target.value) : setGoal(e.target.value))}
 						onSubmit={() => void (run ? send() : start())}
-						onStop={() => {}}
-						isLoading={false}
+						// While it runs, the send arrow is Stop until you type (then it sends your message to the agents).
+						onStop={() => run && void invoke("swarm_stop", { folder, run })}
+						isLoading={Boolean(run)}
 						modelPicker={{
 							value: pickedModel,
 							options: models,
@@ -2230,15 +2231,11 @@ export function SwarmPanel({ folder, name, scan, bridge, session, file: openPath
 							},
 						}}
 						placeholder={run ? "Talk to the agents: a question, a new focus, an idea to check…" : "What should the swarm focus on? (optional) ↑ starts it"}
-						// The composer's top left: the run control (Stop while it runs; Start, or Resume with plan items left,
-						// when it doesn't), then the project this chat talks to.
+						// The composer's top left: Start, or Resume with plan items left, when it isn't running (Stop is the send
+						// button while it runs), then the project this chat talks to.
 						context={
 							<span className="inline-flex items-center gap-1.5">
-								{run ? (
-									<button type="button" onClick={() => void invoke("swarm_stop", { folder, run })} title="Stop the swarm" className="inline-flex h-8 items-center gap-1.5 rounded-full px-3 text-[13px] font-medium text-red-600 hover:bg-red-500/10 dark:text-red-400">
-										<Square className="size-2.5 fill-current" />Stop
-									</button>
-								) : (
+								{run ? null : (
 									<button type="button" onClick={() => void start()} disabled={Boolean(ownKey) && !hasKey} title={ownKey && !hasKey ? `Add your ${ownKey} key in Settings first` : "Start the swarm"} className="btn-dark inline-flex h-8 items-center gap-1.5 px-3 text-[13px] disabled:opacity-50">
 										<Play className="size-3" />{plan.some((i) => i.mark === " ") ? "Resume" : "Start"}
 									</button>
