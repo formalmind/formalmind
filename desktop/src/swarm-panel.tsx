@@ -35,7 +35,7 @@ export type Bridge = {
 
 import type { Diagnostic } from "@/lib/ast/run";
 
-export type Ev = { folder?: string; run: string; kind: "start" | "status" | "context" | "say" | "tool" | "result" | "you" | "bug" | "plan" | "done" | "error"; role: string; item: string; text: string; spent: number; /** ms since the epoch (newer logs) */ at?: number };
+export type Ev = { folder?: string; run: string; kind: "start" | "status" | "context" | "say" | "ask" | "tool" | "result" | "you" | "bug" | "plan" | "done" | "error"; role: string; item: string; text: string; spent: number; /** ms since the epoch (newer logs) */ at?: number };
 type Item = { index: number; mark: string; text: string };
 /** A claim in .formal/statements.md (desktop/src-tauri/src/statements.rs), for the swarm to prove or disprove. */
 type Statement = { id: string; mark: string; author: string; text: string; details: string[]; obligations: { mark: string; text: string }[] };
@@ -289,7 +289,17 @@ function ReplyActions({ text }: { text: string }) {
 	);
 }
 
-export function AgentMessage({ e, onBug }: { e: Ev; onBug: () => void }) {
+/** An `ask` event's text: the question, and the replies the agent drafted for you. */
+function parseAsk(text: string): { question: string; replies: string[] } {
+	try {
+		const v = JSON.parse(text) as { question?: unknown; replies?: unknown };
+		return { question: String(v.question ?? ""), replies: Array.isArray(v.replies) ? v.replies.map(String) : [] };
+	} catch {
+		return { question: text, replies: [] };
+	}
+}
+
+export function AgentMessage({ e, onBug, onReply }: { e: Ev; onBug: () => void; /** A drafted reply picked: it goes to the composer to edit or send. */ onReply?: (text: string) => void }) {
 	const color = e.kind === "bug" ? "#dc2626" : colorOf(e.role);
 	return (
 		<Message>
@@ -306,6 +316,24 @@ export function AgentMessage({ e, onBug }: { e: Ev; onBug: () => void }) {
 					</button>
 				) : e.kind === "plan" || e.kind === "done" ? (
 					<p className="text-[13px] text-muted-foreground">{e.text}</p>
+				) : e.kind === "ask" ? (
+					(() => {
+						const ask = parseAsk(e.text);
+						return (
+							<div className="space-y-2">
+								<ChatMarkdown>{ask.question}</ChatMarkdown>
+								{ask.replies.length ? (
+									<div className="flex flex-wrap gap-1.5">
+										{ask.replies.map((r) => (
+											<button key={r} type="button" onClick={() => onReply?.(r)} disabled={!onReply} className="max-w-full rounded-2xl border bg-background px-3 py-1 text-left text-[13px] hover:bg-muted enabled:cursor-pointer">
+												{r}
+											</button>
+										))}
+									</div>
+								) : null}
+							</div>
+						);
+					})()
 				) : (
 					<div className="group/reply">
 						<ChatMarkdown>{e.text}</ChatMarkdown>
@@ -1885,7 +1913,7 @@ export function SwarmPanel({ folder, name, scan, bridge, session, file: openPath
 			if (payload.run === viewingRef.current) setEvents((all) => trim([...all, payload]));
 			if (["plan", "bug", "done"].includes(payload.kind) || (payload.kind === "status" && / is working$/.test(payload.text))) refresh();
 			// An agent's statement shows in the list straight away.
-			if (payload.kind === "tool" && payload.text.startsWith("add_statement")) refresh();
+			if (payload.kind === "ask" || (payload.kind === "tool" && /^(add_statement|formalize_result|confirm_statement)/.test(payload.text))) refresh();
 			// A finding recorded from a report shows in Bugs straight away.
 			if (payload.kind === "tool" && payload.text.startsWith("record_finding")) setReload((n) => n + 1);
 			if (["plan", "bug", "done"].includes(payload.kind)) {
@@ -2013,7 +2041,7 @@ export function SwarmPanel({ folder, name, scan, bridge, session, file: openPath
 	const draft = async () => {
 		if (!run || drafting) return;
 		setDrafting(true);
-		const transcript = events.filter((e) => e.kind === "say" || e.kind === "you" || e.kind === "bug" || e.kind === "done").slice(-20).map((e) => `${e.role}${e.item ? ` (item ${e.item})` : ""}: ${e.text}`).join("\n");
+		const transcript = events.filter((e) => e.kind === "say" || e.kind === "ask" || e.kind === "you" || e.kind === "bug" || e.kind === "done").slice(-20).map((e) => `${e.role}${e.item ? ` (item ${e.item})` : ""}: ${e.kind === "ask" ? parseAsk(e.text).question : e.text}`).join("\n");
 		await invoke<string>("swarm_suggest", { folder, apiBase: apiBase(), provider, run, transcript })
 			.then((text) => text && setSay(text))
 			.catch((e) => setError(String(e)))
@@ -2063,6 +2091,10 @@ export function SwarmPanel({ folder, name, scan, bridge, session, file: openPath
 					) : (
 						<AgentMessage
 							e={block.e}
+							onReply={(text) => {
+								setSay(text);
+								toggleChat(true);
+							}}
 							onBug={() => {
 								// Open the bugs card on this report.
 								const hit = bugs.find((b) => block.e.text.includes(b.file));
@@ -2196,6 +2228,17 @@ export function SwarmPanel({ folder, name, scan, bridge, session, file: openPath
 		);
 	};
 	const setStatementMark = (id: string, mark: string) => void invoke<Statement[]>("swarm_statement_mark", { folder, id, mark }).then(setStatements, (e) => setClaimError(String(e)));
+	const confirmStatement = (id: string) => void invoke<Statement[]>("swarm_confirm_statement", { folder, id }).then(setStatements, (e) => setClaimError(String(e)));
+	// What you say a formalized statement should mean instead (empty: just try again).
+	const [correcting, setCorrecting] = useState<{ id: string; text: string } | null>(null);
+	const correctStatement = (id: string, text: string) =>
+		void invoke<Statement[]>("swarm_correct_statement", { folder, id, text }).then(
+			(s) => {
+				setStatements(s);
+				setCorrecting(null);
+			},
+			(e) => setClaimError(String(e)),
+		);
 	const removeStatement = (id: string) => void invoke<Statement[]>("swarm_remove_statement", { folder, id }).then(setStatements, (e) => setClaimError(String(e)));
 	const proved = statements.filter((st) => st.mark === "x").length;
 	const statementsList = (
@@ -2250,7 +2293,31 @@ export function SwarmPanel({ folder, name, scan, bridge, session, file: openPath
 										))}
 									</span>
 								) : null}
-								{st.mark === "?" && st.author !== "you" ? (
+								{st.mark === "?" && st.details.some((d) => d.startsWith("kind: ")) ? (
+									correcting?.id === st.id ? (
+										<form
+											className="mt-1 flex gap-1"
+											onSubmit={(e) => {
+												e.preventDefault();
+												correctStatement(st.id, correcting.text);
+											}}
+										>
+											<input autoFocus value={correcting.text} onChange={(e) => setCorrecting({ id: st.id, text: e.target.value })} placeholder="What it should mean…" aria-label={`What ${st.id} should mean`} className="h-6 min-w-0 flex-1 rounded border bg-background px-1.5 text-[11px] outline-none focus-visible:ring-1 focus-visible:ring-ring" />
+											<button type="submit" className="rounded border bg-background px-1.5 text-[11px] hover:bg-muted">Send</button>
+										</form>
+									) : (
+										<span className="mt-1 flex items-center gap-1">
+											<span className="mr-0.5 text-[11px] text-violet-600">Is this what you meant?</span>
+											<button type="button" onClick={() => confirmStatement(st.id)} className="rounded border bg-background px-1.5 text-[11px] hover:bg-muted">Yes</button>
+											<button type="button" onClick={() => setCorrecting({ id: st.id, text: "" })} className="rounded px-1.5 text-[11px] text-muted-foreground hover:bg-muted hover:text-foreground">Edit</button>
+										</span>
+									)
+								) : st.mark === "?" && st.details.some((d) => d.startsWith("note: ")) ? (
+									<span className="mt-1 flex gap-1">
+										<button type="button" onClick={() => correctStatement(st.id, "")} className="rounded border bg-background px-1.5 text-[11px] hover:bg-muted">Try again</button>
+										<button type="button" onClick={() => removeStatement(st.id)} className="rounded px-1.5 text-[11px] text-muted-foreground hover:bg-muted hover:text-foreground">Remove</button>
+									</span>
+								) : st.mark === "?" && st.author !== "you" ? (
 									<span className="mt-1 flex gap-1">
 										<button type="button" onClick={() => setStatementMark(st.id, " ")} className="rounded border bg-background px-1.5 text-[11px] hover:bg-muted">Accept</button>
 										<button type="button" onClick={() => removeStatement(st.id)} className="rounded px-1.5 text-[11px] text-muted-foreground hover:bg-muted hover:text-foreground">Dismiss</button>
