@@ -1004,6 +1004,16 @@ export function BugsView({ folder, files, invoke, apiBase, bugs, openBug, setOpe
 
 export type Mode = "code" | "chat" | "swarm" | "roadmap" | "audit" | "bugs" | "debug";
 
+const PANE_WIDTH = 640;
+
+/** The Mac app's pane views, in the order the chat's top-right icons show them. */
+const PANE_VIEWS: { id: Mode; label: string; icon: typeof Code2 }[] = [
+	{ id: "swarm", label: "Canvas", icon: Network },
+	{ id: "audit", label: "Proofs", icon: ScanSearch },
+	{ id: "bugs", label: "Bugs", icon: Bug },
+	{ id: "code", label: "Code", icon: Code2 },
+];
+
 const MODES: { id: Mode; label: string; icon: typeof Code2 }[] = [
 	{ id: "code", label: "Code", icon: Code2 },
 	{ id: "swarm", label: "Swarm", icon: Network },
@@ -1491,6 +1501,31 @@ export function SwarmPanel({ folder, name, scan, bridge, session, file: openPath
 	const resetChatSize = () => {
 		setChatSize({ w: 416, h: null });
 		store.set("fm:chat-size", JSON.stringify({ w: 416, h: null }));
+	};
+	// The Mac app's right pane: whether it is open and its width, dragged from its left edge. Kept across launches.
+	const [paneOpen, setPaneOpen] = useState(() => store.get("fm:pane-open") !== "0");
+	const [paneWidth, setPaneWidth] = useState(() => Number(store.get("fm:pane-width")) || PANE_WIDTH);
+	const startPaneResize = (e: React.PointerEvent) => {
+		e.preventDefault();
+		const start = { x: e.clientX, w: paneWidth };
+		// Room for the chat: it keeps at least 420px.
+		const max = (root.current?.clientWidth ?? 1200) - 420;
+		let last = paneWidth;
+		const move = (ev: PointerEvent) => {
+			last = Math.round(Math.min(max, Math.max(360, start.w + start.x - ev.clientX)));
+			setPaneWidth(last);
+		};
+		const up = () => {
+			window.removeEventListener("pointermove", move);
+			window.removeEventListener("pointerup", up);
+			store.set("fm:pane-width", String(last));
+		};
+		window.addEventListener("pointermove", move);
+		window.addEventListener("pointerup", up);
+	};
+	const resetPaneWidth = () => {
+		setPaneWidth(PANE_WIDTH);
+		store.set("fm:pane-width", String(PANE_WIDTH));
 	};
 	// Markdown files open rendered; the toggle shows their source (the choice is kept).
 	const [mdSource, setMdSource] = useState(() => store.get("fm:md-view") === "source");
@@ -2090,9 +2125,36 @@ export function SwarmPanel({ folder, name, scan, bridge, session, file: openPath
 							</DropdownMenuRadioGroup>
 						</DropdownMenuContent>
 					</DropdownMenu>
-					<button type="button" onClick={() => toggleChat(false)} title="Hide the chat" aria-label="Hide the chat" className="inline-flex size-7 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-background hover:text-foreground">
-						<ChevronDown className="size-3.5" />
-					</button>
+					{slot ? (
+						// What the right pane can show: the open one is highlighted, and clicking it again closes the pane.
+						<span className="ml-1 inline-flex shrink-0 items-center gap-0.5">
+							{[...PANE_VIEWS, ...(debug ? [{ id: "debug" as Mode, label: "Debug", icon: Terminal }] : [])].map(({ id, label, icon: Icon }) => {
+								const on = paneOpen && mode === id;
+								return (
+									<button
+										key={id}
+										type="button"
+										aria-pressed={on}
+										title={on ? `Close ${label}` : label}
+										aria-label={label}
+										onClick={() => {
+											const open = !on;
+											if (open) setMode(id);
+											setPaneOpen(open);
+											store.set("fm:pane-open", open ? "1" : "0");
+										}}
+										className={`inline-flex size-7 items-center justify-center rounded-md ${on ? "bg-background text-foreground shadow-sm" : "text-muted-foreground hover:bg-background hover:text-foreground"}`}
+									>
+										<Icon className="size-4" />
+									</button>
+								);
+							})}
+						</span>
+					) : (
+						<button type="button" onClick={() => toggleChat(false)} title="Hide the chat" aria-label="Hide the chat" className="inline-flex size-7 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-background hover:text-foreground">
+							<ChevronDown className="size-3.5" />
+						</button>
+					)}
 				</div>
 				<div className="mt-1 flex min-h-0 flex-1 flex-col overflow-hidden rounded-xl border bg-card">
 				{/* The scrubber: a tick per message along the left edge, to preview and jump through the chat. */}
@@ -2187,242 +2249,277 @@ export function SwarmPanel({ folder, name, scan, bridge, session, file: openPath
 		</>
 	);
 
+	// What the page shows besides the chat: the canvas, Code, Proofs, Bugs or Debug. The Mac app opens it in the right
+	// pane; the web shows it full page with the chat floating over the canvas.
+	const modeViews = (
+		<>
+		{/* Swarm mode shows the canvas; Code and Audit replace it. The name and the controls stay in every mode. */}
+		{mode === "swarm" ? (
+			<SwarmCanvas
+				state={board}
+				fill
+				local
+				repo={folder}
+				actions={actions}
+				// An agent's name tag opens the chat addressed to it.
+				onTalk={(role) => {
+					toggleChat(true);
+					const to = (v: string) => (v.startsWith("@") ? v.replace(/^@\S+\s*/, `@${role} `) : `@${role} ${v}`);
+					if (run) setSay(to);
+					else setGoal(to);
+				}}
+				side={{
+					title: "Context notebook",
+					node: lastCtx && lastContextEv ? (
+						<ContextBody
+							role={lastContextEv.role}
+							color={colorOf(lastContextEv.role)}
+							use={lastCtx}
+							onCompact={run && contextEv ? () => invoke("swarm_compact", { folder, run }) : undefined}
+						/>
+					) : (
+						<p className="text-[13px] text-muted-foreground">Each agent's context window shows here once it replies: what fills it, and how far it is from compacting.</p>
+					),
+				}}
+				// The roadmap is the folder's own plan (.formal/plan.md, one item per AST function), nothing from GitHub.
+				below={{
+					title: "Roadmap",
+					height: 640,
+					node: <div className="min-h-0 flex-1 overflow-y-auto">{planList}{entryList}</div>,
+				}}
+			/>
+		) : (
+			<div className="relative h-full w-full bg-background">
+				<div className="absolute right-3 top-3 flex items-center gap-2">{actions}</div>
+			</div>
+		)}
+		{mode === "swarm" ? (
+			<section className={`pointer-events-auto absolute left-3 top-[max(var(--fm-top),0.75rem)] z-10 flex w-[min(20rem,calc(100%-1.5rem))] flex-col overflow-hidden rounded-2xl border bg-muted/80 p-1 shadow-pop backdrop-blur ${planOpen ? "max-h-[calc(100%-var(--fm-top)-1rem)]" : ""}`}>
+				<button type="button" onClick={() => setPlanOpen(!planOpen)} aria-expanded={planOpen} className="flex h-8 shrink-0 items-center gap-2 px-2.5 text-left">
+					<span className="font-mono text-[11px] font-medium uppercase tracking-wider text-muted-foreground">Plan</span>
+					<span className="text-[11px] text-muted-foreground">{plan.length ? `${done}/${plan.length}` : ""}{entryUnits.length ? ` · ${inPlan.size}/${entryUnits.length} entry points` : ""}</span>
+					<ChevronDown className={`ml-auto size-3.5 text-muted-foreground transition-transform ${planOpen ? "rotate-180" : ""}`} />
+				</button>
+				{planOpen ? <div className="min-h-0 overflow-y-auto rounded-xl border bg-card">{planList}{entryList}</div> : null}
+			</section>
+		) : null}
+		{mode === "code" ? (
+			// The page is the editor: the file fills the whole page under the tabs.
+			<div className="absolute inset-x-0 bottom-0 top-[var(--fm-top)] z-10 flex min-h-0 flex-col">
+				{file ? (
+					<>
+						<div className="flex h-8 shrink-0 items-center gap-2 border-y px-4">
+							<FileCode2 className="size-3.5 shrink-0 text-muted-foreground" />
+							<Breadcrumbs root={name} path={file.path} files={tree} onOpen={view} />
+							<span className="ml-auto flex items-center gap-1">
+								{debug && /\.[ts]\.sol$/.test(file.path) ? (
+									<button type="button" onClick={() => debugFile(file.path)} title={`Debug ${file.path.endsWith(".s.sol") ? "this script" : "a test in this file"}`} className="inline-flex h-6 items-center gap-1 rounded-md px-2 text-[11px] text-muted-foreground hover:bg-muted hover:text-foreground">
+										<Bug className="size-3" />Debug
+									</button>
+								) : null}
+								{/\.(md|markdown)$/i.test(file.path) ? (
+									<span role="tablist" aria-label="Markdown view" className="mr-1 inline-flex h-6 items-center rounded-md border bg-muted/60 p-0.5">
+										{(["Preview", "Source"] as const).map((v) => {
+											const on = (v === "Source") === mdSource;
+											return (
+												<button
+													key={v}
+													type="button"
+													role="tab"
+													aria-selected={on}
+													onClick={() => {
+														setMdSource(v === "Source");
+														store.set("fm:md-view", v === "Source" ? "source" : "preview");
+													}}
+													className={`h-5 rounded px-2 text-[11px] ${on ? "bg-background font-medium text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"}`}
+												>
+													{v}
+												</button>
+											);
+										})}
+									</span>
+								) : null}
+								{/\.json$/i.test(file.path) ? (
+									<span role="tablist" aria-label="JSON view" className="mr-1 inline-flex h-6 items-center rounded-md border bg-muted/60 p-0.5">
+										{(["Tree", "Raw"] as const).map((v) => {
+											const on = (v === "Raw") === jsonRaw;
+											return (
+												<button
+													key={v}
+													type="button"
+													role="tab"
+													aria-selected={on}
+													onClick={() => {
+														setJsonRaw(v === "Raw");
+														store.set("fm:json-view", v === "Raw" ? "raw" : "tree");
+													}}
+													className={`h-5 rounded px-2 text-[11px] ${on ? "bg-background font-medium text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"}`}
+												>
+													{v}
+												</button>
+											);
+										})}
+									</span>
+								) : null}
+								<button
+									type="button"
+									onClick={() => setVimMode(!vim)}
+									aria-pressed={vim}
+									title={vim ? (slot ? "Vim mode is on: Neovim runs here. Turn it off" : "Vim keys are on. Turn them off") : slot ? "Open in Neovim (Vim mode)" : "Vim keys"}
+									className={`inline-flex h-6 items-center rounded-md px-1.5 font-mono text-[11px] font-medium ${vim ? "bg-emerald-500/15 text-emerald-700 dark:text-emerald-400" : "text-muted-foreground hover:bg-muted hover:text-foreground"}`}
+								>
+									vim
+								</button>
+								<CopyButton text={file.text} label="Copy the file" />
+							</span>
+						</div>
+						<div
+							className={`min-h-0 flex-1 overflow-auto ${navigable(file.path) ? "[&_[data-code]]:cursor-text" : ""}`}
+							ref={codeBox}
+							tabIndex={vim && !slot ? 0 : undefined}
+							onKeyDown={vimKey}
+							onClick={(e) => {
+								if (vim && slot) return;
+								if (vim) {
+									const pos = codePosition(e.clientX, e.clientY);
+									if (pos) setCursor({ line: pos.line, col: pos.character });
+								}
+								goToDefinition(file.path, e);
+							}}
+							onMouseMove={(e) => !(vim && slot) && hoverMove(file.path, e)}
+							onMouseLeave={() => {
+								if (hoverTimer.current) clearTimeout(hoverTimer.current);
+								hoverAt.current = "";
+								setHover(null);
+							}}
+							onScroll={() => setHover(null)}
+						>
+							{file.url ? (
+								<iframe src={file.url} title={file.path} className="h-full w-full border-0" />
+							) : vim && slot ? (
+								// The Mac app runs real Neovim (bundled); the web keeps the light cursor below.
+								<NvimTerminal bridge={bridge} folder={folder} path={file.path} line={markLine} />
+							) : jsonOk && !jsonRaw ? (
+								<JsonTree text={file.text} />
+							) : /\.(md|markdown)$/i.test(file.path) && !mdSource ? (
+								<ChatMarkdown className="mx-auto max-w-3xl px-6 py-6 text-[14px]" image={(src) => { const p = imagePath(src, file.path); return p === null ? src : images[p]; }}>{file.text}</ChatMarkdown>
+							) : (
+								<FileView path={file.path} text={file.text} big mark={markLine ? markLine - 1 : null} cursor={vim ? cursor : null} />
+							)}
+							{hover ? (
+								<div className="pointer-events-none fixed z-50 max-h-72 max-w-xl overflow-hidden rounded-lg border bg-popover p-2 shadow-pop" style={{ left: Math.min(hover.x + 8, window.innerWidth - 580), top: hover.y + 16 }}>
+									<ChatMarkdown className="text-[12px] [&_pre]:my-0 [&_pre]:p-2">{hover.text}</ChatMarkdown>
+									<p className="mt-1 text-[10px] text-muted-foreground">{vim ? "gd goes to the definition · ctrl-o comes back" : "⌘-click to go to the definition"}</p>
+								</div>
+							) : null}
+							{vim && !slot ? (
+								<div className="sticky bottom-0 left-0 flex h-6 items-center gap-3 border-t bg-background/95 px-3 font-mono text-[11px] text-muted-foreground backdrop-blur">
+									{vimSearchText !== null ? (
+										<label className="flex flex-1 items-center">
+											/
+											<input
+												autoFocus
+												value={vimSearchText}
+												onChange={(e) => setVimSearchText(e.target.value)}
+												onKeyDown={(e) => {
+													e.stopPropagation();
+													if (e.key === "Enter") {
+														lastSearch.current = vimSearchText;
+														const to = vimSearch(file.text.split("\n"), cursor, vimSearchText);
+														if (to) setCursor(to);
+														setVimSearchText(null);
+														codeBox.current?.focus();
+													} else if (e.key === "Escape") {
+														setVimSearchText(null);
+														codeBox.current?.focus();
+													}
+												}}
+												className="ml-0.5 min-w-0 flex-1 bg-transparent text-foreground outline-none"
+											/>
+										</label>
+									) : (
+										<>
+											<span className="font-medium text-foreground">NORMAL</span>
+											<span>{lastSearch.current ? `/${lastSearch.current}` : ""}</span>
+											<span className="ml-auto">{cursor.line + 1}:{cursor.col + 1}</span>
+										</>
+									)}
+								</div>
+							) : null}
+						</div>
+					</>
+				) : (
+					<p className="m-auto text-sm text-muted-foreground">Pick a file in the sidebar.</p>
+				)}
+			</div>
+		) : null}
+		{mode === "debug" && debug ? (
+			<div className="pointer-events-auto absolute inset-x-0 bottom-0 top-[var(--fm-top)] z-10 flex min-h-0 bg-background">
+				{debug(openPath && /\.[ts]\.sol$/.test(openPath) ? openPath : null, params.get("test"), debugFile)}
+			</div>
+		) : null}
+		{mode === "bugs" ? (
+			<BugsView
+				folder={folder}
+				files={tree}
+				invoke={invoke}
+				apiBase={apiBase}
+				bugs={bugs}
+				openBug={openBug}
+				setOpenBug={setOpenBug}
+				withPoc={withPoc}
+				onOpenFile={view}
+				reload={reload}
+				onFilesChanged={() => void invoke<{ files: string[] }>("folder_tree", { path: folder }).then((t) => setTree(t.files), () => {})}
+				// Queued for the swarm's auditor; a stopped swarm starts just for it (and stops after).
+				onTriage={async (path) => {
+					await invoke("swarm_triage", { folder, path, session: viewing && viewing !== "new" ? viewing : "swarm" });
+					if (!run) await start(true);
+				}}
+			/>
+		) : null}
+		{mode === "audit" ? (
+			<div className="pointer-events-auto absolute bottom-3 left-3 right-3 top-[var(--fm-top)] z-10 flex min-h-0 flex-col overflow-hidden rounded-2xl border bg-muted/60 p-1">
+				<AuditView folder={folder} scan={scan} invoke={invoke} onOpenFile={view} reload={reload} />
+			</div>
+		) : null}
+		</>
+	);
+
+	if (slot) {
+		return (
+			<div ref={root} className="relative flex h-full min-h-0 flex-1">
+				{createPortal(
+					<span className="inline-flex h-7 min-w-0 max-w-56 items-center gap-2 rounded-lg bg-background px-2.5 text-[13px] text-foreground shadow-card" title={folder}>
+						{scan?.git ? <MarkGithubIcon className="size-3.5 shrink-0" /> : <Code2 className="size-3.5 shrink-0" />}
+						<span className="truncate">{name}</span>
+					</span>,
+					slot,
+				)}
+				{/* The chat in the middle; the views open beside it. */}
+				<div className="flex min-w-0 flex-1 flex-col">
+					<div className="mx-auto flex h-full min-h-0 w-full max-w-3xl flex-col px-4 pb-3 pt-2">{chatPanel}</div>
+				</div>
+				{paneOpen ? (
+					<>
+						{/* Drag to resize the pane; double-click for the default width. */}
+						<div onPointerDown={startPaneResize} onDoubleClick={resetPaneWidth} title="Drag to resize" className="w-1 shrink-0 cursor-col-resize bg-border/60 transition-colors hover:bg-ring/40" />
+						<section className="relative flex min-h-0 shrink-0 flex-col overflow-hidden bg-background" style={{ width: paneWidth, "--fm-top": "0px" } as React.CSSProperties}>
+							<div className="absolute inset-0 flex flex-col overflow-hidden">{modeViews}</div>
+						</section>
+					</>
+				) : null}
+			</div>
+		);
+	}
+
 	return (
 		// In the Mac app the controls live in the title bar, so the page starts at the top.
 		<div ref={root} className="relative flex h-full min-h-0 flex-1" style={{ "--fm-top": slot ? "0px" : "3.5rem" } as React.CSSProperties}>
 			{/* The canvas, as on the Swarm page, with the plan, files and bugs floating over it as one accordion. */}
 			<div className="absolute inset-0 flex flex-col overflow-hidden">
-				{/* Swarm mode shows the canvas; Code and Audit replace it. The name and the controls stay in every mode. */}
-				{mode === "swarm" ? (
-					<SwarmCanvas
-						state={board}
-						fill
-						local
-						repo={folder}
-						actions={actions}
-						// An agent's name tag opens the chat addressed to it.
-						onTalk={(role) => {
-							toggleChat(true);
-							const to = (v: string) => (v.startsWith("@") ? v.replace(/^@\S+\s*/, `@${role} `) : `@${role} ${v}`);
-							if (run) setSay(to);
-							else setGoal(to);
-						}}
-						side={{
-							title: "Context notebook",
-							node: lastCtx && lastContextEv ? (
-								<ContextBody
-									role={lastContextEv.role}
-									color={colorOf(lastContextEv.role)}
-									use={lastCtx}
-									onCompact={run && contextEv ? () => invoke("swarm_compact", { folder, run }) : undefined}
-								/>
-							) : (
-								<p className="text-[13px] text-muted-foreground">Each agent's context window shows here once it replies: what fills it, and how far it is from compacting.</p>
-							),
-						}}
-						// The roadmap is the folder's own plan (.formal/plan.md, one item per AST function), nothing from GitHub.
-						below={{
-							title: "Roadmap",
-							height: 640,
-							node: <div className="min-h-0 flex-1 overflow-y-auto">{planList}{entryList}</div>,
-						}}
-					/>
-				) : (
-					<div className="relative h-full w-full bg-background">
-						<div className="absolute right-3 top-3 flex items-center gap-2">{actions}</div>
-					</div>
-				)}
-				{slot ? createPortal(nav, slot) : nav}
-				{mode === "swarm" ? (
-					<section className={`pointer-events-auto absolute left-3 top-[var(--fm-top)] z-10 flex w-[min(20rem,calc(100%-1.5rem))] flex-col overflow-hidden rounded-2xl border bg-muted/80 p-1 shadow-pop backdrop-blur ${planOpen ? "max-h-[calc(100%-var(--fm-top)-1rem)]" : ""}`}>
-						<button type="button" onClick={() => setPlanOpen(!planOpen)} aria-expanded={planOpen} className="flex h-8 shrink-0 items-center gap-2 px-2.5 text-left">
-							<span className="font-mono text-[11px] font-medium uppercase tracking-wider text-muted-foreground">Plan</span>
-							<span className="text-[11px] text-muted-foreground">{plan.length ? `${done}/${plan.length}` : ""}{entryUnits.length ? ` · ${inPlan.size}/${entryUnits.length} entry points` : ""}</span>
-							<ChevronDown className={`ml-auto size-3.5 text-muted-foreground transition-transform ${planOpen ? "rotate-180" : ""}`} />
-						</button>
-						{planOpen ? <div className="min-h-0 overflow-y-auto rounded-xl border bg-card">{planList}{entryList}</div> : null}
-					</section>
-				) : null}
-				{mode === "code" ? (
-					// The page is the editor: the file fills the whole page under the tabs.
-					<div className="absolute inset-x-0 bottom-0 top-[var(--fm-top)] z-10 flex min-h-0 flex-col">
-						{file ? (
-							<>
-								<div className="flex h-8 shrink-0 items-center gap-2 border-y px-4">
-									<FileCode2 className="size-3.5 shrink-0 text-muted-foreground" />
-									<Breadcrumbs root={name} path={file.path} files={tree} onOpen={view} />
-									<span className="ml-auto flex items-center gap-1">
-										{debug && /\.[ts]\.sol$/.test(file.path) ? (
-											<button type="button" onClick={() => debugFile(file.path)} title={`Debug ${file.path.endsWith(".s.sol") ? "this script" : "a test in this file"}`} className="inline-flex h-6 items-center gap-1 rounded-md px-2 text-[11px] text-muted-foreground hover:bg-muted hover:text-foreground">
-												<Bug className="size-3" />Debug
-											</button>
-										) : null}
-										{/\.(md|markdown)$/i.test(file.path) ? (
-											<span role="tablist" aria-label="Markdown view" className="mr-1 inline-flex h-6 items-center rounded-md border bg-muted/60 p-0.5">
-												{(["Preview", "Source"] as const).map((v) => {
-													const on = (v === "Source") === mdSource;
-													return (
-														<button
-															key={v}
-															type="button"
-															role="tab"
-															aria-selected={on}
-															onClick={() => {
-																setMdSource(v === "Source");
-																store.set("fm:md-view", v === "Source" ? "source" : "preview");
-															}}
-															className={`h-5 rounded px-2 text-[11px] ${on ? "bg-background font-medium text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"}`}
-														>
-															{v}
-														</button>
-													);
-												})}
-											</span>
-										) : null}
-										{/\.json$/i.test(file.path) ? (
-											<span role="tablist" aria-label="JSON view" className="mr-1 inline-flex h-6 items-center rounded-md border bg-muted/60 p-0.5">
-												{(["Tree", "Raw"] as const).map((v) => {
-													const on = (v === "Raw") === jsonRaw;
-													return (
-														<button
-															key={v}
-															type="button"
-															role="tab"
-															aria-selected={on}
-															onClick={() => {
-																setJsonRaw(v === "Raw");
-																store.set("fm:json-view", v === "Raw" ? "raw" : "tree");
-															}}
-															className={`h-5 rounded px-2 text-[11px] ${on ? "bg-background font-medium text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"}`}
-														>
-															{v}
-														</button>
-													);
-												})}
-											</span>
-										) : null}
-										<button
-											type="button"
-											onClick={() => setVimMode(!vim)}
-											aria-pressed={vim}
-											title={vim ? (slot ? "Vim mode is on: Neovim runs here. Turn it off" : "Vim keys are on. Turn them off") : slot ? "Open in Neovim (Vim mode)" : "Vim keys"}
-											className={`inline-flex h-6 items-center rounded-md px-1.5 font-mono text-[11px] font-medium ${vim ? "bg-emerald-500/15 text-emerald-700 dark:text-emerald-400" : "text-muted-foreground hover:bg-muted hover:text-foreground"}`}
-										>
-											vim
-										</button>
-										<CopyButton text={file.text} label="Copy the file" />
-									</span>
-								</div>
-								<div
-									className={`min-h-0 flex-1 overflow-auto ${navigable(file.path) ? "[&_[data-code]]:cursor-text" : ""}`}
-									ref={codeBox}
-									tabIndex={vim && !slot ? 0 : undefined}
-									onKeyDown={vimKey}
-									onClick={(e) => {
-										if (vim && slot) return;
-										if (vim) {
-											const pos = codePosition(e.clientX, e.clientY);
-											if (pos) setCursor({ line: pos.line, col: pos.character });
-										}
-										goToDefinition(file.path, e);
-									}}
-									onMouseMove={(e) => !(vim && slot) && hoverMove(file.path, e)}
-									onMouseLeave={() => {
-										if (hoverTimer.current) clearTimeout(hoverTimer.current);
-										hoverAt.current = "";
-										setHover(null);
-									}}
-									onScroll={() => setHover(null)}
-								>
-									{file.url ? (
-										<iframe src={file.url} title={file.path} className="h-full w-full border-0" />
-									) : vim && slot ? (
-										// The Mac app runs real Neovim (bundled); the web keeps the light cursor below.
-										<NvimTerminal bridge={bridge} folder={folder} path={file.path} line={markLine} />
-									) : jsonOk && !jsonRaw ? (
-										<JsonTree text={file.text} />
-									) : /\.(md|markdown)$/i.test(file.path) && !mdSource ? (
-										<ChatMarkdown className="mx-auto max-w-3xl px-6 py-6 text-[14px]" image={(src) => { const p = imagePath(src, file.path); return p === null ? src : images[p]; }}>{file.text}</ChatMarkdown>
-									) : (
-										<FileView path={file.path} text={file.text} big mark={markLine ? markLine - 1 : null} cursor={vim ? cursor : null} />
-									)}
-									{hover ? (
-										<div className="pointer-events-none fixed z-50 max-h-72 max-w-xl overflow-hidden rounded-lg border bg-popover p-2 shadow-pop" style={{ left: Math.min(hover.x + 8, window.innerWidth - 580), top: hover.y + 16 }}>
-											<ChatMarkdown className="text-[12px] [&_pre]:my-0 [&_pre]:p-2">{hover.text}</ChatMarkdown>
-											<p className="mt-1 text-[10px] text-muted-foreground">{vim ? "gd goes to the definition · ctrl-o comes back" : "⌘-click to go to the definition"}</p>
-										</div>
-									) : null}
-									{vim && !slot ? (
-										<div className="sticky bottom-0 left-0 flex h-6 items-center gap-3 border-t bg-background/95 px-3 font-mono text-[11px] text-muted-foreground backdrop-blur">
-											{vimSearchText !== null ? (
-												<label className="flex flex-1 items-center">
-													/
-													<input
-														autoFocus
-														value={vimSearchText}
-														onChange={(e) => setVimSearchText(e.target.value)}
-														onKeyDown={(e) => {
-															e.stopPropagation();
-															if (e.key === "Enter") {
-																lastSearch.current = vimSearchText;
-																const to = vimSearch(file.text.split("\n"), cursor, vimSearchText);
-																if (to) setCursor(to);
-																setVimSearchText(null);
-																codeBox.current?.focus();
-															} else if (e.key === "Escape") {
-																setVimSearchText(null);
-																codeBox.current?.focus();
-															}
-														}}
-														className="ml-0.5 min-w-0 flex-1 bg-transparent text-foreground outline-none"
-													/>
-												</label>
-											) : (
-												<>
-													<span className="font-medium text-foreground">NORMAL</span>
-													<span>{lastSearch.current ? `/${lastSearch.current}` : ""}</span>
-													<span className="ml-auto">{cursor.line + 1}:{cursor.col + 1}</span>
-												</>
-											)}
-										</div>
-									) : null}
-								</div>
-							</>
-						) : (
-							<p className="m-auto text-sm text-muted-foreground">Pick a file in the sidebar.</p>
-						)}
-					</div>
-				) : null}
-				{mode === "debug" && debug ? (
-					<div className="pointer-events-auto absolute inset-x-0 bottom-0 top-[var(--fm-top)] z-10 flex min-h-0 bg-background">
-						{debug(openPath && /\.[ts]\.sol$/.test(openPath) ? openPath : null, params.get("test"), debugFile)}
-					</div>
-				) : null}
-				{mode === "bugs" ? (
-					<BugsView
-						folder={folder}
-						files={tree}
-						invoke={invoke}
-						apiBase={apiBase}
-						bugs={bugs}
-						openBug={openBug}
-						setOpenBug={setOpenBug}
-						withPoc={withPoc}
-						onOpenFile={view}
-						reload={reload}
-						onFilesChanged={() => void invoke<{ files: string[] }>("folder_tree", { path: folder }).then((t) => setTree(t.files), () => {})}
-						// Queued for the swarm's auditor; a stopped swarm starts just for it (and stops after).
-						onTriage={async (path) => {
-							await invoke("swarm_triage", { folder, path, session: viewing && viewing !== "new" ? viewing : "swarm" });
-							if (!run) await start(true);
-						}}
-					/>
-				) : null}
-				{mode === "audit" ? (
-					<div className="pointer-events-auto absolute bottom-3 left-3 right-3 top-[var(--fm-top)] z-10 flex min-h-0 flex-col overflow-hidden rounded-2xl border bg-muted/60 p-1">
-						<AuditView folder={folder} scan={scan} invoke={invoke} onOpenFile={view} reload={reload} />
-					</div>
-				) : null}
+				{modeViews}
+				{nav}
 			</div>
 
 			{/* The chat: start and steer the swarm, the plan, and the agents' messages. */}
