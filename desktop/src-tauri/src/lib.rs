@@ -15,6 +15,7 @@ mod local;
 mod lsp;
 mod openai;
 mod platform;
+mod reach;
 mod report;
 mod statements;
 mod term;
@@ -169,6 +170,9 @@ pub fn run() {
             local::folder_repo,
             local::machine_name,
             ast::ast_units,
+            reach::reach_map,
+            reach::reach_run,
+            reach::reach_tasks,
             ast::ast_slice,
             ast::ast_formal,
             ast::ast_scripts,

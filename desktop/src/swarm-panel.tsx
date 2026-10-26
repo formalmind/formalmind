@@ -4,7 +4,7 @@ import { createPortal } from "react-dom";
 import { NvimTerminal } from "./nvim-terminal";
 import { reportError } from "@/lib/report-error";
 import { JsonTree } from "./json-tree";
-import { ArrowDown, Bug, Check, ChevronDown, ChevronRight, CircleCheck, CircleX, LoaderCircle, MoreHorizontal, Pause, Code2, Copy, Crosshair, FileCode2, FileDown, Folder, Network, Play, Plus, ScanSearch, Terminal, ThumbsDown, ThumbsUp, WandSparkles } from "lucide-react";
+import { ArrowDown, Bug, Check, ChevronDown, ChevronRight, CircleCheck, CircleX, LoaderCircle, MoreHorizontal, Pause, Code2, Copy, Crosshair, FileCode2, FileDown, Folder, Network, Play, Plus, ScanSearch, Terminal, ThumbsDown, ThumbsUp, WandSparkles, Waypoints } from "lucide-react";
 
 // The project roadmap (GitHub Projects-style), the same view the web app had on its own page.
 import { motion as vimMotion, search as vimSearch, setVimMode, useVimMode, type Cursor } from "@/components/vim-mode";
@@ -13,6 +13,7 @@ import { ChatComposer } from "@/components/chat-composer";
 import { useReportDirs } from "@/lib/report-dirs";
 import { auditJsonPath, parseAuditDoc, type AuditDoc, type AuditFindingDoc } from "@/lib/audit-format";
 import { readEntryPoints, setMainEntryPoint } from "@/lib/entry-points";
+import { ReachView } from "./reach";
 import { openOnWeb } from "@/lib/open-web";
 import { ChatScrubber } from "./chat-scrubber";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuRadioGroup, DropdownMenuRadioItem, DropdownMenuSeparator, DropdownMenuSub, DropdownMenuSubContent, DropdownMenuSubTrigger, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
@@ -1305,7 +1306,7 @@ export function BugsView({ folder, files, invoke, apiBase, bugs, openBug, setOpe
 	);
 }
 
-export type Mode = "code" | "chat" | "swarm" | "roadmap" | "audit" | "bugs" | "debug" | "concolic";
+export type Mode = "code" | "chat" | "swarm" | "roadmap" | "audit" | "bugs" | "debug" | "concolic" | "reach";
 
 const PANE_WIDTH = 440;
 
@@ -1324,6 +1325,8 @@ const MODES: { id: Mode; label: string; icon: typeof Code2 }[] = [
 	{ id: "bugs", label: "Bugs", icon: Bug },
 	// The bug search: the hunter alone on its own canvas (coverage, concolic explore, its debugger, PoCs). Desktop only.
 	{ id: "concolic", label: "Concolic", icon: Crosshair },
+	// The protocol's call graph, each function by what's known of its branches (run, solved, unsat). Desktop only.
+	{ id: "reach", label: "Reach", icon: Waypoints },
 ];
 
 /**
@@ -1360,7 +1363,7 @@ export function NavGroup({ name, git, onDebug, mode, onMode, inBar, compact, con
 					style={{ left: pill.left, width: pill.width }}
 				/>
 			) : null}
-			{MODES.filter((m) => m.id !== "concolic" || concolic).map(({ id, label, icon: Icon }) =>
+			{MODES.filter((m) => (m.id !== "concolic" && m.id !== "reach") || concolic).map(({ id, label, icon: Icon }) =>
 				// The Code tab is the folder itself: its name, with the GitHub mark when it is a git repository.
 				id === "code" ? (
 					<button key={id} type="button" role="tab" aria-selected={mode === id} aria-label={`Code · ${name}`} title={`Code · ${name}`} onClick={() => onMode(id)} className={`${tab(mode === id)} min-w-0`}>
@@ -1406,7 +1409,7 @@ const isHunt = (run: string | null | undefined) => Boolean(run?.startsWith("hunt
 
 function resolveMode(asked: Mode, hasDebug: boolean, hasConcolic = false): Mode {
 	if (asked === "debug" && !hasDebug) return "code";
-	if (asked === "concolic" && !hasConcolic) return "swarm";
+	if ((asked === "concolic" || asked === "reach") && !hasConcolic) return "swarm";
 	if (asked === "roadmap" || asked === "chat") return "swarm";
 	return asked;
 }
@@ -2680,7 +2683,7 @@ export function SwarmPanel({ folder, name, scan, bridge, session, file: openPath
 	// What the right pane can show: the open one is highlighted, and clicking it again closes the pane.
 	const paneTools = (
 		<span className="ml-1 inline-flex shrink-0 items-center gap-0.5">
-			{[...PANE_VIEWS, ...(agentDebug ? [{ id: "concolic" as Mode, label: "Concolic", icon: Crosshair }] : []), ...(debug ? [{ id: "debug" as Mode, label: "Debug", icon: Terminal }] : [])].map(({ id, label, icon: Icon }) => (
+			{[...PANE_VIEWS, ...(agentDebug ? [{ id: "concolic" as Mode, label: "Concolic", icon: Crosshair }, { id: "reach" as Mode, label: "Reach", icon: Waypoints }] : []), ...(debug ? [{ id: "debug" as Mode, label: "Debug", icon: Terminal }] : [])].map(({ id, label, icon: Icon }) => (
 				<button
 					key={id}
 					type="button"
@@ -3070,6 +3073,11 @@ export function SwarmPanel({ folder, name, scan, bridge, session, file: openPath
 					if (!run) await start(true);
 				}}
 			/>
+		) : null}
+		{mode === "reach" ? (
+			<div className="pointer-events-auto absolute bottom-3 left-3 right-3 top-[max(var(--fm-top),0.75rem)] z-10 flex min-h-0 flex-col overflow-hidden rounded-2xl border bg-muted/60 p-1">
+				<ReachView folder={folder} scan={scan} invoke={invoke} listen={listen} onOpenFile={view} />
+			</div>
 		) : null}
 		{mode === "audit" ? (
 			<div data-fm-proofs className="pointer-events-auto absolute bottom-3 left-3 right-3 top-[var(--fm-top)] z-10 flex min-h-0 flex-col overflow-hidden rounded-2xl border bg-muted/60 p-1">

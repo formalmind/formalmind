@@ -1484,7 +1484,7 @@ dependencies = [
 [[package]]
 name = "concolity"
 version = "0.1.0"
-source = "git+https://github.com/formalmind/concolity#fa2c7082efc046df30ced53fc6866f2c086d8460"
+source = "git+https://github.com/formalmind/concolity#450a5c1901311f210769c0b86cd7883314587fb6"
 dependencies = [
  "alloy-dyn-abi",
  "anyhow",
