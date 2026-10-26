@@ -2315,6 +2315,8 @@ export function SwarmPanel({ folder, name, scan, bridge, session, file: openPath
 				// An agent's name tag opens the chat addressed to it.
 				onTalk={(role) => {
 					toggleChat(true);
+					setPaneOpen(true);
+					store.set("fm:pane-open", "1");
 					const to = (v: string) => (v.startsWith("@") ? v.replace(/^@\S+\s*/, `@${role} `) : `@${role} ${v}`);
 					if (run) setSay(to);
 					else setGoal(to);
