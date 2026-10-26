@@ -129,6 +129,9 @@ fn lean_model_type_checks() {
     assert!(model.text.contains("acc_set"));
     // OpenZeppelin's mulDiv gets the prelude's semantics; the fixture's own library is translated from its code.
     assert!(model.text.contains("MathLib.mulDivUp ext"));
+    // Decimal and scientific literals become the exact Nat solc computes.
+    assert!(model.text.contains("Vault.MAX_FEE : Nat := (25 * 10 ^ 16)"), "{}", model.text);
+    assert!(model.text.contains("Vault.CAP : Nat := 1500000000000000000"), "{}", model.text);
 
     let dir = std::env::temp_dir().join(format!("formal-ast-lean-{}", std::process::id()));
     std::fs::create_dir_all(&dir).unwrap();

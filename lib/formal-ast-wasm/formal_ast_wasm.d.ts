@@ -1,13 +1,13 @@
 /* tslint:disable */
 /* eslint-disable */
 /**
- * `ast_formal`: the Lean model's coverage of the entry contract.
- */
-export function formal(files: string, entry: string, solc_output: string): string;
-/**
  * solc's standard JSON input for the entry file and the version to compile it with: `{ input, version }`.
  */
 export function input(files: string, entry: string): string;
+/**
+ * `ast_formal`: the Lean model's coverage of the entry contract.
+ */
+export function formal(files: string, entry: string, solc_output: string): string;
 /**
  * The scripts `ast_scripts` compiles, each on its own.
  */
