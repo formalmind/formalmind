@@ -82,7 +82,7 @@ const OPENAI_MODELS = [
 ];
 const colorOf = (role: string) => (ROLE_COLORS as Record<string, string>)[role] ?? "hsl(var(--muted-foreground))";
 
-const MARK_LABEL: Record<string, string> = { " ": "open", "~": "working", x: "proved", "!": "disproved", "?": "waiting for you", "-": "can't be proved against the model" };
+const MARK_LABEL: Record<string, string> = { " ": "open", "~": "working", x: "proved", "!": "disproved or blocked", "?": "waiting for you", "-": "can't be proved against the model" };
 
 /** A statement's mark, drawn like the plan's: proved, disproved, working, waiting for you, out of the model, open. */
 function StatementMark({ mark, small }: { mark: string; small?: boolean }) {
@@ -2237,6 +2237,13 @@ export function SwarmPanel({ folder, name, scan, bridge, session, file: openPath
 									<span>· {MARK_LABEL[st.mark] ?? "open"}</span>
 									{st.obligations.length ? <span className="tabular-nums">· {st.obligations.filter((o) => o.mark === "x").length}/{st.obligations.length} functions</span> : null}
 								</span>
+								{working && working.item.startsWith(`${st.id}.`) && activity ? (
+									<span className="mt-0.5 flex items-center gap-1.5 truncate text-[11px] text-muted-foreground" title={activity.text}>
+										<span className="truncate">
+											<span className="font-medium" style={{ color: colorOf(working.role) }}>{roleName(working.role)}</span> · function {working.item.slice(st.id.length + 1)} · {activity.text}
+										</span>
+									</span>
+								) : null}
 								{st.details.length || st.obligations.length ? (
 									<span className="mt-0.5 block space-y-px text-[11px] text-muted-foreground">
 										{st.details.map((d, i) => (

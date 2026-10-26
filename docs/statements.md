@@ -160,10 +160,7 @@ Each obligation is a `prove` job for one function. The prover's task comes from 
   the generated def's signature and monad), and `S02.init` for setup;
 - the file to write: `Refinement/Swarm/S02Withdraw.lean`.
 
-`check_proof` runs unchanged: no cheats, `lake build`, and the def named. One check is added: the theorem with the
-given name exists, its type is the one given (`#check` it against the expected statement), and it has no `sorry`. The
-reviewer then gets the user's words, the back-translation and the theorem, and approves or asks for changes, as it
-does today.
+`check_proof` runs unchanged: no cheats, `lake build`, and the def named. One check is added for an obligation: the theorem with its given name is in its given file, `#print axioms` shows no `sorryAx`, and its type, as `#check` prints it, names the def. A function or access obligation is stated in words, not as a Lean type, so the type isn't matched against an expected one. Instead the reviewer gets it as Lean prints it, next to the user's words and the back-translation, and approves only if it says what the obligation says. (Invariants, step 5, come with their Lean predicate, so their obligations' types can be checked exactly.)
 
 **Strengthening.** An invariant often isn't inductive on its own: `withdraw` preserves `S02.inv` only if
 `pricePerShare > 0` too. The prover can call a new tool, `strengthen`, with the extra predicate and why it's needed.

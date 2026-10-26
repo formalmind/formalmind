@@ -397,6 +397,9 @@ struct Job {
     /// A review's property notes for the report, as the prover wrote them (statement, assumptions, theorems).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     property: Option<Value>,
+    /// For an obligation of a statement (.formal/statements.md): its id; `item` is then the obligation's number in it.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    statement: String,
 }
 
 #[derive(Serialize, Deserialize, Default)]
@@ -1277,8 +1280,10 @@ async fn run_swarm(turn: &Turn<'_>) -> String {
         // Next job: an interrupted one first, then your messages, then the rest in order; derive one if the queue is empty.
         // A plan item another session in this folder is working on is left to it.
         let me = key(&turn.req.folder, turn.run);
-        let free = |j: &Job| !matches!(j.kind.as_str(), "prove" | "review") || !claimed_by_other(&turn.req.folder, j.item, &me);
-        let formalize = (!turn.run.starts_with("hunt-")).then(|| crate::statements::awaiting_formalize(&root).map(|s| s.id)).flatten();
+        let free = |j: &Job| !matches!(j.kind.as_str(), "prove" | "review") || !j.statement.is_empty() || !claimed_by_other(&turn.req.folder, j.item, &me);
+        let hunting = turn.run.starts_with("hunt-");
+        let formalize = (!hunting).then(|| crate::statements::awaiting_formalize(&root).map(|s| s.id)).flatten();
+        let obligation = (!hunting).then(|| crate::statements::next_obligation(&root)).flatten();
         let next = with_queue(&turn.queue, |q| {
             let pick = q.jobs.iter().position(|j| j.state == "running" && free(j))
                 .or_else(|| q.jobs.iter().position(|j| j.state == "queued" && j.kind == "answer"))
@@ -1288,6 +1293,15 @@ async fn run_swarm(turn: &Turn<'_>) -> String {
                 // A statement the maintainer is waiting on comes before the plan (not in a bug search).
                 None if formalize.is_some() => {
                     enqueue(q, "formalize", 0, formalize.as_deref().unwrap_or(""), 1, "");
+                    q.jobs.len() - 1
+                }
+                // Then a confirmed statement's next function, through the same prove → check → review turn as a plan item.
+                None if obligation.is_some() => {
+                    let (st, n) = obligation.clone().expect("an obligation");
+                    let tries = q.jobs.iter().filter(|j| j.kind == "prove" && j.statement == st.id && j.item == n).count();
+                    enqueue(q, "prove", n, &st.obligations[n - 1].text, tries + 1, "");
+                    q.jobs.last_mut().expect("the job just queued").statement = st.id.clone();
+                    let _ = crate::statements::set_obligation(&root, &st.id, n, '~');
                     q.jobs.len() - 1
                 }
                 None => {
@@ -1314,11 +1328,14 @@ async fn run_swarm(turn: &Turn<'_>) -> String {
         let Some((job, resumed)) = next else {
             return "done: the rest of the plan is being worked in another session".into();
         };
-        if matches!(job.kind.as_str(), "prove" | "review") {
+        if matches!(job.kind.as_str(), "prove" | "review") && job.statement.is_empty() {
             claim(&turn.req.folder, job.item, &me);
         }
         *turn.job.lock().unwrap() = Some(job.id);
-        let id = job.item.to_string();
+        // An obligation is S-01.2 in the chat and the events; a plan item its number.
+        let id = if job.statement.is_empty() { job.item.to_string() } else { format!("{}.{}", job.statement, job.item) };
+        let statement = (!job.statement.is_empty()).then(|| crate::statements::load(&root).ok()?.into_iter().find(|s| s.id == job.statement && job.item >= 1 && job.item <= s.obligations.len())).flatten();
+        let lib = crate::swarm_ctx::lake_dir(&root).map(|d| d.strip_prefix(&root).map(|p| p.to_string_lossy().to_string()).unwrap_or_default()).filter(|d| !d.is_empty()).unwrap_or_else(|| ".".into());
         let resume_note = if resumed {
             format!(
                 "\n\nThis job was interrupted (the app quit) and is being resumed. {}Continue from where it stopped; don't redo work that is already there.",
@@ -1363,10 +1380,14 @@ async fn run_swarm(turn: &Turn<'_>) -> String {
                 }
                 Ok(Outcome { summary: format!("{added} items from the AST"), ..Default::default() })
             }
+            "prove" | "review" if !job.statement.is_empty() && statement.is_none() => Ok(Outcome { summary: format!("{id} isn't in .formal/statements.md any more"), ..Default::default() }),
             "prove" => {
                 turn.emit("status", "prover", &id, "reading the item's def and slice (formal-ast)".into());
                 let brief = turn.context(true).await.brief(&job.text, crate::swarm_ctx::lake_dir(&root).as_deref(), &root);
-                let mut task = format!("Plan item {id}: {}\n\n{brief}", job.text);
+                let mut task = match &statement {
+                    Some(st) => format!("{}\n\nThe function: {}\n\n{brief}", crate::statements::obligation_task(st, job.item, &lib), job.text),
+                    None => format!("Plan item {id}: {}\n\n{brief}", job.text),
+                };
                 if !job.notes.is_empty() {
                     task.push_str(&format!("\n\nThe last attempt was sent back:\n{}", job.notes));
                 }
@@ -1384,7 +1405,11 @@ async fn run_swarm(turn: &Turn<'_>) -> String {
                     ),
                     None => "\n\nThe prover wrote no notes for the report: if you approve, give statement, assumptions and theorems.".into(),
                 };
-                turn.agent("reviewer", &id, format!("Plan item {id}: {}\n\nThe prover says:\n{}{notes}{files}\n\n{brief}{resume_note}", job.text, job.notes)).await
+                let head = match &statement {
+                    Some(st) => format!("{}\n\nThe function: {}", crate::statements::review_task(st, job.item), job.text),
+                    None => format!("Plan item {id}: {}", job.text),
+                };
+                turn.agent("reviewer", &id, format!("{head}\n\nThe prover says:\n{}{notes}{files}\n\n{brief}{resume_note}", job.notes)).await
             }
         };
         *turn.job.lock().unwrap() = None;
@@ -1401,6 +1426,7 @@ async fn run_swarm(turn: &Turn<'_>) -> String {
         // item's def as proved. Otherwise the prover gets the output back (or the item is blocked after the last try).
         let mut gate: Option<String> = None;
         let mut proved_by: Vec<String> = vec![];
+        let mut theorem_type: Option<String> = None;
         if job.kind == "prove" && out.bug.is_none() && !turn.swarm.stop.load(Ordering::SeqCst) {
             let files = with_queue(&turn.queue, |q| q.jobs.iter().find(|j| j.id == job.id).map(|j| j.files.clone()).unwrap_or_default());
             let mut all = files.clone();
@@ -1409,7 +1435,20 @@ async fn run_swarm(turn: &Turn<'_>) -> String {
                 Ok(by) => proved_by = by,
                 Err(e) => gate = Some(e),
             }
+            // An obligation's theorem, by name: there, without sorry, about the def; its type goes to the reviewer.
+            if let (None, Some(st)) = (&gate, &statement) {
+                let lean = crate::statements::def_of(&job.text).unwrap_or("").to_string();
+                turn.emit("status", "prover", &id, format!("checking: the theorem {}", crate::statements::theorem_name(&st.id, &lean)));
+                match crate::statements::check_theorem(&root, &st.id, &lean).await {
+                    Ok(ty) => {
+                        turn.emit("result", "prover", &id, ty.chars().take(500).collect());
+                        theorem_type = Some(ty);
+                    }
+                    Err(e) => gate = Some(e),
+                }
+            }
         }
+        let mut statement_proved: Option<String> = None;
 
         // Finish the job and queue what follows from it.
         with_queue(&turn.queue, |q| {
@@ -1422,26 +1461,46 @@ async fn run_swarm(turn: &Turn<'_>) -> String {
                 }
             }
             let files = j.files.clone();
+            // A plan item's mark, or an obligation's (and with it its statement's).
+            let mark = |m: char| {
+                if job.statement.is_empty() {
+                    set_mark(&root, job.item, m);
+                } else if let Err(e) = crate::statements::set_obligation(&root, &job.statement, job.item, m) {
+                    eprintln!("statements: {e}");
+                }
+            };
+            let follow = |q: &mut Queue, id: u64| {
+                if let Some(r) = q.jobs.iter_mut().find(|r| r.id == id) {
+                    r.statement = job.statement.clone();
+                }
+            };
             match job.kind.as_str() {
+                "prove" | "review" if !job.statement.is_empty() && statement.is_none() => {}
                 "prove" if out.bug.is_some() => {
                     j.result = "bug".into();
-                    set_mark(&root, job.item, '!');
+                    mark('!');
                 }
                 "prove" if gate.is_some() => {
                     j.result = "changes".into();
                     let notes = format!("The swarm's check failed:\n{}", gate.clone().unwrap_or_default());
                     if job.attempt >= MAX_ATTEMPTS {
-                        set_mark(&root, job.item, '!');
+                        mark('!');
                     } else {
                         let id = enqueue(q, "prove", job.item, &job.text, job.attempt + 1, &notes);
+                        follow(q, id);
                         if let Some(r) = q.jobs.iter_mut().find(|r| r.id == id) {
                             r.files = files;
                         }
                     }
                 }
                 "prove" => {
-                    let summary = if proved_by.is_empty() { out.summary.clone() } else { format!("{}\n\nChecked by the swarm: `lake build` passes; the Proofs page counts it as proved by {}.", out.summary, proved_by.join("; ")) };
+                    let mut summary = if proved_by.is_empty() { out.summary.clone() } else { format!("{}\n\nChecked by the swarm: `lake build` passes; the Proofs page counts it as proved by {}.", out.summary, proved_by.join("; ")) };
+                    if let (Some(ty), Some(st)) = (&theorem_type, &statement) {
+                        let name = crate::statements::theorem_name(&st.id, crate::statements::def_of(&job.text).unwrap_or(""));
+                        summary.push_str(&format!("\n\n`{name}` has no sorry (#print axioms). Its type, as Lean reports it:\n```lean\n{ty}\n```"));
+                    }
                     let id = enqueue(q, "review", job.item, &job.text, job.attempt, &summary);
+                    follow(q, id);
                     if let Some(r) = q.jobs.iter_mut().find(|r| r.id == id) {
                         r.files = files;
                         r.property = out.property.clone();
@@ -1449,10 +1508,26 @@ async fn run_swarm(turn: &Turn<'_>) -> String {
                 }
                 "review" => match (&out.bug, &out.verdict) {
                     (Some(_), _) => {
-                        set_mark(&root, job.item, '!');
+                        mark('!');
+                    }
+                    // An obligation approved: what proved it is kept, and a statement whose every function is proved goes
+                    // into the audit file as one property.
+                    (None, Some((true, _))) if !job.statement.is_empty() => {
+                        let name = crate::statements::theorem_name(&job.statement, crate::statements::def_of(&job.text).unwrap_or(""));
+                        crate::statements::record_obligation(&root, &job.statement, job.item, &name, &files, merge_property(job.property.as_ref(), out.property.as_ref()).as_ref());
+                        match crate::statements::set_obligation(&root, &job.statement, job.item, 'x') {
+                            Ok('x') => {
+                                if let Err(e) = crate::statements::record_property(&root, &job.statement) {
+                                    eprintln!("record_property: {e}");
+                                }
+                                statement_proved = Some(job.statement.clone());
+                            }
+                            Ok(_) => {}
+                            Err(e) => eprintln!("statements: {e}"),
+                        }
                     }
                     (None, Some((true, _))) => {
-                        set_mark(&root, job.item, 'x');
+                        mark('x');
                         // The prover's notes, with what the reviewer corrected.
                         if let Some(p) = merge_property(job.property.as_ref(), out.property.as_ref()) {
                             if let Err(e) = crate::swarm_ctx::record_property(&root, job.item, &job.text, &files, &p) {
@@ -1464,9 +1539,10 @@ async fn run_swarm(turn: &Turn<'_>) -> String {
                     (None, verdict) => {
                         let notes = verdict.as_ref().map(|v| v.1.clone()).unwrap_or_else(|| "The reviewer gave no verdict; make the proof's statement and check obvious.".into());
                         if job.attempt >= MAX_ATTEMPTS {
-                            set_mark(&root, job.item, '!');
+                            mark('!');
                         } else {
-                            enqueue(q, "prove", job.item, &job.text, job.attempt + 1, &notes);
+                            let id = enqueue(q, "prove", job.item, &job.text, job.attempt + 1, &notes);
+                            follow(q, id);
                         }
                     }
                 },
@@ -1494,6 +1570,9 @@ async fn run_swarm(turn: &Turn<'_>) -> String {
                     turn.emit("plan", "assistant", &sid, format!("{sid}: couldn't formalize it; reword it or name the function"));
                 }
             }
+        }
+        if let Some(sid) = &statement_proved {
+            turn.emit("plan", "reviewer", sid, format!("{sid} proved: every function it is about, in the audit file as P-{}", sid.replace('-', "")));
         }
         match (job.kind.as_str(), &out.bug, &out.verdict) {
             ("prove" | "review", Some(_), _) => turn.emit("plan", &job.kind, &id, format!("item {id}: bug reported, moving on")),
