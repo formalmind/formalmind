@@ -164,6 +164,8 @@ export function TabBar() {
 					<Plus className="size-4" />
 				</button>
 			</div>
+			{/* A page's own actions (a folder's pane views) sit left of refresh, settings and the bell. */}
+			<div id="fm-titlebar-actions" className="mr-1 flex shrink-0 items-center gap-0.5 empty:hidden" />
 			{/* Refresh, settings and the bell stay here on every page; the canvases leave them to the tab bar. */}
 			<button type="button" onClick={() => window.dispatchEvent(new Event("fm:refresh"))} title="Refresh" className="grid size-7 shrink-0 place-items-center rounded-md text-muted-foreground hover:bg-sidebar-accent hover:text-foreground">
 				<RefreshCw className="size-4" />

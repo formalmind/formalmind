@@ -1102,10 +1102,11 @@ function resolveMode(asked: Mode, hasDebug: boolean): Mode {
 	return asked;
 }
 
-/** The Mac app's title bar slot (desktop/src/tabs.tsx), when there is one. */
-function useTitlebarSlot() {
+/** A slot in the Mac app's title bar (desktop/src/tabs.tsx), when there is one: the left one for the page's name, the
+    right one for its actions. */
+function useTitlebarSlot(id = "fm-titlebar-slot") {
 	const [slot, setSlot] = useState<HTMLElement | null>(null);
-	useEffect(() => setSlot(document.getElementById("fm-titlebar-slot")), []);
+	useEffect(() => setSlot(document.getElementById(id)), [id]);
 	return slot;
 }
 
@@ -2054,6 +2055,7 @@ export function SwarmPanel({ folder, name, scan, bridge, session, file: openPath
 	) : null;
 
 	const slot = useTitlebarSlot();
+	const actionsSlot = useTitlebarSlot("fm-titlebar-actions");
 	// Narrow pages show the modes as icons only (the Mac title bar also holds the app's tabs, so it needs more room).
 	const root = useRef<HTMLDivElement | null>(null);
 	const [width, setWidth] = useState(1200);
@@ -2066,6 +2068,70 @@ export function SwarmPanel({ folder, name, scan, bridge, session, file: openPath
 	}, []);
 	const compact = width < (slot ? 1100 : 820);
 	const nav = <NavGroup name={name} git={Boolean(scan?.git)} onDebug={debug ? () => setMode("debug") : undefined} mode={mode} onMode={setMode} inBar={Boolean(slot)} compact={compact} />;
+	// The working agent's context window, with its breakdown; in the Mac app it sits in the title bar.
+	const ctxMenu = working && ctx && ctxPct !== null ? (
+		<DropdownMenu>
+			<DropdownMenuTrigger className="inline-flex h-7 shrink-0 items-center gap-1.5 rounded-md px-1.5 text-[11px] tabular-nums text-muted-foreground outline-none hover:bg-background hover:text-foreground" title={`The ${working.role}'s context window`}>
+				<span className="h-1 w-8 overflow-hidden rounded-full bg-muted">
+					<span className="block h-full rounded-full" style={{ width: `${ctxPct}%`, backgroundColor: colorOf(working.role) }} />
+				</span>
+				{ctxPct}%
+			</DropdownMenuTrigger>
+			<DropdownMenuContent align="end" className="w-auto rounded-2xl border-0 bg-transparent p-0 shadow-lg">
+				<ContextPanel role={working.role} color={colorOf(working.role)} use={ctx} onCompact={run ? () => invoke("swarm_compact", { folder, run }) : undefined} />
+			</DropdownMenuContent>
+		</DropdownMenu>
+	) : null;
+	// The run's spend against its cap, with the cap's menu; in the Mac app it sits in the title bar.
+	const costMenu = (
+		<DropdownMenu>
+			<DropdownMenuTrigger className="inline-flex h-7 shrink-0 items-center gap-1 rounded-md border bg-background px-2 text-[11px] tabular-nums text-muted-foreground outline-none hover:text-foreground" title="Spending cap">
+				{run || viewing ? `$${spent.toFixed(2)} / $${budget}` : `Budget $${budget}`}
+				<ChevronDown className="size-3" />
+			</DropdownMenuTrigger>
+			<DropdownMenuContent align="end">
+				<DropdownMenuLabel className="text-xs font-normal text-muted-foreground">Stop the swarm at</DropdownMenuLabel>
+				<DropdownMenuRadioGroup
+					value={String(budget)}
+					onValueChange={(v) => {
+						setBudget(Number(v));
+						store.set(budgetKey, v);
+						if (run) void invoke("swarm_set_budget", { folder, run, usd: Number(v) });
+					}}
+				>
+					{BUDGETS.map((b) => (
+						<DropdownMenuRadioItem key={b} value={String(b)} disabled={Boolean(run) && b <= spent}>${b}</DropdownMenuRadioItem>
+					))}
+				</DropdownMenuRadioGroup>
+			</DropdownMenuContent>
+		</DropdownMenu>
+	);
+	// What the right pane can show: the open one is highlighted, and clicking it again closes the pane.
+	const paneTools = (
+		<span className="ml-1 inline-flex shrink-0 items-center gap-0.5">
+			{[...PANE_VIEWS, ...(debug ? [{ id: "debug" as Mode, label: "Debug", icon: Terminal }] : [])].map(({ id, label, icon: Icon }) => {
+				const on = paneOpen && mode === id;
+				return (
+					<button
+						key={id}
+						type="button"
+						aria-pressed={on}
+						title={on ? `Close ${label}` : label}
+						aria-label={label}
+						onClick={() => {
+							const open = !on;
+							if (open) setMode(id);
+							setPaneOpen(open);
+							store.set("fm:pane-open", open ? "1" : "0");
+						}}
+						className={`inline-flex size-7 items-center justify-center rounded-md ${on ? "bg-background text-foreground shadow-sm" : "text-muted-foreground hover:bg-background hover:text-foreground"}`}
+					>
+						<Icon className="size-4" />
+					</button>
+				);
+			})}
+		</span>
+	);
 	// The conversation with the swarm: its sessions, budget and Stop on a gray bar, the messages and composer under it.
 	const chatPanel = (
 		<>
@@ -2091,66 +2157,9 @@ export function SwarmPanel({ folder, name, scan, bridge, session, file: openPath
 							</DropdownMenuItem>
 						</DropdownMenuContent>
 					</DropdownMenu>
-					{working && ctx && ctxPct !== null ? (
-						<DropdownMenu>
-							<DropdownMenuTrigger className="inline-flex h-7 shrink-0 items-center gap-1.5 rounded-md px-1.5 text-[11px] tabular-nums text-muted-foreground outline-none hover:bg-background hover:text-foreground" title={`The ${working.role}'s context window`}>
-								<span className="h-1 w-8 overflow-hidden rounded-full bg-muted">
-									<span className="block h-full rounded-full" style={{ width: `${ctxPct}%`, backgroundColor: colorOf(working.role) }} />
-								</span>
-								{ctxPct}%
-							</DropdownMenuTrigger>
-							<DropdownMenuContent align="end" className="w-auto rounded-2xl border-0 bg-transparent p-0 shadow-lg">
-								<ContextPanel role={working.role} color={colorOf(working.role)} use={ctx} onCompact={run ? () => invoke("swarm_compact", { folder, run }) : undefined} />
-							</DropdownMenuContent>
-						</DropdownMenu>
-					) : null}
-					<DropdownMenu>
-						<DropdownMenuTrigger className="inline-flex h-7 shrink-0 items-center gap-1 rounded-md border bg-background px-2 text-[11px] tabular-nums text-muted-foreground outline-none hover:text-foreground" title="Spending cap">
-							{run || viewing ? `$${spent.toFixed(2)} / $${budget}` : `Budget $${budget}`}
-							<ChevronDown className="size-3" />
-						</DropdownMenuTrigger>
-						<DropdownMenuContent align="end">
-							<DropdownMenuLabel className="text-xs font-normal text-muted-foreground">Stop the swarm at</DropdownMenuLabel>
-							<DropdownMenuRadioGroup
-								value={String(budget)}
-								onValueChange={(v) => {
-									setBudget(Number(v));
-									store.set(budgetKey, v);
-									if (run) void invoke("swarm_set_budget", { folder, run, usd: Number(v) });
-								}}
-							>
-								{BUDGETS.map((b) => (
-									<DropdownMenuRadioItem key={b} value={String(b)} disabled={Boolean(run) && b <= spent}>${b}</DropdownMenuRadioItem>
-								))}
-							</DropdownMenuRadioGroup>
-						</DropdownMenuContent>
-					</DropdownMenu>
-					{slot ? (
-						// What the right pane can show: the open one is highlighted, and clicking it again closes the pane.
-						<span className="ml-1 inline-flex shrink-0 items-center gap-0.5">
-							{[...PANE_VIEWS, ...(debug ? [{ id: "debug" as Mode, label: "Debug", icon: Terminal }] : [])].map(({ id, label, icon: Icon }) => {
-								const on = paneOpen && mode === id;
-								return (
-									<button
-										key={id}
-										type="button"
-										aria-pressed={on}
-										title={on ? `Close ${label}` : label}
-										aria-label={label}
-										onClick={() => {
-											const open = !on;
-											if (open) setMode(id);
-											setPaneOpen(open);
-											store.set("fm:pane-open", open ? "1" : "0");
-										}}
-										className={`inline-flex size-7 items-center justify-center rounded-md ${on ? "bg-background text-foreground shadow-sm" : "text-muted-foreground hover:bg-background hover:text-foreground"}`}
-									>
-										<Icon className="size-4" />
-									</button>
-								);
-							})}
-						</span>
-					) : (
+					{actionsSlot ? null : ctxMenu}
+					{actionsSlot ? null : costMenu}
+					{slot ? null : (
 						<button type="button" onClick={() => toggleChat(false)} title="Hide the chat" aria-label="Hide the chat" className="inline-flex size-7 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-background hover:text-foreground">
 							<ChevronDown className="size-3.5" />
 						</button>
@@ -2496,6 +2505,7 @@ export function SwarmPanel({ folder, name, scan, bridge, session, file: openPath
 					</span>,
 					slot,
 				)}
+				{actionsSlot ? createPortal(<>{ctxMenu}{costMenu}{paneTools}</>, actionsSlot) : null}
 				{/* The chat in the middle; the views open beside it. */}
 				<div className="flex min-w-0 flex-1 flex-col">
 					<div className="mx-auto flex h-full min-h-0 w-full max-w-3xl flex-col px-4 pb-3 pt-2">{chatPanel}</div>
