@@ -169,7 +169,7 @@ export function SettingsPage() {
 						</label>
 					</Section> : null}
 					{section === "audit-reports" ? <Section title="Audit reports">
-						<p className="text-xs text-muted-foreground">Where each project's audit reports are read from for Bugs, relative to the project.</p>
+						<p className="text-xs text-muted-foreground">Bugs reads each project's audit reports from audit/, audits/ and reports/. Add any other folder, relative to the project.</p>
 						{folders.length + Object.keys(repos).length === 0 ? <p className="text-xs text-muted-foreground">Add a folder or import a repository in the sidebar first.</p> : null}
 						{folders.map((f) => (
 							<AuditFolders key={f} folder={f} />
