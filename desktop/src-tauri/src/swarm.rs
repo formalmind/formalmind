@@ -4,8 +4,8 @@
 //! proofs go into the folder's Lake project against the generated model and must pass `lake build` and the Proofs page's
 //! coverage before review; findings land in the audit index Bugs reads (see swarm_ctx). Files, `lake` and `forge` stay
 //! here; only the model calls leave: through
-//! formal.team's metered Claude proxy (charged to your credits as `local/<folder>` with the agent and item), or straight
-//! to Anthropic with your own key.
+//! formal.team's metered Claude proxy (charged to your credits as `local/<folder>` with the agent and item), straight
+//! to Anthropic with your own key, or through Claude Code on your own Claude plan (claude_code.rs).
 
 use crate::executor::{call_tool, clip, inside};
 use crate::local;
@@ -638,6 +638,9 @@ async fn model_access(client: &reqwest::Client, folder_path: &str, api_base: &st
             let key = anthropic_entry()?.get_password().map_err(|_| "Add your Anthropic key first".to_string())?;
             return Ok((key, "https://api.anthropic.com".into()));
         }
+        if provider == Some("claude-code") {
+            return Err("Claude Code runs this on your Claude plan, not through a key".into());
+        }
         if provider == Some("openai") {
             let key = openai_entry()?.get_password().map_err(|_| "Add your OpenAI key first".to_string())?;
             return Ok((key, "https://api.openai.com".into()));
@@ -763,9 +766,195 @@ impl Turn<'_> {
         Err("the conversation is too long to summarize".into())
     }
 
+    /// One tool call of an agent's turn, on the API or over Claude Code's MCP: the result the agent reads, with what it
+    /// recorded (files written, notes, a verdict, a bug) kept in `out`.
+    async fn tool(&self, role: &str, item: &str, name: &str, input: &Value, out: &mut Outcome) -> String {
+        let root = PathBuf::from(&self.req.folder);
+        let shown = input.as_object().map(|o| o.values().filter_map(Value::as_str).map(|v| v.chars().take(90).collect::<String>()).collect::<Vec<_>>().join(" ")).unwrap_or_default();
+        match name {
+                "record_property" => {
+                    if input["statement"].as_str().is_none_or(|t| t.trim().is_empty()) {
+                        "error: statement is required: what the proof establishes, as the report states it".to_string()
+                    } else {
+                        out.property = Some(input.clone());
+                        self.emit("tool", role, item, "record_property".into());
+                        "recorded; the reviewer checks it against the Solidity and your proof".to_string()
+                    }
+                }
+                "verdict" => {
+                    let ok = input["decision"].as_str() == Some("approve");
+                    out.verdict = Some((ok, input["notes"].as_str().unwrap_or("").to_string()));
+                    out.property = ok.then(|| input.clone());
+                    self.emit("tool", role, item, format!("verdict {}", if ok { "approve" } else { "changes" }));
+                    "recorded".to_string()
+                }
+                // The Solidity comes from formal-ast, not from the files.
+                "functions" | "function" => {
+                    self.emit("tool", role, item, format!("{name} {shown}"));
+                    let ctx = self.context(false).await;
+                    let r = if name == "functions" {
+                        ctx.functions()
+                    } else {
+                        let n = input["name"].as_str().unwrap_or("");
+                        ctx.slice(n).unwrap_or_else(|| format!("error: no function {n} in scope; `functions` lists them"))
+                    };
+                    self.emit("result", role, item, r.chars().take(500).collect());
+                    r
+                }
+                "search" => {
+                    self.emit("tool", role, item, format!("search {shown}"));
+                    let lake = crate::swarm_ctx::lake_dir(&root).map(|d| d.strip_prefix(&root).map(|p| p.to_string_lossy().to_string()).unwrap_or_default()).unwrap_or_default();
+                    let r = crate::executor::search_in(&root, input["pattern"].as_str().unwrap_or(""), &lake, &[".lean"]).unwrap_or_else(|e| format!("error: {e}"));
+                    self.emit("result", role, item, r.chars().take(500).collect());
+                    r
+                }
+                "record_report" => {
+                    let job = *self.job.lock().unwrap();
+                    let report = with_queue(&self.queue, |q| q.jobs.iter().find(|j| Some(j.id) == job).map(|j| j.text.clone())).unwrap_or_default();
+                    self.emit("tool", role, item, format!("record_report {}", input["title"].as_str().unwrap_or("")));
+                    crate::swarm_ctx::record_report(&root, &report, input).map(|p| format!("recorded in {p}")).unwrap_or_else(|e| format!("error: {e}"))
+                }
+                "record_finding" => {
+                    // The report is the job's text: its path in the folder.
+                    let job = *self.job.lock().unwrap();
+                    let report = with_queue(&self.queue, |q| q.jobs.iter().find(|j| Some(j.id) == job).map(|j| j.text.clone())).unwrap_or_default();
+                    let r = crate::swarm_ctx::record_finding_json(&root, &report, input);
+                    let label = format!("{} {} · {}", input["id"].as_str().unwrap_or(""), input["title"].as_str().unwrap_or(""), input["status"].as_str().unwrap_or(""));
+                    self.emit("tool", role, item, format!("record_finding {label}"));
+                    r.map(|idx| format!("recorded in {idx}")).unwrap_or_else(|e| format!("error: {e}"))
+                }
+                "report_bug" => {
+                    self.emit("tool", role, item, format!("report_bug {shown}"));
+                    let r = self.report_bug(&root, input, role, item).await;
+                    if let Ok((id, _)) = &r {
+                        out.bug = Some(format!("{id} {}", input["title"].as_str().unwrap_or("bug")));
+                    }
+                    let r = r.map(|(id, file)| format!("filed as {id} in audit/README.md (open) and {file}; the swarm marks this item and moves on")).unwrap_or_else(|e| format!("error: {e}"));
+                    self.emit("result", role, item, r.clone());
+                    r
+                }
+                // The swarm keeps .formal/ (it ticks plan items only after the check and the review).
+                "write_file" if role == "prover" && input["path"].as_str().unwrap_or("").trim_start_matches("./").starts_with(".formal") => {
+                    "error: .formal/ is the swarm's; it ticks the plan item once your proof checks and is approved".to_string()
+                }
+                _ => {
+                    if name == "write_file" {
+                        let path = input["path"].as_str().unwrap_or("").trim_start_matches("./").to_string();
+                        if !path.is_empty() && !path.starts_with(".formal/") && !out.files.contains(&path) {
+                            out.files.push(path.clone());
+                            // Recorded now, so a quit mid-turn still knows what was written.
+                            if let Some(job) = *self.job.lock().unwrap() {
+                                with_queue(&self.queue, |q| {
+                                    if let Some(j) = q.jobs.iter_mut().find(|j| j.id == job) {
+                                        if !j.files.contains(&path) {
+                                            j.files.push(path.clone());
+                                        }
+                                    }
+                                });
+                            }
+                        }
+                    }
+                    self.emit("tool", role, item, format!("{name} {shown}"));
+                    let r = call_tool(&root, name, input).await;
+                    self.emit("result", role, item, r.chars().take(500).collect());
+                    r
+                }
+        }
+    }
+
+    /// One agent turn on Claude Code, with your Claude plan: the same system prompt, tools and task as on the API, and
+    /// the same tool code answering them (over MCP, through `claude_code::Bridge`); Claude Code runs the loop. Nothing
+    /// is charged to the session's spend; your plan's usage limits apply instead, and hitting one pauses the swarm
+    /// with the job still running, so the next start resumes the conversation.
+    async fn agent_on_claude_code(&self, role: &str, item: &str, task: Value) -> Result<Outcome, String> {
+        use crate::claude_code::{bridge, events_of, result_of, rpc, start_role, tool_reply, Rpc};
+        let goal = self.req.goal.clone().unwrap_or_default();
+        let job = self.job.lock().unwrap().unwrap_or(0);
+        let tools = crate::claude_code::mcp_tools(tools(role).as_array().cloned().unwrap_or_default());
+        let instructions = format!("Formal Mind's tools for the {role}, run by the app in the folder.");
+        let mut bridge = bridge()?;
+        let model = model_of(self.req);
+        let mut cc = start_role(&self.req.folder, self.run, job, &system(role, &self.req.folder, &goal), &task, model, &bridge)?;
+        let mut out = Outcome::default();
+        self.emit("status", role, item, format!("{role} is working on Claude Code{}", if cc.resumed { ", resuming its conversation" } else { "" }));
+        let window = context_window(model);
+        let compact_at = (window as f64 * COMPACT_AT) as u64;
+        let mut result: Option<Result<String, String>> = None;
+        let mut last_used = 0;
+        loop {
+            if self.swarm.stop.load(Ordering::SeqCst) {
+                let _ = cc.child.kill().await;
+                return Ok(out);
+            }
+            tokio::select! {
+                call = bridge.calls.recv() => {
+                    let Some(call) = call else { continue };
+                    match rpc(&call.msg, &tools, &instructions) {
+                        Rpc::Reply(r) => call.answer(r),
+                        Rpc::Tool { id, name, args } => {
+                            let text = self.tool(role, item, &name, &args, &mut out).await;
+                            call.answer(Some(tool_reply(id, &clip(text))));
+                        }
+                    }
+                }
+                line = cc.lines.next_line() => {
+                    let Ok(Some(line)) = line else { break };
+                    cc.log(&line);
+                    let Ok(v) = serde_json::from_str::<Value>(&line) else { continue };
+                    match v["type"].as_str() {
+                        // It must work in the folder: anywhere else, lake and forge would run in the wrong place.
+                        Some("system") if v["subtype"] == "init" => {
+                            let cwd = v["cwd"].as_str().and_then(|p| std::fs::canonicalize(p).ok());
+                            if cwd.as_deref() != Some(cc.root.as_path()) {
+                                let _ = cc.child.kill().await;
+                                return Err(format!("Claude Code started in {}, not the folder {}", v["cwd"].as_str().unwrap_or("?"), cc.root.display()));
+                            }
+                            for (kind, text) in events_of(&v) {
+                                self.emit(kind, role, item, text);
+                            }
+                        }
+                        // Its words; the tool calls and results are emitted by `tool` as it runs them.
+                        Some("assistant") => {
+                            cc.started(job);
+                            for (kind, text) in events_of(&v) {
+                                if kind == "say" {
+                                    out.summary = text.clone();
+                                    self.emit("say", role, item, text);
+                                }
+                            }
+                            // Each content block of a reply comes as its own line with the reply's usage.
+                            let used = context_used(&v["message"]["usage"]);
+                            if used > 0 && used != last_used {
+                                last_used = used;
+                                self.emit("context", role, item, json!({ "used": used, "window": window, "compact_at": compact_at, "system": 0, "tools": 0, "task": 0 }).to_string());
+                            }
+                        }
+                        Some("result") => result = Some(result_of(&v)),
+                        _ => {}
+                    }
+                }
+            }
+        }
+        let status = cc.child.wait().await.map_err(|e| e.to_string())?;
+        match result {
+            Some(Ok(text)) => {
+                if !text.is_empty() {
+                    out.summary = text;
+                }
+                Ok(out)
+            }
+            // A usage limit or an API error: the job stays running, and the next start resumes it.
+            Some(Err(e)) => Err(e),
+            None => Err(format!("Claude Code exited with {status}: {}", cc.stderr_tail())),
+        }
+    }
+
     /// One agent turn: a tool loop against Claude until it stops calling tools.
     async fn agent(&self, role: &str, item: &str, task: impl Into<Value>) -> Result<Outcome, String> {
         let task: Value = task.into();
+        if self.req.provider.as_deref() == Some("claude-code") {
+            return self.agent_on_claude_code(role, item, task).await;
+        }
         let root = PathBuf::from(&self.req.folder);
         let (key, base) = self.session(role, item).await?;
         let goal = self.req.goal.clone().unwrap_or_default();
@@ -862,98 +1051,7 @@ impl Turn<'_> {
                         }
                     }
                     Some("tool_use") => {
-                        let name = block["name"].as_str().unwrap_or("");
-                        let input = &block["input"];
-                        let shown = input.as_object().map(|o| o.values().filter_map(Value::as_str).map(|v| v.chars().take(90).collect::<String>()).collect::<Vec<_>>().join(" ")).unwrap_or_default();
-                        let result = match name {
-                            "record_property" => {
-                                if input["statement"].as_str().is_none_or(|t| t.trim().is_empty()) {
-                                    "error: statement is required: what the proof establishes, as the report states it".to_string()
-                                } else {
-                                    out.property = Some(input.clone());
-                                    self.emit("tool", role, item, "record_property".into());
-                                    "recorded; the reviewer checks it against the Solidity and your proof".to_string()
-                                }
-                            }
-                            "verdict" => {
-                                let ok = input["decision"].as_str() == Some("approve");
-                                out.verdict = Some((ok, input["notes"].as_str().unwrap_or("").to_string()));
-                                out.property = ok.then(|| input.clone());
-                                self.emit("tool", role, item, format!("verdict {}", if ok { "approve" } else { "changes" }));
-                                "recorded".to_string()
-                            }
-                            // The Solidity comes from formal-ast, not from the files.
-                            "functions" | "function" => {
-                                self.emit("tool", role, item, format!("{name} {shown}"));
-                                let ctx = self.context(false).await;
-                                let r = if name == "functions" {
-                                    ctx.functions()
-                                } else {
-                                    let n = input["name"].as_str().unwrap_or("");
-                                    ctx.slice(n).unwrap_or_else(|| format!("error: no function {n} in scope; `functions` lists them"))
-                                };
-                                self.emit("result", role, item, r.chars().take(500).collect());
-                                r
-                            }
-                            "search" => {
-                                self.emit("tool", role, item, format!("search {shown}"));
-                                let lake = crate::swarm_ctx::lake_dir(&root).map(|d| d.strip_prefix(&root).map(|p| p.to_string_lossy().to_string()).unwrap_or_default()).unwrap_or_default();
-                                let r = crate::executor::search_in(&root, input["pattern"].as_str().unwrap_or(""), &lake, &[".lean"]).unwrap_or_else(|e| format!("error: {e}"));
-                                self.emit("result", role, item, r.chars().take(500).collect());
-                                r
-                            }
-                            "record_report" => {
-                                let job = *self.job.lock().unwrap();
-                                let report = with_queue(&self.queue, |q| q.jobs.iter().find(|j| Some(j.id) == job).map(|j| j.text.clone())).unwrap_or_default();
-                                self.emit("tool", role, item, format!("record_report {}", input["title"].as_str().unwrap_or("")));
-                                crate::swarm_ctx::record_report(&root, &report, input).map(|p| format!("recorded in {p}")).unwrap_or_else(|e| format!("error: {e}"))
-                            }
-                            "record_finding" => {
-                                // The report is the job's text: its path in the folder.
-                                let job = *self.job.lock().unwrap();
-                                let report = with_queue(&self.queue, |q| q.jobs.iter().find(|j| Some(j.id) == job).map(|j| j.text.clone())).unwrap_or_default();
-                                let r = crate::swarm_ctx::record_finding_json(&root, &report, input);
-                                let label = format!("{} {} · {}", input["id"].as_str().unwrap_or(""), input["title"].as_str().unwrap_or(""), input["status"].as_str().unwrap_or(""));
-                                self.emit("tool", role, item, format!("record_finding {label}"));
-                                r.map(|idx| format!("recorded in {idx}")).unwrap_or_else(|e| format!("error: {e}"))
-                            }
-                            "report_bug" => {
-                                self.emit("tool", role, item, format!("report_bug {shown}"));
-                                let r = self.report_bug(&root, input, role, item).await;
-                                if let Ok((id, _)) = &r {
-                                    out.bug = Some(format!("{id} {}", input["title"].as_str().unwrap_or("bug")));
-                                }
-                                let r = r.map(|(id, file)| format!("filed as {id} in audit/README.md (open) and {file}; the swarm marks this item and moves on")).unwrap_or_else(|e| format!("error: {e}"));
-                                self.emit("result", role, item, r.clone());
-                                r
-                            }
-                            // The swarm keeps .formal/ (it ticks plan items only after the check and the review).
-                            "write_file" if role == "prover" && input["path"].as_str().unwrap_or("").trim_start_matches("./").starts_with(".formal") => {
-                                "error: .formal/ is the swarm's; it ticks the plan item once your proof checks and is approved".to_string()
-                            }
-                            _ => {
-                                if name == "write_file" {
-                                    let path = input["path"].as_str().unwrap_or("").trim_start_matches("./").to_string();
-                                    if !path.is_empty() && !path.starts_with(".formal/") && !out.files.contains(&path) {
-                                        out.files.push(path.clone());
-                                        // Recorded now, so a quit mid-turn still knows what was written.
-                                        if let Some(job) = *self.job.lock().unwrap() {
-                                            with_queue(&self.queue, |q| {
-                                                if let Some(j) = q.jobs.iter_mut().find(|j| j.id == job) {
-                                                    if !j.files.contains(&path) {
-                                                        j.files.push(path.clone());
-                                                    }
-                                                }
-                                            });
-                                        }
-                                    }
-                                }
-                                self.emit("tool", role, item, format!("{name} {shown}"));
-                                let r = call_tool(&root, name, input).await;
-                                self.emit("result", role, item, r.chars().take(500).collect());
-                                r
-                            }
-                        };
+                        let result = self.tool(role, item, block["name"].as_str().unwrap_or(""), &block["input"], &mut out).await;
                         results.push(json!({ "type": "tool_result", "tool_use_id": block["id"], "content": clip(result) }));
                     }
                     _ => {}
@@ -1383,6 +1481,8 @@ pub fn swarm_start(app: AppHandle, swarms: State<'_, Swarms>, request: SwarmRequ
         anthropic_entry()?.get_password().map_err(|_| "Add your Anthropic key first".to_string())?;
     } else if request.provider.as_deref() == Some("openai") {
         openai_entry()?.get_password().map_err(|_| "Add your OpenAI key first".to_string())?;
+    } else if request.provider.as_deref() == Some("claude-code") {
+        crate::claude_code::signed_in()?;
     } else {
         token()?;
     }
@@ -1735,15 +1835,20 @@ mod tests {
     }
 }
 
+const SUGGEST_SYSTEM: &str = "You draft the user's next message to a swarm of agents (planner, prover, reviewer) proving a codebase correct. Reply to what the agents last asked or reported, as the user, in one to three plain sentences. Output only the message.";
+
 /// Drafts what you might say next in the swarm chat, from its recent lines; you edit or send it yourself.
 #[tauri::command]
 pub async fn swarm_suggest(folder: String, api_base: String, provider: Option<String>, run: String, transcript: String) -> Result<String, String> {
+    if provider.as_deref() == Some("claude-code") {
+        return crate::claude_code::ask(&folder, SUGGEST_SYSTEM, &format!("The chat so far:\n{transcript}\n\nDraft my next message."), "claude-haiku-5-5").await;
+    }
     let client = reqwest::Client::builder().timeout(Duration::from_secs(60)).build().unwrap_or_default();
     let (key, base) = model_access(&client, &folder, &api_base, provider.as_deref(), &run, "assistant", "suggest").await?;
     let openai = provider.as_deref() == Some("openai");
     let mut body = json!({
         "model": "claude-haiku-5-5", "max_tokens": 400,
-        "system": "You draft the user's next message to a swarm of agents (planner, prover, reviewer) proving a codebase correct. Reply to what the agents last asked or reported, as the user, in one to three plain sentences. Output only the message.",
+        "system": SUGGEST_SYSTEM,
         "messages": [{ "role": "user", "content": format!("The chat so far:\n{transcript}\n\nDraft my next message.") }],
     });
     let res = if openai {

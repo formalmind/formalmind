@@ -40,7 +40,7 @@ import type { Diagnostic } from "@/lib/ast/run";
 export type Ev = { folder?: string; run: string; kind: "start" | "status" | "context" | "say" | "tool" | "result" | "you" | "bug" | "plan" | "done" | "error"; role: string; item: string; text: string; spent: number };
 type Item = { index: number; mark: string; text: string };
 export type Bug = { file: string; title: string; body: string };
-type Provider = "formal" | "anthropic" | "openai";
+type Provider = "formal" | "anthropic" | "openai" | "claude-code";
 type Proof = { item: string; files: string[]; summary: string; at: string };
 
 /** Copies text (or what `get` resolves to), showing a tick for a moment. */
@@ -1487,7 +1487,8 @@ export function SwarmPanel({ folder, name, scan, bridge, session, file: openPath
 	// Set in Settings (desktop/src/settings.tsx).
 	const [provider] = useState<Provider>(() => {
 		const p = store.get("fm:provider");
-		return p === "anthropic" || p === "openai" ? p : "formal";
+		// Claude Code (your Claude plan) unless you picked credits or a key in Settings.
+		return p === "anthropic" || p === "openai" || p === "formal" ? p : "claude-code";
 	});
 	// The models for how the agents are run: GPT on your OpenAI key, Claude otherwise.
 	const models = provider === "openai" ? OPENAI_MODELS : MODELS;

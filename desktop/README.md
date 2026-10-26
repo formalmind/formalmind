@@ -152,8 +152,11 @@ can be raised to keep going.
 nowhere and pushes nothing; its tools can't run git. Activity shows in the app (the Swarm canvas, the plan card, the
 Proofs and Bugs pages), and the canvas links nowhere outside it.
 
-**Who pays for the model.** Files, `lake` and `forge` run here; only the model calls leave, by exactly one of two
-routes, picked in Settings → Models (`fm:provider`): **formal.team credits** (`/api/desktop/model-session` mints a
+**Who pays for the model.** Files, `lake` and `forge` run here; only the model calls leave, by one of these routes,
+picked in Settings → Models (`fm:provider`). The default is **Claude Code on your own Claude plan** (`claude_code.rs`):
+each agent turn is one `claude -p` with the role's system prompt, Claude Code's own tools off, and the role's tools
+served by the swarm over MCP on 127.0.0.1; no settings, hooks or CLAUDE.md reach it, `ANTHROPIC_API_KEY` is unset so
+the plan pays, and a usage limit pauses the swarm. The others: **formal.team credits** (`/api/desktop/model-session` mints a
 session per agent turn with the desktop sign-in, charged as `local/<folder>` with the agent and item), or **your own
 Anthropic key** from the keychain (`team.formal.desktop` / `anthropic`), straight to `api.anthropic.com`. Every event
 is logged to `.formal/runs/<run>.jsonl`.
