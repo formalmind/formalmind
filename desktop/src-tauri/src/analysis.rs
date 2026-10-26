@@ -23,11 +23,11 @@ pub fn tools() -> Vec<Value> {
         json!({ "name": "debug_break", "description": "Toggle a line breakpoint (in `file`, a source name like AsyncSwap.sol, or the current file); `continue` stops there.", "input_schema": s(json!({ "line": { "type": "integer" }, "file": { "type": "string" } }), vec!["line"]) }),
         json!({ "name": "debug_watch", "description": "Watch storage writes whose named path contains `text` (e.g. priceBooks, orderCount); `continue` stops on each. `on: false` removes it.", "input_schema": s(json!({ "text": { "type": "string" }, "on": { "type": "boolean" } }), vec!["text"]) }),
         json!({ "name": "debug_look", "description": "Read the run without moving: here (the current step), summary (verdict, calls, events), lines (every Solidity line it ran, in order; `filter` keeps functions whose name contains it, e.g. AsyncSwap.beforeSwap), revert (why and where it reverted, decoded), writes (every storage write, named; `filter` keeps variables containing it), step (step `n` in full: stack, memory, storage).", "input_schema": s(json!({ "query": { "type": "string", "enum": ["here", "summary", "lines", "revert", "writes", "step"] }, "filter": { "type": "string" }, "n": { "type": "integer" } }), vec!["query"]) }),
-        json!({ "name": "coverage", "description": "Run the Foundry suite in revm with solc's own compile (the optimized bytecode that ships) and report line and branch coverage of src/: per file the lines never run and the JUMPI sides never taken, the tests that failed, and calls into addresses with no code (an interface no test bound to an implementation). Takes about a minute on a large suite.", "input_schema": s(json!({ "include": { "type": "array", "items": { "type": "string" }, "description": "Only files under these prefixes (default src/)" }, "skip": { "type": "array", "items": { "type": "string" }, "description": "Leave out test files whose path contains one of these" } }), vec![]) }),
+        json!({ "name": "coverage", "description": "Run the Foundry suite in revm with solc's own compile (the optimized bytecode that ships) and report line and branch coverage of src/: per file the lines never run and the JUMPI sides never taken, the tests that failed, and calls into addresses with no code (an interface no test bound to an implementation). Takes about a minute on a large suite. With `at` (file:line), only that line's branches and how often each side ran: instant once the suite has run on this code.", "input_schema": s(json!({ "at": { "type": "string", "description": "file:line, e.g. src/AsyncSwap.sol:446: just this line's JUMPI sides" }, "include": { "type": "array", "items": { "type": "string" }, "description": "Only files under these prefixes (default src/)" }, "skip": { "type": "array", "items": { "type": "string" }, "description": "Leave out test files whose path contains one of these" } }), vec![]) }),
         json!({ "name": "tag", "description": "Tag a line of the Solidity with a short note the maintainer sees on that line in their editor and that the next agent reads: a suspicion you couldn't confirm yet, an assumption the code makes, an invariant that must hold there, or a todo. Not for confirmed bugs (report_bug those).", "input_schema": s(json!({ "file": { "type": "string", "description": "e.g. src/AsyncSwap.sol" }, "line": { "type": "integer" }, "kind": { "type": "string", "enum": ["suspicion", "assumption", "invariant", "todo"] }, "note": { "type": "string", "description": "One sentence, third person, e.g. \"Rounds in the taker's favour when amountIn < price\"" } }), vec!["file", "line", "kind", "note"]) }),
-        json!({ "name": "run_in_background", "description": "Start a long task and keep working while it runs: coverage (minutes on a big suite), explore, or a forge command (`forge test …`, `forge build`). Returns a task number at once; read the result later with background_results.", "input_schema": s(json!({ "tool": { "type": "string", "enum": ["coverage", "explore", "run"] }, "input": { "type": "object", "description": "The tool's own arguments: coverage {include, skip}, explore {only, include, skip, timeout_ms}, run {command}" } }), vec!["tool"]) }),
+        json!({ "name": "run_in_background", "description": "Start a long task and keep working while it runs: coverage (minutes on a big suite), explore, or a forge command (`forge test …`, `forge build`). Returns a task number at once; read the result later with background_results.", "input_schema": s(json!({ "tool": { "type": "string", "enum": ["coverage", "explore", "run"] }, "input": { "type": "object", "description": "The tool's own arguments: coverage {at, include, skip}, explore {target, only, include, skip, timeout_ms}, run {command}" } }), vec!["tool"]) }),
         json!({ "name": "background_results", "description": "Your background tasks: with no id, each one's tool, status and time so far; with an id, that task's result once it's done (wait: true waits until it is).", "input_schema": s(json!({ "id": { "type": "integer" }, "wait": { "type": "boolean" } }), vec![]) }),
-        json!({ "name": "explore", "description": "Concolic exploration: every JUMPI side coverage never took is a target; fuzz tests are the harnesses; z3 solves for inputs that take the side. Returns, by source line: solved (the inputs, ready for debug_run's args), unsat (unreachable from that test: a dead guard or a test-design gap), unknown, and findings (solved inputs that make a test fail: open them with debug_run). Slow on a whole suite (minutes): narrow it with `only`.", "input_schema": s(json!({ "only": { "type": "string", "description": "Only fuzz tests whose Contract::name contains this" }, "include": { "type": "array", "items": { "type": "string" } }, "skip": { "type": "array", "items": { "type": "string" } }, "timeout_ms": { "type": "integer", "description": "Per solver call (default 1000)" } }), vec![]) }),
+        json!({ "name": "explore", "description": "Concolic exploration: every JUMPI side coverage never took is a target; fuzz tests are the harnesses; z3 solves for inputs that take the side. Returns, by source line: solved (the inputs, ready for debug_run's args), unsat (unreachable from that test: a dead guard or a test-design gap), unknown, and findings (solved inputs that make a test fail: open them with debug_run). Slow on a whole suite (minutes): narrow it with `target` (one line's untaken sides) and `only`.", "input_schema": s(json!({ "target": { "type": "string", "description": "file:line: only the untaken sides on this line" }, "only": { "type": "string", "description": "Only fuzz tests whose Contract::name contains this" }, "include": { "type": "array", "items": { "type": "string" } }, "skip": { "type": "array", "items": { "type": "string" } }, "timeout_ms": { "type": "integer", "description": "Per solver call (default 1000)" } }), vec![]) }),
     ]
 }
 
@@ -323,6 +323,9 @@ async fn coverage(folder: &str, input: &Value) -> Result<Value, String> {
     if !crate::local::read()?.allows(folder) {
         return Err("Add the folder first".into());
     }
+    if let Some(at) = input["at"].as_str() {
+        return coverage_at(folder, input, at).await;
+    }
     let lock = coverage_lock(&format!("{folder}\n{}\n{}", input["include"], input["skip"]));
     let _one_at_a_time = lock.lock().await;
     let key = tree_key(folder).map(|t| format!("{t}-{:016x}", fnv64(json!({ "include": input["include"], "skip": input["skip"], "format": 2 }).to_string().as_bytes())));
@@ -340,9 +343,37 @@ async fn coverage(folder: &str, input: &Value) -> Result<Value, String> {
     Ok(v)
 }
 
+/// One line's branch sides, from concolity's branch map (cached by the tree; a whole-suite coverage fills it).
+async fn coverage_at(folder: &str, input: &Value, at: &str) -> Result<Value, String> {
+    let (file, line) = location(at).ok_or_else(|| format!("`at` is file:line, not {at}"))?;
+    let lock = coverage_lock(&format!("{folder}\n{}\n{}", input["include"], input["skip"]));
+    let _one_at_a_time = lock.lock().await;
+    let opts = coverage_opts(folder, input);
+    let all = tauri::async_runtime::spawn_blocking(move || concolity::coverage::branches(&opts)).await.map_err(|e| e.to_string())?.map_err(|e| format!("{e:#}"))?;
+    let here: Vec<Value> = all
+        .into_iter()
+        .filter(|(f, l, ..)| f.ends_with(&file) && *l == line)
+        .map(|(f, l, code, pc, j, fl)| json!({ "at": format!("{f}:{l}"), "code": code, "pc": pc, "jumped": j, "fell_through": fl }))
+        .collect();
+    if here.is_empty() {
+        return Ok(json!({ "at": at, "branches": [], "note": "no branch (JUMPI) on that line in the included files" }));
+    }
+    Ok(json!({ "at": at, "branches": here }))
+}
+
 async fn coverage_fresh(folder: &str, input: &Value) -> Result<Value, String> {
     let opts = coverage_opts(folder, input);
-    let report = tauri::async_runtime::spawn_blocking(move || concolity::coverage::run(&opts)).await.map_err(|e| e.to_string())?.map_err(|e| format!("{e:#}"))?;
+    let report = tauri::async_runtime::spawn_blocking(move || {
+        let r = concolity::coverage::run(&opts);
+        // Fills concolity's branch map too, so `at` and explore don't run the suite again.
+        if let Ok(r) = &r {
+            concolity::coverage::remember(&opts, r);
+        }
+        r
+    })
+    .await
+    .map_err(|e| e.to_string())?
+    .map_err(|e| format!("{e:#}"))?;
     let files: Vec<Value> = report
         .files
         .iter()
@@ -402,6 +433,7 @@ async fn explore(folder: &str, input: &Value) -> Result<Value, String> {
         timeout_ms: input["timeout_ms"].as_u64().unwrap_or(1000) as u32,
         seeds: 2,
         only: input["only"].as_str().filter(|s| !s.is_empty()).map(str::to_string),
+        target: input["target"].as_str().and_then(location),
     };
     let report = tauri::async_runtime::spawn_blocking(move || concolity::explore::run(&opts)).await.map_err(|e| e.to_string())?.map_err(|e| format!("{e:#}"))?;
     let full = report.to_json();
@@ -440,6 +472,21 @@ mod tests {
         let f = v["files"].as_array().unwrap().iter().find(|f| f["file"] == "src/AsyncSwap.sol").expect("AsyncSwap.sol covered");
         assert!(f["uncovered_lines"].is_string() && f["untaken_sides"].is_array(), "{f}");
         eprintln!("{}", serde_json::to_string(&v).unwrap().len());
+    }
+
+    /// One line's sides, as an agent asks for them: the second call reads the branch map the first one left.
+    #[test]
+    #[ignore]
+    fn coverage_at_one_line() {
+        let root = std::path::PathBuf::from(std::env::var("HOME").unwrap()).join("developer/asyncswap/contracts");
+        let input = serde_json::json!({ "skip": ["test/formal/AsyncSwapBeforeSwap.t.sol"] });
+        let at = |line: &str| tauri::async_runtime::block_on(super::coverage_at(&root.display().to_string(), &input, line)).unwrap();
+        let first = at("src/AsyncSwap.sol:169");
+        let t = std::time::Instant::now();
+        let again = at("src/AsyncSwap.sol:169");
+        assert_eq!(first, again);
+        assert!(t.elapsed().as_secs() < 5, "the second call is cached");
+        eprintln!("{first}");
     }
 
     #[test]
