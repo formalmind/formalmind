@@ -1219,10 +1219,12 @@ function CoverageView({ data, scripts, onOpenFile }: { data: Formal; scripts: Sc
 	// A function's identity: several share a name (overloads, or the same library compiled twice), so add where it is.
 	const fnKey = (f: FormalFn) => `${f.name}@${f.file ?? ""}:${f.line}`;
 	// Library functions are always listed and counted.
-	// Proved functions come first in each group; the rest keep their order.
+	// Each group lists proved functions first, then those with a sorry, then the modelled ones, and the ones not modelled
+	// last; within a status they keep their order.
+	const rank = (f: FormalFn) => ["proved", "sorry", "modeled", "opaque"].indexOf(fnStatus(f, data.theorems).key);
 	const shown = data.functions
 		.filter((f) => (filter === "all" || (filter === "modeled" ? ["modeled", "sorry"].includes(fnStatus(f, data.theorems).key) : fnStatus(f, data.theorems).key === filter)))
-		.sort((a, b) => Number(fnStatus(b, data.theorems).key === "proved") - Number(fnStatus(a, data.theorems).key === "proved"));
+		.sort((a, b) => rank(a) - rank(b));
 	const groups = [
 		{ title: "Functions", fns: shown.filter((f) => f.entry && calledBy(f).length) },
 		{ title: scripts ? "Other entry points" : "Entry points", fns: shown.filter((f) => f.entry && !calledBy(f).length) },
