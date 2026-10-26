@@ -70,7 +70,7 @@ function aiCatalog(): Response {
       {
         identifier: id("server", "swarm"),
         displayName: "Formal Mind MCP servers",
-        description: "One card, two remotes: read-only tools at /mcp (no auth): the audit format, Formal Mind's audit of an example repository, the desktop app's latest release; and the account tools at /mcp/account (OAuth 2.0 from this host, GitHub sign-in): your projects, usage, credits and hosted swarm state, planning a repository and setting up its specs.",
+        description: "One card, two remotes: read-only tools at /mcp (no auth): the audit format, Formal Mind's audit of an example repository, the desktop app's latest release; and the account tools at /mcp/account (OAuth 2.0 from this host, GitHub sign-in): your projects' files, audits, findings and Proofs coverage, usage, credits, the hosted and the Mac's swarm, planning a repository, setting up its specs and steering the Mac's swarm.",
         type: "application/mcp-server-card+json",
         url: `${ORIGIN}/.well-known/mcp/server-card.json`,
         representativeQueries: [
@@ -105,7 +105,7 @@ function aiCatalog(): Response {
       {
         identifier: id("skill", "connect-formal-mind-as-mcp"),
         displayName: "Skill: connect Formal Mind as an MCP connector",
-        description: "Add formal.team/mcp/account to Claude, ChatGPT or Cursor, sign in with GitHub, and ask about or act on your own account: projects, usage, credits, swarm state, planning a repository, starting the swarm.",
+        description: "Add formal.team/mcp/account to Claude, ChatGPT or Cursor, sign in with GitHub, and ask about or act on your own account: projects, their audits, findings and Proofs coverage, usage, credits, swarm state, planning a repository, starting the swarm.",
         type: "text/markdown",
         url: `${ORIGIN}/.well-known/agent-skills/connect-formal-mind-as-mcp/SKILL.md`,
         representativeQueries: [
