@@ -420,8 +420,9 @@ pub async fn hunt(app: &AppHandle, folder: &str, run: &str, job: u64, resumed: b
         .arg("--mcp-config")
         .arg(&mcp_file)
         .arg("--strict-mcp-config")
-        // The project's settings only: your own hooks, plugins and permission rules stay out of the hunter's session.
-        .args(["--setting-sources", "project,local"])
+        // No settings at all: your own hooks, plugins and permission rules stay out of the hunter's session, and so do
+        // the audited project's (its .claude/settings.json hooks would run commands on this machine).
+        .args(["--setting-sources", ""])
         .arg("--add-dir")
         .arg(&root)
         .arg("--allowedTools")
@@ -639,6 +640,11 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("fm-claude-{}", std::process::id()));
         std::fs::create_dir_all(dir.join("src")).unwrap();
         std::fs::write(dir.join("src/A.sol"), "contract A {}\n").unwrap();
+        // A project hook, as an audited repo could carry: it must not run.
+        let ran = dir.join("hook-ran");
+        std::fs::create_dir_all(dir.join(".claude")).unwrap();
+        let hook = json!({ "hooks": { "SessionStart": [{ "hooks": [{ "type": "command", "command": format!("touch {}", ran.display()) }] }] } });
+        std::fs::write(dir.join(".claude/settings.json"), hook.to_string()).unwrap();
         let server = serve(None, dir.display().to_string(), "hunt-test".into()).unwrap();
         let mcp = json!({ "mcpServers": { "formalmind": { "type": "http", "url": server.url, "headers": { "Authorization": format!("Bearer {}", server.token) } } } });
         // As hunt() passes it: a private file, not the JSON inline.
@@ -646,7 +652,7 @@ mod tests {
         write_private(&mcp_file, &mcp.to_string()).unwrap();
         let out = std::process::Command::new(claude())
             .current_dir(&dir)
-            .args(["--setting-sources", "project,local"])
+            .args(["--setting-sources", ""])
             .args(["-p", "Call the formalmind tag tool once with file src/A.sol, line 1, kind todo, note \"checked by the test\". Then reply with the single word done.", "--output-format", "stream-json", "--verbose", "--strict-mcp-config", "--allowedTools", "mcp__formalmind", "--mcp-config"])
             .arg(&mcp_file)
             .env("PATH", crate::platform::tool_path(None))
@@ -659,6 +665,7 @@ mod tests {
         let init = lines.iter().find(|l| l["type"] == "system" && l["subtype"] == "init").unwrap();
         assert_eq!(std::fs::canonicalize(init["cwd"].as_str().unwrap()).unwrap(), std::fs::canonicalize(&dir).unwrap(), "runs in the project");
         assert!(events.iter().any(|(k, t)| *k == "tool" && t.starts_with("tag")), "{events:?}");
+        assert!(!ran.exists(), "the project's hook ran");
         let sarif = std::fs::read_to_string(dir.join(".formal/findings.sarif")).unwrap();
         assert!(sarif.contains("checked by the test") && sarif.contains("formal-mind/tag/todo"), "{sarif}");
         let _ = std::fs::remove_dir_all(dir);
