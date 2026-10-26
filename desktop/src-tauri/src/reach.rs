@@ -204,17 +204,18 @@ mod tests {
         assert_eq!(status(0, None), "unexplored");
     }
 
-    /// Async Swap (an added folder): the hook's functions, its calls, and sides once coverage has run.
+    /// Async Swap (an added folder), or REACH_FOLDER and REACH_ENTRY: the entry's functions, its calls, and sides once
+    /// coverage has run (this runs it with the app's options, so the page has it).
     #[test]
     #[ignore]
     fn async_swap_map() {
-        let root = std::path::PathBuf::from(std::env::var("HOME").unwrap()).join("developer/asyncswap/contracts");
-        let folder = root.display().to_string();
+        let folder = std::env::var("REACH_FOLDER").unwrap_or_else(|_| format!("{}/developer/asyncswap/contracts", std::env::var("HOME").unwrap()));
+        let entry = std::env::var("REACH_ENTRY").unwrap_or_else(|_| "src/AsyncSwap.sol".into());
         // The branch map the page reads: the suite run once with the app's options (cached after).
         concolity::coverage::branches(&crate::analysis::coverage_opts(&folder, &json!({}))).unwrap();
-        let v = map(&folder, "src/AsyncSwap.sol").unwrap();
+        let v = map(&folder, &entry).unwrap();
         let fns = v["functions"].as_array().unwrap();
-        assert!(fns.iter().any(|f| f["name"] == "cancelOrder" && f["entry"] == true), "{}", fns.len());
+        assert!(fns.iter().any(|f| f["entry"] == true), "{}", fns.len());
         assert!(v["edges"].as_array().unwrap().len() > 10);
         let sides: usize = fns.iter().map(|f| f["sides"].as_array().unwrap().len()).sum();
         eprintln!("{} functions, {} edges, {sides} sides, coverage {}, outside {}", fns.len(), v["edges"].as_array().unwrap().len(), v["coverage"], v["outside"]);

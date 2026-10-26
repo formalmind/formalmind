@@ -26,6 +26,9 @@ pub struct Project {
     pub remappings: Vec<String>,
     /// Library folders (foundry.toml `libs`, default `lib`): code there is a trusted dependency.
     pub libs: Vec<String>,
+    /// The active profile's source and test folders (`src`, `test` by default).
+    pub src: String,
+    pub test: String,
 }
 
 impl Project {
@@ -36,13 +39,21 @@ impl Project {
 
     /// A project whose files come from `files` (`root` is only kept for callers that write next to them).
     pub fn from_files(root: PathBuf, files: Arc<dyn Files>) -> Result<Self> {
-        let mut project = Project { root, files: files.clone(), solc_version: None, evm_version: None, remappings: vec![], libs: vec![] };
+        let mut project = Project { root, files: files.clone(), solc_version: None, evm_version: None, remappings: vec![], libs: vec![], src: "src".into(), test: "test".into() };
         if let Some(text) = files.read("foundry.toml") {
-            let doc: toml::Value = toml::from_str(&text).context("foundry.toml doesn't parse")?;
-            let profile = doc.get("profile").and_then(|p| p.get("default"));
-            let get = |k: &str| profile.and_then(|p| p.get(k)).and_then(|v| v.as_str()).map(str::to_string);
+            toml::from_str::<toml::Table>(&text).context("foundry.toml doesn't parse")?;
+            // The active profile (FOUNDRY_PROFILE) over the default one, as forge reads it.
+            let p = crate::foundry::profile(&text).unwrap_or_default();
+            let profile = Some(&p);
+            let get = |k: &str| crate::foundry::get_str(&p, k);
             project.solc_version = get("solc_version").or_else(|| get("solc"));
             project.evm_version = get("evm_version");
+            if let Some(src) = get("src") {
+                project.src = src.trim_end_matches('/').to_string();
+            }
+            if let Some(test) = get("test") {
+                project.test = test.trim_end_matches('/').to_string();
+            }
             if let Some(list) = profile.and_then(|p| p.get("libs")).and_then(|v| v.as_array()) {
                 project.libs.extend(list.iter().filter_map(|v| v.as_str()).map(str::to_string));
             }
@@ -67,6 +78,23 @@ impl Project {
         if project.libs.is_empty() {
             project.libs.push("lib".into());
         }
+        // forge's automatic remappings, after the declared ones: each library folder's `name/` to its `src/` (or the
+        // folder), then the libraries inside those (forge-std's own `lib/ds-test`).
+        for lib in project.libs.clone() {
+            let mut dirs: Vec<String> = files.read_dir(&lib).into_iter().filter(|(_, dir)| *dir).map(|(name, _)| name).collect();
+            dirs.sort();
+            let mut nested = vec![];
+            for dep in &dirs {
+                project.auto_remap(&format!("{lib}/{dep}"), dep);
+                let inner = format!("{lib}/{dep}/lib");
+                let mut more: Vec<String> = files.read_dir(&inner).into_iter().filter(|(_, dir)| *dir).map(|(name, _)| name).collect();
+                more.sort();
+                nested.extend(more.into_iter().map(|n| (format!("{inner}/{n}"), n)));
+            }
+            for (path, name) in nested {
+                project.auto_remap(&path, &name);
+            }
+        }
         // A dependency's own remappings.txt, scoped to imports from inside it (forge does the same): v4-core's
         // `solmate/=lib/solmate/` becomes `dependencies/v4-core/:solmate/=dependencies/v4-core/lib/solmate/`.
         for lib in project.libs.clone() {
@@ -85,6 +113,18 @@ impl Project {
             }
         }
         Ok(project)
+    }
+}
+
+impl Project {
+    /// `name/=path/src/` (or `path/`) unless a remapping already claims `name/`.
+    fn auto_remap(&mut self, path: &str, name: &str) {
+        let prefix = format!("{name}/");
+        if self.remappings.iter().any(|r| r.split(':').next_back().unwrap_or(r).split('=').next() == Some(prefix.as_str())) {
+            return;
+        }
+        let to = if self.files.exists(&format!("{path}/src")) { format!("{path}/src/") } else { format!("{path}/") };
+        self.remappings.push(format!("{prefix}={to}"));
     }
 }
 

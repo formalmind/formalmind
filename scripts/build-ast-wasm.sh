@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Builds formal-ast for the browser (crates/formal-ast-wasm) into lib/formal-ast-wasm, which is committed so the
-# website builds without Rust. Run it after changing crates/formal-ast. Needs the wasm32 target and wasm-bindgen 0.2.100:
-#   rustup target add wasm32-unknown-unknown && cargo install wasm-bindgen-cli --version 0.2.100
+# website builds without Rust. Run it after changing crates/formal-ast. Needs the wasm32 target and wasm-bindgen 0.2.129 (the version crates/formal-ast-wasm pins):
+#   rustup target add wasm32-unknown-unknown && cargo install wasm-bindgen-cli --version 0.2.129
 set -euo pipefail
 cd "$(dirname "$0")/.."
 cargo build --release --target wasm32-unknown-unknown --manifest-path crates/formal-ast-wasm/Cargo.toml

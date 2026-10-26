@@ -21,13 +21,13 @@ pub struct Settings {
 }
 
 impl Settings {
-    /// `[profile.default]` of foundry.toml: `optimizer`, `optimizer_runs` (200 by default, as in forge), `via_ir`.
+    /// The active profile of foundry.toml (FOUNDRY_PROFILE over `[profile.default]`): `optimizer`, `optimizer_runs` (200
+    /// by default, as in forge), `via_ir` (or `via-ir`).
     pub fn from_foundry(root: &std::path::Path) -> Settings {
-        let Ok(text) = std::fs::read_to_string(root.join("foundry.toml")) else { return Settings::default() };
-        let Ok(doc) = text.parse::<toml::Table>() else { return Settings::default() };
-        let p = doc.get("profile").and_then(|p| p.get("default"));
-        let get = |k: &str| p.and_then(|p| p.get(k));
-        let on = get("optimizer").and_then(|v| v.as_bool()).unwrap_or(false);
+        let p = formal_ast::foundry::read(root);
+        let get = |k: &str| p.get(k);
+        // forge: off unless asked, and asking for runs (`optimizer_runs` without `optimizer`) turns it on.
+        let on = get("optimizer").and_then(|v| v.as_bool()).unwrap_or(get("optimizer_runs").is_some());
         let runs = get("optimizer_runs").and_then(|v| v.as_integer()).unwrap_or(200) as u64;
         Settings { optimizer: on.then_some(runs), via_ir: get("via_ir").and_then(|v| v.as_bool()).unwrap_or(false) }
     }
