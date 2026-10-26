@@ -2228,14 +2228,9 @@ export function SwarmPanel({ folder, name, scan, bridge, session, file: openPath
 				>
 					{shown.length === 0 && !run ? <p className="text-muted-foreground">Talk to the agents here. Before a run, what you write is the swarm's focus and ↑ starts it; while it runs, they read your messages before their next turn.</p> : null}
 					{chatList}
-					{/* While an agent works, Mike's loader until its next words. */}
+					{/* While an agent works: its name, and its current task shimmering until its next words. */}
 					{run && working ? (
 						<p className="flex items-center gap-2 text-[12px] text-muted-foreground">
-							<span className="fm-dots inline-flex gap-1">
-								<i />
-								<i />
-								<i />
-							</span>
 							<span className="font-medium" style={{ color: colorOf(working.role) }}>{working.role}</span>
 							<span className="fm-text-shimmer truncate">{working.text}</span>
 						</p>
