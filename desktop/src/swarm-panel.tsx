@@ -2264,6 +2264,7 @@ export function SwarmPanel({ folder, name, scan, bridge, session, file: openPath
 					{error ? <p className="text-xs text-red-600">{error}</p> : null}
 					{/* The Swarm page's composer: steer while it runs; before that, what you type is its focus and ↑ starts it. */}
 					<ChatComposer
+						compact
 						value={run ? say : goal}
 						onChange={(e) => (run ? setSay(e.target.value) : setGoal(e.target.value))}
 						onSubmit={() => void (run ? send() : start())}
@@ -2285,17 +2286,18 @@ export function SwarmPanel({ folder, name, scan, bridge, session, file: openPath
 						context={
 							<span className="inline-flex items-center gap-1.5">
 								{run ? null : (
-									<button type="button" onClick={() => void start()} disabled={Boolean(ownKey) && !hasKey} title={ownKey && !hasKey ? `Add your ${ownKey} key in Settings first` : "Start the swarm"} className="btn-dark inline-flex h-8 items-center gap-1.5 px-3 text-[13px] disabled:opacity-50">
+									<button type="button" onClick={() => void start()} disabled={Boolean(ownKey) && !hasKey} title={ownKey && !hasKey ? `Add your ${ownKey} key in Settings first` : "Start the swarm"} className="btn-dark inline-flex h-7 items-center gap-1.5 px-2.5 text-[12px] disabled:opacity-50">
 										<Play className="size-3" />{plan.some((i) => i.mark === " ") ? "Resume" : "Start"}
 									</button>
 								)}
-								<span className="inline-flex h-8 items-center gap-1.5 rounded-full bg-secondary px-3 text-[13px] font-medium text-secondary-foreground" title={folder}><Folder className="size-3.5 shrink-0" />{name}</span>
+								<span className="inline-flex h-7 items-center gap-1.5 rounded-full bg-secondary px-2.5 text-[12px] font-medium text-secondary-foreground" title={folder}><Folder className="size-3 shrink-0" />{name}</span>
 							</span>
 						}
 						extra={run ? (
-							<button type="button" onClick={() => void draft()} disabled={drafting} title="Draft a reply for me" className="inline-flex h-8 shrink-0 items-center whitespace-nowrap gap-1.5 rounded-full px-2.5 text-sm text-muted-foreground hover:bg-muted hover:text-foreground disabled:opacity-50">
+							<button type="button" onClick={() => void draft()} disabled={drafting} title="Draft a reply for me" className="inline-flex h-7 shrink-0 items-center whitespace-nowrap gap-1.5 rounded-full px-2 text-[12px] text-muted-foreground hover:bg-muted hover:text-foreground disabled:opacity-50">
 								<WandSparkles className={`size-3.5 ${drafting ? "animate-pulse" : ""}`} />
-								{drafting ? "Drafting…" : "Draft reply"}
+								{/* A narrow composer keeps just the wand. */}
+								<span className="[@container(max-width:440px)]:hidden">{drafting ? "Drafting…" : "Draft reply"}</span>
 							</button>
 						) : null}
 					/>
