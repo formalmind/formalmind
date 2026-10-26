@@ -3,6 +3,10 @@
 //! stay here, keyed by an id; the webview gets a small view of one step at a time (the source place, a window of
 //! opcodes, the stack, memory rebuilt from the frame's writes, the latest storage accesses), never the trace.
 //! The panes are the terminal UI's (crates/sol-debug/src/tui.rs). See desktop/DEBUGGER.md section 8.
+//!
+//! The swarm's agents drive the same sessions through tools (`swarm.rs`: debug_open, debug_run, debug_move, …):
+//! they get JSON ([`here`], sol-debug's agent queries), and every move is emitted as `debug:agent` so the Debug view
+//! follows the agent's cursor.
 
 use revm::bytecode::opcode::OpCode;
 use serde::Serialize;
@@ -274,12 +278,14 @@ pub fn close(state: &Debuggers, id: u32) {
 /// Runs one test (setUp untraced, then the test recorded) and opens on its first statement.
 #[tauri::command]
 pub async fn debug_run(app: tauri::AppHandle, state: tauri::State<'_, Debuggers>, id: u32, contract: String, test: String, chain_id: Option<u64>, fork_url: Option<String>) -> Result<RunView, String> {
-    run_test(&state, id, contract, test, chain_id, fork_url, Some(app)).await
+    run_test(&state, id, contract, test, vec![], chain_id, fork_url, Some(app)).await
 }
 
 /// `chain_id`: what `block.chainid` reads (scripts read deployments/<chainId>/ by it); 31337 when unset.
 /// `fork_url`: run on a fork (a local Anvil fork's URL), which brings its own chain id.
-pub async fn run_test(state: &Debuggers, id: u32, contract: String, test: String, chain_id: Option<u64>, fork_url: Option<String>, app: Option<tauri::AppHandle>) -> Result<RunView, String> {
+/// `args`: a test with parameters (a fuzz test) runs with these, as Solidity literals.
+#[allow(clippy::too_many_arguments)]
+pub async fn run_test(state: &Debuggers, id: u32, contract: String, test: String, args: Vec<String>, chain_id: Option<u64>, fork_url: Option<String>, app: Option<tauri::AppHandle>) -> Result<RunView, String> {
     ask(state, id, move |d| {
         let folder = d.root.display().to_string();
         let name = contract.rsplit(':').next().unwrap_or(&contract).to_string();
@@ -303,7 +309,7 @@ pub async fn run_test(state: &Debuggers, id: u32, contract: String, test: String
         }
         log(&app, &folder, format!("▸ {name}.setUp() then {name}.{test}()"));
         let started = std::time::Instant::now();
-        let mut l = load(s, &contract, &test, d.loaded.take()).map_err(|e| {
+        let mut l = load(s, &contract, &test, &args, d.loaded.take()).map_err(|e| {
             log(&app, &folder, format!("failed: {e}"));
             e
         })?;
@@ -328,8 +334,17 @@ pub async fn run_test(state: &Debuggers, id: u32, contract: String, test: String
 
 /// Runs a test in a compiled session and opens it on the first statement in the test's body, as the TUI does.
 /// Breakpoints and watches of the previous run of the file carry over.
-fn load(mut s: Session, contract: &str, test: &str, previous: Option<Loaded>) -> Result<Loaded, String> {
-    let run = s.run_test(contract, test, false).map_err(err)?.test;
+fn load(mut s: Session, contract: &str, test: &str, args: &[String], previous: Option<Loaded>) -> Result<Loaded, String> {
+    let run = if args.is_empty() {
+        s.run_test(contract, test, false).map_err(err)?.test
+    } else {
+        // A fuzz test with given arguments: setUp untraced, then the call.
+        let address = s.deploy_test(contract).map_err(err)?;
+        let ci = s.artifact(contract).map_err(err)?;
+        let sig = s.artifacts[ci].signature(test).map_err(err)?;
+        let data = sol_debug::session::encode_call(&sig, args).map_err(err)?;
+        s.transact(sol_debug::SENDER, revm::primitives::TxKind::Call(address), data.into(), revm::primitives::U256::ZERO).map_err(err)?
+    };
     let mut nav = Navigator::new(&s, &run);
     if let Some(old) = previous {
         nav.breakpoints = old.nav.breakpoints;
@@ -441,9 +456,9 @@ pub async fn compare(state: &Debuggers, id: u32, other: String, contract: String
             Some(s) => s,
             None => Session::compile(&d.root, &d.file).map_err(err)?,
         };
-        let mut a = load(sa, &contract, &test, d.loaded.take())?;
+        let mut a = load(sa, &contract, &test, &[], d.loaded.take())?;
         let sb = Session::compile(&root_b, &d.file).map_err(|e| format!("{}: {}", root_b.display(), err(e)))?;
-        let mut b = load(sb, &contract, &test, d.other.take())?;
+        let mut b = load(sb, &contract, &test, &[], d.other.take())?;
         let report = sol_debug::diff::compare(&a.s, &a.run, &b.s, &b.run, &map);
         let first = report.first().map(divergence);
         if let Some(f) = &first {
@@ -789,6 +804,114 @@ fn view(l: &Loaded, status: String) -> StepView {
     }
 }
 
+// ---- The agents' side ------------------------------------------------------------------------------------------
+
+/// The tests an opened session lists, as `Contract::test` (what `debug_run` takes).
+pub fn test_names(o: &Opened) -> Vec<String> {
+    o.tests.iter().map(|t| format!("{}::{}", t.name, t.test)).collect()
+}
+
+/// What an agent sees at the current step: where it is in the source (with the lines around it), the instruction,
+/// the top of the stack, the call it is in and the latest storage accesses. Small on purpose; `look` has the rest.
+fn here(l: &Loaded, status: &str) -> serde_json::Value {
+    use serde_json::json;
+    let (s, nav, trace, cur) = (&l.s, &l.nav, &l.run.trace, l.cur);
+    let st = &trace.steps[cur];
+    let place = nav.locs[cur].as_ref().or_else(|| (0..cur).rev().find_map(|i| nav.locs[i].as_ref())).and_then(|loc| {
+        let file = s.sources.files.get(&loc.entry.file)?;
+        let lines: Vec<String> = (loc.line.saturating_sub(2).max(1)..=loc.line + 2)
+            .filter(|&n| n <= file.text.lines().count())
+            .map(|n| format!("{}{n:>5}  {}", if n == loc.line { "▶" } else { " " }, file.line_text(n)))
+            .collect();
+        Some(json!({ "file": file.name, "line": loc.line, "scope": loc.scope, "node": loc.node_type, "exact": nav.locs[cur].is_some(), "source": lines }))
+    });
+    let frame = trace.frames.get(st.frame).map(|fr| {
+        json!({ "who": format!("{} → {}", s.name_of(fr.caller), s.name_of(fr.target)), "call": compact_hex(&s.describe_call(fr.code_address, &fr.input)), "depth": fr.depth })
+    });
+    let storage: Vec<_> = (0..=cur).rev().filter_map(|i| nav.storage[i].as_ref().map(|t| json!({ "step": i, "at": s.name_of(trace.steps[i].address), "access": compact_hex(t) }))).take(5).collect();
+    let file_name = |id: i64| s.sources.files.get(&id).map(|f| f.name.clone()).unwrap_or_else(|| id.to_string());
+    json!({
+        "step": cur,
+        "of": nav.len(),
+        "op": OpCode::new(st.op).map(|o| o.as_str()).unwrap_or("INVALID"),
+        "pc": st.pc,
+        "gas_left": st.gas_left,
+        "place": place,
+        "frame": frame,
+        "stack_top": st.stack.iter().rev().take(6).map(|v| short_word(*v)).collect::<Vec<_>>(),
+        "storage_recent": storage,
+        "breakpoints": nav.breakpoints.iter().map(|(f, line)| format!("{}:{line}", file_name(*f))).collect::<Vec<_>>(),
+        "watches": nav.watches,
+        "status": status,
+    })
+}
+
+/// The run as the agent sees it after `debug_run`: the verdict, the calls (first 40) and where it stopped.
+fn run_summary(l: &Loaded, rv: &RunView) -> serde_json::Value {
+    use serde_json::json;
+    let calls: Vec<_> = rv.calls.iter().take(40).map(|c| json!({ "depth": c.depth, "kind": c.kind, "who": c.who, "call": c.call, "ok": c.ok, "first_step": c.first_step })).collect();
+    json!({ "test": rv.title, "verdict": rv.verdict, "gas": rv.gas, "steps": l.nav.len(), "calls": calls, "calls_total": rv.calls.len(), "console": rv.console, "missing_cheatcodes": rv.missing, "here": here(l, "") })
+}
+
+/// The agent's view of the current step.
+pub async fn agent_here(state: &Debuggers, id: u32) -> Result<serde_json::Value, String> {
+    ask(state, id, |d| Ok(here(loaded(d)?, ""))).await
+}
+
+/// Runs a test for an agent: the UI's run view (for the Debug view to follow) and the agent's summary.
+pub async fn agent_run(state: &Debuggers, id: u32, contract: String, test: String, args: Vec<String>, app: Option<tauri::AppHandle>) -> Result<(RunView, serde_json::Value), String> {
+    let rv = run_test(state, id, contract, test, args, None, None, app).await?;
+    let summary = ask(state, id, |d| Ok(loaded(d)?.clone_summary())).await?;
+    Ok((rv, summary))
+}
+
+/// sol-debug's agent queries on the loaded run: `summary`, `lines` (the Solidity lines it ran, in order, optionally
+/// only in functions whose name contains `filter`), `revert` (why and where it reverted), `writes` (every storage write,
+/// named, optionally only variables containing `filter`), `step` (one step in full, `n`), and `here`.
+pub async fn agent_look(state: &Debuggers, id: u32, query: String, filter: Option<String>, n: Option<usize>) -> Result<serde_json::Value, String> {
+    ask(state, id, move |d| {
+        let l = loaded(d)?;
+        let f = filter.as_deref().filter(|f| !f.is_empty());
+        Ok(match query.as_str() {
+            "here" => here(l, ""),
+            "summary" => sol_debug::agent::summary(&l.s, &l.run),
+            "lines" => sol_debug::agent::lines(&l.s, &l.run, f, 300),
+            "revert" => sol_debug::agent::revert(&l.s, &l.run),
+            "writes" => sol_debug::agent::writes(&l.s, &l.run, f),
+            "step" => sol_debug::agent::step(&l.s, &l.run, n.unwrap_or(l.cur)),
+            q => return Err(format!("no query {q:?}: here, summary, lines, revert, writes, step")),
+        })
+    })
+    .await
+}
+
+impl Loaded {
+    fn clone_summary(&self) -> serde_json::Value {
+        let rv = run_view(self, "", "");
+        let mut v = run_summary(self, &rv);
+        v.as_object_mut().map(|o| o.remove("test"));
+        v
+    }
+}
+
+/// Moves for an agent, as `step`, and also returns the agent's view.
+pub async fn agent_move(state: &Debuggers, id: u32, to: String, back: bool, arg: Option<String>) -> Result<(StepView, serde_json::Value), String> {
+    ask(state, id, move |d| {
+        let l = loaded(d)?;
+        let v = move_to(l, &to, back, arg.unwrap_or_default())?;
+        let h = here(l, &v.status);
+        Ok((v, h))
+    })
+    .await
+}
+
+/// Tells the Debug view what an agent did in its session: `opened` (with the tests), `ran` (with the run view) or
+/// `moved` (with the step view).
+pub fn follow(app: &tauri::AppHandle, folder: &str, role: &str, id: u32, kind: &str, payload: serde_json::Value) {
+    use tauri::Emitter;
+    let _ = app.emit("debug:agent", serde_json::json!({ "folder": folder, "role": role, "id": id, "kind": kind, "payload": payload }));
+}
+
 /// Long hex runs (mapping keys, pool ids, addresses) as `0x3e76cc…a14c`, so a storage path stays readable.
 fn compact_hex(s: &str) -> String {
     let mut out = String::new();
@@ -819,8 +942,8 @@ mod tests {
         let fixture = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../crates/sol-debug/tests/diff_fixture");
         let Ok(sa) = Session::compile(&fixture.join("a"), "test/Counter.t.sol") else { return };
         let sb = Session::compile(&fixture.join("b"), "test/Counter.t.sol").unwrap();
-        let a = load(sa, "CounterTest", "test_bumpTwice", None).unwrap();
-        let b = load(sb, "CounterTest", "test_bumpTwice", None).unwrap();
+        let a = load(sa, "CounterTest", "test_bumpTwice", &[], None).unwrap();
+        let b = load(sb, "CounterTest", "test_bumpTwice", &[], None).unwrap();
         let report = sol_debug::diff::compare(&a.s, &a.run, &b.s, &b.run, &Default::default());
         let d = report.first().expect("the fixture diverges");
         assert!(d.what.starts_with("storage"), "{}", d.what);
@@ -828,6 +951,54 @@ mod tests {
         let (pa, pb) = (CallPlaces::new(&a.run), CallPlaces::new(&b.run));
         assert_eq!(pa.at(sa), pb.at(sb));
         assert!(pa.at(sa).1.is_some_and(|c| c > 0), "inside a call the test made, not the test itself");
+    }
+
+    /// An agent's view of the fixture: where the run stops, a move that changes the place, and sol-debug's queries.
+    #[test]
+    fn agent_view_moves_and_reads() {
+        let fixture = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../crates/sol-debug/tests/diff_fixture");
+        let Ok(s) = Session::compile(&fixture.join("a"), "test/Counter.t.sol") else { return };
+        let mut l = load(s, "CounterTest", "test_bumpTwice", &[], None).unwrap();
+        let start = here(&l, "");
+        assert!(start["place"]["file"].as_str().unwrap().ends_with(".sol"), "{start}");
+        assert!(start["place"]["source"].as_array().unwrap().iter().any(|l| l.as_str().unwrap().starts_with('▶')));
+        move_to(&mut l, "last", false, String::new()).unwrap();
+        assert_ne!(here(&l, "")["step"], start["step"]);
+        let writes = sol_debug::agent::writes(&l.s, &l.run, None);
+        assert!(writes.to_string().contains("bumps"), "{writes}");
+    }
+
+    /// The agent tools' path against Async Swap (an added folder): open, run, watch a variable, continue to its write.
+    #[test]
+    #[ignore]
+    fn agent_debugs_async_swap() {
+        let root = PathBuf::from(std::env::var("HOME").unwrap()).join("developer/asyncswap/contracts");
+        let state = Debuggers::default();
+        tauri::async_runtime::block_on(async {
+            let o = open(&state, root.display().to_string(), "test/AsyncSwap.t.sol".into(), None).await.unwrap();
+            assert!(test_names(&o).iter().any(|t| t == "AsyncSwapTest::test_swap_createsOrderWithPrice"));
+            let (rv, summary) = agent_run(&state, o.id, "AsyncSwapTest".into(), "test_swap_createsOrderWithPrice".into(), vec![], None).await.unwrap();
+            assert!(rv.success, "{}", rv.verdict);
+            assert!(summary["calls_total"].as_u64().unwrap() > 3, "{summary}");
+            watch(&state, o.id, "orderCount".into(), true, false).await.unwrap();
+            let (_, h) = agent_move(&state, o.id, "continue".into(), false, None).await.unwrap();
+            assert!(h["storage_recent"].to_string().contains("orderCount"), "{h}");
+            let lines = agent_look(&state, o.id, "lines".into(), Some("beforeSwap".into()), None).await.unwrap();
+            assert!(lines.to_string().contains("beforeSwap"), "{lines}");
+        });
+    }
+
+    /// A fuzz test run with the inputs concolity's explore solved for it: the overflow it found reverts with Panic 0x11.
+    #[test]
+    #[ignore]
+    fn agent_runs_explore_inputs() {
+        let root = PathBuf::from(std::env::var("HOME").unwrap()).join("developer/asyncswap/concolity/fixtures/triangle-project");
+        let s = Session::compile(&root, "test/Explore.t.sol").unwrap();
+        let max_minus_6 = "115792089237316195423570985008687907853269984665640564039457584007913129639929".to_string();
+        let l = load(s, "MagicExploreTest", "testFuzz_poke", &["1592598101".into(), "0".into(), max_minus_6], None).unwrap();
+        assert!(!l.run.success);
+        let why = sol_debug::agent::revert(&l.s, &l.run);
+        assert!(why.to_string().contains("0x11"), "{why}");
     }
 
     /// The Async Swap test from DEBUGGER.md, when that repository is checked out next to this one.

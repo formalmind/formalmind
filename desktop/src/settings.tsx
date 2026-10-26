@@ -154,7 +154,7 @@ export function SettingsPage() {
 						</label>
 						{claudeCode ? (
 							<p className={`text-xs ${claudeCode.ok ? "text-muted-foreground" : "text-amber-600"}`}>
-								{claudeCode.ok ? `${claudeCode.text}. With it picked, the swarm's agents run on it.` : claudeCode.text}
+								{claudeCode.ok ? `${claudeCode.text}. With it picked, the swarm and the Bug Hunter run on it.` : claudeCode.text}
 							</p>
 						) : null}
 						<ApiKey vendor="anthropic" name="Anthropic" placeholder="sk-ant-…" onSaved={() => flash("Key saved")} />

@@ -13,7 +13,7 @@ import { LocalHeading, TreeFolder } from "@/components/session-folder";
 import type { RepoSource } from "@/components/app-sidebar";
 import { FileTree, type Runnable } from "@/components/file-tree";
 import { SwarmPanel, type Bridge } from "./swarm-panel";
-import { DebugView } from "./debug";
+import { AgentDebugger, DebugView } from "./debug";
 
 /** Debug mode (the Debug tab, and run buttons on scripts and tests in the tree). Off for now: the audit comes first. */
 const DEBUG_ENABLED = false;
@@ -256,5 +256,5 @@ export function LocalFolderPage() {
 		invoke<Scan>("folder_scan", { path }).then(setScan, (e) => setError(String(e)));
 	}, [path]);
 	if (error) return <p className="p-6 text-sm text-red-600">{error}</p>;
-	return path ? <SwarmPanel folder={path} name={name(path)} scan={scan} bridge={tauri} session={params.get("run")} file={params.get("file")} debug={DEBUG_ENABLED ? (file, test, onPick) => <DebugView folder={path} file={file} test={test} onPick={onPick} embedded /> : undefined} /> : null;
+	return path ? <SwarmPanel folder={path} name={name(path)} scan={scan} bridge={tauri} session={params.get("run")} file={params.get("file")} debug={DEBUG_ENABLED ? (file, test, onPick) => <DebugView folder={path} file={file} test={test} onPick={onPick} embedded /> : undefined} agentDebug={(p) => <AgentDebugger folder={path} {...p} />} /> : null;
 }

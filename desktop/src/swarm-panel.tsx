@@ -1,10 +1,10 @@
 import { MarkGithubIcon } from "@primer/octicons-react";
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { NvimTerminal } from "./nvim-terminal";
 import { reportError } from "@/lib/report-error";
 import { JsonTree } from "./json-tree";
-import { ArrowDown, Bug, Check, ChevronDown, Code2, Copy, FileCode2, FileDown, Folder, Network, Play, Plus, ScanSearch, Terminal, ThumbsDown, ThumbsUp, WandSparkles } from "lucide-react";
+import { ArrowDown, Bug, Check, ChevronDown, ChevronRight, Code2, Copy, Crosshair, FileCode2, FileDown, Folder, Network, Play, Plus, ScanSearch, Terminal, ThumbsDown, ThumbsUp, WandSparkles } from "lucide-react";
 
 // The project roadmap (GitHub Projects-style), the same view the web app had on its own page.
 import { motion as vimMotion, search as vimSearch, setVimMode, useVimMode, type Cursor } from "@/components/vim-mode";
@@ -21,9 +21,8 @@ import { GitTree } from "./git-tree";
 import { CodeBlock, CodeBlockContent } from "@/components/ui/code-block";
 import { useHighlightedCode } from "@/hooks/use-highlighted-code";
 import { Message, MessageContent, MessageHeader } from "@/components/ui/message";
-import { Trace, TraceCollapsible, TraceCollapsibleContent, TraceCollapsibleTrigger, TraceIcon, TraceLine, TraceTitle } from "@/components/ui/trace";
 import { SwarmCanvas } from "@/components/swarm/swarm-canvas";
-import { ROLE_COLORS } from "@/lib/swarm-roles";
+import { ROLE_COLORS, roleName } from "@/lib/swarm-roles";
 import { localBoard } from "./local-board";
 import { ContextBody, ContextPanel, parseContext } from "./context-panel";
 import type { Scan } from "./local";
@@ -37,7 +36,7 @@ export type Bridge = {
 
 import type { Diagnostic } from "@/lib/ast/run";
 
-export type Ev = { folder?: string; run: string; kind: "start" | "status" | "context" | "say" | "ask" | "tool" | "result" | "you" | "bug" | "plan" | "done" | "error"; role: string; item: string; text: string; spent: number };
+export type Ev = { folder?: string; run: string; kind: "start" | "status" | "context" | "say" | "ask" | "tool" | "result" | "you" | "bug" | "plan" | "done" | "error"; role: string; item: string; text: string; spent: number; /** ms since the epoch (newer logs) */ at?: number };
 type Item = { index: number; mark: string; text: string };
 /** A claim in .formal/statements.md (desktop/src-tauri/src/statements.rs), for the swarm to prove or disprove. */
 type Statement = { id: string; mark: string; author: string; text: string; details: string[]; obligations: { mark: string; text: string }[] };
@@ -106,49 +105,130 @@ function StatementMark({ mark, small }: { mark: string; small?: boolean }) {
 const store = { get: (k: string) => { try { return localStorage.getItem(k); } catch { return null; } }, set: (k: string, v: string) => { try { localStorage.setItem(k, v); } catch { /* not kept */ } } };
 
 
-type Block = { e: Ev } | { steps: { call: Ev; result?: Ev }[] };
+/** A row of an activity group: the agent's note on what it's about to do, or a tool call with its result. */
+type Row = { note: Ev } | { call: Ev; result?: Ev };
+type Block = { e: Ev } | { steps: Row[] };
 
-/** The chat as blocks: messages stand alone; a run of tool calls (each with its result) folds into one trace. */
+/**
+ * The chat as blocks. Messages stand alone, except an agent's note right before a tool call: it joins the call's
+ * activity group, so the group reads as what it did and why ("Coverage first…", Ran coverage, "Two guards…", Ran …).
+ */
 export function blocks(events: Ev[]): Block[] {
 	const out: Block[] = [];
 	for (const e of events) {
 		const last = out.at(-1);
 		if (e.kind === "tool") {
-			if (last && "steps" in last) last.steps.push({ call: e });
-			else out.push({ steps: [{ call: e }] });
+			let group = last && "steps" in last ? last : null;
+			if (!group && last && "e" in last && last.e.kind === "say" && last.e.role === e.role) {
+				out.pop();
+				const prev = out.at(-1);
+				group = prev && "steps" in prev ? prev : null;
+				if (group) group.steps.push({ note: last.e });
+				else {
+					group = { steps: [{ note: last.e }] };
+					out.push(group);
+				}
+			}
+			if (!group) {
+				group = { steps: [] };
+				out.push(group);
+			}
+			group.steps.push({ call: e });
 		} else if (e.kind === "result") {
-			const step = last && "steps" in last ? last.steps.at(-1) : undefined;
-			if (step && !step.result) step.result = e;
+			const row = last && "steps" in last ? [...last.steps].reverse().find((r): r is { call: Ev; result?: Ev } => "call" in r) : undefined;
+			if (row && !row.result) row.result = e;
 		} else if (e.text.trim()) out.push({ e });
 		// A line with nothing to say (a start without a focus) isn't shown.
 	}
 	return out;
 }
 
-/** A run of tool calls: "Used 4 tools", opening to each call and the start of its output. */
-export function Steps({ steps, running }: { steps: { call: Ev; result?: Ev }[]; running: boolean }) {
-	const one = steps.length === 1 ? steps[0].call.text : null;
+/** 12s, 1m 05s. */
+const took = (ms: number) => {
+	const s = Math.max(0, Math.round(ms / 1000));
+	return s < 60 ? `${s}s` : `${Math.floor(s / 60)}m ${String(s % 60).padStart(2, "0")}s`;
+};
+
+/** What a call is, for its row: a shell command by its command line, a tool by its name and arguments. */
+const callLabel = (text: string) => {
+	const [tool, ...rest] = text.split(" ");
+	return tool === "run" ? { what: "a command", line: rest.join(" ") || "a command" } : { what: tool, line: text };
+};
+
+/**
+ * An activity group, collapsed to one line ("Running 2 commands · 14s", "Ran coverage · 12s"); open, a list of what the
+ * agent said and ran in order. Each note opens to its full text; each call to its command line and output.
+ */
+export function Steps({ steps, running }: { steps: Row[]; running: boolean }) {
+	const calls = steps.filter((r): r is { call: Ev; result?: Ev } => "call" in r);
+	// Open from the start: you see what the agent runs as it runs it (and can fold it away).
+	const [open, setOpen] = useState(true);
+	const [now, setNow] = useState(() => Date.now());
+	useEffect(() => {
+		if (!running) return;
+		const t = setInterval(() => setNow(Date.now()), 1000);
+		return () => clearInterval(t);
+	}, [running]);
+	const first = calls[0]?.call.at;
+	const lastAt = calls.at(-1)?.result?.at ?? (running ? now : undefined);
+	const elapsed = first && lastAt ? took(lastAt - first) : null;
+	const verb = running ? "Running" : "Ran";
+	const title = calls.length === 1 ? `${verb} ${callLabel(calls[0].call.text).what === "a command" ? "a command" : callLabel(calls[0].call.text).what}` : `${verb} ${calls.length} ${calls.every((c) => c.call.text.startsWith("run ")) ? "commands" : "tools"}`;
 	return (
-		<Trace className="pl-1">
-			<TraceCollapsible>
-				<TraceCollapsibleTrigger>
-					<TraceLine status={running ? "running" : undefined}>
-						<TraceIcon><Terminal className="size-3.5" /></TraceIcon>
-						<TraceTitle className="overflow-visible whitespace-pre-wrap font-mono text-[11px] [overflow-wrap:anywhere]">{one ?? `Used ${steps.length} tools`}</TraceTitle>
-					</TraceLine>
-				</TraceCollapsibleTrigger>
-				<TraceCollapsibleContent className="ml-2 space-y-2">
-					{steps.map((s, i) => (
-						<div key={i} className="space-y-1">
-							<p className="whitespace-pre-wrap font-mono text-[11px] text-foreground/80 [overflow-wrap:anywhere]">› {s.call.text}</p>
-							{s.result?.text.trim() ? (
-								<ToolOutput call={s.call.text} text={s.result.text} />
-							) : null}
-						</div>
-					))}
-				</TraceCollapsibleContent>
-			</TraceCollapsible>
-		</Trace>
+		<div className="pl-1 text-[13px]">
+			<button type="button" onClick={() => setOpen(!open)} aria-expanded={open} className="inline-flex items-center gap-1.5 text-muted-foreground hover:text-foreground">
+				{running ? <span className="size-1.5 animate-pulse rounded-full bg-current" aria-hidden /> : null}
+				<span>{title}</span>
+				{elapsed ? <span className="tabular-nums text-muted-foreground/70">· {elapsed}</span> : null}
+				<ChevronDown className={`size-3.5 transition-transform ${open ? "" : "-rotate-90"}`} />
+			</button>
+			{open ? (
+				<ul className="mt-1.5 divide-y overflow-hidden rounded-xl border">
+					{steps.map((r, i) => ("note" in r ? <NoteRow key={i} e={r.note} /> : <CallRow key={i} row={r} running={running && r === calls.at(-1) && !r.result} now={now} defaultOpen={r === calls.at(-1)} />))}
+				</ul>
+			) : null}
+		</div>
+	);
+}
+
+function NoteRow({ e }: { e: Ev }) {
+	const [open, setOpen] = useState(false);
+	return (
+		<li>
+			<button type="button" onClick={() => setOpen(!open)} aria-expanded={open} className="flex w-full items-center gap-2 px-3 py-2 text-left text-muted-foreground hover:bg-muted/50">
+				<span className={`min-w-0 flex-1 ${open ? "whitespace-pre-wrap" : "truncate"}`}>{e.text}</span>
+				{open ? null : <ChevronRight className="size-3.5 shrink-0" />}
+			</button>
+		</li>
+	);
+}
+
+function CallRow({ row, running, now, defaultOpen = false }: { row: { call: Ev; result?: Ev }; running: boolean; now: number; defaultOpen?: boolean }) {
+	// The newest call starts open, showing its command and its output as it arrives.
+	const [open, setOpen] = useState(defaultOpen);
+	const { line } = callLabel(row.call.text);
+	const end = row.result?.at ?? (running ? now : undefined);
+	const elapsed = row.call.at && end ? took(end - row.call.at) : null;
+	return (
+		<li>
+			<button type="button" onClick={() => setOpen(!open)} aria-expanded={open} className="flex w-full items-center gap-2 px-3 py-2 text-left text-muted-foreground hover:bg-muted/50">
+				<span className="shrink-0">{running ? "Running" : "Ran"}</span>
+				<span className="min-w-0 truncate font-mono text-[12px] text-foreground">{line}</span>
+				{elapsed ? <span className="shrink-0 tabular-nums text-muted-foreground/70">{elapsed}</span> : null}
+				<ChevronRight className={`ml-auto size-3.5 shrink-0 transition-transform ${open ? "rotate-90" : ""}`} />
+			</button>
+			{open ? (
+				<div className="space-y-1.5 border-t bg-muted/30 px-3 py-2">
+					<p className="whitespace-pre-wrap break-all font-mono text-[11px] text-foreground/80">$ {line}</p>
+					{row.result?.text.trim() ? (
+						<ToolOutput call={row.call.text} text={row.result.text} />
+					) : (
+						// No output yet: still running (coverage runs the whole suite), or the session stopped first.
+						<p className="font-mono text-[11px] text-muted-foreground">{running ? "running…" : "no result: the session stopped before it finished"}</p>
+					)}
+				</div>
+			) : null}
+		</li>
 	);
 }
 
@@ -232,7 +312,7 @@ export function AgentMessage({ e, onBug, onReply }: { e: Ev; onBug: () => void; 
 			<MessageContent className="gap-1">
 				{/* The name in its colour says who it is. */}
 				<MessageHeader className="gap-1.5 px-0 capitalize" style={{ color }}>
-					{e.kind === "bug" ? "bug reported" : e.role}
+					{e.kind === "bug" ? "bug reported" : roleName(e.role)}
 					{/^\d+$/.test(e.item) ? <span className="font-normal normal-case text-muted-foreground">· item {e.item}</span> : null}
 				</MessageHeader>
 				{e.kind === "bug" ? (
@@ -808,7 +888,8 @@ export function BugsView({ folder, files, invoke, apiBase, bugs, openBug, setOpe
 			(text) => setReport({ path: showingPath, text }),
 			(e) => setReport({ path: showingPath, text: `Couldn't read ${showingPath}: ${e}` }),
 		);
-	}, [folder, showingPath, invoke, generated]);
+		// `reload` is Refresh (and the swarm's writes): a report open here is read again too.
+	}, [folder, showingPath, invoke, generated, reload]);
 	const facts = selected ? bugFacts(selected.body) : null;
 	const head = "px-2 pb-1 pt-2 font-mono text-[10px] uppercase tracking-wider text-muted-foreground";
 	const reportItem = (r: string) => (
@@ -1096,7 +1177,7 @@ export function BugsView({ folder, files, invoke, apiBase, bugs, openBug, setOpe
 	);
 }
 
-export type Mode = "code" | "chat" | "swarm" | "roadmap" | "audit" | "bugs" | "debug";
+export type Mode = "code" | "chat" | "swarm" | "roadmap" | "audit" | "bugs" | "debug" | "concolic";
 
 const PANE_WIDTH = 440;
 
@@ -1113,6 +1194,8 @@ const MODES: { id: Mode; label: string; icon: typeof Code2 }[] = [
 	{ id: "swarm", label: "Swarm", icon: Network },
 	{ id: "audit", label: "Proofs", icon: ScanSearch },
 	{ id: "bugs", label: "Bugs", icon: Bug },
+	// The bug search: the hunter alone on its own canvas (coverage, concolic explore, its debugger, PoCs). Desktop only.
+	{ id: "concolic", label: "Concolic", icon: Crosshair },
 ];
 
 /**
@@ -1122,7 +1205,7 @@ const MODES: { id: Mode; label: string; icon: typeof Code2 }[] = [
 /** Where the selected tab's pill last was, so a new page's tabs slide from there instead of jumping. */
 let lastPill: { left: number; width: number } | null = null;
 
-export function NavGroup({ name, git, onDebug, mode, onMode, inBar, compact }: { name: string; git: boolean; onDebug?: () => void; mode: Mode; onMode: (m: Mode) => void; inBar?: boolean; compact?: boolean }) {
+export function NavGroup({ name, git, onDebug, mode, onMode, inBar, compact, concolic = false }: { name: string; git: boolean; onDebug?: () => void; mode: Mode; onMode: (m: Mode) => void; inBar?: boolean; compact?: boolean; concolic?: boolean }) {
 	const seg = "relative z-10 inline-flex shrink-0 items-center gap-1.5 rounded-md px-2.5 text-[12px] font-medium outline-none transition-colors duration-200 focus-visible:ring-2 focus-visible:ring-ring";
 	const h = inBar ? "h-6" : "h-7";
 	// One white pill under the selected tab, sliding between tabs (and across pages) rather than jumping.
@@ -1149,7 +1232,7 @@ export function NavGroup({ name, git, onDebug, mode, onMode, inBar, compact }: {
 					style={{ left: pill.left, width: pill.width }}
 				/>
 			) : null}
-			{MODES.map(({ id, label, icon: Icon }) =>
+			{MODES.filter((m) => m.id !== "concolic" || concolic).map(({ id, label, icon: Icon }) =>
 				// The Code tab is the folder itself: its name, with the GitHub mark when it is a git repository.
 				id === "code" ? (
 					<button key={id} type="button" role="tab" aria-selected={mode === id} aria-label={`Code · ${name}`} title={`Code · ${name}`} onClick={() => onMode(id)} className={`${tab(mode === id)} min-w-0`}>
@@ -1190,8 +1273,12 @@ export function TalkIcon({ className }: { className?: string }) {
  * The mode a link asks for, as the page has it: Debug only with a debugger (else Code); Roadmap and Chat have no tab
  * now (the roadmap is on the Swarm canvas), so they open Swarm. The Chat view stays in the code for later.
  */
-function resolveMode(asked: Mode, hasDebug: boolean): Mode {
+/** A bug-search session (the hunter alone, on the Concolic tab). */
+const isHunt = (run: string | null | undefined) => Boolean(run?.startsWith("hunt-"));
+
+function resolveMode(asked: Mode, hasDebug: boolean, hasConcolic = false): Mode {
 	if (asked === "debug" && !hasDebug) return "code";
+	if (asked === "concolic" && !hasConcolic) return "swarm";
 	if (asked === "roadmap" || asked === "chat") return "swarm";
 	return asked;
 }
@@ -1524,7 +1611,7 @@ export function AuditView({ folder, scan, invoke, onOpenFile, reload = 0 }: { fo
  * `defaultMode` is the tab without a ?mode; `onSwarm` sends the Swarm tab elsewhere (the website's imported repositories
  * keep their swarm on the project canvas).
  */
-export function SwarmPanel({ folder, name, scan, bridge, session, file: openPath, actions, debug, defaultMode, onSwarm }: { folder: string; name: string; scan: Scan | null; bridge: Bridge; session?: string | null; file?: string | null; actions?: React.ReactNode; debug?: (file: string | null, test: string | null, onPick: (file: string) => void) => React.ReactNode; defaultMode?: Mode; onSwarm?: () => void }) {
+export function SwarmPanel({ folder, name, scan, bridge, session, file: openPath, actions, debug, agentDebug, defaultMode, onSwarm }: { folder: string; name: string; scan: Scan | null; bridge: Bridge; session?: string | null; file?: string | null; actions?: React.ReactNode; debug?: (file: string | null, test: string | null, onPick: (file: string) => void) => React.ReactNode; agentDebug?: (props: { onActive: (role: string) => void; onClose: () => void; colorOf: (role: string) => string }) => React.ReactNode; defaultMode?: Mode; onSwarm?: () => void }) {
 	const { invoke, listen, apiBase } = bridge;
 	// Every session running in this folder: each is its own swarm, and they keep working while you read another.
 	const [runs, setRuns] = useState<string[]>([]);
@@ -1561,6 +1648,11 @@ export function SwarmPanel({ folder, name, scan, bridge, session, file: openPath
 	// `url`: a PDF, shown in the browser's own viewer instead of as text.
 	const [file, setFile] = useState<{ path: string; text: string; url?: string } | null>(null);
 	const [planOpen, setPlanOpen] = useState(false);
+	// The agent whose debugger is being watched (it opens when an agent starts debugging), and whether it's shown.
+	const [debugging, setDebugging] = useState<string | null>(null);
+	const [watchDebug, setWatchDebug] = useState(true);
+	const onDebugActive = useCallback((role: string) => setDebugging(role), []);
+	const hideDebug = useCallback(() => setWatchDebug(false), []);
 	const [chatOpen, setChatOpen] = useState(() => store.get("fm:chat-open") !== "0");
 	// How many agent messages you had seen when the chat was folded; the button counts the ones since.
 	const [seen, setSeen] = useState(0);
@@ -1690,7 +1782,10 @@ export function SwarmPanel({ folder, name, scan, bridge, session, file: openPath
 	// Debug mode exists only where the page is given a debugger; an old link to it opens Code instead.
 	const asked = (params.get("mode") as Mode | null) ?? defaultMode ?? "swarm";
 	// The roadmap lives on the Swarm canvas now and Chat has no tab; old links to either open Swarm.
-	const mode = resolveMode(asked, Boolean(debug));
+	const mode = resolveMode(asked, Boolean(debug), Boolean(agentDebug));
+	// Swarm and Concolic share the canvas, the chat and the agent's debugger; Concolic's sessions are bug searches.
+	const canvas = mode === "swarm" || mode === "concolic";
+	const concolic = mode === "concolic";
 	// The main contract's entry points, read from the AST, so the plan can name the ones each item covers.
 	const [entryUnits, setEntryUnits] = useState<AstUnit[]>([]);
 	const mainSource = (scan?.solidity ?? []).find((f) => f.startsWith("src/") && !f.endsWith(".t.sol") && !f.endsWith(".s.sol")) ?? null;
@@ -1841,13 +1936,13 @@ export function SwarmPanel({ folder, name, scan, bridge, session, file: openPath
 	const run = viewing && runs.includes(viewing) ? viewing : null;
 	// Grouped once per change of the events (a long session has about a thousand): typing in the composer re-renders the
 	// panel, and must not regroup the history, rebuild the board or redraw every message.
-	const chatBlocks = useMemo(() => blocks(events.filter((e) => e.kind !== "status" && e.kind !== "context")), [events]);
+	const chatBlocks = useMemo(() => blocks(events.filter((e) => e.kind !== "status" && e.kind !== "context" && !(concolic && e.kind === "start"))), [events, concolic]);
 	const scrubItems = useMemo(
 		() =>
 			chatBlocks.map((b) =>
 				"steps" in b
-					? { label: `${b.steps.length} tool step${b.steps.length === 1 ? "" : "s"}`, text: b.steps.map((st) => st.call.text).join(" · ") }
-					: { label: b.e.kind === "you" ? "You" : `${b.e.role[0]?.toUpperCase() ?? ""}${b.e.role.slice(1)}${b.e.item ? ` · item ${b.e.item}` : ""}`, text: b.e.text },
+					? { label: `${b.steps.filter((r) => "call" in r).length} tool step${b.steps.filter((r) => "call" in r).length === 1 ? "" : "s"}`, text: b.steps.map((r) => ("call" in r ? r.call.text : r.note.text)).join(" · ") }
+					: { label: b.e.kind === "you" ? "You" : `${roleName(b.e.role)[0]?.toUpperCase() ?? ""}${roleName(b.e.role).slice(1)}${b.e.item ? ` · item ${b.e.item}` : ""}`, text: b.e.text },
 			),
 		[chatBlocks],
 	);
@@ -1939,6 +2034,18 @@ export function SwarmPanel({ folder, name, scan, bridge, session, file: openPath
 		void invoke<{ files: string[] }>("folder_tree", { path: folder }).then((t) => setTree(t.files), () => setTree([]));
 		// eslint-disable-next-line react-hooks/exhaustive-deps
 	}, [folder]);
+	// The Refresh button: the folder is read again, so reports and indexes added to the audit folders show in Bugs, and
+	// the findings, plan and bugs are read again too.
+	useEffect(() => {
+		const again = () => {
+			void invoke<{ files: string[] }>("folder_tree", { path: folder }).then((t) => setTree(t.files), () => {});
+			refresh();
+			setReload((n) => n + 1);
+		};
+		window.addEventListener("fm:refresh", again);
+		return () => window.removeEventListener("fm:refresh", again);
+		// eslint-disable-next-line react-hooks/exhaustive-deps
+	}, [folder]);
 	// The file picked in the sidebar's tree (or a proof link) is what the Code tab shows.
 	// Without one, it reopens the last file this folder showed.
 	useEffect(() => {
@@ -1962,6 +2069,17 @@ export function SwarmPanel({ folder, name, scan, bridge, session, file: openPath
 		// eslint-disable-next-line react-hooks/exhaustive-deps
 	}, [openPath, folder]);
 	// Sessions are picked from the chat card's title (the sidebar holds the folder's files).
+	// Switching between Swarm and Concolic opens the latest session of that tab's kind (or an empty one).
+	useEffect(() => {
+		if (!canvas || session === "new" || isHunt(viewing) === concolic) return;
+		const latest = sessions.find((x) => isHunt(x.run) === concolic);
+		if (latest) load(latest.run);
+		else {
+			setViewing(null);
+			setEvents([]);
+		}
+		// eslint-disable-next-line react-hooks/exhaustive-deps
+	}, [mode, sessions]);
 	const pickSession = (run: string) => {
 		const next = new URLSearchParams(params);
 		next.set("run", run);
@@ -1982,6 +2100,20 @@ export function SwarmPanel({ folder, name, scan, bridge, session, file: openPath
 	// `onlyQueued`: a run for the work already queued (reading a report), which stops when that's done.
 	const start = async (onlyQueued = false) => {
 		setError(null);
+		// On Concolic, start is a bug search: the hunter alone, on the focus you typed, in a hunt-* session.
+		if (concolic) {
+			try {
+				const id = await invoke<string>("swarm_start", { request: { folder, goal: null, budget_usd: budget, api_base: apiBase(), provider, model: pickedModel, session: viewing && isHunt(viewing) ? viewing : `hunt-${Date.now().toString(16)}`, only_queued: true, hunt: goal.trim() } });
+				if (!viewing || !isHunt(viewing)) setEvents([]);
+				setGoal("");
+				setRuns((r) => (r.includes(id) ? r : [...r, id]));
+				setViewing(id);
+				void listSessions();
+			} catch (e) {
+				setError(String(e));
+			}
+			return;
+		}
 		// A new session starts empty; Resume carries on below the chat you're reading.
 		const fresh = session === "new" && !viewing;
 		if (fresh) setEvents([]);
@@ -2031,7 +2163,8 @@ export function SwarmPanel({ folder, name, scan, bridge, session, file: openPath
 	const inPlan = new Set(plan.flatMap((i) => named(i.text).map((u) => u.name)));
 	const finished = !run ? events.find((e) => e.kind === "done") : undefined;
 	const shown = chatBlocks;
-	const board = useMemo(() => localBoard(folder, plan, events, Boolean(run), budget), [folder, plan, events, run, budget]);
+	// Concolic's board has no plan: the hunter alone, with its notebook and ledger.
+	const board = useMemo(() => localBoard(folder, concolic ? [] : plan, events, Boolean(run), budget), [folder, plan, events, run, budget, concolic]);
 	const chatList = useMemo(
 		() =>
 			chatBlocks.map((block, i) => (
@@ -2041,7 +2174,8 @@ export function SwarmPanel({ folder, name, scan, bridge, session, file: openPath
 					) : block.e.kind === "you" ? (
 						<Message align="end">
 							<MessageContent>
-								<div className="ml-10 w-fit whitespace-pre-wrap rounded-2xl bg-muted px-3 py-2.5 text-foreground">{block.e.text}</div>
+								{/* Your message: on the right, as wide as its text up to most of the chat, wrapping long words. */}
+								<div className="max-w-[85%] self-end whitespace-pre-wrap break-words rounded-2xl bg-muted px-3 py-2 text-foreground">{block.e.text}</div>
 							</MessageContent>
 						</Message>
 					) : (
@@ -2098,7 +2232,7 @@ export function SwarmPanel({ folder, name, scan, bridge, session, file: openPath
 												{working && working.item === String(i.index) && activity ? (
 													<span className="mt-0.5 flex items-center gap-1.5 truncate text-[11px] text-muted-foreground" title={activity.text}>
 														<span className="truncate">
-															<span className="font-medium" style={{ color: colorOf(working.role) }}>{working.role}</span> · {activity.text}
+															<span className="font-medium" style={{ color: colorOf(working.role) }}>{roleName(working.role)}</span> · {activity.text}
 														</span>
 													</span>
 												) : null}
@@ -2187,7 +2321,7 @@ export function SwarmPanel({ folder, name, scan, bridge, session, file: openPath
 	};
 	// A stopped swarm starts just for the statements (and stops after), as it does to read a report.
 	const workOnStatements = () => {
-		if (!run) void start(true);
+		if (!run && !concolic) void start(true);
 	};
 	const afterStatement = (s: Statement[]) => {
 		setStatements(s);
@@ -2242,14 +2376,14 @@ export function SwarmPanel({ folder, name, scan, bridge, session, file: openPath
 								<span className={st.mark === "x" || st.mark === "-" ? "text-muted-foreground" : ""}>{st.text}</span>
 								<span className="mt-0.5 flex flex-wrap items-center gap-x-1.5 text-[11px] text-muted-foreground">
 									<span className="font-mono text-[10px]">{st.id}</span>
-									{st.author === "you" ? <span>you</span> : <span className="font-medium" style={{ color: colorOf(st.author) }}>{st.author}</span>}
+									{st.author === "you" ? <span>you</span> : <span className="font-medium" style={{ color: colorOf(st.author) }}>{roleName(st.author)}</span>}
 									<span>· {MARK_LABEL[st.mark] ?? "open"}</span>
 									{st.obligations.length ? <span className="tabular-nums">· {st.obligations.filter((o) => o.mark === "x").length}/{st.obligations.length} functions</span> : null}
 								</span>
 								{working && working.item.startsWith(`${st.id}.`) && activity ? (
 									<span className="mt-0.5 flex items-center gap-1.5 truncate text-[11px] text-muted-foreground" title={activity.text}>
 										<span className="truncate">
-											<span className="font-medium" style={{ color: colorOf(working.role) }}>{working.role}</span> · function {working.item.slice(st.id.length + 1)} · {activity.text}
+											<span className="font-medium" style={{ color: colorOf(working.role) }}>{roleName(working.role)}</span> · function {working.item.slice(st.id.length + 1)} · {activity.text}
 										</span>
 									</span>
 								) : null}
@@ -2317,7 +2451,7 @@ export function SwarmPanel({ folder, name, scan, bridge, session, file: openPath
 		return () => ro.disconnect();
 	}, []);
 	const compact = width < (slot ? 1100 : 820);
-	const nav = <NavGroup name={name} git={Boolean(scan?.git)} onDebug={debug ? () => setMode("debug") : undefined} mode={mode} onMode={setMode} inBar={Boolean(slot)} compact={compact} />;
+	const nav = <NavGroup name={name} git={Boolean(scan?.git)} onDebug={debug ? () => setMode("debug") : undefined} mode={mode} onMode={setMode} inBar={Boolean(slot)} compact={compact} concolic={Boolean(agentDebug)} />;
 	// The working agent's context window, with its breakdown; in the Mac app it sits in the title bar.
 	const ctxMenu = working && ctx && ctxPct !== null ? (
 		<DropdownMenu>
@@ -2359,7 +2493,7 @@ export function SwarmPanel({ folder, name, scan, bridge, session, file: openPath
 	// What the right pane can show: the open one is highlighted, and clicking it again closes the pane.
 	const paneTools = (
 		<span className="ml-1 inline-flex shrink-0 items-center gap-0.5">
-			{[...PANE_VIEWS, ...(debug ? [{ id: "debug" as Mode, label: "Debug", icon: Terminal }] : [])].map(({ id, label, icon: Icon }) => (
+			{[...PANE_VIEWS, ...(agentDebug ? [{ id: "concolic" as Mode, label: "Concolic", icon: Crosshair }] : []), ...(debug ? [{ id: "debug" as Mode, label: "Debug", icon: Terminal }] : [])].map(({ id, label, icon: Icon }) => (
 				<button
 					key={id}
 					type="button"
@@ -2391,7 +2525,10 @@ export function SwarmPanel({ folder, name, scan, bridge, session, file: openPath
 	// The conversation with the swarm: its sessions, budget and Stop on a gray bar, the messages and composer under it.
 	const chatPanel = (
 		<>
-				<div className="flex h-8 shrink-0 items-center gap-2 pl-2 pr-0.5">
+				<div className="flex h-8 shrink-0 items-center gap-1 pl-3 pr-0.5">
+					<button type="button" onClick={() => pickSession("new")} aria-label="New chat" title={concolic ? "New bug search" : "New chat"} className="grid size-7 shrink-0 place-items-center rounded-full text-muted-foreground hover:bg-background hover:text-foreground">
+						<Plus className="size-3.5" />
+					</button>
 					<DropdownMenu>
 						<DropdownMenuTrigger className="flex min-w-0 flex-1 items-center gap-1 rounded-md text-left text-[12px] text-muted-foreground outline-none hover:text-foreground" title={`${title} — switch sessions`}>
 							<span className="truncate">{title}</span>
@@ -2400,17 +2537,13 @@ export function SwarmPanel({ folder, name, scan, bridge, session, file: openPath
 						<DropdownMenuContent align="start" className="w-64">
 							<DropdownMenuLabel className="text-xs font-normal text-muted-foreground">Sessions in {name}</DropdownMenuLabel>
 							{/* The session you're reading stays highlighted, with a check on the right. */}
-							{sessions.map((x, i) => (
+							{sessions.filter((x) => isHunt(x.run) === concolic).map((x, i) => (
 								<DropdownMenuItem key={x.run} onSelect={() => pickSession(x.run)} aria-current={x.run === viewing} className={`text-[13px] ${x.run === viewing ? "bg-accent text-accent-foreground" : ""}`}>
 									<span className="truncate">{x.title || (x.run === "swarm" ? "Main session" : `Session ${sessions.length - i}`)}</span>
 									{runs.includes(x.run) ? <span className="ml-auto shrink-0 text-[11px] text-muted-foreground">running</span> : null}
 									{x.run === viewing ? <Check className={`size-3.5 shrink-0 ${runs.includes(x.run) ? "" : "ml-auto"}`} /> : null}
 								</DropdownMenuItem>
 							))}
-							<DropdownMenuSeparator />
-							<DropdownMenuItem onSelect={() => pickSession("new")} className="text-[13px]">
-								<Plus className="size-3.5" /> New session
-							</DropdownMenuItem>
 						</DropdownMenuContent>
 					</DropdownMenu>
 					{actionsSlot ? null : ctxMenu}
@@ -2421,7 +2554,8 @@ export function SwarmPanel({ folder, name, scan, bridge, session, file: openPath
 						</button>
 					)}
 				</div>
-				<div className={`mt-1 flex min-h-0 flex-1 flex-col overflow-hidden ${slot ? "" : "rounded-xl border bg-card"}`}>
+				{/* Corners nest: the panel 28px, inset 4px; this card 24px; the composer 16px, inset 8px. */}
+				<div className={`mt-1 flex min-h-0 flex-1 flex-col overflow-hidden ${slot ? "" : "rounded-[24px] border bg-card"}`}>
 				{/* The scrubber: a tick per message along the left edge, to preview and jump through the chat. */}
 				<div className="relative flex min-h-0 flex-1 flex-col">
 				<ChatScrubber
@@ -2442,7 +2576,7 @@ export function SwarmPanel({ folder, name, scan, bridge, session, file: openPath
 					{/* While an agent works: its name, and its current task shimmering until its next words. */}
 					{run && working ? (
 						<p className="flex items-center gap-2 text-[12px] text-muted-foreground">
-							<span className="font-medium" style={{ color: colorOf(working.role) }}>{working.role}</span>
+							<span className="font-medium" style={{ color: colorOf(working.role) }}>{roleName(working.role)}</span>
 							<span className="fm-text-shimmer truncate">{working.text}</span>
 						</p>
 					) : null}
@@ -2462,17 +2596,23 @@ export function SwarmPanel({ folder, name, scan, bridge, session, file: openPath
 				</button>
 				</div>
 
-				<div className="shrink-0 space-y-2 p-3">
+				<div className="shrink-0 space-y-2 p-2">
 					{error ? <p className="text-xs text-red-600">{error}</p> : null}
 					{/* The Swarm page's composer: steer while it runs; before that, what you type is its focus and ↑ starts it. */}
 					<ChatComposer
 						compact
+						rounded="rounded-2xl"
 						value={run ? say : goal}
 						onChange={(e) => (run ? setSay(e.target.value) : setGoal(e.target.value))}
 						onSubmit={() => void (run ? send() : start())}
-						// While it runs, the send arrow is Stop until you type (then it sends your message to the agents).
-						onStop={() => run && void invoke("swarm_stop", { folder, run })}
+						// One button: ↑ starts (Concolic: once you've said what to look at) and sends; while it runs, an empty box
+						// makes it Stop, which stops the session.
+						onStop={() => void invoke("swarm_stop", { folder, run })}
 						isLoading={Boolean(run)}
+						allowEmpty={!run && !concolic}
+						sendClassName="btn-dark !px-0"
+						sendDisabled={!run && Boolean(ownKey) && !hasKey}
+						sendTitle={run ? (say.trim() ? "Send" : "Stop the session") : ownKey && !hasKey ? `Add your ${ownKey} key in Settings first` : concolic ? "Start the bug search with this message" : "Start the swarm"}
 						modelPicker={{
 							value: pickedModel,
 							options: models,
@@ -2482,12 +2622,10 @@ export function SwarmPanel({ folder, name, scan, bridge, session, file: openPath
 								store.set("fm:model", m);
 							},
 						}}
-						placeholder={run ? "Talk to the agents: a question, a new focus, an idea to check…" : "What should the swarm focus on? (optional) ↑ starts it"}
-						// The composer's top left: Start, or Resume with plan items left, when it isn't running (Stop is the send
-						// button while it runs), then the project this chat talks to.
+						placeholder={run ? (concolic ? "Talk to the hunter: a question, a lead, where to look next…" : "Talk to the agents: a question, a new focus, an idea to check…") : concolic ? "What should the hunter look at? Router.swap, the fee path, settlement…" : "What should the swarm focus on? (optional) ↑ starts it"}
 						context={
 							<span className="inline-flex items-center gap-1.5">
-								{run ? null : (
+								{run || concolic ? null : (
 									<button type="button" onClick={() => void start()} disabled={Boolean(ownKey) && !hasKey} title={ownKey && !hasKey ? `Add your ${ownKey} key in Settings first` : "Start the swarm"} className="btn-dark inline-flex h-7 items-center gap-1.5 px-2.5 text-[12px] disabled:opacity-50">
 										<Play className="size-3" />{plan.some((i) => i.mark === " ") ? "Resume" : "Start"}
 									</button>
@@ -2512,12 +2650,13 @@ export function SwarmPanel({ folder, name, scan, bridge, session, file: openPath
 	// pane; the web shows it full page with the chat floating over the canvas.
 	const modeViews = (
 		<>
-		{/* Swarm mode shows the canvas; Code and Audit replace it. The name and the controls stay in every mode. */}
-		{mode === "swarm" ? (
+		{/* Swarm and Concolic show the canvas; Code and Audit replace it. The name and the controls stay in every mode. */}
+		{canvas ? (
 			<SwarmCanvas
 				state={board}
 				fill
 				local
+				roles={concolic ? ["hunter"] : undefined}
 				repo={folder}
 				actions={actions}
 				// An agent's name tag opens the chat addressed to it.
@@ -2543,7 +2682,8 @@ export function SwarmPanel({ folder, name, scan, bridge, session, file: openPath
 					),
 				}}
 				// The roadmap is the folder's own plan (.formal/plan.md, one item per AST function), nothing from GitHub.
-				below={{
+				// Concolic's board has no plan: the hunter alone.
+				below={concolic ? undefined : {
 					// The Mac app's pane has no floating Plan card: the plan is this panel, with its counts.
 					title: slot ? "Plan" : "Roadmap",
 					note: slot ? `${plan.length ? `${done}/${plan.length}` : ""}${entryUnits.length ? ` · ${inPlan.size}/${entryUnits.length} entry points` : ""}` : undefined,
@@ -2552,7 +2692,7 @@ export function SwarmPanel({ folder, name, scan, bridge, session, file: openPath
 				}}
 				// In the Mac app the folder's git tree has a card of its own beside the plan: where the swarm works, HEAD and its
 				// uncommitted proofs.
-				beside={slot && scan?.git ? { title: "Git", width: 440, node: <GitTree folder={folder} invoke={invoke} working={Boolean(run)} flat /> } : undefined}
+				beside={slot && scan?.git && !concolic ? { title: "Git", width: 440, node: <GitTree folder={folder} invoke={invoke} working={Boolean(run)} flat /> } : undefined}
 			/>
 		) : (
 			<div className="relative h-full w-full bg-background">
@@ -2766,6 +2906,22 @@ export function SwarmPanel({ folder, name, scan, bridge, session, file: openPath
 				{/* The view in the middle (Canvas, Proofs, Bugs, Code); the chat in the right pane. */}
 				<div className="relative min-w-0 flex-1" style={{ "--fm-top": "0px" } as React.CSSProperties}>
 					<div className="absolute inset-0 flex flex-col overflow-hidden">{modeViews}</div>
+					{/* An agent's debugger, watched over the canvas: mounted with it so it hears every move, shown once an agent debugs. */}
+					{canvas && agentDebug ? (
+						<>
+							<section
+								aria-label="Agent's debugger"
+								className={`pointer-events-auto absolute inset-3 z-10 flex flex-col overflow-hidden rounded-2xl border bg-background/95 p-2 shadow-pop backdrop-blur ${debugging && watchDebug ? "" : "hidden"}`}
+							>
+								{agentDebug({ onActive: onDebugActive, onClose: hideDebug, colorOf })}
+							</section>
+							{debugging && !watchDebug ? (
+								<button type="button" onClick={() => setWatchDebug(true)} className="pointer-events-auto absolute bottom-3 left-1/2 z-10 -translate-x-1/2 rounded-full border bg-muted/90 px-3 py-1.5 text-[12px] shadow-pop backdrop-blur hover:bg-muted">
+									<span className="font-medium" style={{ color: colorOf(debugging) }}>{roleName(debugging)}</span> is debugging · watch
+								</button>
+							) : null}
+						</>
+					) : null}
 				</div>
 				{paneOpen ? (
 					<section className="relative flex min-h-0 shrink-0 flex-col border-l px-3 pb-3 pt-2" style={{ width: paneWidth }}>
@@ -2787,16 +2943,34 @@ export function SwarmPanel({ folder, name, scan, bridge, session, file: openPath
 				{nav}
 			</div>
 
+			{/* An agent's debugger, watched: mounted in Swarm mode so it hears every move, shown once an agent debugs. */}
+			{canvas && agentDebug ? (
+				<>
+					<section
+						aria-label="Agent's debugger"
+						className={`pointer-events-auto absolute bottom-3 left-3 z-10 flex flex-col overflow-hidden rounded-2xl border bg-background/95 p-2 shadow-pop backdrop-blur ${debugging && watchDebug ? "" : "hidden"}`}
+						style={{ top: "calc(var(--fm-top) + 2.75rem)", right: chatOpen ? `calc(min(${chatSize.w}px, 100% - 1.5rem) + 1.5rem)` : "4.5rem" }}
+					>
+						{agentDebug({ onActive: onDebugActive, onClose: hideDebug, colorOf })}
+					</section>
+					{debugging && !watchDebug ? (
+						<button type="button" onClick={() => setWatchDebug(true)} className="pointer-events-auto absolute bottom-3 left-1/2 z-10 -translate-x-1/2 rounded-full border bg-muted/90 px-3 py-1.5 text-[12px] shadow-pop backdrop-blur hover:bg-muted">
+							<span className="font-medium" style={{ color: colorOf(debugging) }}>{roleName(debugging)}</span> is debugging · watch
+						</button>
+					) : null}
+				</>
+			) : null}
+
 			{/* The chat: start and steer the swarm, the plan, and the agents' messages. */}
 			{/* The chat floats over the canvas on the right: a gray title bar with the run's controls, the white chat inside.
 			    The strip above it stays free for the Live pill and the bell. */}
 			{/* Talk to the agents: floats on the right of the Swarm canvas, the Plan's counterpart on the left. */}
-			{mode === "swarm" ? (
+			{canvas ? (
 				<>
 					{/* One box: the chat when open, the round button at its corner when closed. It switches at once, no animation. */}
 					<aside
 						ref={chatBox}
-						className={`pointer-events-auto absolute bottom-3 right-3 z-20 overflow-hidden border shadow-pop backdrop-blur ${chatOpen ? "rounded-2xl bg-muted/80" : "cursor-pointer rounded-[24px] border-transparent bg-foreground hover:opacity-90"}`}
+						className={`pointer-events-auto absolute bottom-3 right-3 z-20 overflow-hidden border shadow-pop backdrop-blur ${chatOpen ? "rounded-[28px] bg-muted/80" : "cursor-pointer rounded-[24px] border-transparent bg-foreground hover:opacity-90"}`}
 						style={{
 							width: chatOpen ? `min(${chatSize.w}px, calc(100% - 1.5rem))` : 48,
 							height: chatOpen ? (chatSize.h ? `min(${chatSize.h}px, calc(100% - max(var(--fm-top), 2.75rem) - 1rem))` : "calc(100% - max(var(--fm-top), 2.75rem) - 4rem)") : 48,

@@ -1,6 +1,6 @@
 [package]
 name = "formalmind-desktop"
-version = "0.1.41"
+version = "0.2.1"
 description = "Formal Mind desktop app"
 edition = "2021"
 
@@ -24,11 +24,14 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 sol-debug = { path = "../../crates/sol-debug" }
 formal-ast = { path = "../../crates/formal-ast" }
+# The agents' coverage and explore tools. It depends on sol-debug and formal-ast from this repository on GitHub; the
+# [patch] below points those at the crates here, so there is one sol-debug.
+concolity = { git = "https://github.com/formalmind/concolity" }
 revm = { version = "43", default-features = false, features = ["std"] }
 regex = "1"
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
 tokio = { version = "1", features = ["process", "time", "io-util", "sync", "macros"] }
-# The swarm's tools over MCP for Claude Code (127.0.0.1, one turn).
+# The swarm's and the Bug Hunter's tools over MCP for Claude Code (127.0.0.1, one turn).
 tiny_http = "0.12"
 portable-pty = "0.9"
 
@@ -39,6 +42,8 @@ tokio = { version = "1", features = ["macros", "rt"] }
 [profile.dev.package.sol-debug]
 opt-level = 3
 [profile.dev.package.formal-ast]
+opt-level = 3
+[profile.dev.package.concolity]
 opt-level = 3
 [profile.dev.package.revm-interpreter]
 opt-level = 3
@@ -56,3 +61,7 @@ opt-level = 3
 opt-level = 3
 [profile.dev.package.alloy-primitives]
 opt-level = 3
+
+[patch."https://github.com/formalmind/formalmind"]
+sol-debug = { path = "../../crates/sol-debug" }
+formal-ast = { path = "../../crates/formal-ast" }

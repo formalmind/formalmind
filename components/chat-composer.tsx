@@ -53,6 +53,15 @@ export interface ChatComposerProps {
 	/** Smaller text and chips, for a narrow side pane (the swarm's chat). */
 	compact?: boolean;
 	textareaRef?: React.Ref<HTMLTextAreaElement>;
+	/** The composer's corner radius class; a container sets it so its own corners nest around it. */
+	rounded?: string;
+	/** The send button works with nothing typed (it starts a session; what you type is optional). */
+	allowEmpty?: boolean;
+	/** The send button's look when it's enabled, in place of the primary colour. */
+	sendClassName?: string;
+	sendDisabled?: boolean;
+	/** The send button's tooltip (what it does now: start, send, stop, or why it can't). */
+	sendTitle?: string;
 }
 
 export function ChatComposer({
@@ -72,6 +81,11 @@ export function ChatComposer({
 	modelPicker,
 	placeholder = "Ask about this repo…",
 	textareaRef,
+	rounded = "rounded-[28px]",
+	allowEmpty = false,
+	sendClassName = "bg-primary text-primary-foreground",
+	sendDisabled = false,
+	sendTitle,
 }: ChatComposerProps) {
 	const innerRef = React.useRef<HTMLTextAreaElement | null>(null);
 	const setRefs = React.useCallback(
@@ -97,7 +111,7 @@ export function ChatComposer({
 	const hasContent = value.trim().length > 0;
 	// While the model is responding and the box is empty, the send button becomes stop.
 	const stopMode = isLoading && !hasContent;
-	const sendEnabled = stopMode || hasContent;
+	const sendEnabled = !sendDisabled && (stopMode || hasContent || allowEmpty);
 
 	const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
 		if (e.key !== "Enter" || e.shiftKey || e.nativeEvent.isComposing) return;
@@ -109,12 +123,13 @@ export function ChatComposer({
 		<form
 			onSubmit={(e) => {
 				e.preventDefault();
+				if (sendDisabled) return;
 				if (stopMode) onStop();
-				else if (hasContent) onSubmit();
+				else if (hasContent || allowEmpty) onSubmit();
 			}}
 			// Its own width is a container, so what sits in it can fold away when it is narrow.
 			style={{ containerType: "inline-size" }}
-			className="rounded-[28px] border border-border bg-card shadow-sm focus-within:border-ring/40 transition-colors motion-reduce:transition-none"
+			className={`${rounded} border border-border bg-card shadow-sm focus-within:border-ring/40 transition-colors motion-reduce:transition-none`}
 		>
 			{/* Shelf: context chips */}
 			<div className="flex items-center gap-2 px-3 pt-3">
@@ -142,76 +157,80 @@ export function ChatComposer({
 				className={cn("block w-full resize-none bg-transparent px-4 py-3 leading-5 outline-none placeholder:text-muted-foreground", compact ? "text-[13px]" : "text-sm")}
 			/>
 
-			{/* Bottom row: model pill, send/stop */}
+			{/* Bottom row: model pill and extras, send/stop */}
 			<div className="flex items-center gap-2 px-3 pb-3">
-				{model && onModelChange ? (
-				<DropdownMenu>
-						<DropdownMenuTrigger
-							className={cn(CHIP, compact && "h-7 px-2.5 text-[12px]", "bg-secondary text-secondary-foreground outline-none focus-visible:ring-1 focus-visible:ring-ring")}
-							aria-label="Model"
-						>
-							<Sparkles className="h-3.5 w-3.5" />
-							{MODEL_LABELS[model]}
-							{think ? <span className="font-normal text-muted-foreground">· {THINK_LABELS[think]}</span> : null}
-							<ChevronDown className="h-3 w-3 text-muted-foreground" />
-						</DropdownMenuTrigger>
-						<DropdownMenuContent align="start">
-							<DropdownMenuRadioGroup value={model} onValueChange={(v) => onModelChange(v as OpenAIModel)}>
-								{openAIModelNames.map((m) => (
-									<DropdownMenuRadioItem key={m} value={m}>
-										{MODEL_LABELS[m]}
-									</DropdownMenuRadioItem>
-								))}
-							</DropdownMenuRadioGroup>
-							{think && onThinkChange ? (
-								<>
-									<DropdownMenuSeparator />
-									<DropdownMenuLabel className="text-xs font-normal text-muted-foreground">Thinking</DropdownMenuLabel>
-									<DropdownMenuRadioGroup value={think} onValueChange={(v) => onThinkChange(v as ThinkLevel)}>
-										{thinkLevels.map((t) => (
-											<DropdownMenuRadioItem key={t} value={t}>
-												{THINK_LABELS[t]}
-											</DropdownMenuRadioItem>
-										))}
-									</DropdownMenuRadioGroup>
-								</>
-							) : null}
-						</DropdownMenuContent>
-					</DropdownMenu>
-				) : null}
-				{modelPicker ? (
+				{/* One line high: what doesn't fit wraps out of sight, last first (an extra like Draft reply before the
+				    pills), so a narrow composer drops options instead of squeezing the send button. The padding keeps
+				    focus rings in view. */}
+				<div className="-m-1 flex h-10 min-w-0 flex-1 flex-wrap items-center gap-x-2 gap-y-4 overflow-hidden p-1">
+					{model && onModelChange ? (
 					<DropdownMenu>
-						<DropdownMenuTrigger
-							disabled={modelPicker.disabled}
-							className={cn(CHIP, compact && "h-7 px-2.5 text-[12px]", "bg-secondary text-secondary-foreground outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:opacity-60")}
-							aria-label="Model"
-						>
-							<Sparkles className="h-3.5 w-3.5" />
-							{modelPicker.options.find((o) => o.value === modelPicker.value)?.label ?? modelPicker.value}
-							<ChevronDown className="h-3 w-3 text-muted-foreground" />
-						</DropdownMenuTrigger>
-						<DropdownMenuContent align="start">
-							<DropdownMenuRadioGroup value={modelPicker.value} onValueChange={modelPicker.onChange}>
-								{modelPicker.options.map((o) => (
-									<DropdownMenuRadioItem key={o.value} value={o.value}>
-										{o.label}
-									</DropdownMenuRadioItem>
-								))}
-							</DropdownMenuRadioGroup>
-						</DropdownMenuContent>
-					</DropdownMenu>
-				) : null}
-				{extra}
-
-				<div className="flex-1" />
+							<DropdownMenuTrigger
+								className={cn(CHIP, compact && "h-7 px-2.5 text-[12px]", "bg-secondary text-secondary-foreground outline-none focus-visible:ring-1 focus-visible:ring-ring")}
+								aria-label="Model"
+							>
+								<Sparkles className="h-3.5 w-3.5" />
+								{MODEL_LABELS[model]}
+								{think ? <span className="font-normal text-muted-foreground">· {THINK_LABELS[think]}</span> : null}
+								<ChevronDown className="h-3 w-3 text-muted-foreground" />
+							</DropdownMenuTrigger>
+							<DropdownMenuContent align="start">
+								<DropdownMenuRadioGroup value={model} onValueChange={(v) => onModelChange(v as OpenAIModel)}>
+									{openAIModelNames.map((m) => (
+										<DropdownMenuRadioItem key={m} value={m}>
+											{MODEL_LABELS[m]}
+										</DropdownMenuRadioItem>
+									))}
+								</DropdownMenuRadioGroup>
+								{think && onThinkChange ? (
+									<>
+										<DropdownMenuSeparator />
+										<DropdownMenuLabel className="text-xs font-normal text-muted-foreground">Thinking</DropdownMenuLabel>
+										<DropdownMenuRadioGroup value={think} onValueChange={(v) => onThinkChange(v as ThinkLevel)}>
+											{thinkLevels.map((t) => (
+												<DropdownMenuRadioItem key={t} value={t}>
+													{THINK_LABELS[t]}
+												</DropdownMenuRadioItem>
+											))}
+										</DropdownMenuRadioGroup>
+									</>
+								) : null}
+							</DropdownMenuContent>
+						</DropdownMenu>
+					) : null}
+					{modelPicker ? (
+						<DropdownMenu>
+							<DropdownMenuTrigger
+								disabled={modelPicker.disabled}
+								className={cn(CHIP, compact && "h-7 px-2.5 text-[12px]", "bg-secondary text-secondary-foreground outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:opacity-60")}
+								aria-label="Model"
+							>
+								<Sparkles className="h-3.5 w-3.5" />
+								{modelPicker.options.find((o) => o.value === modelPicker.value)?.label ?? modelPicker.value}
+								<ChevronDown className="h-3 w-3 text-muted-foreground" />
+							</DropdownMenuTrigger>
+							<DropdownMenuContent align="start">
+								<DropdownMenuRadioGroup value={modelPicker.value} onValueChange={modelPicker.onChange}>
+									{modelPicker.options.map((o) => (
+										<DropdownMenuRadioItem key={o.value} value={o.value}>
+											{o.label}
+										</DropdownMenuRadioItem>
+									))}
+								</DropdownMenuRadioGroup>
+							</DropdownMenuContent>
+						</DropdownMenu>
+					) : null}
+					{extra}
+				</div>
 
 				<button
 					type="submit"
 					disabled={!sendEnabled}
 					aria-label={stopMode ? "Stop" : "Send"}
+					title={sendTitle}
 					className={cn(
-						"flex h-8 w-8 shrink-0 items-center justify-center rounded-full transition-colors motion-reduce:transition-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2",
-						sendEnabled ? "bg-primary text-primary-foreground" : "bg-secondary text-muted-foreground",
+						"flex size-8 shrink-0 items-center justify-center rounded-full transition-colors motion-reduce:transition-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2",
+						sendEnabled ? sendClassName : "bg-secondary text-muted-foreground",
 					)}
 				>
 					{stopMode ? <Square className="h-3.5 w-3.5 fill-current" /> : <ArrowUp className="h-4 w-4" strokeWidth={2.5} />}

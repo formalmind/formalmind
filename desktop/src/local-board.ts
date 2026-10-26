@@ -3,9 +3,9 @@ import type { SwarmCost, SwarmItem, SwarmNote, SwarmRole, SwarmState } from "@/l
 type Ev = { kind: string; role: string; item: string; text: string; spent: number };
 type Item = { index: number; mark: string; text: string };
 
-const ROLES: SwarmRole[] = ["planner", "prover", "reviewer", "assistant"];
+const ROLES: SwarmRole[] = ["planner", "prover", "reviewer", "assistant", "hunter"];
 /** The ledger's names for the roles (its rows are coloured by them). */
-const COST_NAME: Record<string, string> = { planner: "plan", prover: "prove", reviewer: "review", assistant: "assistant" };
+const COST_NAME: Record<string, string> = { planner: "plan", prover: "prove", reviewer: "review", assistant: "assistant", hunter: "hunt" };
 
 /** One agent turn in the session's events: from its first status to the next turn's. */
 type Turn = { role: SwarmRole; item: string; tools: string[]; now: string | null; startSpent: number; endSpent: number };

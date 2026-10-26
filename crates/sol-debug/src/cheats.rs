@@ -28,6 +28,10 @@ pub const CONSOLE: Address = address!("000000000000000000636F6e736F6c652e6c6f67"
 struct Prank {
     sender: Address,
     origin: Option<Address>,
+    /// `prank(…, true)`: the prank applies to a DELEGATECALL the caller makes.
+    delegate: bool,
+    /// tx.origin before the prank changed it, restored when the prank ends.
+    prior_origin: Option<Address>,
     /// Only calls made by this address, at this depth, are pranked.
     caller: Address,
     depth: usize,
@@ -39,16 +43,50 @@ struct ExpectRevert {
     data: Option<Bytes>,
     caller: Address,
     depth: usize,
+    /// The open frame that called expectRevert (an index into the frame stack): if it reverts itself, that is the
+    /// expected revert too.
+    frame: usize,
 }
 
-#[derive(Default)]
+impl ExpectRevert {
+    /// As in forge: the data matches as bytes, or a reason string given as bytes matches an Error(string).
+    fn matches(&self, output: &[u8]) -> bool {
+        self.data.as_ref().is_none_or(|d| output.starts_with(d) || error_message(output).is_some_and(|m| m.as_bytes() == &d[..]))
+    }
+}
+
+/// What the inspector does when a frame ends, for the cheatcodes.
+pub struct FrameEnd {
+    /// The frame was one of the test contract's own top-level calls (forge clears transient storage after each).
+    pub clear_transient: bool,
+    /// A single prank set tx.origin for this call: put it back.
+    pub restore_origin: Option<Address>,
+}
+
+/// A compiled contract as state diffs need it: identifier (`file:Name`), runtime code, the byte ranges a deploy
+/// fills in (immutables, libraries), storage layout.
+pub type KnownContract = (String, Vec<u8>, Vec<(usize, usize)>, serde_json::Value);
+
+/// Slots read and written, as `vm.accesses` returns them.
+type Accesses = (Vec<B256>, Vec<B256>);
+
+#[derive(Debug, Clone)]
+struct Mock {
+    target: Address,
+    value: Option<U256>,
+    data: Vec<u8>,
+    returns: Vec<Vec<u8>>,
+    revert: bool,
+}
+
+#[derive(Default, Clone)]
 pub struct Cheats {
     prank: Option<Prank>,
     expect_revert: Option<ExpectRevert>,
     /// `vm.label` names, shown in the trace.
     pub labels: HashMap<Address, String>,
     /// Creation code by every name `getCode` might be given (`AsyncSwap.sol`, `AsyncSwap.sol:AsyncSwap`, the path).
-    pub code: HashMap<String, Vec<u8>>,
+    pub code: std::sync::Arc<HashMap<String, Vec<u8>>>,
     /// Unsupported cheatcodes that were called (for the summary).
     pub missing: Vec<String>,
     /// What `console.log` printed, in order (setUp's and the run's).
@@ -67,6 +105,43 @@ pub struct Cheats {
     /// Bytecode a compiler printed through ffi, by the source file it named (`src/AsyncSwap.huff`): lets the session
     /// name code that solc didn't build.
     pub compiled: Vec<(String, Vec<u8>)>,
+    /// Runtime code by the names `getCode` takes, for `getDeployedCode`.
+    pub deployed: std::sync::Arc<HashMap<String, Vec<u8>>>,
+    /// `mockCall`s, newest last: a call to `target` whose calldata starts with `data` (and whose value matches, when
+    /// given) is answered with the next of `returns` (the last one repeats), as a return or a revert.
+    mocks: Vec<Mock>,
+    /// `record()`: slots read and written per address, until `accesses` is asked.
+    recording: Option<HashMap<Address, Accesses>>,
+    /// `snapshotState()`: the accounts, transient storage and the block, by id.
+    states: Vec<Option<(revm::state::EvmState, revm::state::TransientStorage, revm::context::BlockEnv)>>,
+    /// The test contract being run (forge's rules for its own calls apply to it), and per open frame whether it is
+    /// one of the test contract's top-level calls.
+    pub test_contract: Option<Address>,
+    top_calls: Vec<bool>,
+    origin_restore: Vec<Option<Address>>,
+    /// Folders a test may write to (foundry.toml's read-write `fs_permissions`, absolute). Empty: writes are
+    /// skipped.
+    pub writable: Vec<std::path::PathBuf>,
+    /// Folders a test may read (foundry.toml's read and read-write `fs_permissions`). With neither list set,
+    /// reads go anywhere (debugging).
+    pub readable: Vec<std::path::PathBuf>,
+    /// `readLine`: the next line per file.
+    line_cursor: HashMap<std::path::PathBuf, usize>,
+    /// The compile's contracts, to name code and find storage layouts (state diffs): identifier
+    /// (`file:Name`), runtime code, the byte ranges a deploy fills in, and the storage layout.
+    pub contracts: std::sync::Arc<Vec<KnownContract>>,
+    /// `startStateDiffRecording()`: the account accesses since.
+    pub diffs: Option<crate::statediff::Recording>,
+    /// `recordLogs()`: the logs emitted since, until `getRecordedLogs` takes them.
+    logs: Option<Vec<revm::primitives::Log>>,
+    /// `setEnv`: variables set by the test, read before the process's.
+    env_set: HashMap<String, String>,
+    /// `_expectCheatcodeRevert`: the next cheatcode call must revert (with these bytes, when given).
+    expect_cheat_revert: Option<Option<Vec<u8>>>,
+    /// The `random*` cheatcodes' generator (`setSeed` resets it).
+    rng: Option<u64>,
+    /// `expectCall`s accepted but not checked (the runner doesn't verify them yet).
+    pub unchecked_expect_calls: usize,
     /// One entry per open call or create: whether a pending expectRevert is aimed at it.
     armed: Vec<bool>,
     signatures: HashMap<[u8; 4], &'static str>,
@@ -82,6 +157,267 @@ const SIGNATURES: &[&str] = &[
     "etch(address,bytes)",
     "getCode(string)",
     "warp(uint256)",
+    "contains(string,string)",
+    "indexOf(string,string)",
+    "replace(string,string,string)",
+    "split(string,string)",
+    "toLowercase(string)",
+    "toUppercase(string)",
+    "trim(string)",
+    "getStateDiff()",
+    "getStateDiffJson()",
+    "startStateDiffRecording()",
+    "stopAndReturnStateDiff()",
+    "getStorageAccesses()",
+    "closeFile(string)",
+    "copyFile(string,string)",
+    "exists(string)",
+    "fsMetadata(string)",
+    "isDir(string)",
+    "isFile(string)",
+    "readDir(string)",
+    "readDir(string,uint64)",
+    "readDir(string,uint64,bool)",
+    "readFileBinary(string)",
+    "readLine(string)",
+    "removeDir(string,bool)",
+    "removeFile(string)",
+    "writeFileBinary(string,bytes)",
+    "writeLine(string,string)",
+    "envAddress(string,string)",
+    "envBool(string,string)",
+    "envBytes(string,string)",
+    "envBytes32(string)",
+    "envBytes32(string,string)",
+    "envInt(string,string)",
+    "envOr(string,string,address[])",
+    "envOr(string,string,bool[])",
+    "envOr(string,string,bytes32[])",
+    "envOr(string,string,bytes[])",
+    "envOr(string,string,int256[])",
+    "envOr(string,string,string[])",
+    "envOr(string,string,uint256[])",
+    "envString(string,string)",
+    "envUint(string,string)",
+    "keyExistsToml(string,string)",
+    "parseJson(string)",
+    "parseJson(string,string)",
+    "parseJsonAddress(string,string,address)",
+    "parseJsonAddressArray(string,string)",
+    "parseJsonAddressArray(string,string,address[])",
+    "parseJsonArrayLength(string,string)",
+    "parseJsonBool(string,string,bool)",
+    "parseJsonBoolArray(string,string)",
+    "parseJsonBoolArray(string,string,bool[])",
+    "parseJsonBytes(string,string,bytes)",
+    "parseJsonBytes32(string,string)",
+    "parseJsonBytes32(string,string,bytes32)",
+    "parseJsonBytes32Array(string,string)",
+    "parseJsonBytes32Array(string,string,bytes32[])",
+    "parseJsonBytesArray(string,string)",
+    "parseJsonBytesArray(string,string,bytes[])",
+    "parseJsonInt(string,string,int256)",
+    "parseJsonIntArray(string,string)",
+    "parseJsonIntArray(string,string,int256[])",
+    "parseJsonKeys(string,string)",
+    "parseJsonString(string,string,string)",
+    "parseJsonStringArray(string,string)",
+    "parseJsonStringArray(string,string,string[])",
+    "parseJsonUint(string,string,uint256)",
+    "parseJsonUintArray(string,string)",
+    "parseJsonUintArray(string,string,uint256[])",
+    "parseToml(string)",
+    "parseToml(string,string)",
+    "parseTomlAddress(string,string)",
+    "parseTomlAddress(string,string,address)",
+    "parseTomlAddressArray(string,string)",
+    "parseTomlAddressArray(string,string,address[])",
+    "parseTomlBool(string,string)",
+    "parseTomlBool(string,string,bool)",
+    "parseTomlBoolArray(string,string)",
+    "parseTomlBoolArray(string,string,bool[])",
+    "parseTomlBytes(string,string)",
+    "parseTomlBytes(string,string,bytes)",
+    "parseTomlBytes32(string,string)",
+    "parseTomlBytes32(string,string,bytes32)",
+    "parseTomlBytes32Array(string,string)",
+    "parseTomlBytes32Array(string,string,bytes32[])",
+    "parseTomlBytesArray(string,string)",
+    "parseTomlBytesArray(string,string,bytes[])",
+    "parseTomlInt(string,string)",
+    "parseTomlInt(string,string,int256)",
+    "parseTomlIntArray(string,string)",
+    "parseTomlIntArray(string,string,int256[])",
+    "parseTomlKeys(string,string)",
+    "parseTomlString(string,string)",
+    "parseTomlString(string,string,string)",
+    "parseTomlStringArray(string,string)",
+    "parseTomlStringArray(string,string,string[])",
+    "parseTomlUint(string,string)",
+    "parseTomlUint(string,string,uint256)",
+    "parseTomlUintArray(string,string)",
+    "parseTomlUintArray(string,string,uint256[])",
+    "assertApproxEqAbs(int256,int256,uint256)",
+    "assertApproxEqAbs(int256,int256,uint256,string)",
+    "assertApproxEqAbsDecimal(int256,int256,uint256,uint256)",
+    "assertApproxEqAbsDecimal(int256,int256,uint256,uint256,string)",
+    "assertApproxEqAbsDecimal(uint256,uint256,uint256,uint256)",
+    "assertApproxEqAbsDecimal(uint256,uint256,uint256,uint256,string)",
+    "assertApproxEqRel(int256,int256,uint256)",
+    "assertApproxEqRel(int256,int256,uint256,string)",
+    "assertApproxEqRelDecimal(int256,int256,uint256,uint256)",
+    "assertApproxEqRelDecimal(int256,int256,uint256,uint256,string)",
+    "assertApproxEqRelDecimal(uint256,uint256,uint256,uint256)",
+    "assertApproxEqRelDecimal(uint256,uint256,uint256,uint256,string)",
+    "assertEq(address[],address[])",
+    "assertEq(address[],address[],string)",
+    "assertEq(bool[],bool[])",
+    "assertEq(bool[],bool[],string)",
+    "assertEq(bytes32[],bytes32[])",
+    "assertEq(bytes32[],bytes32[],string)",
+    "assertEq(bytes[],bytes[])",
+    "assertEq(bytes[],bytes[],string)",
+    "assertEq(int256[],int256[])",
+    "assertEq(int256[],int256[],string)",
+    "assertEq(string[],string[])",
+    "assertEq(string[],string[],string)",
+    "assertEq(uint256[],uint256[])",
+    "assertEq(uint256[],uint256[],string)",
+    "assertEqDecimal(int256,int256,uint256)",
+    "assertEqDecimal(int256,int256,uint256,string)",
+    "assertEqDecimal(uint256,uint256,uint256)",
+    "assertEqDecimal(uint256,uint256,uint256,string)",
+    "assertGe(int256,int256)",
+    "assertGe(int256,int256,string)",
+    "assertGeDecimal(int256,int256,uint256)",
+    "assertGeDecimal(int256,int256,uint256,string)",
+    "assertGeDecimal(uint256,uint256,uint256)",
+    "assertGeDecimal(uint256,uint256,uint256,string)",
+    "assertGtDecimal(int256,int256,uint256)",
+    "assertGtDecimal(int256,int256,uint256,string)",
+    "assertGtDecimal(uint256,uint256,uint256)",
+    "assertGtDecimal(uint256,uint256,uint256,string)",
+    "assertLe(int256,int256)",
+    "assertLe(int256,int256,string)",
+    "assertLeDecimal(int256,int256,uint256)",
+    "assertLeDecimal(int256,int256,uint256,string)",
+    "assertLeDecimal(uint256,uint256,uint256)",
+    "assertLeDecimal(uint256,uint256,uint256,string)",
+    "assertLtDecimal(int256,int256,uint256)",
+    "assertLtDecimal(int256,int256,uint256,string)",
+    "assertLtDecimal(uint256,uint256,uint256)",
+    "assertLtDecimal(uint256,uint256,uint256,string)",
+    "assertNotEq(address[],address[])",
+    "assertNotEq(address[],address[],string)",
+    "assertNotEq(bool,bool)",
+    "assertNotEq(bool,bool,string)",
+    "assertNotEq(bool[],bool[])",
+    "assertNotEq(bool[],bool[],string)",
+    "assertNotEq(bytes,bytes)",
+    "assertNotEq(bytes,bytes,string)",
+    "assertNotEq(bytes32[],bytes32[])",
+    "assertNotEq(bytes32[],bytes32[],string)",
+    "assertNotEq(bytes[],bytes[])",
+    "assertNotEq(bytes[],bytes[],string)",
+    "assertNotEq(int256,int256)",
+    "assertNotEq(int256,int256,string)",
+    "assertNotEq(int256[],int256[])",
+    "assertNotEq(int256[],int256[],string)",
+    "assertNotEq(string,string)",
+    "assertNotEq(string,string,string)",
+    "assertNotEq(string[],string[])",
+    "assertNotEq(string[],string[],string)",
+    "assertNotEq(uint256[],uint256[])",
+    "assertNotEq(uint256[],uint256[],string)",
+    "assertNotEqDecimal(int256,int256,uint256)",
+    "assertNotEqDecimal(int256,int256,uint256,string)",
+    "assertNotEqDecimal(uint256,uint256,uint256)",
+    "assertNotEqDecimal(uint256,uint256,uint256,string)",
+    "setEnv(string,string)",
+    "_expectCheatcodeRevert()",
+    "_expectCheatcodeRevert(bytes)",
+    "_expectCheatcodeRevert(bytes4)",
+    "expectSafeMemory(uint64,uint64)",
+    "expectSafeMemoryCall(uint64,uint64)",
+    "stopExpectSafeMemory()",
+    "skip(bool)",
+    "skip(bool,string)",
+    "fee(uint256)",
+    "txGasPrice(uint256)",
+    "prevrandao(uint256)",
+    "prevrandao(bytes32)",
+    "difficulty(uint256)",
+    "coinbase(address)",
+    "getBlockTimestamp()",
+    "getBlockNumber()",
+    "readCallers()",
+    "setNonce(address,uint64)",
+    "setNonceUnsafe(address,uint64)",
+    "resetNonce(address)",
+    "createWallet(uint256)",
+    "createWallet(string)",
+    "createWallet(uint256,string)",
+    "setSeed(uint256)",
+    "randomUint()",
+    "randomUint(uint256)",
+    "randomUint(uint256,uint256)",
+    "randomInt()",
+    "randomInt(uint256)",
+    "randomAddress()",
+    "randomBool()",
+    "randomBytes(uint256)",
+    "randomBytes4()",
+    "randomBytes8()",
+    "snapshot()",
+    "revertTo(uint256)",
+    "revertToAndDelete(uint256)",
+    "deleteSnapshot(uint256)",
+    "deleteSnapshots()",
+    "deleteStateSnapshots()",
+    "getLabel(address)",
+    "pauseGasMetering()",
+    "resumeGasMetering()",
+    "resetGasMetering()",
+    "computeCreate2Address(bytes32,bytes32,address)",
+    "computeCreate2Address(bytes32,bytes32)",
+    "parseUint(string)",
+    "parseInt(string)",
+    "parseBool(string)",
+    "parseAddress(string)",
+    "parseBytes32(string)",
+    "parseBytes(string)",
+    "prank(address,bool)",
+    "prank(address,address,bool)",
+    "startPrank(address,bool)",
+    "startPrank(address,address,bool)",
+    "store(address,bytes32,bytes32)",
+    "load(address,bytes32)",
+    "record()",
+    "accesses(address)",
+    "mockCall(address,bytes,bytes)",
+    "mockCall(address,uint256,bytes,bytes)",
+    "mockCallRevert(address,bytes,bytes)",
+    "mockCallRevert(address,uint256,bytes,bytes)",
+    "mockCalls(address,bytes,bytes[])",
+    "clearMockedCalls()",
+    "chainId(uint256)",
+    "snapshotState()",
+    "revertToState(uint256)",
+    "revertToStateAndDelete(uint256)",
+    "deleteStateSnapshot(uint256)",
+    "expectCall(address,bytes)",
+    "expectCall(address,uint256,bytes)",
+    "expectCall(address,bytes,uint64)",
+    "expectCall(address,uint256,bytes,uint64)",
+    "getDeployedCode(string)",
+    "getNonce(address)",
+    "computeCreateAddress(address,uint256)",
+    "cool(address)",
+    "coolSlot(address,bytes32)",
+    "dumpState(string)",
+    "createFork(string,uint256)",
+    "createFork(string)",
+    "selectFork(uint256)",
     "roll(uint256)",
     "addr(uint256)",
     "sign(uint256,bytes32)",
@@ -240,6 +576,8 @@ impl Cheats {
     pub fn call(&mut self, ctx: &mut Ctx, inputs: &mut CallInputs, input: &Bytes, depth: usize) -> Option<CallOutcome> {
         let aimed = inputs.target_address != HEVM
             && self.expect_revert.as_ref().is_some_and(|e| e.depth == depth && e.caller == inputs.caller);
+        self.top_calls.push(self.armed.len() == 1 && self.test_contract == Some(inputs.caller) && inputs.target_address != HEVM);
+        self.origin_restore.push(None);
         self.armed.push(aimed);
         if inputs.target_address == CONSOLE {
             let line = self.console_line(input);
@@ -247,29 +585,101 @@ impl Cheats {
             return Some(outcome(inputs, InstructionResult::Return, Bytes::new()));
         }
         if inputs.target_address != HEVM {
-            if let Some(p) = &self.prank {
-                if p.depth == depth && inputs.caller == p.caller {
+            if let Some(p) = &mut self.prank {
+                let delegated = p.delegate && inputs.scheme == revm::interpreter::CallScheme::DelegateCall && inputs.target_address == p.caller;
+                if p.depth == depth && (inputs.caller == p.caller || delegated) {
                     inputs.caller = p.sender;
+                    // revm moves a call's value from its caller, which it loaded before this hook ran: load the
+                    // pranked sender too, or a pranked call with value finds no account to debit.
+                    let _ = revm::context::ContextTr::journal_mut(ctx).load_account(p.sender);
                     if let Some(o) = p.origin {
+                        p.prior_origin.get_or_insert(ctx.tx.caller);
                         ctx.tx.caller = o;
                     }
                     if p.single {
-                        self.prank = None;
+                        // tx.origin comes back when this call ends.
+                        if let Some(prior) = self.prank.take().and_then(|p| p.prior_origin) {
+                            if let Some(last) = self.origin_restore.last_mut() {
+                                *last = Some(prior);
+                            }
+                        }
                     }
                 }
             }
-            return None;
+            return self.mocked(inputs, input);
         }
-        let answer = self.answer(ctx, inputs.caller, input, depth);
+        let expecting = self.expect_cheat_revert.take();
+        let pending = self.expect_revert.as_ref().is_some_and(|e| e.depth == depth && e.caller == inputs.caller);
+        let mut answer = self.answer(ctx, inputs.caller, input, depth);
+        if pending && expecting.is_none() {
+            if let Answer::Revert(msg) = &answer {
+                let e = self.expect_revert.take().unwrap();
+                answer = if e.matches(&error_string(msg)) { Answer::Ok(vec![0u8; 8192]) } else { Answer::Revert(format!("Error != expected error: {msg}")) };
+            }
+        }
+        if let Some(want) = expecting {
+            // `_expectCheatcodeRevert` itself arms it again; any other cheatcode settles it.
+            if self.expect_cheat_revert.is_none() {
+                answer = match answer {
+                    Answer::Revert(msg) => {
+                        let data = error_string(&msg);
+                        let ok = want.as_ref().is_none_or(|w| data.starts_with(w) || msg.as_bytes() == &w[..] || error_message(w).is_some_and(|m| m == msg));
+                        if ok {
+                            // As for expectRevert: enough zeros for any return type to decode.
+                            Answer::Ok(vec![0u8; 8192])
+                        } else {
+                            Answer::Revert(format!("Error != expected error: {msg} != {}", want.as_ref().and_then(|w| error_message(w).or_else(|| String::from_utf8(w.clone()).ok())).unwrap_or_default()))
+                        }
+                    }
+                    Answer::Ok(_) => Answer::Revert("next call did not revert as expected".into()),
+                };
+            } else {
+                self.expect_cheat_revert = Some(want);
+            }
+        }
         Some(match answer {
             Answer::Ok(out) => outcome(inputs, InstructionResult::Return, out.into()),
             Answer::Revert(msg) => outcome(inputs, InstructionResult::Revert, error_string(&msg)),
         })
     }
 
+    /// A mocked answer for this call, if a `mockCall` covers it: the longest matching calldata wins, as in forge.
+    fn mocked(&mut self, inputs: &CallInputs, input: &Bytes) -> Option<CallOutcome> {
+        let value = inputs.value.get();
+        let m = self
+            .mocks
+            .iter_mut()
+            .filter(|m| m.target == inputs.target_address && input.starts_with(&m.data) && m.value.is_none_or(|v| v == value))
+            .max_by_key(|m| m.data.len())?;
+        let out = if m.returns.len() > 1 { m.returns.remove(0) } else { m.returns[0].clone() };
+        let result = if m.revert { InstructionResult::Revert } else { InstructionResult::Return };
+        Some(outcome(inputs, result, out.into()))
+    }
+
+    /// A log, kept while `recordLogs()` is on.
+    pub fn on_log(&mut self, log: &revm::primitives::Log) {
+        if let Some(l) = &mut self.logs {
+            l.push(log.clone());
+        }
+    }
+
+    /// `record()`: a storage access by the code running at `address` (SSTORE counts as a read too, as in forge).
+    pub fn storage_access(&mut self, address: Address, slot: U256, write: bool) {
+        if let Some(r) = &mut self.recording {
+            let e = r.entry(address).or_default();
+            let slot = B256::from(slot);
+            e.0.push(slot);
+            if write {
+                e.1.push(slot);
+            }
+        }
+    }
+
     /// Before a create: prank the deployer.
     pub fn create(&mut self, inputs: &mut revm::interpreter::CreateInputs, depth: usize) {
         let aimed = self.expect_revert.as_ref().is_some_and(|e| e.depth == depth && e.caller == inputs.caller());
+        self.top_calls.push(self.armed.len() == 1 && self.test_contract == Some(inputs.caller()));
+        self.origin_restore.push(None);
         self.armed.push(aimed);
         if let Some(p) = &self.prank {
             if p.depth == depth && inputs.caller() == p.caller {
@@ -282,22 +692,47 @@ impl Cheats {
     }
 
     /// After a call or create: settle an expectRevert aimed at it.
-    pub fn frame_end(&mut self, result: &mut InterpreterResult) {
-        if !self.armed.pop().unwrap_or(false) {
+    /// Returns whether the frame was one of the test contract's own top-level calls: forge runs each of those as
+    /// its own transaction, so transient storage is cleared after it (and kept within it).
+    pub fn frame_end(&mut self, result: &mut InterpreterResult) -> FrameEnd {
+        let top = self.top_calls.pop().unwrap_or(false);
+        let origin = self.origin_restore.pop().flatten();
+        self.settle_expect_revert(result);
+        FrameEnd { clear_transient: top, restore_origin: origin }
+    }
+
+    fn settle_expect_revert(&mut self, result: &mut InterpreterResult) {
+        // The frame that called expectRevert reverting is the expected revert too (`vm.expectRevert(…); revert(…);`).
+        let this = self.armed.len().saturating_sub(1);
+        let own = self.expect_revert.as_ref().is_some_and(|e| e.frame == this) && !result.result.is_ok();
+        if !self.armed.pop().unwrap_or(false) && !own {
             return;
         }
         let Some(e) = self.expect_revert.take() else { return };
         let reverted = !result.result.is_ok();
-        let data_ok = e.data.as_ref().is_none_or(|d| result.output.starts_with(d));
+        // A halt matches as forge names it: `EvmError: OutOfGas`.
+        let output = if reverted && !result.result.is_revert() {
+            Bytes::from(format!("EvmError: {:?}", result.result).into_bytes())
+        } else {
+            result.output.clone()
+        };
+        let data_ok = e.matches(&output);
         if reverted && data_ok {
+            // forge answers a matched expectRevert with 8192 zero bytes, so the caller's ABI decoder finds a value
+            // of any return type (an empty output would make `manager.initialize(...)`'s int24 fail to decode).
             result.result = InstructionResult::Return;
-            result.output = Bytes::new();
+            result.output = Bytes::from(vec![0u8; 8192]);
         } else {
             result.result = InstructionResult::Revert;
-            result.output = error_string(if reverted {
-                "sol-debug: call reverted with different data than expectRevert wanted"
+            let hexs = |b: &[u8]| format!("0x{}", revm::primitives::hex::encode(&b[..b.len().min(100)]));
+            result.output = error_string(&if reverted {
+                format!(
+                    "sol-debug: call reverted with different data than expectRevert wanted (got {}, wanted {})",
+                    hexs(&result.output),
+                    e.data.as_deref().map(|d| hexs(d)).unwrap_or_default()
+                )
             } else {
-                "sol-debug: call did not revert as expected"
+                "sol-debug: call did not revert as expected".to_string()
             });
         }
     }
@@ -321,6 +756,11 @@ impl Cheats {
         let addr = |i: usize| args[i].as_address().unwrap_or_default();
         let uint = |i: usize| args[i].as_uint().map(|(u, _)| u).unwrap_or_default();
         let text = |i: usize| args[i].as_str().unwrap_or_default().to_string();
+        let word = |v: &DynSolValue| match v {
+            DynSolValue::FixedBytes(b, _) => U256::from_be_bytes(b.0),
+            DynSolValue::Uint(u, _) => *u,
+            _ => U256::ZERO,
+        };
         match name {
             n if n.starts_with("env") => {
                 let key = text(0);
@@ -328,8 +768,11 @@ impl Cheats {
                 if n == "envExists" {
                     return Answer::Ok(DynSolValue::Bool(value.is_some()).abi_encode());
                 }
+                // envX(name), envX(name, delimiter) for arrays, envOr(name, default), envOr(name, delimiter, default[]).
+                let params: Vec<&str> = sig[sig.find('(').unwrap() + 1..sig.len() - 1].split(',').collect();
+                let delimiter = (params.len() >= 2 && params[1] == "string" && (n != "envOr" || params.len() == 3)).then(|| text(1));
                 let ty = match n {
-                    "envOr" => sig[sig.find(',').unwrap() + 1..sig.len() - 1].to_string(),
+                    "envOr" => params.last().unwrap().trim_end_matches("[]").to_string(),
                     "envAddress" => "address".into(),
                     "envUint" => "uint256".into(),
                     "envInt" => "int256".into(),
@@ -338,13 +781,28 @@ impl Cheats {
                     "envString" => "string".into(),
                     _ => "bytes".into(),
                 };
+                let default = (n == "envOr").then(|| args.last().unwrap().clone());
+                let failed = || format!("failed parsing ${key} as type `{}`", if delimiter.is_some() { format!("{ty}[]") } else { ty.clone() });
                 match value {
-                    Some(v) => match parse_env(&ty, &v) {
-                        Some(val) => Answer::Ok(val.abi_encode_params()),
-                        None => Answer::Revert(format!("sol-debug: environment variable {key:?} isn't a valid {ty}")),
+                    // An empty value takes the default, except for a string (forge returns the empty string).
+                    Some(v) if v.is_empty() && default.is_some() && !(ty == "string" && delimiter.is_none()) => Answer::Ok(default.unwrap().abi_encode()),
+                    Some(v) => match &delimiter {
+                        Some(d) => {
+                            let parts: Option<Vec<DynSolValue>> = if v.is_empty() { Some(vec![]) } else { v.split(d.as_str()).map(|p| parse_env(&ty, p.trim())).collect() };
+                            match parts {
+                                Some(list) => Answer::Ok(DynSolValue::Array(list).abi_encode()),
+                                None => Answer::Revert(failed()),
+                            }
+                        }
+                        None => match parse_env(&ty, &v) {
+                            Some(val) => Answer::Ok(val.abi_encode()),
+                            None => Answer::Revert(failed()),
+                        },
                     },
-                    None if n == "envOr" => Answer::Ok(args[1].abi_encode_params()),
-                    None => Answer::Revert(format!("sol-debug: environment variable {key:?} not found (set it in the project's .env)")),
+                    None => match default {
+                        Some(d) => Answer::Ok(d.abi_encode()),
+                        None => Answer::Revert(format!("environment variable {key:?} not found")),
+                    },
                 }
             }
             // Broadcasting is a prank: calls (and creates) from the script come from the key's address.
@@ -357,7 +815,7 @@ impl Cheats {
                     },
                     _ => DEFAULT_SENDER,
                 };
-                self.prank = Some(Prank { sender, origin: Some(sender), caller, depth, single: name == "broadcast" });
+                self.prank = Some(Prank { sender, origin: Some(sender), delegate: false, prior_origin: None, caller, depth, single: name == "broadcast" });
                 Answer::Ok(vec![])
             }
             "stopBroadcast" => {
@@ -375,16 +833,7 @@ impl Cheats {
                 Answer::Ok(DynSolValue::String(out).abi_encode_params())
             }
             "projectRoot" => Answer::Ok(DynSolValue::String(self.ffi_dir.display().to_string()).abi_encode_params()),
-            "readFile" => {
-                let path = text(0);
-                let full = if path.starts_with('/') { std::path::PathBuf::from(&path) } else { self.ffi_dir.join(&path) };
-                match std::fs::read_to_string(&full) {
-                    Ok(t) => Answer::Ok(DynSolValue::String(t).abi_encode_params()),
-                    Err(e) => Answer::Revert(format!("sol-debug: readFile {path}: {e}")),
-                }
-            }
-            // Debugging never writes to the project.
-            "writeFile" | "writeJson" | "createDir" => Answer::Ok(vec![]),
+            "readFile" | "readFileBinary" | "readLine" | "closeFile" | "writeFile" | "writeFileBinary" | "writeLine" | "writeJson" | "removeFile" | "copyFile" | "createDir" | "removeDir" | "readDir" | "fsMetadata" | "exists" | "isFile" | "isDir" => self.fs(name, &args),
             n if n.starts_with("serialize") => {
                 let (obj, key) = (text(0), text(1));
                 let value = match &args[2] {
@@ -402,37 +851,104 @@ impl Cheats {
                 Answer::Ok(DynSolValue::String(out).abi_encode_params())
             }
             // A value at a key path (`.contracts.AsyncSwap.address`) in a JSON string, read as the type asked for.
-            n if n.starts_with("parseJson") || n.starts_with("keyExists") => {
-                let (json, key) = (text(0), text(1));
-                let found = serde_json::from_str::<serde_json::Value>(&json).ok().and_then(|v| json_at(&v, &key).cloned());
-                if n.starts_with("keyExists") {
-                    return Answer::Ok(DynSolValue::Bool(found.is_some()).abi_encode());
-                }
-                let Some(v) = found else { return Answer::Revert(format!("sol-debug: {n}: no key {key:?}")) };
-                let raw = match &v {
-                    serde_json::Value::String(s) => s.clone(),
-                    other => other.to_string(),
+            // parseJson/parseToml and their typed variants, keyExists*, parseJsonKeys: TOML is read as JSON.
+            n if n.starts_with("parseJson") || n.starts_with("parseToml") || n.starts_with("keyExists") => {
+                let toml = n.contains("Toml");
+                let doc = if toml {
+                    text(0).parse::<toml::Table>().ok().and_then(|t| serde_json::to_value(t).ok())
+                } else {
+                    serde_json::from_str::<serde_json::Value>(&strip_json_comments(&text(0))).ok()
                 };
-                let ty = match n {
-                    "parseJsonAddress" => "address",
-                    "parseJsonUint" => "uint256",
-                    "parseJsonInt" => "int256",
-                    "parseJsonBool" => "bool",
-                    "parseJsonBytes32" => "bytes32",
-                    "parseJsonString" => "string",
+                let Some(doc) = doc else { return Answer::Revert(format!("failed parsing {}", if toml { "TOML" } else { "JSON" })) };
+                let key = if args.len() > 1 { text(1) } else { "$".to_string() };
+                let matches: Vec<serde_json::Value> = json_select(&doc, &key).into_iter().cloned().collect();
+                let kind = n.trim_start_matches("parseJson").trim_start_matches("parseToml");
+                if n.starts_with("keyExists") {
+                    return Answer::Ok(DynSolValue::Bool(!matches.is_empty()).abi_encode());
+                }
+                if kind.is_empty() {
+                    // abi.encode of the value, as bytes: nothing for no match, an array for several.
+                    let token = match matches.as_slice() {
+                        [] => return Answer::Ok(DynSolValue::Bytes(vec![]).abi_encode()),
+                        [one] => json_token(one),
+                        many => many.iter().map(json_token).collect::<Result<Vec<_>, _>>().map(DynSolValue::Array),
+                    };
+                    return match token {
+                        Ok(t) => Answer::Ok(DynSolValue::Bytes(t.abi_encode()).abi_encode()),
+                        Err(e) => Answer::Revert(e),
+                    };
+                }
+                if kind == "ArrayLength" {
+                    return match matches.as_slice() {
+                        [serde_json::Value::Array(a)] => Answer::Ok(DynSolValue::Uint(U256::from(a.len()), 256).abi_encode()),
+                        [_] => Answer::Revert(format!("JSON value at {key:?} is not an array")),
+                        _ => Answer::Revert(format!("key {key:?} must return exactly one JSON array")),
+                    };
+                }
+                // The (json, key, default) variants: the default when the key is missing.
+                let default = (args.len() > 2).then(|| args[2].clone());
+                let v = match (matches.as_slice(), default) {
+                    ([], Some(d)) => return Answer::Ok(d.abi_encode()),
+                    ([], None) => return Answer::Revert(format!("path {key:?} must return exactly one JSON value")),
+                    ([one], _) => one.clone(),
+                    (many, _) => serde_json::Value::Array(many.to_vec()),
+                };
+                if kind == "Keys" {
+                    let keys = v.as_object().map(|o| o.keys().map(|k| DynSolValue::String(k.clone())).collect()).unwrap_or_default();
+                    return Answer::Ok(DynSolValue::Array(keys).abi_encode());
+                }
+                let (scalar, array) = match kind.strip_suffix("Array") {
+                    Some(k) => (k, true),
+                    None => (kind, false),
+                };
+                let ty = match scalar {
+                    "Address" => "address",
+                    "Uint" => "uint256",
+                    "Int" => "int256",
+                    "Bool" => "bool",
+                    "Bytes32" => "bytes32",
+                    "String" => "string",
                     _ => "bytes",
                 };
-                match parse_env(ty, &raw) {
-                    Some(val) => Answer::Ok(val.abi_encode_params()),
-                    None => Answer::Revert(format!("sol-debug: {n}: {key:?} isn't a valid {ty}")),
+                let out = if array {
+                    match &v {
+                        serde_json::Value::Array(items) => items.iter().map(|i| json_coerce(i, ty)).collect::<Result<Vec<_>, _>>().map(DynSolValue::Array),
+                        other => json_coerce(other, ty).map(|x| DynSolValue::Array(vec![x])),
+                    }
+                } else {
+                    json_coerce(&v, ty)
+                };
+                match out {
+                    Ok(val) => Answer::Ok(val.abi_encode()),
+                    Err(e) => Answer::Revert(e),
                 }
             }
             // Logs aren't kept: an empty list.
-            "getRecordedLogs" => Answer::Ok(DynSolValue::Array(vec![]).abi_encode_params()),
+            // Vm.Log[]: (bytes32[] topics, bytes data, address emitter), and the recording starts over.
+            "getRecordedLogs" => {
+                let logs = self.logs.as_mut().map(std::mem::take).unwrap_or_default();
+                let list = logs
+                    .into_iter()
+                    .map(|l| {
+                        DynSolValue::Tuple(vec![
+                            DynSolValue::Array(l.topics().iter().map(|t| DynSolValue::FixedBytes(*t, 32)).collect()),
+                            DynSolValue::Bytes(l.data.data.to_vec()),
+                            DynSolValue::Address(l.address),
+                        ])
+                    })
+                    .collect();
+                Answer::Ok(DynSolValue::Tuple(vec![DynSolValue::Array(list)]).abi_encode_params())
+            }
+            "recordLogs" => {
+                self.logs = Some(vec![]);
+                Answer::Ok(vec![])
+            }
             "prank" | "startPrank" => {
                 self.prank = Some(Prank {
                     sender: addr(0),
-                    origin: (args.len() > 1).then(|| addr(1)),
+                    origin: args.get(1).and_then(|v| v.as_address()),
+                    delegate: args.last().and_then(|v| v.as_bool()).unwrap_or(false),
+                    prior_origin: None,
                     caller,
                     depth,
                     single: name == "prank",
@@ -440,7 +956,9 @@ impl Cheats {
                 Answer::Ok(vec![])
             }
             "stopPrank" => {
-                self.prank = None;
+                if let Some(o) = self.prank.take().and_then(|p| p.prior_origin) {
+                    ctx.tx.caller = o;
+                }
                 Answer::Ok(vec![])
             }
             "deal" => {
@@ -448,6 +966,7 @@ impl Cheats {
                 acc.set_balance(uint(1));
                 Answer::Ok(vec![])
             }
+            "store" | "etch" if is_precompile(addr(0)) => Answer::Revert(format!("cannot use precompile {} as an argument", addr(0).to_checksum(None))),
             "etch" => {
                 let code = args[1].as_bytes().unwrap_or_default().to_vec();
                 let _ = ctx.journaled_state.load_account(addr(0));
@@ -455,10 +974,334 @@ impl Cheats {
                 Answer::Ok(vec![])
             }
             "getCode" => {
-                let what = args[0].as_str().unwrap_or("");
-                match self.code.get(what) {
+                let what = artifact_name(args[0].as_str().unwrap_or(""));
+                if what.ends_with(".json") {
+                    return match artifact_file(&self.ffi_dir, &what, false) {
+                        Some(code) => Answer::Ok(DynSolValue::Bytes(code).abi_encode()),
+                        None => Answer::Revert(format!("sol-debug: getCode: no bytecode in {what}")),
+                    };
+                }
+                let found = self.code.get(&what).or_else(|| suffix_match(&self.code, &what));
+                match found {
                     Some(code) => Answer::Ok(DynSolValue::Bytes(code.clone()).abi_encode()),
                     None => Answer::Revert(format!("sol-debug: getCode: no compiled contract {what:?} (compile the file that imports it)")),
+                }
+            }
+            "store" => {
+                let (a, slot, v) = (addr(0), word(&args[1]), word(&args[2]));
+                let _ = ctx.journaled_state.load_account(a);
+                let _ = ctx.journaled_state.sstore(a, slot, v);
+                Answer::Ok(vec![])
+            }
+            "load" => {
+                let a = addr(0);
+                let _ = ctx.journaled_state.load_account(a);
+                let v = ctx.journaled_state.sload(a, word(&args[1])).map(|l| l.data).unwrap_or_default();
+                Answer::Ok(DynSolValue::FixedBytes(B256::from(v), 32).abi_encode())
+            }
+            "record" => {
+                self.recording = Some(HashMap::new());
+                Answer::Ok(vec![])
+            }
+            "accesses" => {
+                let (reads, writes) = self.recording.as_ref().and_then(|r| r.get(&addr(0)).cloned()).unwrap_or_default();
+                let list = |v: Vec<B256>| DynSolValue::Array(v.into_iter().map(|b| DynSolValue::FixedBytes(b, 32)).collect());
+                Answer::Ok(DynSolValue::Tuple(vec![list(reads), list(writes)]).abi_encode_params())
+            }
+            "mockCall" | "mockCallRevert" | "mockCalls" => {
+                let with_value = matches!(args.len(), 4);
+                let at = |i: usize| if with_value { i + 1 } else { i };
+                let data = args[at(1)].as_bytes().unwrap_or_default().to_vec();
+                let returns = match &args[at(2)] {
+                    DynSolValue::Array(v) => v.iter().map(|b| b.as_bytes().unwrap_or_default().to_vec()).collect(),
+                    b => vec![b.as_bytes().unwrap_or_default().to_vec()],
+                };
+                let value = with_value.then(|| uint(1));
+                let m = Mock { target: addr(0), value, data, returns, revert: name == "mockCallRevert" };
+                // A newer mock of the same call replaces the older one.
+                self.mocks.retain(|o| !(o.target == m.target && o.data == m.data && o.value == m.value));
+                self.mocks.push(m);
+                Answer::Ok(vec![])
+            }
+            "clearMockedCalls" => {
+                self.mocks.clear();
+                Answer::Ok(vec![])
+            }
+            "chainId" => {
+                ctx.cfg.chain_id = uint(0).saturating_to();
+                Answer::Ok(vec![])
+            }
+            "snapshotState" | "snapshot" => {
+                let j = &ctx.journaled_state.inner;
+                self.states.push(Some((j.state.clone(), j.transient_storage.clone(), ctx.block.clone())));
+                Answer::Ok(DynSolValue::Uint(U256::from(self.states.len() - 1), 256).abi_encode())
+            }
+            "deleteStateSnapshots" | "deleteSnapshots" => {
+                self.states.iter_mut().for_each(|s| *s = None);
+                Answer::Ok(vec![])
+            }
+            "revertToState" | "revertToStateAndDelete" | "deleteStateSnapshot" | "revertTo" | "revertToAndDelete" | "deleteSnapshot" => {
+                let name = match name {
+                    "revertTo" => "revertToState",
+                    "revertToAndDelete" => "revertToStateAndDelete",
+                    "deleteSnapshot" => "deleteStateSnapshot",
+                    n => n,
+                };
+                let id = uint(0).saturating_to::<usize>();
+                let Some(Some((state, transient, block))) = self.states.get(id).cloned() else {
+                    return Answer::Ok(DynSolValue::Bool(false).abi_encode());
+                };
+                if name != "deleteStateSnapshot" {
+                    restore_state(ctx, state);
+                    ctx.journaled_state.inner.transient_storage = transient;
+                    ctx.block = block;
+                }
+                if name != "revertToState" {
+                    self.states[id] = None;
+                }
+                Answer::Ok(DynSolValue::Bool(true).abi_encode())
+            }
+            "expectCall" => {
+                self.unchecked_expect_calls += 1;
+                Answer::Ok(vec![])
+            }
+            "getDeployedCode" if artifact_name(args[0].as_str().unwrap_or("")).ends_with(".json") => {
+                match artifact_file(&self.ffi_dir, &artifact_name(args[0].as_str().unwrap_or("")), true) {
+                    Some(code) => Answer::Ok(DynSolValue::Bytes(code).abi_encode()),
+                    None => Answer::Revert(format!("sol-debug: getDeployedCode: no bytecode in {}", text(0))),
+                }
+            }
+            "getDeployedCode" => match self.deployed.get(&artifact_name(args[0].as_str().unwrap_or(""))).or_else(|| suffix_match(&self.deployed, &artifact_name(args[0].as_str().unwrap_or("")))) {
+                Some(code) => Answer::Ok(DynSolValue::Bytes(code.clone()).abi_encode()),
+                None => Answer::Revert(format!("sol-debug: getDeployedCode: no contract {}", text(0))),
+            },
+            "getNonce" => {
+                let nonce = ctx.journaled_state.load_account(addr(0)).map(|a| a.data.info.nonce).unwrap_or(0);
+                Answer::Ok(DynSolValue::Uint(U256::from(nonce), 64).abi_encode())
+            }
+            "computeCreateAddress" => Answer::Ok(DynSolValue::Address(addr(0).create(uint(1).saturating_to())).abi_encode()),
+            // Gas and dumps only.
+            "cool" | "coolSlot" => {
+                let a = addr(0);
+                if let Some(acc) = ctx.journaled_state.inner.state.get_mut(&a) {
+                    if name == "cool" {
+                        acc.mark_cold();
+                        acc.storage.values_mut().for_each(|slot| slot.mark_cold());
+                    } else if let Some(slot) = acc.storage.get_mut(&word(&args[1])) {
+                        slot.mark_cold();
+                    }
+                }
+                Answer::Ok(vec![])
+            }
+            "dumpState" => Answer::Ok(vec![]),
+            "createFork" | "selectFork" => Answer::Revert("sol-debug: createFork inside a test isn't supported (run on a fork)".into()),
+            "startStateDiffRecording" => {
+                self.diffs = Some(Default::default());
+                Answer::Ok(vec![])
+            }
+            "stopAndReturnStateDiff" => {
+                let all = self.diffs.as_mut().map(|r| r.take()).unwrap_or_default();
+                Answer::Ok(DynSolValue::Array(all.iter().map(|a| a.token()).collect()).abi_encode())
+            }
+            "contains" => Answer::Ok(DynSolValue::Bool(text(0).contains(&text(1))).abi_encode()),
+            "indexOf" => {
+                let i = text(0).find(&text(1)).map_or(U256::MAX, U256::from);
+                Answer::Ok(DynSolValue::Uint(i, 256).abi_encode())
+            }
+            "replace" => Answer::Ok(DynSolValue::String(text(0).replace(&text(1), &text(2))).abi_encode()),
+            "split" => {
+                let parts = text(0).split(&text(1)).map(|p| DynSolValue::String(p.to_string())).collect();
+                Answer::Ok(DynSolValue::Array(parts).abi_encode())
+            }
+            "toLowercase" => Answer::Ok(DynSolValue::String(text(0).to_lowercase()).abi_encode()),
+            "toUppercase" => Answer::Ok(DynSolValue::String(text(0).to_uppercase()).abi_encode()),
+            "trim" => Answer::Ok(DynSolValue::String(text(0).trim().to_string()).abi_encode()),
+            "getStateDiff" | "getStateDiffJson" => {
+                let contracts = self.contracts.clone();
+                let mut code_of = |a: Address| -> Option<(String, serde_json::Value)> {
+                    use revm::DatabaseRef;
+                    let code = match ctx.journaled_state.inner.state.get(&a) {
+                        Some(acc) => acc.info.code.clone(),
+                        None => ctx.journaled_state.database.basic_ref(a).ok().flatten().and_then(|i| i.code),
+                    }?
+                    .original_bytes();
+                    if code.is_empty() {
+                        return None;
+                    }
+                    contracts.iter().find(|(_, runtime, holes, _)| {
+                        let mut holes = holes.clone();
+                        if runtime.first() == Some(&0x73) {
+                            holes.push((1, 20));
+                        }
+                        runtime.len() == code.len() && crate::solc::same_outside(&code, runtime, &holes)
+                    }).map(|(id, _, _, layout)| (id.clone(), layout.clone()))
+                };
+                let Some(r) = &self.diffs else { return Answer::Ok(DynSolValue::String(String::new()).abi_encode()) };
+                let diffs = r.diffs(&self.labels, &mut code_of);
+                let out = if name == "getStateDiff" { crate::statediff::diffs_text(&diffs) } else { crate::statediff::diffs_json(&diffs) };
+                Answer::Ok(DynSolValue::String(out).abi_encode())
+            }
+            "getStorageAccesses" => {
+                let all = self.diffs.as_ref().map(|r| r.accesses()).unwrap_or_default();
+                Answer::Ok(DynSolValue::Array(all.iter().flat_map(|a| a.storage.iter().map(|s| s.token())).collect()).abi_encode())
+            }
+            "setEnv" => {
+                self.env_set.insert(text(0), text(1));
+                Answer::Ok(vec![])
+            }
+            "_expectCheatcodeRevert" => {
+                self.expect_cheat_revert = Some(args.first().and_then(|a| match a {
+                    DynSolValue::Bytes(b) => Some(b.clone()),
+                    DynSolValue::FixedBytes(b, n) => Some(b[..*n].to_vec()),
+                    _ => None,
+                }));
+                Answer::Ok(vec![])
+            }
+            // Memory-safety and gas-metering checks don't change what a test computes.
+            "expectSafeMemory" | "expectSafeMemoryCall" | "stopExpectSafeMemory" | "pauseGasMetering" | "resumeGasMetering" | "resetGasMetering" => {
+                Answer::Ok(vec![])
+            }
+            "skip" => {
+                if args[0].as_bool() == Some(true) {
+                    let why = args.get(1).and_then(|v| v.as_str()).unwrap_or("");
+                    Answer::Revert(format!("sol-debug: skip {why}"))
+                } else {
+                    Answer::Ok(vec![])
+                }
+            }
+            "fee" => {
+                ctx.block.basefee = uint(0).saturating_to();
+                Answer::Ok(vec![])
+            }
+            "txGasPrice" => {
+                ctx.tx.gas_price = uint(0).saturating_to();
+                Answer::Ok(vec![])
+            }
+            "prevrandao" => {
+                ctx.block.prevrandao = Some(B256::from(word(&args[0])));
+                Answer::Ok(vec![])
+            }
+            "difficulty" => {
+                ctx.block.difficulty = uint(0);
+                Answer::Ok(vec![])
+            }
+            "coinbase" => {
+                ctx.block.beneficiary = addr(0);
+                Answer::Ok(vec![])
+            }
+            "getBlockTimestamp" => Answer::Ok(DynSolValue::Uint(ctx.block.timestamp, 256).abi_encode()),
+            "getBlockNumber" => Answer::Ok(DynSolValue::Uint(ctx.block.number, 256).abi_encode()),
+            // (CallerMode, msg.sender, tx.origin): None 0, Broadcast 1, RecurrentBroadcast 2, Prank 3, RecurrentPrank 4.
+            "readCallers" => {
+                let (mode, sender, origin) = match &self.prank {
+                    Some(p) => (if p.single { 3u8 } else { 4 }, p.sender, p.origin.unwrap_or(ctx.tx.caller)),
+                    None => (0, DEFAULT_SENDER, ctx.tx.caller),
+                };
+                Answer::Ok(DynSolValue::Tuple(vec![DynSolValue::Uint(U256::from(mode), 8), DynSolValue::Address(sender), DynSolValue::Address(origin)]).abi_encode_params())
+            }
+            "setNonce" | "setNonceUnsafe" | "resetNonce" => {
+                let a = addr(0);
+                let Ok(mut acc) = ctx.journaled_state.load_account_mut(a);
+                let current = acc.nonce();
+                let new = if name == "resetNonce" { 0 } else { uint(1).saturating_to::<u64>() };
+                if name == "setNonce" && new < current {
+                    return Answer::Revert(format!("vm.setNonce: new nonce ({new}) must be strictly equal to or higher than the account's current nonce ({current})"));
+                }
+                acc.set_nonce(new);
+                Answer::Ok(vec![])
+            }
+            "createWallet" => {
+                let pk = match &args[0] {
+                    DynSolValue::String(name) => U256::from_be_bytes(keccak256(name.as_bytes()).0),
+                    v => word(v),
+                };
+                let Some(k) = signing_key(pk) else { return Answer::Revert("vm.createWallet: bad private key".into()) };
+                let a = key_address(&k);
+                if let Some(label) = args.iter().find_map(|v| v.as_str()) {
+                    self.labels.insert(a, label.to_string());
+                }
+                let point = k.verifying_key().to_sec1_point(false);
+                let (x, y) = (U256::from_be_slice(point.x().unwrap()), U256::from_be_slice(point.y().unwrap()));
+                Answer::Ok(
+                    DynSolValue::Tuple(vec![DynSolValue::Address(a), DynSolValue::Uint(x, 256), DynSolValue::Uint(y, 256), DynSolValue::Uint(pk, 256)])
+                        .abi_encode_params(),
+                )
+            }
+            "setSeed" => {
+                self.rng = Some(uint(0).as_limbs()[0] | 1);
+                Answer::Ok(vec![])
+            }
+            n if n.starts_with("random") => {
+                let mut word_ = || -> U256 {
+                    let r = self.rng.get_or_insert(0x5eed_cafe_f00d_u64);
+                    let mut next = || {
+                        *r ^= *r << 13;
+                        *r ^= *r >> 7;
+                        *r ^= *r << 17;
+                        *r
+                    };
+                    U256::from_limbs([next(), next(), next(), next()])
+                };
+                let w = word_();
+                match (n, args.len()) {
+                    ("randomUint", 0) => Answer::Ok(DynSolValue::Uint(w, 256).abi_encode()),
+                    ("randomUint", 1) => {
+                        let bits = uint(0).saturating_to::<usize>().min(256);
+                        let v = if bits == 256 { w } else { w & ((U256::from(1) << bits) - U256::from(1)) };
+                        Answer::Ok(DynSolValue::Uint(v, 256).abi_encode())
+                    }
+                    ("randomUint", _) => {
+                        let (lo, hi) = (uint(0), uint(1));
+                        if lo > hi {
+                            return Answer::Revert("vm.randomUint: min must be less than or equal to max".to_string());
+                        }
+                        let span = hi - lo;
+                        let v = if span == U256::MAX { w } else { lo + w % (span + U256::from(1)) };
+                        Answer::Ok(DynSolValue::Uint(v, 256).abi_encode())
+                    }
+                    ("randomInt", 0) => Answer::Ok(DynSolValue::Int(revm::primitives::I256::from_raw(w), 256).abi_encode()),
+                    ("randomInt", _) => {
+                        let bits = uint(0).saturating_to::<usize>().clamp(1, 256);
+                        let v = revm::primitives::I256::from_raw(w << (256 - bits)).asr(256 - bits);
+                        Answer::Ok(DynSolValue::Int(v, 256).abi_encode())
+                    }
+                    ("randomAddress", _) => Answer::Ok(DynSolValue::Address(Address::from_slice(&w.to_be_bytes::<32>()[12..])).abi_encode()),
+                    ("randomBool", _) => Answer::Ok(DynSolValue::Bool(w.bit(0)).abi_encode()),
+                    ("randomBytes", _) => {
+                        let len = uint(0).saturating_to::<usize>().min(1 << 20);
+                        let mut out = vec![];
+                        while out.len() < len {
+                            out.extend_from_slice(&word_().to_be_bytes::<32>());
+                        }
+                        out.truncate(len);
+                        Answer::Ok(DynSolValue::Bytes(out).abi_encode_params())
+                    }
+                    ("randomBytes4", _) => Answer::Ok(DynSolValue::FixedBytes(B256::from(w & (U256::MAX << 224)), 4).abi_encode()),
+                    ("randomBytes8", _) => Answer::Ok(DynSolValue::FixedBytes(B256::from(w & (U256::MAX << 192)), 8).abi_encode()),
+                    _ => Answer::Revert(format!("sol-debug: unsupported cheatcode {n}")),
+                }
+            }
+            "getLabel" => {
+                let a = addr(0);
+                let l = self.labels.get(&a).cloned().unwrap_or_else(|| format!("unlabeled:{}", a.to_checksum(None)));
+                Answer::Ok(DynSolValue::String(l).abi_encode_params())
+            }
+            "computeCreate2Address" => {
+                let deployer = if args.len() > 2 { addr(2) } else { address!("4e59b44847b379578588920cA78FbF26c0B4956C") };
+                Answer::Ok(DynSolValue::Address(deployer.create2(B256::from(word(&args[0])), B256::from(word(&args[1])))).abi_encode())
+            }
+            "parseUint" | "parseInt" | "parseBool" | "parseAddress" | "parseBytes32" | "parseBytes" => {
+                let ty = match name {
+                    "parseUint" => "uint256",
+                    "parseInt" => "int256",
+                    "parseBool" => "bool",
+                    "parseAddress" => "address",
+                    "parseBytes32" => "bytes32",
+                    _ => "bytes",
+                };
+                match parse_env(ty, &text(0)) {
+                    Some(v) => Answer::Ok(v.abi_encode_params()),
+                    None => Answer::Revert(format!("failed parsing {:?} as type `{ty}`", text(0))),
                 }
             }
             "warp" => {
@@ -505,10 +1348,10 @@ impl Cheats {
                     DynSolValue::FixedBytes(b, n) => Bytes::copy_from_slice(&b[..*n]),
                     other => Bytes::from(other.as_bytes().unwrap_or_default().to_vec()),
                 });
-                self.expect_revert = Some(ExpectRevert { data, caller, depth });
+                self.expect_revert = Some(ExpectRevert { data, caller, depth, frame: self.armed.len().saturating_sub(2) });
                 Answer::Ok(vec![])
             }
-            "expectEmit" | "recordLogs" => Answer::Ok(vec![]),
+            "expectEmit" => Answer::Ok(vec![]),
             "ffi" | "tryFfi" => {
                 let argv: Vec<String> = args[0].as_array().unwrap_or_default().iter().filter_map(|v| v.as_str().map(str::to_string)).collect();
                 match self.ffi(&argv) {
@@ -540,7 +1383,7 @@ impl Cheats {
     /// Runs an allowed program like forge's ffi: stdout that is hex (with or without 0x) comes back decoded.
     fn ffi(&mut self, argv: &[String]) -> Result<(i32, Vec<u8>, Vec<u8>), String> {
         let Some(program) = argv.first() else { return Err("ffi: empty command".into()) };
-        if !self.ffi_allow.iter().any(|p| p == program) {
+        if !self.ffi_allow.iter().any(|p| p == program || p == "*") {
             return Err(format!("sol-debug: ffi refused {program:?}; allowed: {:?}", self.ffi_allow));
         }
         if let Some(hit) = self.ffi_cache.get(argv) {
@@ -569,6 +1412,168 @@ impl Cheats {
     }
 }
 
+impl Cheats {
+    /// A path a test gave, relative to the project root unless absolute.
+    fn full_path(&self, path: &str) -> std::path::PathBuf {
+        if path.starts_with('/') { std::path::PathBuf::from(path) } else { self.ffi_dir.join(path) }
+    }
+
+    /// forge's fs_permissions: with none configured (debugging), reads go anywhere and writes are skipped.
+    fn allowed(&self, path: &str, write: bool) -> Result<std::path::PathBuf, String> {
+        let full = self.full_path(path);
+        if write && full.file_name().is_some_and(|n| n.to_string_lossy().eq_ignore_ascii_case("foundry.toml")) {
+            return Err("access to foundry.toml is not allowed".into());
+        }
+        let list = if write { &self.writable } else { &self.readable };
+        if !write && list.is_empty() && self.writable.is_empty() {
+            return Ok(full);
+        }
+        // The nearest existing ancestor decides (a file about to be written doesn't exist yet).
+        let mut probe = full.clone();
+        let resolved = loop {
+            if let Ok(c) = probe.canonicalize() {
+                break c.join(full.strip_prefix(&probe).unwrap_or(std::path::Path::new("")));
+            }
+            if !probe.pop() {
+                break full.clone();
+            }
+        };
+        let readable = !write && self.writable.iter().any(|w| resolved.starts_with(w));
+        if list.iter().any(|w| resolved.starts_with(w)) || readable {
+            Ok(full)
+        } else {
+            Err(format!("the path {path} is not allowed to be accessed for {} operations", if write { "write" } else { "read" }))
+        }
+    }
+
+    fn fs(&mut self, name: &str, args: &[DynSolValue]) -> Answer {
+        let text = |i: usize| args.get(i).and_then(|v| v.as_str()).unwrap_or_default().to_string();
+        let write = matches!(name, "writeFile" | "writeFileBinary" | "writeLine" | "writeJson" | "removeFile" | "copyFile" | "createDir" | "removeDir");
+        if write && self.writable.is_empty() {
+            return Answer::Ok(vec![]);
+        }
+        let path = if name == "writeJson" { text(1) } else { text(0) };
+        let full = match self.allowed(&path, write && name != "copyFile") {
+            Ok(p) => p,
+            Err(e) => return Answer::Revert(e),
+        };
+        let err = |e: std::io::Error| Answer::Revert(format!("failed to {name} {path:?}: {e}"));
+        match name {
+            "readFile" => match std::fs::read_to_string(&full) {
+                Ok(t) => Answer::Ok(DynSolValue::String(t).abi_encode()),
+                Err(e) => err(e),
+            },
+            "readFileBinary" => match std::fs::read(&full) {
+                Ok(b) => Answer::Ok(DynSolValue::Bytes(b).abi_encode()),
+                Err(e) => err(e),
+            },
+            "readLine" => {
+                let n = self.line_cursor.entry(full.clone()).or_insert(0);
+                let line = std::fs::read_to_string(&full).ok().and_then(|t| t.lines().nth(*n).map(str::to_string));
+                *n += 1;
+                Answer::Ok(DynSolValue::String(line.unwrap_or_default()).abi_encode())
+            }
+            "closeFile" => {
+                self.line_cursor.remove(&full);
+                Answer::Ok(vec![])
+            }
+            "writeFile" | "writeJson" => match std::fs::write(&full, if name == "writeJson" { text(0) } else { text(1) }) {
+                Ok(()) => Answer::Ok(vec![]),
+                Err(e) => err(e),
+            },
+            "writeFileBinary" => match std::fs::write(&full, args[1].as_bytes().unwrap_or_default()) {
+                Ok(()) => Answer::Ok(vec![]),
+                Err(e) => err(e),
+            },
+            "writeLine" => {
+                use std::io::Write as _;
+                match std::fs::OpenOptions::new().create(true).append(true).open(&full).and_then(|mut f| writeln!(f, "{}", text(1))) {
+                    Ok(()) => Answer::Ok(vec![]),
+                    Err(e) => err(e),
+                }
+            }
+            "removeFile" => match std::fs::remove_file(&full) {
+                Ok(()) => Answer::Ok(vec![]),
+                Err(e) => err(e),
+            },
+            "copyFile" => {
+                let to = match self.allowed(&text(1), true) {
+                    Ok(p) => p,
+                    Err(e) => return Answer::Revert(e),
+                };
+                match std::fs::copy(&full, to) {
+                    Ok(n) => Answer::Ok(DynSolValue::Uint(U256::from(n), 64).abi_encode()),
+                    Err(e) => err(e),
+                }
+            }
+            "createDir" => {
+                let recursive = args.get(1).and_then(|v| v.as_bool()).unwrap_or(false);
+                match if recursive { std::fs::create_dir_all(&full) } else { std::fs::create_dir(&full) } {
+                    Ok(()) => Answer::Ok(vec![]),
+                    Err(e) => err(e),
+                }
+            }
+            "removeDir" => {
+                let recursive = args.get(1).and_then(|v| v.as_bool()).unwrap_or(false);
+                if full.canonicalize().ok() == self.ffi_dir.canonicalize().ok() {
+                    return Answer::Revert(format!("the path {path} is not allowed to be accessed for write operations"));
+                }
+                match if recursive { std::fs::remove_dir_all(&full) } else { std::fs::remove_dir(&full) } {
+                    Ok(()) => Answer::Ok(vec![]),
+                    Err(e) => err(e),
+                }
+            }
+            "readDir" => {
+                let max_depth = args.get(1).and_then(|v| v.as_uint()).map(|(u, _)| u.saturating_to::<u64>()).unwrap_or(1);
+                // DirEntry: (errorMessage, path, depth, isDir, isSymlink), depth first, by name.
+                fn walk(dir: &std::path::Path, depth: u64, max: u64, out: &mut Vec<DynSolValue>) {
+                    let mut entries: Vec<_> = std::fs::read_dir(dir).into_iter().flatten().flatten().collect();
+                    entries.sort_by_key(|e| e.file_name());
+                    for e in entries {
+                        let p = e.path();
+                        let meta = std::fs::symlink_metadata(&p).ok();
+                        let is_dir = p.is_dir();
+                        out.push(DynSolValue::Tuple(vec![
+                            DynSolValue::String(String::new()),
+                            DynSolValue::String(p.to_string_lossy().to_string()),
+                            DynSolValue::Uint(U256::from(depth), 64),
+                            DynSolValue::Bool(is_dir),
+                            DynSolValue::Bool(meta.is_some_and(|m| m.file_type().is_symlink())),
+                        ]));
+                        if is_dir && depth < max {
+                            walk(&p, depth + 1, max, out);
+                        }
+                    }
+                }
+                let mut out = vec![];
+                walk(&full, 1, max_depth, &mut out);
+                Answer::Ok(DynSolValue::Array(out).abi_encode())
+            }
+            "fsMetadata" => match std::fs::symlink_metadata(&full) {
+                Ok(m) => {
+                    let secs = |t: std::io::Result<std::time::SystemTime>| U256::from(t.ok().and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok()).map_or(0, |d| d.as_secs()));
+                    Answer::Ok(
+                        DynSolValue::Tuple(vec![
+                            DynSolValue::Bool(m.is_dir()),
+                            DynSolValue::Bool(m.file_type().is_symlink()),
+                            DynSolValue::Uint(U256::from(m.len()), 256),
+                            DynSolValue::Bool(m.permissions().readonly()),
+                            DynSolValue::Uint(secs(m.modified()), 256),
+                            DynSolValue::Uint(secs(m.accessed()), 256),
+                            DynSolValue::Uint(secs(m.created()), 256),
+                        ])
+                        .abi_encode(),
+                    )
+                }
+                Err(e) => err(e),
+            },
+            "exists" => Answer::Ok(DynSolValue::Bool(full.exists()).abi_encode()),
+            "isFile" => Answer::Ok(DynSolValue::Bool(full.is_file()).abi_encode()),
+            _ => Answer::Ok(DynSolValue::Bool(full.is_dir()).abi_encode()),
+        }
+    }
+}
+
 /// A program on PATH, or in the usual per-user install folders (`~/.huff-neo/bin` for hnc).
 fn find_program(name: &str) -> std::path::PathBuf {
     let home = std::env::var("HOME").unwrap_or_default();
@@ -579,56 +1584,202 @@ fn find_program(name: &str) -> std::path::PathBuf {
     dirs.into_iter().map(|d| d.join(name)).find(|p| p.is_file()).unwrap_or_else(|| name.into())
 }
 
+/// `vm.assert*`, with forge's messages: `assertion failed: a != b`, or `msg: a != b` with a message; `assertion
+/// failed` (or the message) for assertTrue/assertFalse. The `Decimal` variants print values with their decimals,
+/// and assertApproxEqRel prints its deltas as percentages (1e18 is 100%).
 fn assert(name: &str, args: &[DynSolValue]) -> Answer {
-    let operands = match name {
+    let decimal = name.ends_with("Decimal");
+    let base = name.trim_end_matches("Decimal");
+    let values = match base {
         "assertTrue" | "assertFalse" => 1,
         "assertApproxEqAbs" | "assertApproxEqRel" => 3,
         _ => 2,
     };
-    let msg = args.get(operands).and_then(|m| m.as_str()).map(|m| format!("{m}: ")).unwrap_or_default();
-    let show = |v: &DynSolValue| match v {
-        DynSolValue::Uint(u, _) => u.to_string(),
-        DynSolValue::Int(i, _) => i.to_string(),
-        DynSolValue::Address(a) => a.to_checksum(None),
-        DynSolValue::Bool(b) => b.to_string(),
-        DynSolValue::String(s) => format!("{s:?}"),
-        other => format!("0x{}", revm::primitives::hex::encode(other.abi_encode_packed())),
+    let decimals = decimal.then(|| args.get(values).and_then(|d| d.as_uint()).map(|(u, _)| u.saturating_to::<usize>()).unwrap_or(0));
+    let msg = args.get(values + decimal as usize).and_then(|m| m.as_str());
+    let fmt = |v: &DynSolValue| -> String {
+        if let Some(d) = decimals {
+            match v {
+                DynSolValue::Uint(u, _) => return with_decimals(*u, d, false),
+                DynSolValue::Int(i, _) => return with_decimals(i.unsigned_abs(), d, i.is_negative()),
+                _ => {}
+            }
+        }
+        to_string(v)
     };
     let ord = |a: &DynSolValue, b: &DynSolValue| match (a, b) {
         (DynSolValue::Uint(x, _), DynSolValue::Uint(y, _)) => x.cmp(y),
         (DynSolValue::Int(x, _), DynSolValue::Int(y, _)) => x.cmp(y),
         _ => std::cmp::Ordering::Equal,
     };
-    let (ok, why) = match name {
-        "assertTrue" => (args[0].as_bool() == Some(true), "expected true".to_string()),
-        "assertFalse" => (args[0].as_bool() == Some(false), "expected false".to_string()),
-        "assertEq" => (args[0] == args[1], format!("{} != {}", show(&args[0]), show(&args[1]))),
-        "assertNotEq" => (args[0] != args[1], format!("both {}", show(&args[0]))),
-        "assertGt" => (ord(&args[0], &args[1]).is_gt(), format!("{} <= {}", show(&args[0]), show(&args[1]))),
-        "assertGe" => (ord(&args[0], &args[1]).is_ge(), format!("{} < {}", show(&args[0]), show(&args[1]))),
-        "assertLt" => (ord(&args[0], &args[1]).is_lt(), format!("{} >= {}", show(&args[0]), show(&args[1]))),
-        "assertLe" => (ord(&args[0], &args[1]).is_le(), format!("{} > {}", show(&args[0]), show(&args[1]))),
-        "assertApproxEqAbs" | "assertApproxEqRel" => {
-            let (a, b, max) = (args[0].as_uint().unwrap().0, args[1].as_uint().unwrap().0, args[2].as_uint().unwrap().0);
-            let delta = if a > b { a - b } else { b - a };
-            let within = if name == "assertApproxEqAbs" {
-                delta <= max
+    let fail = |why: String| Answer::Revert(match msg {
+        Some(m) => format!("{m}: {why}"),
+        None => format!("assertion failed: {why}"),
+    });
+    let (a, b) = (&args[0], args.get(1).unwrap_or(&args[0]));
+    match base {
+        "assertTrue" | "assertFalse" => {
+            if a.as_bool() == Some(base == "assertTrue") {
+                Answer::Ok(vec![])
             } else {
-                b.is_zero() && a.is_zero() || !b.is_zero() && delta * U256::from(10).pow(U256::from(18)) / b <= max
-            };
-            (within, format!("{a} vs {b}, off by {delta} (max {max})"))
+                Answer::Revert(msg.unwrap_or("assertion failed").to_string())
+            }
         }
-        _ => (true, String::new()),
-    };
-    if ok {
-        Answer::Ok(vec![])
-    } else {
-        Answer::Revert(format!("{msg}assertion failed: {why}"))
+        "assertEq" if a != b => fail(format!("{} != {}", fmt(a), fmt(b))),
+        "assertNotEq" if a == b => fail(format!("{} == {}", fmt(a), fmt(b))),
+        "assertGt" if !ord(a, b).is_gt() => fail(format!("{} <= {}", fmt(a), fmt(b))),
+        "assertGe" if !ord(a, b).is_ge() => fail(format!("{} < {}", fmt(a), fmt(b))),
+        "assertLt" if !ord(a, b).is_lt() => fail(format!("{} >= {}", fmt(a), fmt(b))),
+        "assertLe" if !ord(a, b).is_le() => fail(format!("{} > {}", fmt(a), fmt(b))),
+        "assertApproxEqAbs" | "assertApproxEqRel" => {
+            // |a - b| for uint or int operands.
+            let (delta, bmag) = match (a, b) {
+                (DynSolValue::Int(x, _), DynSolValue::Int(y, _)) => {
+                    let d = if x > y { x.wrapping_sub(*y) } else { y.wrapping_sub(*x) };
+                    (d.unsigned_abs(), y.unsigned_abs())
+                }
+                _ => {
+                    let (x, y) = (a.as_uint().map(|v| v.0).unwrap_or_default(), b.as_uint().map(|v| v.0).unwrap_or_default());
+                    (if x > y { x - y } else { y - x }, y)
+                }
+            };
+            let max = args[2].as_uint().map(|v| v.0).unwrap_or_default();
+            if base == "assertApproxEqAbs" {
+                if delta <= max {
+                    return Answer::Ok(vec![]);
+                }
+                return fail(format!("{} !~= {} (max delta: {}, real delta: {})", fmt(a), fmt(b), fmt(&DynSolValue::Uint(max, 256)), fmt(&DynSolValue::Uint(delta, 256))));
+            }
+            let pct = |x: U256| format!("{}%", with_decimals(x, 16, false));
+            if bmag.is_zero() {
+                if delta.is_zero() {
+                    return Answer::Ok(vec![]);
+                }
+                return fail(format!("{} !~= {} (max delta: {}, real delta: undefined)", fmt(a), fmt(b), pct(max)));
+            }
+            // |a - b| * 1e18 / |b| at 512 bits; a result past 256 bits is forge's overflow.
+            let wide: revm::primitives::ruint::Uint<512, 8> = delta.widening_mul(U256::from(10).pow(U256::from(18)));
+            let q = wide / revm::primitives::ruint::Uint::<512, 8>::from(bmag);
+            let rel = (q.bit_len() <= 256).then(|| U256::from_limbs(q.as_limbs()[..4].try_into().unwrap()));
+            let Some(rel) = rel else {
+                return Answer::Revert(match msg {
+                    Some(m) => format!("{m}: overflow in delta calculation"),
+                    None => "assertion failed: overflow in delta calculation".into(),
+                });
+            };
+            if rel <= max {
+                return Answer::Ok(vec![]);
+            }
+            fail(format!("{} !~= {} (max delta: {}, real delta: {})", fmt(a), fmt(b), pct(max), pct(rel)))
+        }
+        _ => Answer::Ok(vec![]),
     }
+}
+
+/// A value as `vm.toString` prints it.
+fn to_string(v: &DynSolValue) -> String {
+    match v {
+        DynSolValue::Uint(u, _) => u.to_string(),
+        DynSolValue::Int(i, _) => i.to_string(),
+        DynSolValue::Address(a) => a.to_checksum(None),
+        DynSolValue::Bool(b) => b.to_string(),
+        DynSolValue::String(s) => s.clone(),
+        DynSolValue::FixedBytes(b, n) => format!("0x{}", revm::primitives::hex::encode(&b[..*n])),
+        DynSolValue::Bytes(b) => format!("0x{}", revm::primitives::hex::encode(b)),
+        DynSolValue::Array(v) | DynSolValue::FixedArray(v) => format!("[{}]", v.iter().map(to_string).collect::<Vec<_>>().join(", ")),
+        other => format!("0x{}", revm::primitives::hex::encode(other.abi_encode_packed())),
+    }
+}
+
+/// `value` with `decimals` decimal places, zero-padded (`1.000500`).
+fn with_decimals(value: U256, decimals: usize, negative: bool) -> String {
+    let s = value.to_string();
+    let out = if decimals == 0 {
+        // As forge prints it: an integer part, then the (empty) decimals.
+        format!("{s}.0")
+    } else if s.len() > decimals {
+        format!("{}.{}", &s[..s.len() - decimals], &s[s.len() - decimals..])
+    } else {
+        format!("0.{}{s}", "0".repeat(decimals - s.len()))
+    };
+    if negative { format!("-{out}") } else { out }
 }
 
 fn outcome(inputs: &CallInputs, result: InstructionResult, output: Bytes) -> CallOutcome {
     CallOutcome::new(InterpreterResult::new(result, output, Gas::new(inputs.gas_limit)), inputs.return_memory_offset.clone())
+}
+
+/// `revertToState` inside a transaction. revm still holds undo entries for the frames that are open, and they name
+/// accounts and slots loaded after the snapshot, so the state map isn't swapped: every account and slot stays, with
+/// the value it had at the snapshot. One loaded after it had the committed value then (its original value, or the
+/// database's account).
+fn restore_state(ctx: &mut Ctx, snap: revm::state::EvmState) {
+    use revm::DatabaseRef;
+    let db = &ctx.journaled_state.database;
+    for (addr, acc) in ctx.journaled_state.inner.state.iter_mut() {
+        match snap.get(addr) {
+            Some(then) => {
+                acc.info = then.info.clone();
+                for (key, slot) in acc.storage.iter_mut() {
+                    slot.present_value = then.storage.get(key).map_or(slot.original_value, |s| s.present_value);
+                }
+            }
+            None => {
+                // An account the database doesn't have is the empty account.
+                acc.info = db.basic_ref(*addr).ok().flatten().unwrap_or_default();
+                for slot in acc.storage.values_mut() {
+                    slot.present_value = slot.original_value;
+                }
+            }
+        }
+    }
+    for (addr, then) in snap {
+        let state = &mut ctx.journaled_state.inner.state;
+        let acc = state.entry(addr).or_insert_with(|| then.clone());
+        for (key, slot) in then.storage {
+            acc.storage.entry(key).or_insert(slot);
+        }
+    }
+}
+
+/// Code by a name that ends a known key at a path boundary (`cheats/GetCode.t.sol:TestContract` for the file
+/// `default/cheats/GetCode.t.sol`).
+fn suffix_match<'a>(map: &'a HashMap<String, Vec<u8>>, what: &str) -> Option<&'a Vec<u8>> {
+    if !what.contains('/') {
+        return None;
+    }
+    map.iter().find(|(k, _)| k.ends_with(&format!("/{what}"))).map(|(_, v)| v)
+}
+
+fn is_precompile(a: Address) -> bool {
+    a != Address::ZERO && (a <= Address::with_last_byte(0x11) || a == address!("0000000000000000000000000000000000000100"))
+}
+
+/// An artifact name as forge takes it, without a compiler version suffix (`File.sol:Contract:0.8.18`).
+fn artifact_name(what: &str) -> String {
+    match what.rsplit_once(':') {
+        Some((head, v)) if v.split('.').count() == 3 && v.split('.').all(|p| p.chars().all(|c| c.is_ascii_digit())) => head.to_string(),
+        _ => what.to_string(),
+    }
+}
+
+/// Creation or runtime code from an artifact JSON file: forge's (`bytecode.object`) or Hardhat's (`bytecode`).
+fn artifact_file(root: &std::path::Path, path: &str, deployed: bool) -> Option<Vec<u8>> {
+    let v: serde_json::Value = serde_json::from_slice(&std::fs::read(root.join(path)).ok()?).ok()?;
+    let key = if deployed { "deployedBytecode" } else { "bytecode" };
+    let hex = v[key]["object"].as_str().or_else(|| v[key].as_str())?;
+    revm::primitives::hex::decode(hex.trim_start_matches("0x")).ok()
+}
+
+/// The message of `Error(string)` revert data.
+fn error_message(data: &[u8]) -> Option<String> {
+    if data.len() < 4 || data[..4] != keccak256("Error(string)".as_bytes())[..4] {
+        return None;
+    }
+    match DynSolType::Tuple(vec![DynSolType::String]).abi_decode_params(&data[4..]).ok()? {
+        DynSolValue::Tuple(v) => v.first()?.as_str().map(str::to_string),
+        _ => None,
+    }
 }
 
 /// `Error(string)` revert data.
@@ -665,6 +1816,9 @@ const DEFAULT_SENDER: Address = address!("1804c8AB1F12E6bbf3894d4083f33e07309d1f
 impl Cheats {
     /// An environment variable: the process's, else the project's `.env` (as Foundry loads it).
     fn env(&mut self, key: &str) -> Option<String> {
+        if let Some(v) = self.env_set.get(key) {
+            return Some(v.clone());
+        }
         if let Ok(v) = std::env::var(key) {
             return Some(v);
         }
@@ -717,20 +1871,131 @@ fn parse_env(ty: &str, v: &str) -> Option<DynSolValue> {
 }
 
 /// The value at a jq-style key path: `.a.b`, `$.a.b`, `.list[0]`, `.` for the whole document.
-fn json_at<'a>(v: &'a serde_json::Value, key: &str) -> Option<&'a serde_json::Value> {
+/// A JSON value as forge's `parseJson` encodes it: numbers as uint256 (int256 when negative), `0x` strings as an
+/// address (20 bytes), a bytes32 (32) or bytes, other strings as strings, objects as tuples in key order, arrays as
+/// arrays.
+fn json_token(v: &serde_json::Value) -> Result<DynSolValue, String> {
+    use serde_json::Value as J;
+    Ok(match v {
+        J::Null => DynSolValue::Bytes(vec![]),
+        J::Bool(b) => DynSolValue::Bool(*b),
+        J::Number(n) => {
+            let s = n.to_string();
+            match s.strip_prefix('-') {
+                Some(_) => DynSolValue::Int(s.parse().map_err(|_| format!("unsupported JSON number {s}"))?, 256),
+                None => DynSolValue::Uint(parse_number(&s).ok_or_else(|| format!("unsupported JSON number {s}"))?, 256),
+            }
+        }
+        J::String(s) => match s.strip_prefix("0x").map(|h| if h.len() % 2 == 1 { format!("0{h}") } else { h.to_string() }).and_then(|h| revm::primitives::hex::decode(h).ok()) {
+            Some(b) if b.len() == 20 => DynSolValue::Address(Address::from_slice(&b)),
+            Some(b) if b.len() == 32 => DynSolValue::FixedBytes(B256::from_slice(&b), 32),
+            Some(b) => DynSolValue::Bytes(b),
+            None => DynSolValue::String(s.clone()),
+        },
+        J::Array(items) => DynSolValue::Array(items.iter().map(json_token).collect::<Result<_, _>>()?),
+        J::Object(map) => {
+            let mut keys: Vec<&String> = map.keys().collect();
+            keys.sort();
+            DynSolValue::Tuple(keys.into_iter().map(|k| json_token(&map[k])).collect::<Result<_, _>>()?)
+        }
+    })
+}
+
+/// A decimal integer, also in scientific notation (`1e18`), as JSON writes big numbers.
+fn parse_number(s: &str) -> Option<U256> {
+    if let Some((m, e)) = s.split_once(['e', 'E']) {
+        let e: usize = e.trim_start_matches('+').parse().ok()?;
+        let (int, frac) = m.split_once('.').unwrap_or((m, ""));
+        if frac.len() > e {
+            return None;
+        }
+        let digits = format!("{int}{frac}{}", "0".repeat(e - frac.len()));
+        return digits.parse().ok();
+    }
+    s.parse().ok()
+}
+
+/// A JSON value read as one Solidity type, for the typed `parseJson*` variants.
+fn json_coerce(v: &serde_json::Value, ty: &str) -> Result<DynSolValue, String> {
+    use serde_json::Value as J;
+    let found = |v: &J| match v {
+        J::Object(_) => "JSON object",
+        J::Array(_) => "JSON array",
+        J::Null => "JSON null",
+        _ => "JSON value",
+    };
+    let raw = match v {
+        J::String(s) => s.clone(),
+        J::Number(n) => n.to_string(),
+        J::Bool(b) => b.to_string(),
+        other => return Err(format!("expected {ty}, found {}", found(other))),
+    };
+    let parsed = if ty == "uint256" && matches!(v, J::Number(_)) { parse_number(&raw).map(|u| DynSolValue::Uint(u, 256)) } else { parse_env(ty, &raw) };
+    parsed.ok_or_else(|| format!("failed parsing {raw:?} as type `{ty}`"))
+}
+
+/// Every value a path selects: `$`, `.a.b`, `[0]`, and `[*]` for every element (a wildcard can select several).
+fn json_select<'a>(v: &'a serde_json::Value, key: &str) -> Vec<&'a serde_json::Value> {
     let path = key.trim_start_matches('$');
-    let mut at = v;
+    let mut at = vec![v];
     for part in path.split('.').filter(|p| !p.is_empty()) {
         let (name, rest) = part.split_once('[').map_or((part, ""), |(n, r)| (n, r));
         if !name.is_empty() {
-            at = at.get(name)?;
+            at = at.into_iter().filter_map(|x| x.get(name)).collect();
         }
         for idx in rest.split('[').filter(|s| !s.is_empty()) {
-            at = at.get(idx.trim_end_matches(']').parse::<usize>().ok()?)?;
+            let idx = idx.trim_end_matches(']');
+            at = if idx == "*" {
+                at.into_iter().flat_map(|x| x.as_array().map(|a| a.iter().collect::<Vec<_>>()).unwrap_or_default()).collect()
+            } else {
+                let Ok(i) = idx.parse::<usize>() else { return vec![] };
+                at.into_iter().filter_map(|x| x.get(i)).collect()
+            };
         }
     }
-    Some(at)
+    at
 }
+
+/// JSON with `//` and `/* */` comments (JSONC) as plain JSON; text inside strings is kept.
+fn strip_json_comments(s: &str) -> String {
+    let b = s.as_bytes();
+    let mut out = String::with_capacity(s.len());
+    let (mut i, mut in_str) = (0, false);
+    while i < b.len() {
+        let c = b[i] as char;
+        if in_str {
+            out.push(c);
+            if c == '\\' && i + 1 < b.len() {
+                out.push(b[i + 1] as char);
+                i += 2;
+                continue;
+            }
+            if c == '"' {
+                in_str = false;
+            }
+            i += 1;
+        } else if c == '"' {
+            in_str = true;
+            out.push(c);
+            i += 1;
+        } else if s[i..].starts_with("//") {
+            while i < b.len() && b[i] != b'\n' {
+                i += 1;
+            }
+        } else if s[i..].starts_with("/*") {
+            i += 2;
+            while i + 1 < b.len() && !s[i..].starts_with("*/") {
+                i += 1;
+            }
+            i += 2;
+        } else {
+            out.push(c);
+            i += 1;
+        }
+    }
+    out
+}
+
 
 /// forge-std's console.log signatures (and hardhat's older `uint`/`int` spellings), by selector.
 fn console_signatures() -> HashMap<[u8; 4], String> {
