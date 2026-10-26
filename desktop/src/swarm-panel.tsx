@@ -4,7 +4,7 @@ import { createPortal } from "react-dom";
 import { NvimTerminal } from "./nvim-terminal";
 import { reportError } from "@/lib/report-error";
 import { JsonTree } from "./json-tree";
-import { ArrowDown, Bug, Check, ChevronDown, ChevronRight, Code2, Copy, Crosshair, FileCode2, FileDown, Folder, Network, Play, Plus, ScanSearch, Terminal, ThumbsDown, ThumbsUp, WandSparkles } from "lucide-react";
+import { ArrowDown, Bug, Check, ChevronDown, ChevronRight, CircleCheck, CircleX, LoaderCircle, MoreHorizontal, Pause, Code2, Copy, Crosshair, FileCode2, FileDown, Folder, Network, Play, Plus, ScanSearch, Terminal, ThumbsDown, ThumbsUp, WandSparkles } from "lucide-react";
 
 // The project roadmap (GitHub Projects-style), the same view the web app had on its own page.
 import { motion as vimMotion, search as vimSearch, setVimMode, useVimMode, type Cursor } from "@/components/vim-mode";
@@ -149,45 +149,179 @@ const took = (ms: number) => {
 	return s < 60 ? `${s}s` : `${Math.floor(s / 60)}m ${String(s % 60).padStart(2, "0")}s`;
 };
 
-/** What a call is, for its row: a shell command by its command line, a tool by its name and arguments. */
-const callLabel = (text: string) => {
-	const [tool, ...rest] = text.split(" ");
-	return tool === "run" ? { what: "a command", line: rest.join(" ") || "a command" } : { what: tool, line: text };
-};
+/** How run cards show (the ⋯ menu): file paths shown, finished runs folded, notes under each step. Kept per viewer. */
+type CardView = { fold: boolean; paths: boolean; compact: boolean };
+const CARD_VIEW = "fm:run-card-view";
+function useCardView() {
+	const [view, setView] = useState<CardView>(() => {
+		try {
+			return { fold: false, paths: true, compact: false, ...JSON.parse(localStorage.getItem(CARD_VIEW) ?? "{}") };
+		} catch {
+			return { fold: false, paths: true, compact: false };
+		}
+	});
+	const set = (p: Partial<CardView>) =>
+		setView((v) => {
+			const next = { ...v, ...p };
+			try {
+				localStorage.setItem(CARD_VIEW, JSON.stringify(next));
+			} catch {
+				/* not kept */
+			}
+			return next;
+		});
+	return [view, set] as const;
+}
+
+/** A step that failed: a command's non-zero exit or a tool's error. */
+const failed = (r?: Ev) => Boolean(r && /^(exit [1-9]|error:)/m.test(r.text));
 
 /**
- * An activity group, collapsed to one line ("Running 2 commands · 14s", "Ran coverage · 12s"); open, a list of what the
- * agent said and ran in order. Each note opens to its full text; each call to its command line and output.
+ * One agent run as a card: who and on what, its status, each step (what it did, on which file, how long; the agent's
+ * note under the step it led to), and how far along it is. A step opens to its command and output (a write to its diff).
  */
-export function Steps({ steps, running }: { steps: Row[]; running: boolean }) {
-	const calls = steps.filter((r): r is { call: Ev; result?: Ev } => "call" in r);
-	// Open from the start: you see what the agent runs as it runs it (and can fold it away).
-	const [open, setOpen] = useState(true);
+export function Steps({ steps, running, title, onPause }: { steps: Row[]; running: boolean; /** What the run works on (a plan item's text). */ title?: string; onPause?: () => void }) {
+	const [view, setView] = useCardView();
 	const [now, setNow] = useState(() => Date.now());
 	useEffect(() => {
 		if (!running) return;
 		const t = setInterval(() => setNow(Date.now()), 1000);
 		return () => clearInterval(t);
 	}, [running]);
-	const first = calls[0]?.call.at;
-	const lastAt = calls.at(-1)?.result?.at ?? (running ? now : undefined);
-	const elapsed = first && lastAt ? took(lastAt - first) : null;
-	const verb = running ? "Running" : "Ran";
-	const title = calls.length === 1 ? `${verb} ${callLabel(calls[0].call.text).what === "a command" ? "a command" : callLabel(calls[0].call.text).what}` : `${verb} ${calls.length} ${calls.every((c) => c.call.text.startsWith("run ")) ? "commands" : "tools"}`;
+	// Notes join the call they lead to; notes after the last call stay on their own.
+	const items: { call: Ev; result?: Ev; notes: Ev[] }[] = [];
+	let notes: Ev[] = [];
+	for (const r of steps) {
+		if ("note" in r) notes.push(r.note);
+		else {
+			items.push({ ...r, notes });
+			notes = [];
+		}
+	}
+	const trailing = notes;
+	const first = items[0]?.call ?? trailing[0];
+	const role = first?.role ?? "agent";
+	const item = first?.item ?? "";
+	const startAt = items[0]?.call.at;
+	const endAt = items.at(-1)?.result?.at ?? (running ? now : undefined);
+	const elapsed = startAt && endAt ? took(endAt - startAt) : null;
+	const changed = items.filter((c) => c.call.text.startsWith("write_file")).length;
+	const broke = items.filter((c) => failed(c.result)).length;
+	const status = running
+		? { label: "Working", cls: "bg-violet-500/15 text-violet-700 dark:text-violet-300" }
+		: items.some((c) => !c.result)
+			? { label: "Stopped", cls: "bg-muted text-muted-foreground" }
+			: { label: "Done", cls: "bg-emerald-500/15 text-emerald-700 dark:text-emerald-400" };
+	const folded = view.fold && !running;
+	const summary = () => [`${role}${item ? ` · item ${item}` : ""}${title ? ` · ${title}` : ""}`, ...items.map((c) => `${failed(c.result) ? "✗" : "✓"} ${c.call.text}`), ...trailing.map((n) => n.text)].join("\n");
 	return (
-		<div className="pl-1 text-[13px]">
-			<button type="button" onClick={() => setOpen(!open)} aria-expanded={open} className="inline-flex items-center gap-1.5 text-muted-foreground hover:text-foreground">
-				{running ? <span className="size-1.5 animate-pulse rounded-full bg-current" aria-hidden /> : null}
-				<span>{title}</span>
-				{elapsed ? <span className="tabular-nums text-muted-foreground/70">· {elapsed}</span> : null}
-				<ChevronDown className={`size-3.5 transition-transform ${open ? "" : "-rotate-90"}`} />
+		<div className="overflow-hidden rounded-xl border bg-card text-[13px]">
+			<div className="flex items-center gap-2 border-b px-3 py-2">
+				<span className="shrink-0 font-medium capitalize" style={{ color: colorOf(role) }}>{role}</span>
+				{title || item ? <span className="min-w-0 truncate text-foreground">{title ?? `item ${item}`}</span> : null}
+				<span className={`shrink-0 rounded px-1.5 py-0.5 text-[11px] ${status.cls}`}>{status.label}</span>
+				<DropdownMenu>
+					<DropdownMenuTrigger className="ml-auto grid size-6 shrink-0 place-items-center rounded-md text-muted-foreground outline-none hover:bg-muted hover:text-foreground" aria-label="Card options">
+						<MoreHorizontal className="size-4" />
+					</DropdownMenuTrigger>
+					<DropdownMenuContent align="end" className="w-52">
+						<DropdownMenuLabel className="text-xs font-normal text-muted-foreground">View</DropdownMenuLabel>
+						{([["paths", "File paths"], ["fold", "Fold finished runs"]] as const).map(([k, label]) => (
+							<DropdownMenuItem key={k} onSelect={(e) => (e.preventDefault(), setView({ [k]: !view[k] }))} className="text-[13px]">
+								{label}
+								{view[k] ? <Check className="ml-auto size-3.5" /> : null}
+							</DropdownMenuItem>
+						))}
+						<DropdownMenuSeparator />
+						<DropdownMenuLabel className="text-xs font-normal text-muted-foreground">Density</DropdownMenuLabel>
+						{([[false, "Comfortable"], [true, "Compact"]] as const).map(([c, label]) => (
+							<DropdownMenuItem key={label} onSelect={(e) => (e.preventDefault(), setView({ compact: c }))} className="text-[13px]">
+								{label}
+								{view.compact === c ? <Check className="ml-auto size-3.5" /> : null}
+							</DropdownMenuItem>
+						))}
+						<DropdownMenuSeparator />
+						<DropdownMenuItem onSelect={() => void navigator.clipboard?.writeText(summary())} className="text-[13px]">
+							<Copy className="size-3.5" /> Copy summary
+						</DropdownMenuItem>
+					</DropdownMenuContent>
+				</DropdownMenu>
+			</div>
+			{folded ? (
+				<button type="button" onClick={() => setView({ fold: false })} className="flex w-full items-center gap-2 px-3 py-2 text-left text-muted-foreground hover:bg-muted/40">
+					<CircleCheck className="size-4 shrink-0 text-emerald-600 dark:text-emerald-400" />
+					Finished · {items.length} {items.length === 1 ? "step" : "steps"}
+					{changed ? <span className="rounded bg-violet-500/15 px-1.5 text-[11px] text-violet-700 dark:text-violet-300">{changed} changed</span> : null}
+					{broke ? <span className="rounded bg-amber-500/15 px-1.5 text-[11px] text-amber-700 dark:text-amber-300">{broke} to check</span> : null}
+				</button>
+			) : (
+				<ul className="divide-y">
+					{items.map((c, i) => (
+						<CardStep key={i} step={c} running={running && i === items.length - 1 && !c.result} now={now} view={view} defaultOpen={running && i === items.length - 1} />
+					))}
+					{trailing.map((n, i) => <NoteRow key={`n${i}`} e={n} />)}
+				</ul>
+			)}
+			<div className="flex items-center gap-2 border-t px-3 py-1.5 text-[11px] text-muted-foreground">
+				<span className="tabular-nums">
+					{items.length} {items.length === 1 ? "step" : "steps"}
+					{elapsed ? ` · ${elapsed}` : ""}
+				</span>
+				{running && onPause ? (
+					<button type="button" onClick={onPause} className="ml-auto inline-flex h-6 items-center gap-1 rounded-md border bg-background px-2 text-[11px] text-foreground hover:bg-muted">
+						<Pause className="size-3" /> Pause
+					</button>
+				) : null}
+			</div>
+		</div>
+	);
+}
+
+/** One step of a run card: done, failed or running, what and where, how long, the agent's note; opens to its output. */
+function CardStep({ step, running, now, view, defaultOpen }: { step: { call: Ev; result?: Ev; notes: Ev[] }; running: boolean; now: number; view: CardView; defaultOpen: boolean }) {
+	const [open, setOpen] = useState(defaultOpen);
+	const [tool, ...rest] = step.call.text.split(" ");
+	const arg = rest.join(" ");
+	const isRun = tool === "run";
+	const end = step.result?.at ?? (running ? now : undefined);
+	const elapsed = step.call.at && end ? took(end - step.call.at) : null;
+	const bad = failed(step.result);
+	const wrote = tool === "write_file";
+	return (
+		<li>
+			<button type="button" onClick={() => setOpen(!open)} aria-expanded={open} className={`flex w-full items-start gap-2 px-3 text-left hover:bg-muted/40 ${view.compact ? "py-1" : "py-2"}`}>
+				<span className="mt-0.5 shrink-0">
+					{running ? <LoaderCircle className="size-4 animate-spin text-muted-foreground" /> : bad ? <CircleX className="size-4 text-red-500" /> : <CircleCheck className="size-4 text-muted-foreground" />}
+				</span>
+				<span className="min-w-0 flex-1">
+					<span className="flex min-w-0 items-center gap-2">
+						<span className="shrink-0 text-foreground">{isRun ? (running ? "Running" : "Ran") : tool}</span>
+						{view.paths && arg ? <span className="min-w-0 truncate font-mono text-[12px] text-muted-foreground">{arg}</span> : null}
+						{wrote ? <span className="shrink-0 rounded bg-violet-500/15 px-1.5 text-[11px] text-violet-700 dark:text-violet-300">Changed</span> : null}
+						{bad ? <span className="shrink-0 rounded bg-red-500/15 px-1.5 text-[11px] text-red-700 dark:text-red-400">Failed</span> : null}
+						{elapsed ? <span className="ml-auto shrink-0 tabular-nums text-[11px] text-muted-foreground">{elapsed}</span> : null}
+					</span>
+					{!view.compact && step.notes.length ? <span className="mt-0.5 line-clamp-2 block text-[12px] text-muted-foreground">{step.notes.map((n) => n.text).join(" ")}</span> : null}
+					{running ? (
+						<span className="mt-1.5 block h-0.5 overflow-hidden rounded-full bg-muted">
+							<span className="fm-indeterminate block h-full w-1/3 rounded-full bg-foreground/60" />
+						</span>
+					) : null}
+				</span>
 			</button>
 			{open ? (
-				<ul className="mt-1.5 divide-y overflow-hidden rounded-xl border">
-					{steps.map((r, i) => ("note" in r ? <NoteRow key={i} e={r.note} /> : <CallRow key={i} row={r} running={running && r === calls.at(-1) && !r.result} now={now} defaultOpen={r === calls.at(-1)} />))}
-				</ul>
+				<div className="space-y-1.5 border-t bg-muted/30 px-3 py-2">
+					<p className="whitespace-pre-wrap break-all font-mono text-[11px] text-foreground/80">$ {step.call.text}</p>
+					{step.result?.text.includes("\n```diff\n") ? (
+						<DiffOutput text={step.result.text} />
+					) : step.result?.text.trim() ? (
+						<ToolOutput call={step.call.text} text={step.result.text} />
+					) : (
+						<p className="font-mono text-[11px] text-muted-foreground">{running ? "running…" : "no result: the session stopped before it finished"}</p>
+					)}
+				</div>
 			) : null}
-		</div>
+		</li>
 	);
 }
 
@@ -199,37 +333,6 @@ function NoteRow({ e }: { e: Ev }) {
 				<span className={`min-w-0 flex-1 ${open ? "whitespace-pre-wrap" : "truncate"}`}>{e.text}</span>
 				{open ? null : <ChevronRight className="size-3.5 shrink-0" />}
 			</button>
-		</li>
-	);
-}
-
-function CallRow({ row, running, now, defaultOpen = false }: { row: { call: Ev; result?: Ev }; running: boolean; now: number; defaultOpen?: boolean }) {
-	// The newest call starts open, showing its command and its output as it arrives.
-	const [open, setOpen] = useState(defaultOpen);
-	const { line } = callLabel(row.call.text);
-	const end = row.result?.at ?? (running ? now : undefined);
-	const elapsed = row.call.at && end ? took(end - row.call.at) : null;
-	return (
-		<li>
-			<button type="button" onClick={() => setOpen(!open)} aria-expanded={open} className="flex w-full items-center gap-2 px-3 py-2 text-left text-muted-foreground hover:bg-muted/50">
-				<span className="shrink-0">{running ? "Running" : "Ran"}</span>
-				<span className="min-w-0 truncate font-mono text-[12px] text-foreground">{line}</span>
-				{elapsed ? <span className="shrink-0 tabular-nums text-muted-foreground/70">{elapsed}</span> : null}
-				<ChevronRight className={`ml-auto size-3.5 shrink-0 transition-transform ${open ? "rotate-90" : ""}`} />
-			</button>
-			{open ? (
-				<div className="space-y-1.5 border-t bg-muted/30 px-3 py-2">
-					<p className="whitespace-pre-wrap break-all font-mono text-[11px] text-foreground/80">$ {line}</p>
-					{row.result?.text.includes("\n```diff\n") ? (
-						<DiffOutput text={row.result.text} />
-					) : row.result?.text.trim() ? (
-						<ToolOutput call={row.call.text} text={row.result.text} />
-					) : (
-						// No output yet: still running (coverage runs the whole suite), or the session stopped first.
-						<p className="font-mono text-[11px] text-muted-foreground">{running ? "running…" : "no result: the session stopped before it finished"}</p>
-					)}
-				</div>
-			) : null}
 		</li>
 	);
 }
@@ -2200,12 +2303,24 @@ export function SwarmPanel({ folder, name, scan, bridge, session, file: openPath
 	const shown = chatBlocks;
 	// Concolic's board has no plan: the hunter alone, with its notebook and ledger.
 	const board = useMemo(() => localBoard(folder, concolic ? [] : plan, events, Boolean(run), budget), [folder, plan, events, run, budget, concolic]);
+	const itemTitle = (steps: Row[]) => {
+		const r = steps.find((x) => "call" in x) ?? steps[0];
+		const item = r ? ("call" in r ? r.call.item : r.note.item) : "";
+		const text = plan.find((p) => String(p.index) === item)?.text;
+		return text ? text.replace(/\*\*|`/g, "").split(" — ")[0].trim() : undefined;
+	};
 	const chatList = useMemo(
 		() =>
 			chatBlocks.map((block, i) => (
 				<div key={i} data-msg={i} className="fm-settle">
 					{"steps" in block ? (
-						<Steps steps={block.steps} running={Boolean(run) && i === chatBlocks.length - 1} />
+						<Steps
+							steps={block.steps}
+							running={Boolean(run) && i === chatBlocks.length - 1}
+							// The plan item the run works on, by its text (bold markers and code ticks off).
+							title={itemTitle(block.steps)}
+							onPause={run ? () => void invoke("swarm_stop", { folder, run }) : undefined}
+						/>
 					) : block.e.kind === "you" ? (
 						<Message align="end">
 							<MessageContent>
@@ -2231,7 +2346,7 @@ export function SwarmPanel({ folder, name, scan, bridge, session, file: openPath
 				</div>
 			)),
 		// eslint-disable-next-line react-hooks/exhaustive-deps
-		[chatBlocks, run, bugs],
+		[chatBlocks, run, bugs, plan],
 	);
 	// How full the working agent's context window is and what fills it, from its last reply; past 75% its older steps
 	// are summarized.
