@@ -104,8 +104,21 @@ const SAMPLE_EVENTS = (() => {
 })();
 
 const listeners = new Set<(e: { payload: unknown }) => void>();
+
+type DemoStatement = { id: string; mark: string; author: string; text: string; details: string[]; obligations: { mark: string; text: string }[] };
+/** The sample folder's statements (.formal/statements.md in the app): one proved, one partly done, one an agent proposed. */
+const STATEMENTS: DemoStatement[] = [
+	{ id: "S-01", mark: "x", author: "you", text: "Only the owner can change `Lending.penaltyCap`.", details: ["kind: access"], obligations: [{ mark: "x", text: "`Lending.setPenaltyCap` reverts unless the owner calls" }] },
+	{ id: "S-02", mark: "~", author: "you", text: "`Vault.totalSupply` always equals the sum of `balanceOf`.", details: ["kind: invariant"], obligations: [{ mark: "x", text: "`Vault.deposit` preserves it" }, { mark: "x", text: "`Vault.withdraw` preserves it" }, { mark: " ", text: "`Vault.transfer` preserves it" }] },
+	{ id: "S-03", mark: "?", author: "prover", text: "A liquidation never takes more than `penaltyCap` of the debt it repays.", details: ["why: the penalty bug in item 3 breaks it"], obligations: [] },
+];
+
 /** The demo's bridge: a real repository's files and AST when `data` is there, the sample folder otherwise. */
-const makeDemo = (data: DemoData | null): Bridge => ({
+const makeDemo = (data: DemoData | null): Bridge => {
+	// Kept for the page's life, as the app keeps them in the folder.
+	const statements: DemoStatement[] = data ? [] : STATEMENTS.map((st) => ({ ...st }));
+	let next = statements.length + 1;
+	return {
 	apiBase: () => "",
 	listen: async (_event, cb) => {
 		listeners.add(cb as (e: { payload: unknown }) => void);
@@ -171,9 +184,27 @@ const makeDemo = (data: DemoData | null): Bridge => ({
 				for (const l of listeners) l({ payload: ev("say", "assistant", "you", `(demo) Noted: “${String(args?.text ?? "")}”. In the app the assistant answers before the next turn.`, 1.84) });
 			}, 900);
 		}
+		if (cmd === "swarm_add_statement") {
+			const text = String(args?.text ?? "").trim().replace(/\s+/g, " ");
+			if (!text) throw "the statement is empty";
+			const same = statements.find((st) => st.text.toLowerCase() === text.toLowerCase());
+			if (same) throw `already in the list as ${same.id}`;
+			const st = { id: `S-${String(next++).padStart(2, "0")}`, mark: " ", author: "you", text, details: [], obligations: [] };
+			statements.push(st);
+			return st as T;
+		}
+		if (cmd === "swarm_statement_mark" || cmd === "swarm_remove_statement") {
+			const i = statements.findIndex((st) => st.id === args?.id);
+			if (i < 0) throw `no statement ${String(args?.id)}`;
+			if (cmd === "swarm_remove_statement") statements.splice(i, 1);
+			else statements[i] = { ...statements[i], mark: String(args?.mark ?? " ") };
+			return statements.map((st) => ({ ...st })) as T;
+		}
+		if (cmd === "swarm_statements") return statements.map((st) => ({ ...st })) as T;
 		return answers[cmd] as T;
 	},
-});
+	};
+};
 
 const AST_UNITS = {
 	contract: "Vault",

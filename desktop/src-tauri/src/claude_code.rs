@@ -154,6 +154,9 @@ async fn call(s: &Served, name: &str, args: &Value) -> String {
     if name == "tag" {
         return crate::analysis::tag(&s.folder, ROLE, args);
     }
+    if name == "add_statement" {
+        return crate::statements::add_tool(&s.folder, ROLE, args);
+    }
     let Some(app) = &s.app else { return format!("error: {name} needs the app") };
     if name == "report_bug" {
         let root = PathBuf::from(&s.folder);
