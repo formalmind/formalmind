@@ -119,7 +119,7 @@ variable. The user sees why it was rewritten and confirms.
 
 ### 3b. Confirm (the questionnaire)
 
-The user sees the statement, the kind, the functions, the assumptions and the back-translation. Answers:
+The user sees the statement, the kind, the functions, the assumptions and the back-translation, in the Statements list and as a question in the chat. The question comes with two or three replies the formalizer drafted in the user's voice (one confirming, the others correcting the likeliest misreadings). A click puts one in the message box to edit or send, like Draft reply, and the assistant records the answer with `confirm_statement`. Answers:
 
 - **Yes**: it goes on to falsify.
 - **Edit**: their correction goes back to formalize.

@@ -545,6 +545,15 @@ fn tools(role: &str) -> Value {
             "evidence": { "type": "string", "description": "Anything else: the Lean counterexample, the property it breaks" } }), vec!["title", "severity", "location", "scenario", "poc"]) }));
         t.push(json!({ "name": "write_file", "description": "Create or overwrite a file in the folder.", "input_schema": s(json!({ "path": { "type": "string" }, "content": { "type": "string" } }), vec!["path", "content"]) }));
     }
+    // Any role but the auditor can add a claim to the statements checklist.
+    if role != "auditor" {
+        t.push(crate::statements::tool());
+    }
+    // The assistant formalizes statements and relays the maintainer's answers about them.
+    if role == "assistant" {
+        t.push(crate::statements::formalize_tool());
+        t.push(crate::statements::confirm_tool());
+    }
     if role == "prover" {
         t.push(json!({ "name": "record_property", "description": "Once your proof checks, write the notes that go into Formal Mind's report for this property (audit/formal-mind.audit.json). The reviewer checks them against the Solidity and your proof before they count. Call it again to replace them.", "input_schema": s(json!({
             "statement": { "type": "string", "description": "What the proof establishes about the function, as an audit report states a verified property: third person, present tense, what holds (e.g. \"`Router.swap` reverts unless the caller owns the order; on success it writes only …\"). Markdown; a bulleted list of what each theorem says is fine. No first person, no build, plan or next-step talk, and never a statement of what wasn't found." },
@@ -572,6 +581,8 @@ struct Outcome {
     /// What an approving reviewer said holds (statement, assumptions, theorems), for Formal Mind's audit file.
     property: Option<Value>,
     bug: Option<String>,
+    /// A formalize job's answer, checked against formal-ast.
+    formalized: Option<crate::statements::Formalized>,
 }
 
 struct Turn<'a> {
@@ -780,6 +791,27 @@ impl Turn<'_> {
                         self.emit("tool", role, item, "record_property".into());
                         "recorded; the reviewer checks it against the Solidity and your proof".to_string()
                     }
+                }
+                "formalize_result" => {
+                    let ctx = self.context(false).await;
+                    match crate::statements::derive(&ctx, input) {
+                        Ok(f) => {
+                            self.emit("tool", role, item, format!("formalize_result {} · {} functions", f.kind, f.obligations.len()));
+                            let r = if f.asks() { format!("recorded: {} functions; the maintainer is asked whether it means what they meant", f.obligations.len()) } else { format!("recorded as {}; the swarm doesn't prove those yet", f.kind) };
+                            out.formalized = Some(f);
+                            r
+                        }
+                        Err(e) => format!("error: {e}"),
+                    }
+                }
+                "add_statement" => {
+                    self.emit("tool", role, item, format!("add_statement {shown}"));
+                    crate::statements::add_tool(&self.req.folder, role, input)
+                }
+                "confirm_statement" => {
+                    let r = crate::statements::confirm_tool_call(&self.req.folder, input);
+                    self.emit("tool", role, item, format!("confirm_statement {shown}"));
+                    r
                 }
                 "verdict" => {
                     let ok = input["decision"].as_str() == Some("approve");
@@ -1246,12 +1278,18 @@ async fn run_swarm(turn: &Turn<'_>) -> String {
         // A plan item another session in this folder is working on is left to it.
         let me = key(&turn.req.folder, turn.run);
         let free = |j: &Job| !matches!(j.kind.as_str(), "prove" | "review") || !claimed_by_other(&turn.req.folder, j.item, &me);
+        let formalize = (!turn.run.starts_with("hunt-")).then(|| crate::statements::awaiting_formalize(&root).map(|s| s.id)).flatten();
         let next = with_queue(&turn.queue, |q| {
             let pick = q.jobs.iter().position(|j| j.state == "running" && free(j))
                 .or_else(|| q.jobs.iter().position(|j| j.state == "queued" && j.kind == "answer"))
                 .or_else(|| q.jobs.iter().position(|j| j.state == "queued" && free(j)));
             let idx = match pick {
                 Some(i) => i,
+                // A statement the maintainer is waiting on comes before the plan (not in a bug search).
+                None if formalize.is_some() => {
+                    enqueue(q, "formalize", 0, formalize.as_deref().unwrap_or(""), 1, "");
+                    q.jobs.len() - 1
+                }
                 None => {
                     let plan = read_plan(&root);
                     let open: Vec<_> = plan.iter().filter(|i| i.mark == " ").collect();
@@ -1291,7 +1329,15 @@ async fn run_swarm(turn: &Turn<'_>) -> String {
         };
 
         let outcome = match job.kind.as_str() {
-            "answer" => turn.agent("assistant", "you", format!("The maintainer says:\n\n{}{resume_note}", job.text)).await,
+            "answer" => turn.agent("assistant", "you", format!("The maintainer says:\n\n{}{}{resume_note}", job.text, crate::statements::waiting_note(&root))).await,
+            // A statement in plain words: what it claims about the code, and the functions it would be proved for.
+            "formalize" => match crate::statements::load(&root).ok().and_then(|all| all.into_iter().find(|s| s.id == job.text)) {
+                Some(st) => {
+                    turn.emit("status", "assistant", &job.text, format!("formalizing {}", st.id));
+                    turn.agent("assistant", &job.text, format!("{}{resume_note}", crate::statements::formalize_task(&st))).await
+                }
+                None => Ok(Outcome { summary: format!("{} isn't in .formal/statements.md any more", job.text), ..Default::default() }),
+            },
             // An audit report to read: a PDF goes to the model as a document; Markdown and text as text.
             "triage" => {
                 let report = job.text.clone();
@@ -1427,6 +1473,28 @@ async fn run_swarm(turn: &Turn<'_>) -> String {
                 _ => {}
             }
         });
+        // A formalized statement: its obligations under it, and the question (with drafted replies) in the chat.
+        if job.kind == "formalize" {
+            let sid = job.text.clone();
+            let still = crate::statements::load(&root).unwrap_or_default().into_iter().any(|s| s.id == sid);
+            match &out.formalized {
+                _ if !still => {}
+                Some(f) => {
+                    if let Err(e) = crate::statements::record(&root, &sid, f) {
+                        eprintln!("statements: {e}");
+                    }
+                    if f.asks() {
+                        turn.emit("ask", "assistant", &sid, crate::statements::ask_text(&sid, f));
+                    } else {
+                        turn.emit("plan", "assistant", &sid, format!("{sid}: a {} statement; the swarm doesn't prove those yet", f.kind));
+                    }
+                }
+                None => {
+                    let _ = crate::statements::record_failure(&root, &sid, &out.summary);
+                    turn.emit("plan", "assistant", &sid, format!("{sid}: couldn't formalize it; reword it or name the function"));
+                }
+            }
+        }
         match (job.kind.as_str(), &out.bug, &out.verdict) {
             ("prove" | "review", Some(_), _) => turn.emit("plan", &job.kind, &id, format!("item {id}: bug reported, moving on")),
             ("review", None, Some((true, _))) => turn.emit("plan", "reviewer", &id, format!("item {id} proven")),
