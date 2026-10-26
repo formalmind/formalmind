@@ -416,7 +416,7 @@ pub fn ask_text(id: &str, f: &Formalized) -> String {
     } else {
         format!("\n\nIt would be proved for {}: {}.", if f.obligations.len() == 1 { "one function".into() } else { format!("{} functions", f.obligations.len()) }, f.obligations.iter().filter_map(|o| o.split('`').nth(1)).map(|d| format!("`{d}`")).collect::<Vec<_>>().join(", "))
     };
-    let assumes: Vec<&str> = f.details.iter().filter_map(|d| d.strip_prefix("assumes: ")).collect();
+    let assumes: Vec<&str> = f.details.iter().filter_map(|d| d.strip_prefix("assumes: ")).map(|a| a.trim_end_matches('.')).collect();
     let assumes = if assumes.is_empty() { String::new() } else { format!("\n\nAssuming: {}.", assumes.join("; ")) };
     let question = format!("**{id}**: is this what you meant?\n\n> {}{functions}{assumes}", f.means);
     let mut replies = f.replies.clone();
@@ -629,27 +629,44 @@ pub fn record_obligation(root: &Path, id: &str, n: usize, theorem: &str, files: 
 pub fn record_property(root: &Path, id: &str) -> Result<String, String> {
     let s = load(root)?.into_iter().find(|s| s.id == id).ok_or_else(|| format!("no statement {id}"))?;
     let all: Value = std::fs::read_to_string(proofs_path(root)).ok().and_then(|t| serde_json::from_str(&t).ok()).unwrap_or(json!({}));
-    let mut theorems = vec![];
+    let mut theorems: Vec<String> = vec![];
     let mut files: Vec<String> = vec![];
-    let mut lines = vec![];
+    let mut sections = vec![];
+    // The statement's own assumptions, then each function's (the prover's or reviewer's notes), each once.
+    let mut assumptions: Vec<String> = s.details.iter().filter_map(|d| d.strip_prefix("assumes: ")).map(sentence).collect();
+    let add = |list: &mut Vec<String>, x: String| {
+        if !x.is_empty() && !list.contains(&x) {
+            list.push(x);
+        }
+    };
     for n in 1..=s.obligations.len() {
         let p = &all[id][n.to_string()];
-        if let Some(t) = p["theorem"].as_str() {
-            theorems.push(t.to_string());
+        // The theorem it was asked for first, then the others the notes name.
+        add(&mut theorems, p["theorem"].as_str().unwrap_or("").to_string());
+        for t in p["notes"]["theorems"].as_array().into_iter().flatten().filter_map(Value::as_str) {
+            add(&mut theorems, t.to_string());
         }
         for f in p["files"].as_array().into_iter().flatten().filter_map(Value::as_str) {
-            if !files.iter().any(|x| x == f) {
-                files.push(f.to_string());
-            }
+            add(&mut files, f.to_string());
         }
-        let fallback = s.obligations[n - 1].text.clone();
-        lines.push(format!("- {}", p["notes"]["statement"].as_str().filter(|t| !t.trim().is_empty()).map(str::to_string).unwrap_or(fallback)));
+        for a in p["notes"]["assumptions"].as_str().unwrap_or("").split("; ").map(sentence) {
+            add(&mut assumptions, a);
+        }
+        let o = &s.obligations[n - 1].text;
+        let notes = p["notes"]["statement"].as_str().map(str::trim).filter(|t| !t.is_empty()).map(str::to_string).unwrap_or_else(|| o.split_once("): ").map_or(o.clone(), |(_, w)| w.to_string()));
+        sections.push(if s.obligations.len() == 1 { notes } else { format!("**`{}`**\n\n{notes}", def_of(o).unwrap_or("")) });
     }
     let means = s.details.iter().find_map(|d| d.strip_prefix("means: ")).unwrap_or("");
-    let assumes: Vec<&str> = s.details.iter().filter_map(|d| d.strip_prefix("assumes: ")).collect();
-    let statement = format!("{means}\n\n{}", lines.join("\n"));
-    let input = json!({ "statement": statement, "assumptions": assumes.join("; "), "theorems": theorems });
+    let statement = format!("{means}\n\n{}", sections.join("\n\n"));
+    let input = json!({ "statement": statement, "assumptions": assumptions.join(" "), "theorems": theorems });
     crate::swarm_ctx::record_statement_property(root, id, &s.text, &files, &input)
+}
+
+/// An assumption as a sentence of its own: trimmed, ending in one full stop.
+fn sentence(a: &str) -> String {
+    let a = one_line(a);
+    let a = a.trim_end_matches(['.', ';']);
+    if a.is_empty() { String::new() } else { format!("{a}.") }
 }
 
 /// The agents' tool (the swarm's roles and Claude Code's hunter).
@@ -825,6 +842,8 @@ mod tests {
         assert!(ask["question"].as_str().unwrap().contains("Every function that writes `fee` reverts unless the owner calls it."));
         assert!(ask["question"].as_str().unwrap().contains("2 functions: `Vault.setFee`, `Vault.initialize`"));
         assert_eq!(ask["replies"][1], "No: initialize may set it once");
+        let dotted = Formalized { details: vec!["assumes: one.".into(), "assumes: two.".into()], ..f.clone() };
+        assert!(serde_json::from_str::<Value>(&ask_text("S-01", &dotted)).unwrap()["question"].as_str().unwrap().ends_with("Assuming: one; two."));
     }
 
     #[test]
@@ -931,17 +950,19 @@ mod tests {
     fn a_proved_statement_is_one_property_in_the_audit_file() {
         let d = folder("property");
         let s = confirmed(&d);
-        record_obligation(&d, &s.id, 1, "S01.Vault_setFee", &["formal/Refinement/Statements/S01/VaultSetFee.lean".into()], Some(&json!({ "statement": "`Vault.setFee` reverts unless `owner` calls." })));
+        record_obligation(&d, &s.id, 1, "S01.Vault_setFee", &["formal/Refinement/Statements/S01/VaultSetFee.lean".into()], Some(&json!({ "statement": "`Vault.setFee` reverts unless `owner` calls.", "assumptions": "The model matches the Solidity.; initialize runs once", "theorems": ["S01.Vault_setFee", "Vault_setFee_spec"] })));
         record_obligation(&d, &s.id, 2, "S01.Vault_initialize", &["formal/Refinement/Statements/S01/VaultInitialize.lean".into()], None);
         let at = record_property(&d, &s.id).unwrap();
         let doc: Value = serde_json::from_str(&std::fs::read_to_string(d.join(&at)).unwrap_or_else(|_| std::fs::read_to_string(&at).unwrap())).unwrap();
         let p = doc["properties"].as_array().unwrap().iter().find(|p| p["id"] == "P-S01").expect("P-S01");
         assert_eq!(p["title"], "Only the owner can change `fee`.");
         assert_eq!(p["statement"], "S-01");
-        assert_eq!(p["theorems"], json!([{ "name": "S01.Vault_setFee" }, { "name": "S01.Vault_initialize" }]));
+        assert_eq!(p["theorems"], json!([{ "name": "S01.Vault_setFee" }, { "name": "Vault_setFee_spec" }, { "name": "S01.Vault_initialize" }]));
+        assert!(p["description"].as_str().unwrap().ends_with("**Assumptions.** initialize runs once. The model matches the Solidity."), "{}", p["description"]);
         let desc = p["description"].as_str().unwrap();
         assert!(desc.starts_with("Only the owner's calls write `fee`."), "{desc}");
-        assert!(desc.contains("- `Vault.setFee` reverts unless `owner` calls.") && desc.contains("**Assumptions.** initialize runs once"), "{desc}");
+        assert!(desc.contains("**`Vault.setFee`**\n\n`Vault.setFee` reverts unless `owner` calls.") && desc.contains("**`Vault.initialize`**\n\nreverts unless the owner calls"), "{desc}");
+        assert!(desc.contains("**Assumptions.** initialize runs once."), "{desc}");
         assert_eq!(p["files"].as_array().unwrap().len(), 2);
     }
 
