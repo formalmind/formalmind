@@ -2901,13 +2901,7 @@ export function SwarmPanel({ folder, name, scan, bridge, session, file: openPath
 	if (slot) {
 		return (
 			<div ref={root} className="relative flex h-full min-h-0 flex-1">
-				{createPortal(
-					<span className="inline-flex h-7 min-w-0 max-w-56 items-center gap-2 rounded-lg bg-background px-2.5 text-[13px] text-foreground shadow-card" title={folder}>
-						{scan?.git ? <MarkGithubIcon className="size-3.5 shrink-0" /> : <Code2 className="size-3.5 shrink-0" />}
-						<span className="truncate">{name}</span>
-					</span>,
-					slot,
-				)}
+				{/* The folder's tab names it, in its own place among the tabs; only the page's actions go to the title bar. */}
 				{actionsSlot ? createPortal(<>{ctxMenu}{costMenu}{paneTools}</>, actionsSlot) : null}
 				{/* The view in the middle (Canvas, Proofs, Bugs, Code); the chat in the right pane. */}
 				<div className="relative min-w-0 flex-1" style={{ "--fm-top": "0px" } as React.CSSProperties}>
