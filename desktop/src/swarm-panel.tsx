@@ -2180,18 +2180,27 @@ export function SwarmPanel({ folder, name, scan, bridge, session, file: openPath
 				setClaim("");
 				setClaimError(null);
 				refresh();
+				workOnStatements();
 			},
 			(e) => setClaimError(String(e)),
 		);
 	};
-	const setStatementMark = (id: string, mark: string) => void invoke<Statement[]>("swarm_statement_mark", { folder, id, mark }).then(setStatements, (e) => setClaimError(String(e)));
-	const confirmStatement = (id: string) => void invoke<Statement[]>("swarm_confirm_statement", { folder, id }).then(setStatements, (e) => setClaimError(String(e)));
+	// A stopped swarm starts just for the statements (and stops after), as it does to read a report.
+	const workOnStatements = () => {
+		if (!run && !concolic) void start(true);
+	};
+	const afterStatement = (s: Statement[]) => {
+		setStatements(s);
+		workOnStatements();
+	};
+	const setStatementMark = (id: string, mark: string) => void invoke<Statement[]>("swarm_statement_mark", { folder, id, mark }).then(afterStatement, (e) => setClaimError(String(e)));
+	const confirmStatement = (id: string) => void invoke<Statement[]>("swarm_confirm_statement", { folder, id }).then(afterStatement, (e) => setClaimError(String(e)));
 	// What you say a formalized statement should mean instead (empty: just try again).
 	const [correcting, setCorrecting] = useState<{ id: string; text: string } | null>(null);
 	const correctStatement = (id: string, text: string) =>
 		void invoke<Statement[]>("swarm_correct_statement", { folder, id, text }).then(
 			(s) => {
-				setStatements(s);
+				afterStatement(s);
 				setCorrecting(null);
 			},
 			(e) => setClaimError(String(e)),
