@@ -2024,7 +2024,8 @@ export function SwarmPanel({ folder, name, scan, bridge, session, file: openPath
 												) : null}
 											</span>
 											<span className="min-w-0 flex-1">
-												<span className={i.mark === "x" ? "text-muted-foreground" : ""}>{i.text}</span>
+												{/* The item's text is markdown (bold names, `code`), rendered inline. */}
+												<ChatMarkdown className={`[&_p]:my-0 [&_p]:leading-5 ${i.mark === "x" ? "text-muted-foreground" : ""}`}>{i.text}</ChatMarkdown>
 												{working && working.item === String(i.index) && activity ? (
 													<span className="mt-0.5 flex items-center gap-1.5 truncate text-[11px] text-muted-foreground" title={activity.text}>
 														<span className="truncate">
