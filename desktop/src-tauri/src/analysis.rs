@@ -8,7 +8,7 @@ use serde_json::{json, Value};
 use std::path::PathBuf;
 use tauri::{AppHandle, Manager};
 
-const TOOLS: [&str; 11] = ["debug_open", "debug_run", "debug_move", "debug_break", "debug_watch", "debug_look", "coverage", "explore", "tag", "run_in_background", "background_results"];
+const TOOLS: [&str; 12] = ["debug_open", "debug_run", "debug_move", "debug_break", "debug_watch", "debug_look", "coverage", "explore", "tag", "add_statement", "run_in_background", "background_results"];
 
 pub fn is_tool(name: &str) -> bool {
     TOOLS.contains(&name)
@@ -28,6 +28,7 @@ pub fn tools() -> Vec<Value> {
         json!({ "name": "run_in_background", "description": "Start a long task and keep working while it runs: coverage (minutes on a big suite), explore, or a forge command (`forge test …`, `forge build`). Returns a task number at once; read the result later with background_results.", "input_schema": s(json!({ "tool": { "type": "string", "enum": ["coverage", "explore", "run"] }, "input": { "type": "object", "description": "The tool's own arguments: coverage {at, include, skip}, explore {target, only, include, skip, timeout_ms}, run {command}" } }), vec!["tool"]) }),
         json!({ "name": "background_results", "description": "Your background tasks: with no id, each one's tool, status and time so far; with an id, that task's result once it's done (wait: true waits until it is).", "input_schema": s(json!({ "id": { "type": "integer" }, "wait": { "type": "boolean" } }), vec![]) }),
         json!({ "name": "explore", "description": "Concolic exploration: every JUMPI side coverage never took is a target; fuzz tests are the harnesses; z3 solves for inputs that take the side. Returns, by source line: solved (the inputs, ready for debug_run's args), unsat (unreachable from that test: a dead guard or a test-design gap), unknown, and findings (solved inputs that make a test fail: open them with debug_run). Slow on a whole suite (minutes): narrow it with `target` (one line's untaken sides) and `only`.", "input_schema": s(json!({ "target": { "type": "string", "description": "file:line: only the untaken sides on this line" }, "only": { "type": "string", "description": "Only fuzz tests whose Contract::name contains this" }, "include": { "type": "array", "items": { "type": "string" } }, "skip": { "type": "array", "items": { "type": "string" } }, "timeout_ms": { "type": "integer", "description": "Per solver call (default 1000)" } }), vec![]) }),
+        crate::statements::tool(),
     ]
 }
 
@@ -101,6 +102,7 @@ pub async fn call(app: &AppHandle, folder: &str, role: &str, session: Option<u32
             (text(r), None)
         }
         "tag" => (tag(folder, role, input), None),
+        "add_statement" => (crate::statements::add_tool(folder, role, input), None),
         "run_in_background" => (start_task(app, folder, input), None),
         "background_results" => (task_results(folder, input).await, None),
         "coverage" => (text(coverage(folder, input).await), None),

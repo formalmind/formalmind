@@ -16,6 +16,7 @@ mod lsp;
 mod openai;
 mod platform;
 mod report;
+mod statements;
 mod term;
 
 use keyring::Entry;
@@ -194,6 +195,12 @@ pub fn run() {
             swarm::swarm_suggest,
             swarm::swarm_plan,
             swarm::swarm_bugs,
+            statements::swarm_statements,
+            statements::swarm_add_statement,
+            statements::swarm_statement_mark,
+            statements::swarm_remove_statement,
+            statements::swarm_confirm_statement,
+            statements::swarm_correct_statement,
             swarm::anthropic_key_set,
             swarm::anthropic_key_status,
             swarm::openai_key_set,

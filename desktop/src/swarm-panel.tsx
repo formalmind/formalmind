@@ -36,8 +36,10 @@ export type Bridge = {
 
 import type { Diagnostic } from "@/lib/ast/run";
 
-export type Ev = { folder?: string; run: string; kind: "start" | "status" | "context" | "say" | "tool" | "result" | "you" | "bug" | "plan" | "done" | "error"; role: string; item: string; text: string; spent: number; /** ms since the epoch (newer logs) */ at?: number };
+export type Ev = { folder?: string; run: string; kind: "start" | "status" | "context" | "say" | "ask" | "tool" | "result" | "you" | "bug" | "plan" | "done" | "error"; role: string; item: string; text: string; spent: number; /** ms since the epoch (newer logs) */ at?: number };
 type Item = { index: number; mark: string; text: string };
+/** A claim in .formal/statements.md (desktop/src-tauri/src/statements.rs), for the swarm to prove or disprove. */
+type Statement = { id: string; mark: string; author: string; text: string; details: string[]; obligations: { mark: string; text: string }[] };
 export type Bug = { file: string; title: string; body: string };
 type Provider = "formal" | "anthropic" | "openai" | "claude-code";
 type Proof = { item: string; files: string[]; summary: string; at: string };
@@ -78,6 +80,28 @@ const OPENAI_MODELS = [
 	{ value: "gpt-5-mini", label: "GPT-5 mini" },
 ];
 const colorOf = (role: string) => (ROLE_COLORS as Record<string, string>)[role] ?? "hsl(var(--muted-foreground))";
+
+const MARK_LABEL: Record<string, string> = { " ": "open", "~": "working", x: "proved", "!": "disproved or blocked", "?": "waiting for you", "-": "can't be proved against the model" };
+
+/** A statement's mark, drawn like the plan's: proved, disproved, working, waiting for you, out of the model, open. */
+function StatementMark({ mark, small }: { mark: string; small?: boolean }) {
+	const box = small ? "mt-[3px] size-2.5" : "mt-px size-3.5";
+	const glyph = small ? "size-2" : "size-2.5";
+	const tone = mark === "x" ? "border-emerald-500 bg-emerald-500 text-white" : mark === "!" ? "border-amber-500 text-amber-600" : mark === "?" ? "border-violet-500 text-violet-600" : mark === "~" ? "border-sky-500 text-sky-500" : mark === "-" ? "border-muted-foreground/50 text-muted-foreground" : "";
+	return (
+		<span className={`grid shrink-0 place-items-center rounded border ${box} ${tone}`} title={MARK_LABEL[mark] ?? "open"}>
+			{mark === "x" ? <Check className={glyph} strokeWidth={3.5} /> : mark === "!" ? (
+				<svg viewBox="0 0 10 10" className={glyph} aria-hidden><path d="M5 2v3.6" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" /><circle cx="5" cy="7.9" r="1" fill="currentColor" /></svg>
+			) : mark === "?" ? (
+				<svg viewBox="0 0 10 10" className={glyph} aria-hidden><path d="M3.4 3.6a1.7 1.7 0 1 1 2.4 1.5c-.5.3-.8.6-.8 1.2" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" fill="none" /><circle cx="5" cy="8.2" r=".9" fill="currentColor" /></svg>
+			) : mark === "~" ? (
+				<svg viewBox="0 0 10 10" className={`${glyph} animate-pulse`} aria-hidden><circle cx="5" cy="5" r="2.2" fill="currentColor" /></svg>
+			) : mark === "-" ? (
+				<svg viewBox="0 0 10 10" className={glyph} aria-hidden><path d="M2.5 5h5" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" /></svg>
+			) : null}
+		</span>
+	);
+}
 const store = { get: (k: string) => { try { return localStorage.getItem(k); } catch { return null; } }, set: (k: string, v: string) => { try { localStorage.setItem(k, v); } catch { /* not kept */ } } };
 
 
@@ -271,7 +295,17 @@ function ReplyActions({ text }: { text: string }) {
 	);
 }
 
-export function AgentMessage({ e, onBug }: { e: Ev; onBug: () => void }) {
+/** An `ask` event's text: the question, and the replies the agent drafted for you. */
+function parseAsk(text: string): { question: string; replies: string[] } {
+	try {
+		const v = JSON.parse(text) as { question?: unknown; replies?: unknown };
+		return { question: String(v.question ?? ""), replies: Array.isArray(v.replies) ? v.replies.map(String) : [] };
+	} catch {
+		return { question: text, replies: [] };
+	}
+}
+
+export function AgentMessage({ e, onBug, onReply }: { e: Ev; onBug: () => void; /** A drafted reply picked: it goes to the composer to edit or send. */ onReply?: (text: string) => void }) {
 	const color = e.kind === "bug" ? "#dc2626" : colorOf(e.role);
 	return (
 		<Message>
@@ -288,6 +322,24 @@ export function AgentMessage({ e, onBug }: { e: Ev; onBug: () => void }) {
 					</button>
 				) : e.kind === "plan" || e.kind === "done" ? (
 					<p className="text-[13px] text-muted-foreground">{e.text}</p>
+				) : e.kind === "ask" ? (
+					(() => {
+						const ask = parseAsk(e.text);
+						return (
+							<div className="space-y-2">
+								<ChatMarkdown>{ask.question}</ChatMarkdown>
+								{ask.replies.length ? (
+									<div className="flex flex-wrap gap-1.5">
+										{ask.replies.map((r) => (
+											<button key={r} type="button" onClick={() => onReply?.(r)} disabled={!onReply} className="max-w-full rounded-2xl border bg-background px-3 py-1 text-left text-[13px] hover:bg-muted enabled:cursor-pointer">
+												{r}
+											</button>
+										))}
+									</div>
+								) : null}
+							</div>
+						);
+					})()
 				) : (
 					<div className="group/reply">
 						<ChatMarkdown>{e.text}</ChatMarkdown>
@@ -1565,6 +1617,9 @@ export function SwarmPanel({ folder, name, scan, bridge, session, file: openPath
 	const [runs, setRuns] = useState<string[]>([]);
 	const [events, setEvents] = useState<Ev[]>([]);
 	const [plan, setPlan] = useState<Item[]>([]);
+	const [statements, setStatements] = useState<Statement[]>([]);
+	const [claim, setClaim] = useState("");
+	const [claimError, setClaimError] = useState<string | null>(null);
 	const [bugs, setBugs] = useState<Bug[]>([]);
 	const [goal, setGoal] = useState("");
 	// The cap is kept per folder, so the chat header, the canvas ledger and the next start all agree after a reload.
@@ -1925,6 +1980,7 @@ export function SwarmPanel({ folder, name, scan, bridge, session, file: openPath
 	const [reload, setReload] = useState(0);
 	const refresh = () => {
 		void invoke<Item[]>("swarm_plan", { folder }).then(setPlan, () => {});
+		void invoke<Statement[]>("swarm_statements", { folder }).then((s) => setStatements(s ?? []), () => {});
 		void invoke<Bug[]>("swarm_bugs", { folder }).then(setBugs, () => {});
 		void invoke<Record<string, Proof>>("swarm_proofs", { folder }).then(setProofs, () => {});
 	};
@@ -1946,6 +2002,8 @@ export function SwarmPanel({ folder, name, scan, bridge, session, file: openPath
 			// The chat shows the session you're reading; the others carry on in the background.
 			if (payload.run === viewingRef.current) setEvents((all) => trim([...all, payload]));
 			if (["plan", "bug", "done"].includes(payload.kind) || (payload.kind === "status" && / is working$/.test(payload.text))) refresh();
+			// An agent's statement shows in the list straight away.
+			if (payload.kind === "ask" || (payload.kind === "tool" && /^(add_statement|formalize_result|confirm_statement)/.test(payload.text))) refresh();
 			// A finding recorded from a report shows in Bugs straight away.
 			if (payload.kind === "tool" && payload.text.startsWith("record_finding")) setReload((n) => n + 1);
 			if (["plan", "bug", "done"].includes(payload.kind)) {
@@ -2073,7 +2131,7 @@ export function SwarmPanel({ folder, name, scan, bridge, session, file: openPath
 	const draft = async () => {
 		if (!run || drafting) return;
 		setDrafting(true);
-		const transcript = events.filter((e) => e.kind === "say" || e.kind === "you" || e.kind === "bug" || e.kind === "done").slice(-20).map((e) => `${e.role}${e.item ? ` (item ${e.item})` : ""}: ${e.text}`).join("\n");
+		const transcript = events.filter((e) => e.kind === "say" || e.kind === "ask" || e.kind === "you" || e.kind === "bug" || e.kind === "done").slice(-20).map((e) => `${e.role}${e.item ? ` (item ${e.item})` : ""}: ${e.kind === "ask" ? parseAsk(e.text).question : e.text}`).join("\n");
 		await invoke<string>("swarm_suggest", { folder, apiBase: apiBase(), provider, run, transcript })
 			.then((text) => text && setSay(text))
 			.catch((e) => setError(String(e)))
@@ -2123,6 +2181,10 @@ export function SwarmPanel({ folder, name, scan, bridge, session, file: openPath
 					) : (
 						<AgentMessage
 							e={block.e}
+							onReply={(text) => {
+								setSay(text);
+								toggleChat(true);
+							}}
 							onBug={() => {
 								// Open the bugs card on this report.
 								const hit = bugs.find((b) => block.e.text.includes(b.file));
@@ -2242,6 +2304,139 @@ export function SwarmPanel({ folder, name, scan, bridge, session, file: openPath
 			</ul>
 		</div>
 	) : null;
+
+	// The statements checklist (.formal/statements.md): claims in plain words, the maintainer's and the agents'.
+	const addClaim = () => {
+		const text = claim.trim();
+		if (!text) return;
+		invoke<Statement>("swarm_add_statement", { folder, text }).then(
+			() => {
+				setClaim("");
+				setClaimError(null);
+				refresh();
+				workOnStatements();
+			},
+			(e) => setClaimError(String(e)),
+		);
+	};
+	// A stopped swarm starts just for the statements (and stops after), as it does to read a report.
+	const workOnStatements = () => {
+		if (!run && !concolic) void start(true);
+	};
+	const afterStatement = (s: Statement[]) => {
+		setStatements(s);
+		workOnStatements();
+	};
+	const setStatementMark = (id: string, mark: string) => void invoke<Statement[]>("swarm_statement_mark", { folder, id, mark }).then(afterStatement, (e) => setClaimError(String(e)));
+	const confirmStatement = (id: string) => void invoke<Statement[]>("swarm_confirm_statement", { folder, id }).then(afterStatement, (e) => setClaimError(String(e)));
+	// What you say a formalized statement should mean instead (empty: just try again).
+	const [correcting, setCorrecting] = useState<{ id: string; text: string } | null>(null);
+	const correctStatement = (id: string, text: string) =>
+		void invoke<Statement[]>("swarm_correct_statement", { folder, id, text }).then(
+			(s) => {
+				afterStatement(s);
+				setCorrecting(null);
+			},
+			(e) => setClaimError(String(e)),
+		);
+	const removeStatement = (id: string) => void invoke<Statement[]>("swarm_remove_statement", { folder, id }).then(setStatements, (e) => setClaimError(String(e)));
+	const proved = statements.filter((st) => st.mark === "x").length;
+	const statementsList = (
+		<div className="border-t p-2">
+			<div className="flex items-center gap-2 px-2 pb-1 text-[11px] text-muted-foreground">
+				<span className="font-mono uppercase tracking-wider">Statements</span>
+				{statements.length ? <span className="ml-auto tabular-nums">{proved}/{statements.length} proved</span> : null}
+			</div>
+			<form
+				className="px-1 pb-1"
+				onSubmit={(e) => {
+					e.preventDefault();
+					addClaim();
+				}}
+			>
+				<input
+					value={claim}
+					onChange={(e) => {
+						setClaim(e.target.value);
+						setClaimError(null);
+					}}
+					placeholder="State something about the code…"
+					aria-label="A claim about the code, for the swarm to prove or disprove"
+					className="h-7 w-full rounded-md border bg-background px-2 text-[12px] outline-none placeholder:text-muted-foreground/70 focus-visible:ring-1 focus-visible:ring-ring"
+				/>
+				{claimError ? <p className="px-1 pt-1 text-[11px] text-amber-600">{claimError}</p> : null}
+			</form>
+			{statements.length === 0 ? <p className="px-2 py-1 text-[12px] leading-[18px] text-muted-foreground">Claims you want proved or disproved, in plain words. They're kept in .formal/statements.md.</p> : null}
+			<ul className="space-y-0.5 text-[12px] leading-[18px]">
+				{statements.map((st) => (
+					<li key={st.id} className="rounded-md px-2 py-1 hover:bg-muted/50">
+						<div className="flex gap-2">
+							<StatementMark mark={st.mark} />
+							<span className="min-w-0 flex-1">
+								<span className={st.mark === "x" || st.mark === "-" ? "text-muted-foreground" : ""}>{st.text}</span>
+								<span className="mt-0.5 flex flex-wrap items-center gap-x-1.5 text-[11px] text-muted-foreground">
+									<span className="font-mono text-[10px]">{st.id}</span>
+									{st.author === "you" ? <span>you</span> : <span className="font-medium" style={{ color: colorOf(st.author) }}>{roleName(st.author)}</span>}
+									<span>· {MARK_LABEL[st.mark] ?? "open"}</span>
+									{st.obligations.length ? <span className="tabular-nums">· {st.obligations.filter((o) => o.mark === "x").length}/{st.obligations.length} functions</span> : null}
+								</span>
+								{working && working.item.startsWith(`${st.id}.`) && activity ? (
+									<span className="mt-0.5 flex items-center gap-1.5 truncate text-[11px] text-muted-foreground" title={activity.text}>
+										<span className="truncate">
+											<span className="font-medium" style={{ color: colorOf(working.role) }}>{roleName(working.role)}</span> · function {working.item.slice(st.id.length + 1)} · {activity.text}
+										</span>
+									</span>
+								) : null}
+								{st.details.length || st.obligations.length ? (
+									<span className="mt-0.5 block space-y-px text-[11px] text-muted-foreground">
+										{st.details.map((d, i) => (
+											<span key={`d${i}`} className="block">{d}</span>
+										))}
+										{st.obligations.map((o, i) => (
+											<span key={`o${i}`} className="flex items-start gap-1.5">
+												<StatementMark mark={o.mark} small />
+												<span className="min-w-0">{o.text}</span>
+											</span>
+										))}
+									</span>
+								) : null}
+								{st.mark === "?" && st.details.some((d) => d.startsWith("kind: ")) ? (
+									correcting?.id === st.id ? (
+										<form
+											className="mt-1 flex gap-1"
+											onSubmit={(e) => {
+												e.preventDefault();
+												correctStatement(st.id, correcting.text);
+											}}
+										>
+											<input autoFocus value={correcting.text} onChange={(e) => setCorrecting({ id: st.id, text: e.target.value })} placeholder="What it should mean…" aria-label={`What ${st.id} should mean`} className="h-6 min-w-0 flex-1 rounded border bg-background px-1.5 text-[11px] outline-none focus-visible:ring-1 focus-visible:ring-ring" />
+											<button type="submit" className="rounded border bg-background px-1.5 text-[11px] hover:bg-muted">Send</button>
+										</form>
+									) : (
+										<span className="mt-1 flex items-center gap-1">
+											<span className="mr-0.5 text-[11px] text-violet-600">Is this what you meant?</span>
+											<button type="button" onClick={() => confirmStatement(st.id)} className="rounded border bg-background px-1.5 text-[11px] hover:bg-muted">Yes</button>
+											<button type="button" onClick={() => setCorrecting({ id: st.id, text: "" })} className="rounded px-1.5 text-[11px] text-muted-foreground hover:bg-muted hover:text-foreground">Edit</button>
+										</span>
+									)
+								) : st.mark === "?" && st.details.some((d) => d.startsWith("note: ")) ? (
+									<span className="mt-1 flex gap-1">
+										<button type="button" onClick={() => correctStatement(st.id, "")} className="rounded border bg-background px-1.5 text-[11px] hover:bg-muted">Try again</button>
+										<button type="button" onClick={() => removeStatement(st.id)} className="rounded px-1.5 text-[11px] text-muted-foreground hover:bg-muted hover:text-foreground">Remove</button>
+									</span>
+								) : st.mark === "?" && st.author !== "you" ? (
+									<span className="mt-1 flex gap-1">
+										<button type="button" onClick={() => setStatementMark(st.id, " ")} className="rounded border bg-background px-1.5 text-[11px] hover:bg-muted">Accept</button>
+										<button type="button" onClick={() => removeStatement(st.id)} className="rounded px-1.5 text-[11px] text-muted-foreground hover:bg-muted hover:text-foreground">Dismiss</button>
+									</span>
+								) : null}
+							</span>
+						</div>
+					</li>
+				))}
+			</ul>
+		</div>
+	);
 
 	const slot = useTitlebarSlot();
 	const actionsSlot = useTitlebarSlot("fm-titlebar-actions");
@@ -2493,7 +2688,7 @@ export function SwarmPanel({ folder, name, scan, bridge, session, file: openPath
 					title: slot ? "Plan" : "Roadmap",
 					note: slot ? `${plan.length ? `${done}/${plan.length}` : ""}${entryUnits.length ? ` · ${inPlan.size}/${entryUnits.length} entry points` : ""}` : undefined,
 					height: 640,
-					node: <div className="min-h-0 flex-1 overflow-y-auto">{planList}{entryList}</div>,
+					node: <div className="min-h-0 flex-1 overflow-y-auto">{planList}{statementsList}{entryList}</div>,
 				}}
 				// In the Mac app the folder's git tree has a card of its own beside the plan: where the swarm works, HEAD and its
 				// uncommitted proofs.
@@ -2511,7 +2706,7 @@ export function SwarmPanel({ folder, name, scan, bridge, session, file: openPath
 					<span className="text-[11px] text-muted-foreground">{plan.length ? `${done}/${plan.length}` : ""}{entryUnits.length ? ` · ${inPlan.size}/${entryUnits.length} entry points` : ""}</span>
 					<ChevronDown className={`ml-auto size-3.5 text-muted-foreground transition-transform ${planOpen ? "rotate-180" : ""}`} />
 				</button>
-				{planOpen ? <div className="min-h-0 overflow-y-auto rounded-xl border bg-card">{planList}{entryList}</div> : null}
+				{planOpen ? <div className="min-h-0 overflow-y-auto rounded-xl border bg-card">{planList}{statementsList}{entryList}</div> : null}
 			</section>
 		) : null}
 		{mode === "code" ? (
