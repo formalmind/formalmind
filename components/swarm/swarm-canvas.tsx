@@ -634,7 +634,7 @@ function cloneScene(scene: Scene): Scene {
  * `fill` makes the board fill its parent, scaled to fit both ways and centred, below a strip kept clear
  * for the pinned controls; otherwise it scales to the width. `title` and `actions` are pinned top-left and top-right.
  */
-export function SwarmCanvas({ state, fill = false, contain = false, title, actions, repo, onTalk, local = false, below, side, pace = 1 }: {
+export function SwarmCanvas({ state, fill = false, contain = false, title, actions, repo, onTalk, local = false, below, beside, side, pace = 1 }: {
 	state: SwarmState | null;
 	/** How fast the replay plays: 2 is twice as lively (the phone's introduction); 1 is the landing page's pace. */
 	pace?: number;
@@ -650,7 +650,9 @@ export function SwarmCanvas({ state, fill = false, contain = false, title, actio
 	title?: ReactNode;
 	actions?: ReactNode;
 	/** A card on the board under the notebooks (the project's roadmap), as wide as the board; it scrolls inside. */
-	below?: { title: string; height: number; node: ReactNode };
+	below?: { title: string; height: number; node: ReactNode; /** Shown after the title, e.g. counts (the title keys the kept height). */ note?: string };
+	/** A card of its own to the right of `below`, as tall as it (the app's git tree); `below` narrows to make room. */
+	beside?: { title: string; note?: string; width: number; node: ReactNode };
 	/** A fourth notebook card next to the others (the app's Context notebook); the four share the row. */
 	side?: { title: string; node: ReactNode };
 }) {
@@ -667,8 +669,9 @@ export function SwarmCanvas({ state, fill = false, contain = false, title, actio
 	const geo = useMemo(() => geometry(groups, panels), [groups, panels]);
 	const panelsEnd = Math.max(geo.height, geo.panelTop + Math.max(...panelHs.slice(0, panels)) + PAD);
 	const BELOW_GAP = 24;
-	// The card under the notebooks can be resized from its bottom edge; its height is kept per title.
-	const belowKey = below ? `fm:canvas-below:${below.title}` : "";
+	// The card under the notebooks (and the one beside it) grow to show all they hold; dragging the bottom edge sets a
+	// height instead, kept per title (double-click goes back to fitting).
+	const belowKey = below ? `fm:canvas-below-h:${below.title}` : "";
 	const [belowH, setBelowH] = useState<number | null>(() => {
 		try {
 			return Number(localStorage.getItem(belowKey)) || null;
@@ -676,7 +679,31 @@ export function SwarmCanvas({ state, fill = false, contain = false, title, actio
 			return null;
 		}
 	});
-	const belowHeight = below ? Math.max(240, belowH ?? below.height) : 0;
+	const belowBody = useRef<HTMLDivElement>(null);
+	const besideBody = useRef<HTMLDivElement>(null);
+	const [fitH, setFitH] = useState<number | null>(null);
+	useEffect(() => {
+		if (!below) return;
+		// What a card's content needs: its scrolling part's content, plus what sits above that part.
+		const need = (body: HTMLElement | null) => {
+			if (!body) return 0;
+			const scroller = body.querySelector<HTMLElement>(".overflow-y-auto") ?? body;
+			let top = 0;
+			for (let el: HTMLElement | null = scroller; el && el !== body; el = el.offsetParent as HTMLElement | null) top += el.offsetTop;
+			// Its children's heights, not scrollHeight (which never drops below the card's own height), so it can shrink too.
+			const pad = parseFloat(getComputedStyle(scroller).paddingTop) + parseFloat(getComputedStyle(scroller).paddingBottom);
+			return top + pad + Array.from(scroller.children).reduce((h, c) => h + (c as HTMLElement).offsetHeight, 0);
+		};
+		const measure = () => {
+			const h = Math.ceil(Math.max(need(belowBody.current), need(besideBody.current))) + 36 + 8;
+			setFitH((old) => (old === h ? old : h));
+		};
+		measure();
+		// The plan and the history change as the swarm works: look again every second.
+		const t = setInterval(measure, 1000);
+		return () => clearInterval(t);
+	}, [below]);
+	const belowHeight = below ? Math.max(240, belowH ?? fitH ?? below.height) : 0;
 	const boardH = below ? panelsEnd + BELOW_GAP + belowHeight + PAD : panelsEnd;
 	// In fill mode people can pan and zoom: `view` sits on top of the fitted placement.
 	const [view, setRawView] = useState({ k: 1, x: 0, y: 0 });
@@ -1115,14 +1142,26 @@ export function SwarmCanvas({ state, fill = false, contain = false, title, actio
 							<TurnChip turn={shown.turn} />
 						</>
 					)}
+					{below && beside ? (
+						<section
+							data-canvas-ui
+							className="absolute flex flex-col overflow-hidden rounded-xl border bg-card shadow-card"
+							style={{ left: W - PAD - beside.width, top: panelsEnd + BELOW_GAP, width: beside.width, height: belowHeight }}
+						>
+							<div className="flex h-9 shrink-0 items-center gap-2 border-b px-4 font-mono text-[12px] font-medium text-muted-foreground">{beside.title}{beside.note ? <span className="truncate font-sans text-[11px] font-normal">{beside.note}</span> : null}</div>
+							<div ref={besideBody} data-scroll className="flex min-h-0 flex-1 flex-col overflow-auto">
+								{beside.node}
+							</div>
+						</section>
+					) : null}
 					{below ? (
 						<section
 							data-canvas-ui
 							className="absolute flex flex-col overflow-hidden rounded-xl border bg-card shadow-card"
-							style={{ left: PAD, top: panelsEnd + BELOW_GAP, width: W - PAD * 2, height: belowHeight }}
+							style={{ left: PAD, top: panelsEnd + BELOW_GAP, width: W - PAD * 2 - (beside ? beside.width + BELOW_GAP : 0), height: belowHeight }}
 						>
-							<div className="flex h-9 shrink-0 items-center border-b px-4 font-mono text-[12px] font-medium text-muted-foreground">{below.title}</div>
-							<div data-scroll className="flex min-h-0 flex-1 flex-col overflow-auto">
+							<div className="flex h-9 shrink-0 items-center gap-2 border-b px-4 font-mono text-[12px] font-medium text-muted-foreground">{below.title}{below.note ? <span className="font-sans text-[11px] font-normal">{below.note}</span> : null}</div>
+							<div ref={belowBody} data-scroll className="flex min-h-0 flex-1 flex-col overflow-auto">
 								{below.node}
 							</div>
 							{/* Drag to resize (in board units, so it follows the zoom); double-click for the default size. */}
@@ -1478,11 +1517,11 @@ export function SwarmCursor({ role, x, y, say, turn, thinking, where, onWhereEnt
 				{(() => {
 					const pill = (
 						<>
-							{turn ? <span className="size-1.5 animate-pulse rounded-full bg-white" aria-hidden /> : null}
-							{role}
+							{/* Its turn or working: the name shimmers. */}
+							<span className={turn || thinking ? "fm-text-shimmer-light" : undefined}>{role}</span>
 							{/* Working right now: a small spinner by the name. */}
 							{thinking ? <span className="size-2 animate-spin rounded-full border border-white/25 border-t-white/80 [animation-duration:1.4s] motion-reduce:animate-none" aria-label="working" /> : null}
-							{turn ? <span className="font-normal opacity-80">· turn</span> : null}
+							{turn ? <span className="fm-text-shimmer-light font-normal">· turn</span> : null}
 						</>
 					);
 					const style = { backgroundColor: color };

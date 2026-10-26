@@ -50,6 +50,8 @@ export interface ChatComposerProps {
 	placeholder?: string;
 	/** Extra controls in the bottom row, after the model picker. */
 	extra?: React.ReactNode;
+	/** Smaller text and chips, for a narrow side pane (the swarm's chat). */
+	compact?: boolean;
 	textareaRef?: React.Ref<HTMLTextAreaElement>;
 }
 
@@ -66,6 +68,7 @@ export function ChatComposer({
 	repo,
 	context,
 	extra,
+	compact,
 	modelPicker,
 	placeholder = "Ask about this repo…",
 	textareaRef,
@@ -109,17 +112,19 @@ export function ChatComposer({
 				if (stopMode) onStop();
 				else if (hasContent) onSubmit();
 			}}
+			// Its own width is a container, so what sits in it can fold away when it is narrow.
+			style={{ containerType: "inline-size" }}
 			className="rounded-[28px] border border-border bg-card shadow-sm focus-within:border-ring/40 transition-colors motion-reduce:transition-none"
 		>
 			{/* Shelf: context chips */}
 			<div className="flex items-center gap-2 px-3 pt-3">
 				{context ?? (repo ? (
-					<Link to={`/github/${repo.owner}/${repo.name}`} className={cn(CHIP, "bg-secondary text-secondary-foreground")}>
+					<Link to={`/github/${repo.owner}/${repo.name}`} className={cn(CHIP, compact && "h-7 px-2.5 text-[12px]", "bg-secondary text-secondary-foreground")}>
 						<RepoIcon size={14} />
 						<span className="max-w-[12rem] truncate">{repo.owner}/{repo.name}</span>
 					</Link>
 				) : (
-					<Link to="/github" className={cn(CHIP, "bg-secondary text-muted-foreground hover:text-foreground")}>
+					<Link to="/github" className={cn(CHIP, compact && "h-7 px-2.5 text-[12px]", "bg-secondary text-muted-foreground hover:text-foreground")}>
 						<GitBranch className="h-3.5 w-3.5" />
 						Choose a repo
 					</Link>
@@ -134,7 +139,7 @@ export function ChatComposer({
 				rows={1}
 				placeholder={placeholder}
 				aria-label="Message"
-				className="block w-full resize-none bg-transparent px-4 py-3 text-sm leading-5 outline-none placeholder:text-muted-foreground"
+				className={cn("block w-full resize-none bg-transparent px-4 py-3 leading-5 outline-none placeholder:text-muted-foreground", compact ? "text-[13px]" : "text-sm")}
 			/>
 
 			{/* Bottom row: model pill, send/stop */}
@@ -142,7 +147,7 @@ export function ChatComposer({
 				{model && onModelChange ? (
 				<DropdownMenu>
 						<DropdownMenuTrigger
-							className={cn(CHIP, "bg-secondary text-secondary-foreground outline-none focus-visible:ring-1 focus-visible:ring-ring")}
+							className={cn(CHIP, compact && "h-7 px-2.5 text-[12px]", "bg-secondary text-secondary-foreground outline-none focus-visible:ring-1 focus-visible:ring-ring")}
 							aria-label="Model"
 						>
 							<Sparkles className="h-3.5 w-3.5" />
@@ -178,7 +183,7 @@ export function ChatComposer({
 					<DropdownMenu>
 						<DropdownMenuTrigger
 							disabled={modelPicker.disabled}
-							className={cn(CHIP, "bg-secondary text-secondary-foreground outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:opacity-60")}
+							className={cn(CHIP, compact && "h-7 px-2.5 text-[12px]", "bg-secondary text-secondary-foreground outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:opacity-60")}
 							aria-label="Model"
 						>
 							<Sparkles className="h-3.5 w-3.5" />
@@ -205,7 +210,7 @@ export function ChatComposer({
 					disabled={!sendEnabled}
 					aria-label={stopMode ? "Stop" : "Send"}
 					className={cn(
-						"flex h-8 w-8 items-center justify-center rounded-full transition-colors motion-reduce:transition-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2",
+						"flex h-8 w-8 shrink-0 items-center justify-center rounded-full transition-colors motion-reduce:transition-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2",
 						sendEnabled ? "bg-primary text-primary-foreground" : "bg-secondary text-muted-foreground",
 					)}
 				>

@@ -1,4 +1,4 @@
-![Formal Mind 0.1.41 on asyncswap/contracts: the Swarm canvas with the plan (158/192 items), the agents in their role colours, the ledger and context notebooks, and the main session's chat](docs/images/formal-mind-0.1.41-swarm.webp)
+![Formal Mind 0.1.41: Home, with local folders and imported GitHub repositories in the sidebar, and Add a project](docs/images/formal-mind-0.1.41-home.png)
 
 # Formal Mind
 

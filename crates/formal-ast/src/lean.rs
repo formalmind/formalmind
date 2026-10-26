@@ -1031,12 +1031,8 @@ fn literal(e: &Value) -> R<String> {
                 // Lean reads hex literals natively.
                 return Ok(scale(format!("0x{hex}"), e));
             }
-            if let Some((m, x)) = raw.split_once(['e', 'E']) {
-                let x: u32 = x.parse().map_err(|_| "exponent")?;
-                return Ok(scale(format!("({m} * 10 ^ {x})"), e));
-            }
-            if raw.contains('.') {
-                return bail("fractional literal");
+            if raw.contains(['e', 'E', '.']) {
+                return decimal(&raw, e);
             }
             Ok(scale(raw, e))
         }
@@ -1045,9 +1041,36 @@ fn literal(e: &Value) -> R<String> {
     }
 }
 
-fn scale(n: String, e: &Value) -> String {
-    let unit: u64 = match e["subdenomination"].as_str().unwrap_or("") {
-        "seconds" | "wei" | "" => 1,
+/// A decimal or scientific literal (`0.25e18`, `1.5 ether`, `2e3`) as the exact `Nat` solc computes: the mantissa's
+/// digits times a power of ten, times the unit. Solidity rejects a literal whose value isn't an integer, so the only
+/// bail is for one too large to check in u128.
+fn decimal(raw: &str, e: &Value) -> R<String> {
+    let (m, x) = raw.split_once(['e', 'E']).unwrap_or((raw, "0"));
+    let x: i64 = x.parse().map_err(|_| "exponent")?;
+    let (int, frac) = m.split_once('.').unwrap_or((m, ""));
+    let mut digits = format!("{int}{frac}").trim_start_matches('0').to_string();
+    let mut k = x - frac.len() as i64;
+    while k < 0 && digits.ends_with('0') {
+        digits.pop();
+        k += 1;
+    }
+    if digits.is_empty() {
+        return Ok("0".into());
+    }
+    if k >= 0 {
+        return Ok(scale(if k == 0 { digits } else { format!("({digits} * 10 ^ {k})") }, e));
+    }
+    let d: u128 = digits.parse().map_err(|_| "literal too large")?;
+    let v = d.checked_mul(unit(e) as u128).ok_or("literal too large")?;
+    let p = 10u128.checked_pow((-k) as u32).ok_or("literal too large")?;
+    if v % p != 0 {
+        return bail("fractional literal");
+    }
+    Ok((v / p).to_string())
+}
+
+fn unit(e: &Value) -> u64 {
+    match e["subdenomination"].as_str().unwrap_or("") {
         "minutes" => 60,
         "hours" => 3600,
         "days" => 86400,
@@ -1055,7 +1078,11 @@ fn scale(n: String, e: &Value) -> String {
         "gwei" => 1_000_000_000,
         "ether" => 1_000_000_000_000_000_000,
         _ => 1,
-    };
+    }
+}
+
+fn scale(n: String, e: &Value) -> String {
+    let unit = unit(e);
     if unit == 1 { n } else { format!("({n} * {unit})") }
 }
 
