@@ -1219,17 +1219,20 @@ function CoverageView({ data, scripts, onOpenFile }: { data: Formal; scripts: Sc
 	// A function's identity: several share a name (overloads, or the same library compiled twice), so add where it is.
 	const fnKey = (f: FormalFn) => `${f.name}@${f.file ?? ""}:${f.line}`;
 	// Library functions are always listed and counted.
-	// Each group lists proved functions first, then those with a sorry, then the modelled ones, and the ones not modelled
-	// last; within a status they keep their order.
+	// Within a group: those with a sorry, then the modelled ones, and the ones not modelled last, each keeping its order.
 	const rank = (f: FormalFn) => ["proved", "sorry", "modeled", "opaque"].indexOf(fnStatus(f, data.theorems).key);
 	const shown = data.functions
 		.filter((f) => (filter === "all" || (filter === "modeled" ? ["modeled", "sorry"].includes(fnStatus(f, data.theorems).key) : fnStatus(f, data.theorems).key === filter)))
 		.sort((a, b) => rank(a) - rank(b));
+	// Proved functions sit in their own group on top, out of the others.
+	const provedFns = shown.filter((f) => rank(f) === 0);
+	const rest = shown.filter((f) => rank(f) !== 0);
 	const groups = [
-		{ title: "Functions", fns: shown.filter((f) => f.entry && calledBy(f).length) },
-		{ title: scripts ? "Other entry points" : "Entry points", fns: shown.filter((f) => f.entry && !calledBy(f).length) },
-		{ title: "Internal", fns: shown.filter((f) => !f.entry && !f.dependency) },
-		{ title: "Libraries", fns: shown.filter((f) => !f.entry && f.dependency) },
+		{ title: "Proved", fns: provedFns },
+		{ title: "Functions", fns: rest.filter((f) => f.entry && calledBy(f).length) },
+		{ title: scripts ? "Other entry points" : "Entry points", fns: rest.filter((f) => f.entry && !calledBy(f).length) },
+		{ title: "Internal", fns: rest.filter((f) => !f.entry && !f.dependency) },
+		{ title: "Libraries", fns: rest.filter((f) => !f.entry && f.dependency) },
 	].filter((g) => g.fns.length);
 	const [picked, setPicked] = useState<string | null>(null);
 	const current = data.functions.find((f) => fnKey(f) === picked) ?? groups[0]?.fns[0] ?? null;
