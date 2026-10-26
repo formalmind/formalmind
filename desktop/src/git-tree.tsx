@@ -63,8 +63,13 @@ export function GitTree({ folder, invoke, working, flat = false }: { folder: str
 	return (
 		<section className={flat ? "flex min-h-0 flex-1 flex-col" : "pointer-events-auto absolute left-3 top-3 z-10 flex max-h-[min(28rem,calc(100%-1.5rem))] w-[min(24rem,calc(100%-1.5rem))] flex-col overflow-hidden rounded-2xl border bg-muted/80 p-1 shadow-pop backdrop-blur"}>
 			<button type="button" onClick={() => !flat && setOpen(!open)} aria-expanded={open} className="flex h-8 shrink-0 items-center gap-2 px-2.5 text-left">
-				<GitBranch className="size-3.5 text-muted-foreground" />
-				<span className="font-mono text-[11px] uppercase tracking-wider text-muted-foreground">Git</span>
+				{/* Laid flat, the card's title already says Git. */}
+				{flat ? null : (
+					<>
+						<GitBranch className="size-3.5 text-muted-foreground" />
+						<span className="font-mono text-[11px] uppercase tracking-wider text-muted-foreground">Git</span>
+					</>
+				)}
 				<span className="truncate text-[11px] text-muted-foreground">
 					{graph ? `${graph.branch ?? "detached"}${graph.dirty ? ` · ${graph.dirty} uncommitted` : ""}` : error ? "not a git repository" : ""}
 				</span>

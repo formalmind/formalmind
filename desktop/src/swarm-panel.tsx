@@ -2347,18 +2347,11 @@ export function SwarmPanel({ folder, name, scan, bridge, session, file: openPath
 					title: slot ? "Plan" : "Roadmap",
 					note: slot ? `${plan.length ? `${done}/${plan.length}` : ""}${entryUnits.length ? ` · ${inPlan.size}/${entryUnits.length} entry points` : ""}` : undefined,
 					height: 640,
-					// In the Mac app the folder's git tree lies beside the plan: where the swarm works, HEAD and its uncommitted proofs.
-					node: (
-						<div className="flex min-h-0 flex-1">
-							<div className="min-h-0 flex-1 overflow-y-auto">{planList}{entryList}</div>
-							{slot && scan?.git ? (
-								<div className="flex w-[26rem] shrink-0 flex-col border-l">
-									<GitTree folder={folder} invoke={invoke} working={Boolean(run)} flat />
-								</div>
-							) : null}
-						</div>
-					),
+					node: <div className="min-h-0 flex-1 overflow-y-auto">{planList}{entryList}</div>,
 				}}
+				// In the Mac app the folder's git tree has a card of its own beside the plan: where the swarm works, HEAD and its
+				// uncommitted proofs.
+				beside={slot && scan?.git ? { title: "Git", width: 440, node: <GitTree folder={folder} invoke={invoke} working={Boolean(run)} flat /> } : undefined}
 			/>
 		) : (
 			<div className="relative h-full w-full bg-background">
