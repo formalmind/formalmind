@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { ChevronDown, Crosshair, Play, RefreshCw } from "lucide-react";
+import { ChevronDown, Crosshair, Maximize, Minus, Play, Plus, RefreshCw } from "lucide-react";
 import { readEntryPoints, setMainEntryPoint } from "@/lib/entry-points";
 import type { Bridge } from "./swarm-panel";
 
@@ -29,7 +29,7 @@ type Fn = {
 	counts: Partial<Record<Status, number>>;
 	sides: Side[];
 };
-type ReachMap = { entry: string; contract: string | null; functions: Fn[]; edges: [number, number][]; coverage: boolean; explored: number | null; outside: number };
+type ReachMap = { entry: string; contract: string | null; functions: Fn[]; edges: [number, number][]; coverage: "current" | "stale" | null; explored: number | null; outside: number };
 type Task = { id: number; task: string; status: "running" | "done"; seconds: number };
 
 /** Best first: what a side ended as, its colour, and what it means. */
@@ -51,6 +51,10 @@ const NODE_H = 52;
 const COL_GAP = 72;
 const ROW_GAP = 10;
 const PAD = 16;
+const MIN_ZOOM = 0.15;
+const MAX_ZOOM = 2.5;
+/** The Swarm canvas's dot grid. */
+const DOTS = { backgroundImage: "radial-gradient(hsl(var(--border)) 1px, transparent 1px)" };
 
 const total = (f: Fn) => f.sides.length;
 
@@ -156,8 +160,9 @@ export function ReachView({ folder, scan, invoke, listen, onOpenFile }: { folder
 
 	const shown = useMemo(() => {
 		if (!data) return { fns: [] as Fn[], edges: [] as [number, number][] };
-		// Branches only: functions with sides, and the ones on a call path to them from an entry point.
-		if (!branchesOnly) return { fns: data.functions, edges: data.edges };
+		// Branches only: functions with sides, and the ones on a call path to them from an entry point. With no sides
+		// yet (no coverage), the whole graph.
+		if (!branchesOnly || !data.functions.some(total)) return { fns: data.functions, edges: data.edges };
 		const out = new Map<number, number[]>();
 		for (const [a, b] of data.edges) out.set(a, [...(out.get(a) ?? []), b]);
 		const keep = new Set<number>();
@@ -192,7 +197,45 @@ export function ReachView({ folder, scan, invoke, listen, onOpenFile }: { folder
 		}
 		return s;
 	}, [selected, shown.edges]);
-	const scroller = useRef<HTMLDivElement>(null);
+	// The canvas: pan by dragging the background or scrolling, zoom with a pinch or ctrl/cmd + wheel, fit with the pill.
+	const frame = useRef<HTMLDivElement>(null);
+	const [view, setView] = useState({ k: 1, x: 0, y: 0 });
+	const drag = useRef<{ id: number; x: number; y: number; moved: boolean } | null>(null);
+	const fitView = () => {
+		const box = frame.current?.getBoundingClientRect();
+		if (!box || !width || !height) return;
+		const k = Math.min(1, Math.max(MIN_ZOOM, Math.min(box.width / width, box.height / height)));
+		setView({ k, x: Math.max(0, (box.width - width * k) / 2), y: k * height < box.height ? (box.height - height * k) / 2 : 0 });
+	};
+	const fitRef = useRef(fitView);
+	fitRef.current = fitView;
+	// A new map (another entry, branches only on or off) starts fitted.
+	useEffect(() => fitRef.current(), [width, height, entry]);
+	const zoomAt = (factor: number, px: number, py: number) =>
+		setView((v) => {
+			const k = Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, v.k * factor));
+			const r = k / v.k;
+			return { k, x: px - (px - v.x) * r, y: py - (py - v.y) * r };
+		});
+	const zoomRef = useRef(zoomAt);
+	zoomRef.current = zoomAt;
+	useEffect(() => {
+		const el = frame.current;
+		if (!el) return;
+		const onWheel = (e: WheelEvent) => {
+			e.preventDefault();
+			if (e.ctrlKey || e.metaKey) {
+				const box = el.getBoundingClientRect();
+				zoomRef.current(Math.exp(-e.deltaY * 0.01), e.clientX - box.left, e.clientY - box.top);
+			} else setView((v) => ({ ...v, x: v.x - e.deltaX, y: v.y - e.deltaY }));
+		};
+		el.addEventListener("wheel", onWheel, { passive: false });
+		return () => el.removeEventListener("wheel", onWheel);
+	}, [data]);
+	const zoomCentre = (factor: number) => {
+		const box = frame.current?.getBoundingClientRect();
+		if (box) zoomAt(factor, box.width / 2, box.height / 2);
+	};
 
 	return (
 		<div className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-xl bg-card">
@@ -200,7 +243,7 @@ export function ReachView({ folder, scan, invoke, listen, onOpenFile }: { folder
 			<div className="flex h-10 shrink-0 items-center gap-3 border-b px-3 text-[12px]">
 				<label className="relative inline-flex h-7 max-w-64 items-center gap-1.5 rounded-md border bg-background pl-2 pr-6 text-[12px]">
 					<Crosshair className="size-3.5 shrink-0 text-muted-foreground" />
-					<span className="truncate">{entry ?? "No Solidity sources"}</span>
+					<span className="truncate whitespace-nowrap">{entry ?? "No Solidity sources"}</span>
 					<ChevronDown className="pointer-events-none absolute right-1.5 size-3.5 text-muted-foreground" />
 					<select
 						aria-label="Entry contract"
@@ -217,44 +260,72 @@ export function ReachView({ folder, scan, invoke, listen, onOpenFile }: { folder
 						))}
 					</select>
 				</label>
-				{sideCount ? (
-					<div className="flex min-w-0 flex-1 items-center gap-3">
-						<SideBar counts={totals} n={sideCount} className="w-40 shrink-0" />
-						<span className="flex min-w-0 flex-wrap gap-x-3 gap-y-0.5 overflow-hidden text-muted-foreground" style={{ maxHeight: 18 }}>
-							{STATUSES.filter((s) => totals[s.id]).map((s) => (
-								<span key={s.id} className="inline-flex items-center gap-1 whitespace-nowrap" title={s.what}>
-									<i className="size-2 rounded-sm" style={{ backgroundColor: s.color }} />
-									{s.label} <span className="tabular-nums text-foreground">{totals[s.id]}</span>
-								</span>
-							))}
-						</span>
-					</div>
-				) : (
-					<span className="flex-1 text-muted-foreground">{data && !data.coverage ? "No coverage of this code yet: run it to see each branch side." : ""}</span>
-				)}
-				<label className="inline-flex shrink-0 items-center gap-1.5 text-muted-foreground">
+				{/* One line whatever the width: what doesn't fit scrolls sideways under a fade at either edge. */}
+				<div className="flex min-w-0 flex-1 items-center gap-3">
+					{sideCount ? <SideBar counts={totals} n={sideCount} className="w-32 shrink-0" /> : null}
+					<span
+						className="flex min-w-0 flex-1 gap-3 overflow-x-auto whitespace-nowrap px-3 text-muted-foreground [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+						style={{ maskImage: "linear-gradient(to right, transparent, black 12px, black calc(100% - 12px), transparent)" }}
+					>
+						{STATUSES.filter((s) => totals[s.id]).map((s) => (
+							<span key={s.id} className="inline-flex shrink-0 items-center gap-1" title={s.what}>
+								<i className="size-2 rounded-sm" style={{ backgroundColor: s.color }} />
+								{s.label} <span className="tabular-nums text-foreground">{totals[s.id]}</span>
+							</span>
+						))}
+					</span>
+				</div>
+				<label className="inline-flex shrink-0 items-center gap-1.5 whitespace-nowrap text-muted-foreground">
 					<input type="checkbox" checked={branchesOnly} onChange={(e) => setBranchesOnly(e.target.checked)} className="accent-foreground" />
 					Branches only
 				</label>
 				{running.length ? (
-					<span className="shrink-0 text-muted-foreground" title={running.map((t) => t.task).join(", ")}>
+					<span className="shrink-0 whitespace-nowrap text-muted-foreground" title={running.map((t) => t.task).join(", ")}>
 						<span className="fm-text-shimmer">{running[0].task.split(" ")[0]} running</span> · {running[0].seconds}s
 					</span>
 				) : null}
-				<button type="button" disabled={running.length > 0} onClick={() => void run("coverage")} title="Run the suite and map every branch side (cached once the code is unchanged)" className="inline-flex h-7 shrink-0 items-center gap-1 rounded-md border bg-background px-2 text-[12px] text-muted-foreground hover:text-foreground disabled:opacity-50">
-					<RefreshCw className="size-3" />Coverage
+				<button type="button" disabled={running.length > 0} onClick={() => void run("coverage")} title={data?.coverage === "stale" ? "These sides are from an earlier run: the files changed since. Run the suite again" : data?.coverage ? "Run the suite again" : "No coverage yet: run the suite and map every branch side"} className="inline-flex h-7 shrink-0 items-center whitespace-nowrap gap-1 rounded-md border bg-background px-2 text-[12px] text-muted-foreground hover:text-foreground disabled:opacity-50">
+					<RefreshCw className="size-3" />Coverage{data?.coverage === "stale" ? <i className="size-1.5 rounded-full bg-amber-500" aria-label="stale" /> : null}
 				</button>
-				<button type="button" disabled={running.length > 0 || !data?.coverage} onClick={() => void run("explore")} title={data?.coverage ? "Solve for every side the suite never takes (minutes on a big suite)" : "Run coverage first"} className="inline-flex h-7 shrink-0 items-center gap-1 rounded-md border bg-background px-2 text-[12px] text-muted-foreground hover:text-foreground disabled:opacity-50">
+				<button type="button" disabled={running.length > 0 || !data?.coverage} onClick={() => void run("explore")} title={data?.coverage ? "Solve for every side the suite never takes (minutes on a big suite)" : "Run coverage first"} className="inline-flex h-7 shrink-0 items-center whitespace-nowrap gap-1 rounded-md border bg-background px-2 text-[12px] text-muted-foreground hover:text-foreground disabled:opacity-50">
 					<Play className="size-3" />Explore all
 				</button>
 			</div>
 
 			<div className="flex min-h-0 flex-1">
-				<div ref={scroller} className="relative min-w-0 flex-1 overflow-auto bg-muted/30" onClick={() => setSelected(null)}>
-					{error ? <p className="m-4 text-[13px] text-red-600">{error}</p> : null}
-					{loading && !data ? <p className="m-4 text-[13px] text-muted-foreground">Reading {entry}'s AST…</p> : null}
+				<div
+					ref={frame}
+					className={`relative min-w-0 flex-1 touch-none overflow-hidden ${drag.current?.moved ? "cursor-grabbing" : "cursor-grab"}`}
+					style={{ ...DOTS, backgroundSize: `${20 * view.k}px ${20 * view.k}px`, backgroundPosition: `${view.x}px ${view.y}px` }}
+					// Drag the background to pan; the pointer is captured only once it moves, so a click still picks.
+					onPointerDown={(e) => {
+						if (e.button !== 0 || (e.target as HTMLElement).closest("[data-node], [data-canvas-ui]")) return;
+						drag.current = { id: e.pointerId, x: e.clientX, y: e.clientY, moved: false };
+					}}
+					onPointerMove={(e) => {
+						const d = drag.current;
+						if (!d || d.id !== e.pointerId || e.buttons === 0) return;
+						const dx = e.clientX - d.x;
+						const dy = e.clientY - d.y;
+						if (!d.moved) {
+							if (Math.hypot(dx, dy) < 4) return;
+							d.moved = true;
+							e.currentTarget.setPointerCapture(e.pointerId);
+						}
+						d.x = e.clientX;
+						d.y = e.clientY;
+						setView((v) => ({ ...v, x: v.x + dx, y: v.y + dy }));
+					}}
+					onPointerUp={() => setTimeout(() => (drag.current = null))}
+					onPointerCancel={() => (drag.current = null)}
+					onClick={() => {
+						if (!drag.current?.moved) setSelected(null);
+					}}
+				>
+					{error ? <p className="absolute left-4 top-4 text-[13px] text-red-600">{error}</p> : null}
+					{loading && !data ? <p className="absolute left-4 top-4 text-[13px] text-muted-foreground">Reading {entry}'s AST…</p> : null}
 					{data ? (
-						<div className="relative" style={{ width, height }}>
+						<div className="absolute left-0 top-0 origin-top-left" style={{ width, height, transform: `translate(${view.x}px, ${view.y}px) scale(${view.k})` }}>
 							<svg className="pointer-events-none absolute inset-0" width={width} height={height} aria-hidden>
 								{shown.edges.map(([a, b]) => {
 									const p = pos.get(a);
@@ -288,6 +359,7 @@ export function ReachView({ folder, scan, invoke, listen, onOpenFile }: { folder
 									<button
 										key={f.id}
 										type="button"
+										data-node
 										onClick={(e) => {
 											e.stopPropagation();
 											setSelected(f.id === selected ? null : f.id);
@@ -308,6 +380,20 @@ export function ReachView({ folder, scan, invoke, listen, onOpenFile }: { folder
 									</button>
 								);
 							})}
+						</div>
+					) : null}
+					{data ? (
+						<div data-canvas-ui className="absolute bottom-3 right-3 z-10 flex h-8 items-center rounded-full border bg-background/90 text-muted-foreground shadow-sm backdrop-blur">
+							<button type="button" onClick={() => zoomCentre(1 / 1.25)} className="flex size-8 items-center justify-center rounded-full transition-colors hover:text-foreground" aria-label="Zoom out" title="Zoom out">
+								<Minus className="size-3.5" />
+							</button>
+							<span className="w-10 text-center text-xs tabular-nums">{Math.round(view.k * 100)}%</span>
+							<button type="button" onClick={() => zoomCentre(1.25)} className="flex size-8 items-center justify-center rounded-full transition-colors hover:text-foreground" aria-label="Zoom in" title="Zoom in">
+								<Plus className="size-3.5" />
+							</button>
+							<button type="button" onClick={fitView} className="flex size-8 items-center justify-center rounded-full border-l transition-colors hover:text-foreground" aria-label="Fit to screen" title="Fit to screen">
+								<Maximize className="size-3.5" />
+							</button>
 						</div>
 					) : null}
 				</div>

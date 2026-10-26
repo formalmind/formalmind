@@ -69,7 +69,11 @@ pub fn map(folder: &str, entry: &str) -> Result<Value, String> {
     // The protocol's own code: contracts the entry compiles that aren't tests.
     let protocol: BTreeSet<&str> = g.contracts.values().filter(|c| g.files.get(&c.file).is_none_or(|f| !f.path.starts_with("test/"))).map(|c| c.name.as_str()).collect();
     let cov = crate::analysis::coverage_opts(folder, &json!({}));
-    let branches = concolity::coverage::cached(&cov);
+    // This tree's branch map, or else the project's last one (marked stale): forge rewriting an untracked file is a
+    // new tree, and the map shouldn't go blank for that.
+    let latest = concolity::coverage::latest(&cov);
+    let current = latest.as_ref().map(|(_, now)| *now);
+    let branches = latest.map(|(b, _)| b);
     let explored: HashMap<(String, usize, String, usize, bool), Value> = std::fs::read_to_string(root.join(".formal/explore.json"))
         .ok()
         .and_then(|t| serde_json::from_str::<Value>(&t).ok())
@@ -147,7 +151,7 @@ pub fn map(folder: &str, entry: &str) -> Result<Value, String> {
         "contract": g.contracts.get(&a.scope.entry).map(|c| c.name.clone()),
         "functions": functions,
         "edges": edges.into_iter().map(|(a, b)| json!([a, b])).collect::<Vec<_>>(),
-        "coverage": branches.is_some(),
+        "coverage": current.map(|now| if now { "current" } else { "stale" }),
         "explored": updated,
         "outside": outside,
     }))
