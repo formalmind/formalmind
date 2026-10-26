@@ -549,7 +549,7 @@ To see what the bytecode actually does, debug it yourself: debug_open a test fil
 The shared state is .formal/: plan.md is the checklist (`- [ ]` todo, `- [x]` proven, `- [!]` blocked or a bug). {lean} \
 Never leave `sorry`, `admit`, `native_decide` or new axioms. \
 If you find a real bug (a reachable violation of an intended property, loss of funds, broken accounting, access control), first write a Foundry PoC test under test/formal/ (e.g. test/formal/RouterMatchBook.t.sol, reusing the repo's test setup under test/) whose test passes by demonstrating the exploit, run it with `forge test --match-path <file>`, then call report_bug with that path: it is filed in audit/README.md as an open finding. \
-Be brief; end with one short paragraph saying what you did and what's next.{}",
+The maintainer follows your work in the chat, so think aloud in short notes between tool calls: which theorem or property you are working on and what it means for the contract, the goal Lean shows, what a build or check told you (the key error, in a line), and how you will fix it; when you change approach, say why. A sentence or two each, no filler. End with one short paragraph saying what you did and what's next.{}",
         if goal.is_empty() { String::new() } else { format!("\n\nThe maintainer's focus: {goal}") }
     );
     let job = match role {
@@ -985,6 +985,18 @@ impl Turn<'_> {
                                 });
                             }
                         }
+                    }
+                    if name == "write_file" {
+                        // The chat shows the write as a diff against what was there (the agent's reply stays short).
+                        let path = input["path"].as_str().unwrap_or("").trim_start_matches("./").to_string();
+                        self.emit("tool", role, item, format!("write_file {path}"));
+                        let before = std::fs::read_to_string(root.join(&path)).unwrap_or_default();
+                        let r = call_tool(&root, name, input).await;
+                        let after = std::fs::read_to_string(root.join(&path)).unwrap_or_default();
+                        let diff = similar::TextDiff::from_lines(&before, &after).unified_diff().context_radius(3).header(&format!("a/{path}"), &format!("b/{path}")).to_string();
+                        let shown_diff: String = diff.chars().take(20_000).collect();
+                        self.emit("result", role, item, if diff.is_empty() { r.clone() } else { format!("{r}\n```diff\n{shown_diff}```") });
+                        return r;
                     }
                     self.emit("tool", role, item, format!("{name} {shown}"));
                     let r = call_tool(&root, name, input).await;

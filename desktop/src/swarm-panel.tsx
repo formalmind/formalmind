@@ -220,7 +220,9 @@ function CallRow({ row, running, now, defaultOpen = false }: { row: { call: Ev; 
 			{open ? (
 				<div className="space-y-1.5 border-t bg-muted/30 px-3 py-2">
 					<p className="whitespace-pre-wrap break-all font-mono text-[11px] text-foreground/80">$ {line}</p>
-					{row.result?.text.trim() ? (
+					{row.result?.text.includes("\n```diff\n") ? (
+						<DiffOutput text={row.result.text} />
+					) : row.result?.text.trim() ? (
 						<ToolOutput call={row.call.text} text={row.result.text} />
 					) : (
 						// No output yet: still running (coverage runs the whole suite), or the session stopped first.
@@ -235,6 +237,29 @@ function CallRow({ row, running, now, defaultOpen = false }: { row: { call: Ev; 
 const EXT: Record<string, string> = { sol: "solidity", lean: "lean", ts: "typescript", tsx: "tsx", js: "javascript", json: "json", md: "markdown", toml: "toml", sh: "bash", py: "python", yml: "yaml", yaml: "yaml" };
 
 /** A tool's output, highlighted by the file it read (or as shell for a run); read_file's line numbers sit in a gutter. */
+/** A file write as the swarm reports it: its one-line result, then the unified diff, added lines green, removed red. */
+function DiffOutput({ text }: { text: string }) {
+	const [head, rest] = text.split("\n```diff\n");
+	const lines = rest.replace(/```\s*$/, "").replace(/\n$/, "").split("\n");
+	return (
+		<div className="space-y-1.5">
+			<p className="font-mono text-[11px] text-muted-foreground">{head}</p>
+			<CodeBlock size="sm" className="text-[11px]">
+				<CodeBlockContent className="max-h-72">
+					{lines.map((l, i) => (
+						<span
+							key={i}
+							className={`block whitespace-pre ${l.startsWith("+++") || l.startsWith("---") ? "text-muted-foreground" : l.startsWith("@@") ? "text-sky-600 dark:text-sky-400" : l.startsWith("+") ? "bg-emerald-500/10 text-emerald-700 dark:text-emerald-400" : l.startsWith("-") ? "bg-red-500/10 text-red-700 dark:text-red-400" : ""}`}
+						>
+							{l || " "}
+						</span>
+					))}
+				</CodeBlockContent>
+			</CodeBlock>
+		</div>
+	);
+}
+
 function ToolOutput({ call, text }: { call: string; text: string }) {
 	const [tool, path = ""] = call.split(" ");
 	const language = tool === "run" ? "bash" : (EXT[path.split(".").pop() ?? ""] ?? "text");
