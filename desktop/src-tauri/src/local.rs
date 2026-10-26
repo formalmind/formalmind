@@ -263,9 +263,16 @@ pub fn folder_git_graph(path: String) -> Result<GitGraph, String> {
         return Err("Add the folder first".into());
     }
     let dir = Path::new(&path);
-    let log = git(&["log", "--all", "--date-order", "-n", "80", "--format=%H%x1f%P%x1f%D%x1f%s%x1f%ct"], Some(dir))?;
-    let commits = log
-        .lines()
+    let format = "--format=%H%x1f%P%x1f%D%x1f%s%x1f%ct";
+    // The newest commits on every branch, and always HEAD's own line, however old (a release checked out to prove).
+    let all = git(&["log", "--all", "--date-order", "-n", "80", format], Some(dir))?;
+    let mine = git(&["log", "--date-order", "-n", "20", format, "HEAD"], Some(dir)).unwrap_or_default();
+    let mut seen = std::collections::HashSet::new();
+    let mut lines: Vec<&str> = all.lines().chain(mine.lines()).filter(|l| seen.insert(l.split('\u{1f}').next().unwrap_or_default().to_string())).collect();
+    // Newest first, so the lanes read top to bottom.
+    lines.sort_by_key(|l| std::cmp::Reverse(l.rsplit('\u{1f}').next().and_then(|t| t.parse::<i64>().ok()).unwrap_or(0)));
+    let commits = lines
+        .into_iter()
         .filter_map(|l| {
             let f: Vec<&str> = l.split('\u{1f}').collect();
             (f.len() == 5).then(|| Commit {
