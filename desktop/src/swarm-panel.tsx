@@ -110,13 +110,13 @@ export function Steps({ steps, running }: { steps: { call: Ev; result?: Ev }[]; 
 				<TraceCollapsibleTrigger>
 					<TraceLine status={running ? "running" : undefined}>
 						<TraceIcon><Terminal className="size-3.5" /></TraceIcon>
-						<TraceTitle className="font-mono text-[11px]">{one ?? `Used ${steps.length} tools`}</TraceTitle>
+						<TraceTitle className="overflow-visible whitespace-pre-wrap font-mono text-[11px] [overflow-wrap:anywhere]">{one ?? `Used ${steps.length} tools`}</TraceTitle>
 					</TraceLine>
 				</TraceCollapsibleTrigger>
 				<TraceCollapsibleContent className="ml-2 space-y-2">
 					{steps.map((s, i) => (
 						<div key={i} className="space-y-1">
-							<p className="truncate font-mono text-[11px] text-foreground/80">› {s.call.text}</p>
+							<p className="whitespace-pre-wrap font-mono text-[11px] text-foreground/80 [overflow-wrap:anywhere]">› {s.call.text}</p>
 							{s.result?.text.trim() ? (
 								<ToolOutput call={s.call.text} text={s.result.text} />
 							) : null}
@@ -141,9 +141,14 @@ function ToolOutput({ call, text }: { call: string; text: string }) {
 	const body = first < 0 ? (tool === "read_file" ? [] : all) : all.slice(first);
 	const code = body.map((l, i) => numbered[first + i]?.[2] ?? l).join("\n");
 	const lines = useHighlightedCode(code, language);
+	// From its first line: nothing (scroll anchoring as the highlighting lands, a stray scroll) leaves it opened mid-way.
+	const box = useRef<HTMLPreElement>(null);
+	useLayoutEffect(() => {
+		if (box.current) box.current.scrollTop = 0;
+	}, [text, lines]);
 	return (
 		<CodeBlock size="sm" className="text-[11px]">
-			<CodeBlockContent className="max-h-48">
+			<CodeBlockContent ref={box} className="max-h-48 [overflow-anchor:none]">
 				{head.map((l, i) => <span key={`h${i}`} className="block text-muted-foreground">{l}</span>)}
 				{lines.map((line, i) => (
 					<span key={i} className="block whitespace-pre">
@@ -2545,7 +2550,7 @@ export function SwarmPanel({ folder, name, scan, bridge, session, file: openPath
 			/>
 		) : null}
 		{mode === "audit" ? (
-			<div className="pointer-events-auto absolute bottom-3 left-3 right-3 top-[var(--fm-top)] z-10 flex min-h-0 flex-col overflow-hidden rounded-2xl border bg-muted/60 p-1">
+			<div data-fm-proofs className="pointer-events-auto absolute bottom-3 left-3 right-3 top-[var(--fm-top)] z-10 flex min-h-0 flex-col overflow-hidden rounded-2xl border bg-muted/60 p-1">
 				<AuditView folder={folder} scan={scan} invoke={invoke} onOpenFile={view} reload={reload} />
 			</div>
 		) : null}
