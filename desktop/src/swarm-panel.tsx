@@ -1640,8 +1640,6 @@ export function SwarmPanel({ folder, name, scan, bridge, session, file: openPath
 	// Swarm and Concolic share the canvas, the chat and the agent's debugger; Concolic's sessions are bug searches.
 	const canvas = mode === "swarm" || mode === "concolic";
 	const concolic = mode === "concolic";
-	// Claude Code runs the hunter only; the formal agents need credits or a key.
-	const claudeCodeOnly = provider === "claude-code" && !concolic;
 	// The main contract's entry points, read from the AST, so the plan can name the ones each item covers.
 	const [entryUnits, setEntryUnits] = useState<AstUnit[]>([]);
 	const mainSource = (scan?.solidity ?? []).find((f) => f.startsWith("src/") && !f.endsWith(".t.sol") && !f.endsWith(".s.sol")) ?? null;
@@ -2277,8 +2275,8 @@ export function SwarmPanel({ folder, name, scan, bridge, session, file: openPath
 						isLoading={Boolean(run)}
 						allowEmpty={!run && !concolic}
 						sendClassName="btn-dark !px-0"
-						sendDisabled={!run && ((Boolean(ownKey) && !hasKey) || claudeCodeOnly)}
-						sendTitle={run ? (say.trim() ? "Send" : "Stop the session") : ownKey && !hasKey ? `Add your ${ownKey} key in Settings first` : claudeCodeOnly ? "Claude Code runs the Concolic hunter only: pick credits or a key in Settings for the formal agents" : concolic ? "Start the bug search with this message" : "Start the swarm"}
+						sendDisabled={!run && Boolean(ownKey) && !hasKey}
+						sendTitle={run ? (say.trim() ? "Send" : "Stop the session") : ownKey && !hasKey ? `Add your ${ownKey} key in Settings first` : concolic ? "Start the bug search with this message" : "Start the swarm"}
 						modelPicker={{
 							value: pickedModel,
 							options: models,

@@ -77,7 +77,7 @@ export function SettingsPage() {
 		const p = read("fm:provider");
 		return p === "anthropic" || p === "openai" || p === "claude-code" ? p : "formal";
 	});
-	// Claude Code on this computer: its version, or why it can't run (for the hunter on your own Claude plan).
+	// Claude Code on this computer: its version and plan, or why it can't run the agents on your own Claude plan.
 	const [claudeCode, setClaudeCode] = useState<{ ok: boolean; text: string } | null>(null);
 	useEffect(() => {
 		void invoke<string>("claude_code_status").then((v) => setClaudeCode({ ok: true, text: v }), (e) => setClaudeCode({ ok: false, text: String(e) }));
@@ -142,7 +142,7 @@ export function SettingsPage() {
 						<label className="flex items-center justify-between gap-4">
 							<span>
 								<span className="font-medium">Run agents via</span>
-								<span className="block text-xs text-muted-foreground">Credits run Claude, metered by formal.team and shown in Billing. Your own key goes straight to Anthropic (Claude) or OpenAI (GPT-5). Claude Code runs the Concolic hunter on your own Claude plan (Max or Pro), with the `claude` you're logged in to.</span>
+								<span className="block text-xs text-muted-foreground">Credits run Claude, metered by formal.team and shown in Billing. Your own key goes straight to Anthropic (Claude) or OpenAI (GPT-5). Claude Code runs every agent on your own Claude plan (Max or Pro), through the `claude` you're signed in to: nothing is charged to credits or a key, and your plan's usage limits apply.</span>
 							</span>
 							<select value={provider} onChange={(e) => pick(e.target.value as Provider)} className="h-8 rounded-lg border bg-background px-2 text-sm">
 								<option value="formal">formal.team credits</option>
@@ -153,7 +153,7 @@ export function SettingsPage() {
 						</label>
 						{claudeCode ? (
 							<p className={`text-xs ${claudeCode.ok ? "text-muted-foreground" : "text-amber-600"}`}>
-								{claudeCode.ok ? `Claude Code ${claudeCode.text} is installed. With it picked, the Concolic hunter runs on it; the formal agents need credits or a key.` : claudeCode.text}
+								{claudeCode.ok ? `${claudeCode.text}. With it picked, the swarm and the Bug Hunter run on it.` : claudeCode.text}
 							</p>
 						) : null}
 						<ApiKey vendor="anthropic" name="Anthropic" placeholder="sk-ant-…" onSaved={() => flash("Key saved")} />

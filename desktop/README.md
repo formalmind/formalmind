@@ -126,11 +126,28 @@ can be raised to keep going.
 nowhere and pushes nothing; its tools can't run git. Activity shows in the app (the Swarm canvas, the plan card, the
 Proofs and Bugs pages), and the canvas links nowhere outside it.
 
-**Who pays for the model.** Files, `lake` and `forge` run here; only the model calls leave, by exactly one of two
-routes, picked in Settings → Models (`fm:provider`): **formal.team credits** (`/api/desktop/model-session` mints a
-session per agent turn with the desktop sign-in, charged as `local/<folder>` with the agent and item), or **your own
-Anthropic key** from the keychain (`team.formal.desktop` / `anthropic`), straight to `api.anthropic.com`. Every event
-is logged to `.formal/runs/<run>.jsonl`.
+**Who pays for the model.** Files, `lake` and `forge` run here; only the model calls leave, by exactly one route,
+picked in Settings → Models (`fm:provider`): **formal.team credits** (`/api/desktop/model-session` mints a
+session per agent turn with the desktop sign-in, charged as `local/<folder>` with the agent and item), **your own
+Anthropic key** from the keychain (`team.formal.desktop` / `anthropic`), straight to `api.anthropic.com`, or
+**Claude Code on your Claude plan** (`claude-code`). Every event is logged to `.formal/runs/<run>.jsonl`.
+
+**On Claude Code** (`src-tauri/src/claude_code.rs`), each agent turn is one `claude -p` in the folder, with the
+`claude` you installed and signed in to yourself (Max or Pro; Settings shows what `claude auth status` reports, and
+Start refuses until it is signed in). The app never sees or stores the sign-in, and it unsets `ANTHROPIC_API_KEY` for
+the run so the plan pays, not a stray key. The role keeps everything it has on the API: its system prompt replaces
+Claude Code's (`--system-prompt`), Claude Code's own tools are off (`--tools ""`), and the role's tools are served by
+the swarm over MCP on 127.0.0.1 with a per-turn token (`Bridge`), answered by the same code as on the API, so the
+plan, the check, review, `report_bug` and the files a prover writes work the same. Nothing from your Claude Code setup
+or the project reaches the agent (`--setting-sources ""`: no settings, hooks, CLAUDE.md, skills or other MCP
+servers). The task goes in as a stream-json message, so an audit report's PDF is still a document. Each job has its
+own Claude session id, kept in `~/.formalmind/claude-code/<project>-<hash>/<run>/` with the raw stream and stderr, so a
+quit mid-job resumes the conversation (`--resume`). Nothing is added to the session's spend; your plan's usage limits
+apply instead, and hitting one pauses the swarm with the job still running (Start again after the reset).
+Anthropic allows this because the person signs in to the unmodified Claude Code binary with their own plan. The app
+must never offer a Claude login itself, handle Claude credentials, or route one person's plan for someone else
+(code.claude.com/docs/en/legal-and-compliance). Plan limits assume ordinary, individual use, so a swarm left running
+for a long time will hit them.
 
 The Swarm canvas follows the events: the working agent sits on its item saying what it's doing, the Swarm notebook
 lists the current turn's steps, the ledger has a line per turn, and the Proofs page and Bugs read again when an item is proven
