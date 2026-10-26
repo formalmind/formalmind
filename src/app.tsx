@@ -53,18 +53,26 @@ const UsagePage = page(() => import("@/components/usage/usage-page"), (m) => m.U
 const BillingPage = page(() => import("@/components/billing/billing-page"), (m) => m.BillingPage);
 const SettingsPage = page(() => import("@/components/settings-page"), (m) => m.SettingsPage);
 const FirstProject = page(() => import("@/components/projects/project-pages"), (m) => m.FirstProject);
+const DocsSite = page(() => import("@/components/docs/docs-site"), (m) => m.DocsSite);
+
+/** docs.formal.team serves the guide at its root; formal.team serves it at /docs. Null elsewhere. */
+function docsBase(host: string, path: string): string | null {
+	if (host.startsWith("docs.")) return "";
+	return path === "/docs" || path.startsWith("/docs/") ? "/docs" : null;
+}
 
 type User = SessionData["user"];
 
-/** Asks the Worker once who is signed in; undefined while that answer is on its way. */
-function useUser() {
+/** Asks the Worker once who is signed in; undefined while that answer is on its way (and while `skip`: the docs). */
+function useUser(skip = false) {
 	const [user, setUser] = useState<User | null | undefined>(undefined);
 	useEffect(() => {
+		if (skip) return;
 		fetch("/api/me")
 			.then((res) => (res.ok ? res.json() : { user: null }))
 			.then((body: { user: User | null }) => setUser(body.user))
 			.catch(() => setUser(null));
-	}, []);
+	}, [skip]);
 	return user;
 }
 
@@ -110,7 +118,19 @@ function RepoChat() {
 }
 
 export function App() {
-	const user = useUser();
+	const { pathname } = useLocation();
+	// The docs are public: they neither ask for nor wait for the session.
+	const docs = docsBase(window.location.hostname, pathname);
+	const user = useUser(docs !== null);
+	if (docs !== null) {
+		return (
+			<ThemeProvider>
+				<Suspense fallback={null}>
+					<DocsSite base={docs} />
+				</Suspense>
+			</ThemeProvider>
+		);
+	}
 	if (user === undefined) return null;
 	const signedIn = Boolean(user);
 

@@ -128,6 +128,7 @@ ${SHORT} The full account, how the swarm works and where it keeps its files incl
 
 ## App
 
+- [Docs](https://docs.formal.team): the guide to the app (install, the swarm, Statements, Proofs, Bugs, the Bug Hunter, files, MCP); every page as Markdown, listed in [its llms.txt](https://docs.formal.team/llms.txt)
 - [Download for Mac](${MAC_DOWNLOAD}): the desktop app, one universal build; the local swarm runs here
 - [Download for Windows](${WINDOWS_DOWNLOAD}): the same app for Windows
 - [Releases](${RELEASES}): every version of the desktop app
