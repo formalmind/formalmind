@@ -17,6 +17,7 @@ import { openOnWeb } from "@/lib/open-web";
 import { ChatScrubber } from "./chat-scrubber";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuRadioGroup, DropdownMenuRadioItem, DropdownMenuSeparator, DropdownMenuSub, DropdownMenuSubContent, DropdownMenuSubTrigger, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { ChatMarkdown } from "@/components/chat-markdown";
+import { GitTree } from "./git-tree";
 import { CodeBlock, CodeBlockContent } from "@/components/ui/code-block";
 import { useHighlightedCode } from "@/hooks/use-highlighted-code";
 import { Message, MessageContent, MessageHeader } from "@/components/ui/message";
@@ -2354,6 +2355,8 @@ export function SwarmPanel({ folder, name, scan, bridge, session, file: openPath
 				<div className="absolute right-3 top-3 flex items-center gap-2">{actions}</div>
 			</div>
 		)}
+		{/* The Mac app's canvas shows where the swarm works: the folder's git tree, HEAD and the uncommitted proofs on it. */}
+		{mode === "swarm" && slot && scan?.git ? <GitTree folder={folder} invoke={invoke} working={Boolean(run)} /> : null}
 		{mode === "swarm" && !slot ? (
 			<section className={`pointer-events-auto absolute left-3 top-[max(var(--fm-top),0.75rem)] z-10 flex w-[min(20rem,calc(100%-1.5rem))] flex-col overflow-hidden rounded-2xl border bg-muted/80 p-1 shadow-pop backdrop-blur ${planOpen ? "max-h-[calc(100%-var(--fm-top)-1rem)]" : ""}`}>
 				<button type="button" onClick={() => setPlanOpen(!planOpen)} aria-expanded={planOpen} className="flex h-8 shrink-0 items-center gap-2 px-2.5 text-left">

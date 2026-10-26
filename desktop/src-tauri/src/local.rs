@@ -236,6 +236,51 @@ fn git(args: &[&str], dir: Option<&Path>) -> Result<String, String> {
     }
 }
 
+/// One commit in a folder's history, for the canvas's git tree.
+#[derive(Serialize)]
+pub struct Commit {
+    id: String,
+    parents: Vec<String>,
+    /// Branch and tag names pointing at it (`HEAD -> main`, `origin/main`, `tag: v1.0.0`).
+    refs: Vec<String>,
+    subject: String,
+    time: i64,
+}
+
+#[derive(Serialize)]
+pub struct GitGraph {
+    commits: Vec<Commit>,
+    head: Option<String>,
+    branch: Option<String>,
+    /// Files changed and not committed: the work in progress on top of HEAD.
+    dirty: usize,
+}
+
+/// The latest commits on every branch of an added folder, newest first, read with git (nothing is written).
+#[tauri::command(async)]
+pub fn folder_git_graph(path: String) -> Result<GitGraph, String> {
+    if !read()?.allows(&path) {
+        return Err("Add the folder first".into());
+    }
+    let dir = Path::new(&path);
+    let log = git(&["log", "--all", "--date-order", "-n", "80", "--format=%H%x1f%P%x1f%D%x1f%s%x1f%ct"], Some(dir))?;
+    let commits = log
+        .lines()
+        .filter_map(|l| {
+            let f: Vec<&str> = l.split('\u{1f}').collect();
+            (f.len() == 5).then(|| Commit {
+                id: f[0].into(),
+                parents: f[1].split_whitespace().map(String::from).collect(),
+                refs: f[2].split(", ").filter(|r| !r.is_empty()).map(String::from).collect(),
+                subject: f[3].into(),
+                time: f[4].parse().unwrap_or(0),
+            })
+        })
+        .collect();
+    let dirty = git(&["status", "--porcelain"], Some(dir)).map(|s| s.lines().count()).unwrap_or(0);
+    Ok(GitGraph { commits, head: git(&["rev-parse", "HEAD"], Some(dir)).ok(), branch: git(&["rev-parse", "--abbrev-ref", "HEAD"], Some(dir)).ok(), dirty })
+}
+
 /// Whether a folder's origin is this GitHub repository (https or ssh, with or without .git).
 fn is_repo(folder: &Path, repo: &str) -> bool {
     git(&["remote", "get-url", "origin"], Some(folder)).is_ok_and(|url| {
