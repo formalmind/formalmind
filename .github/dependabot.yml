@@ -1,0 +1,25 @@
+# Dependabot opens update PRs weekly; security updates come as soon as an advisory lands.
+version: 2
+updates:
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: weekly
+    groups:
+      minor-and-patch:
+        update-types: [minor, patch]
+  - package-ecosystem: cargo
+    directories: [/desktop/src-tauri, /mobile/src-tauri, /crates/formal-ast, /crates/formal-ast-wasm, /crates/sol-debug]
+    schedule:
+      interval: weekly
+    ignore:
+      # tree-sitter-solidity 1.2 doesn't load under tree-sitter-highlight 0.26+ (the highlighter stops); wait for it.
+      - dependency-name: tree-sitter-highlight
+        versions: [">=0.26"]
+    groups:
+      minor-and-patch:
+        update-types: [minor, patch]
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly

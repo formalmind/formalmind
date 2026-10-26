@@ -7,7 +7,7 @@ import { FolderMenu, type FolderMenuItem } from "@/components/folder-menu";
  * A project or folder in the sidebar. Selected, it shows its files underneath (`children`, the file tree); its name
  * opens it, and folds the tree when it's already open.
  */
-export function TreeFolder({ name, title, href, current, action, menu, dim, children }: {
+export function TreeFolder({ name, title, href, current, action, menu, dim, working, children }: {
 	name: string;
 	title?: string;
 	href: string;
@@ -18,21 +18,24 @@ export function TreeFolder({ name, title, href, current, action, menu, dim, chil
 	menu?: FolderMenuItem[];
 	/** Archived, shown faded. */
 	dim?: boolean;
+	/** Agents are working in it: the folder icon pulses. */
+	working?: boolean;
 	children?: React.ReactNode;
 }) {
 	const [open, setOpen] = useState(true);
 	const navigate = useNavigate();
 	const shown = current && open;
+	const icon = `size-4 shrink-0 ${working ? "text-emerald-600 motion-safe:animate-pulse dark:text-emerald-400" : ""}`;
 	const row = (dots: React.ReactNode) => (
 			<div className={`group/folder flex h-8 items-center rounded-md pr-1 hover:bg-sidebar-accent ${current ? "text-sidebar-foreground" : ""}`}>
 				<button
 					type="button"
 					onClick={() => (current ? setOpen(!open) : (setOpen(true), navigate(href)))}
-					title={title ?? name}
+					title={working ? `${title ?? name} · agents working` : title ?? name}
 					aria-expanded={current ? open : undefined}
 					className={`flex h-8 min-w-0 flex-1 items-center gap-2 px-2 text-left text-sm outline-none focus-visible:ring-2 focus-visible:ring-sidebar-ring ${current ? "font-medium" : "font-normal text-sidebar-foreground/90"}`}
 				>
-					{shown ? <FolderOpen className="size-4 shrink-0" /> : <Folder className="size-4 shrink-0" />}
+					{shown ? <FolderOpen className={icon} /> : <Folder className={icon} />}
 					<span className="truncate group-data-[collapsible=icon]:hidden">{name}</span>
 				</button>
 				{dots}

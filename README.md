@@ -1,4 +1,4 @@
-<p align="center"><img src="public/brand/files/social/formalmind-x-header-1500x500.png" alt="Formal Mind" width="100%" /></p>
+![Formal Mind 0.1.41: Home, with local folders and imported GitHub repositories in the sidebar, and Add a project](docs/images/formal-mind-0.1.41-home.png)
 
 # Formal Mind
 
@@ -9,6 +9,30 @@ machine-checked by `lake build`, with no `sorry` and no new axioms.
 - **Web:** [formal.team](https://formal.team). Paste a repository, watch the plan, start the swarm.
 - **Mac:** [Download for Mac](https://github.com/formalmind/formalmind/releases/latest/download/Formal-Mind-mac.dmg).
   Also runs agent turns on folders on your machine, so the code never leaves it ([desktop/](desktop/README.md)).
+
+## The problem
+
+DeFi users lose money to logic and accounting bugs: code that compiles, passes its tests and audits, and still lets an
+attacker withdraw more than was deposited. Hacken's 2025 report puts losses from code logic errors at $512 million that
+year, including heavily audited and battle-tested codebases. The largest, Balancer v2 in November 2025, lost
+$128 million to a rounding error in pool math, the kind of invariant a proof checks.
+
+Formal verification rules out whole classes of these bugs, but a proof is only as good as its match to the deployed
+code. Protocols change weekly, specs don't, and few teams can afford a verification engineer on every pull request.
+Formal Mind keeps the proofs in step with the code: every commit is checked against invariants such as "escrow always
+equals open orders" and "no match creates or destroys tokens".
+
+## Focus
+
+**Prove money invariants, and test on Solidity protocols on GitHub.**
+
+- **Money invariants first.** Conservation (no call creates or destroys tokens), solvency (what the contract holds
+  covers what it owes), escrow (locked funds equal open obligations), and fees and rounding that never favour the
+  caller. These are what users lose money to; other properties wait.
+- **Tested on real protocols.** Beyond Async Swap, the swarm runs on public Solidity protocols on GitHub, and each run
+  reports which money invariants were proved, which failed with a counterexample, and what was left unmodelled.
+
+Where it stands, the method ahead, open decisions and milestones: [docs/roadmap.md](docs/roadmap.md).
 
 ## How it works
 
@@ -72,7 +96,7 @@ built yet is labelled planned.
 | `/.well-known/api-catalog` | RFC 9727 linkset: the two MCP servers, the open `POST /api/onboarding/plan`, and the token-capable account routes |
 | `/.well-known/agent-skills/index.json` | Four skills with sha256 digests: `run-the-local-swarm`, `onboard-a-repository`, `read-formal-mind-results` and `connect-formal-mind-as-mcp` |
 | `/.well-known/mcp/server-card.json`, `/mcp` | Read-only MCP server (Streamable HTTP, no auth): `get_audit_format`, `get_example_audit` (Formal Mind's audit of asyncswap/contracts), `get_app_release` |
-| `/mcp/account` | Account MCP server behind an OAuth access token (`worker/account-mcp.ts`): `my_projects`, `my_usage`, `my_credits`, `swarm_state` (swarm:read), `plan_repository`, `start_swarm` (swarm:write); 401 with `WWW-Authenticate: Bearer resource_metadata=…` without one |
+| `/mcp/account` | Account MCP server behind an OAuth access token or the desktop app's token (`worker/account-mcp.ts`, [docs/MCP.md](docs/MCP.md)): `my_projects`, `my_usage`, `my_credits`, `swarm_state`, `list_files`, `read_file`, `list_audits`, `list_findings`, `get_finding`, `proofs_coverage`, `report_quote`, `mac_swarm`, `mac_swarm_events` (swarm:read), `add_project`, `plan_repository`, `start_swarm`, `mac_swarm_send` (swarm:write); 401 with `WWW-Authenticate: Bearer resource_metadata=…` without one |
 | `/.well-known/oauth-authorization-server`, `/oauth/register`, `/oauth/authorize`, `/oauth/token`, `/oauth/revoke`, `/.well-known/jwks.json` | The OAuth 2.0 authorization server (`worker/oauth.ts`, `lib/oauth.ts`): RFC 8414 metadata, RFC 7591 registration of public clients, authorization code with PKCE after GitHub sign-in and a consent page, ES256 JWT access tokens (1 h) with rotated refresh tokens, RFC 7009 revocation |
 | `/.well-known/oauth-protected-resource`, `…/mcp/account` | RFC 9728 metadata for the API and for the account MCP server, both naming `https://formal.team` as the authorization server |
 | `/.well-known/poppy.json`, `/.well-known/ai-catalog.json` | Personal Agent Protocol (website-only) and the AI catalog of the artifacts above |

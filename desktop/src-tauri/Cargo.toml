@@ -31,7 +31,7 @@ revm = { version = "43", default-features = false, features = ["std"] }
 regex = "1"
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
 tokio = { version = "1", features = ["process", "time", "io-util", "sync", "macros"] }
-# The hunter's tools over MCP for Claude Code (127.0.0.1, one run).
+# The swarm's and the Bug Hunter's tools over MCP for Claude Code (127.0.0.1, one turn).
 tiny_http = "0.12"
 portable-pty = "0.9"
 

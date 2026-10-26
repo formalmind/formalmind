@@ -1220,7 +1220,7 @@ impl Cheats {
                 if let Some(label) = args.iter().find_map(|v| v.as_str()) {
                     self.labels.insert(a, label.to_string());
                 }
-                let point = k.verifying_key().to_encoded_point(false);
+                let point = k.verifying_key().to_sec1_point(false);
                 let (x, y) = (U256::from_be_slice(point.x().unwrap()), U256::from_be_slice(point.y().unwrap()));
                 Answer::Ok(
                     DynSolValue::Tuple(vec![DynSolValue::Address(a), DynSolValue::Uint(x, 256), DynSolValue::Uint(y, 256), DynSolValue::Uint(pk, 256)])
@@ -1320,20 +1320,17 @@ impl Cheats {
                 let (Some(k), Some(digest)) = (signing_key(uint(0)), args[1].as_fixed_bytes().map(|(b, _)| B256::from_slice(b))) else {
                     return Answer::Revert("sol-debug: sign: bad private key".into());
                 };
-                match k.sign_prehash_recoverable(digest.as_slice()) {
-                    Ok((sig, rec)) => {
-                        let bytes = sig.to_bytes();
-                        Answer::Ok(
-                            DynSolValue::Tuple(vec![
-                                DynSolValue::Uint(U256::from(27 + rec.to_byte()), 8),
-                                DynSolValue::FixedBytes(B256::from_slice(&bytes[..32]), 32),
-                                DynSolValue::FixedBytes(B256::from_slice(&bytes[32..]), 32),
-                            ])
-                            .abi_encode_params(),
-                        )
-                    }
-                    Err(e) => Answer::Revert(format!("sol-debug: sign: {e}")),
-                }
+                // k256 0.14 signs a 32-byte prehash without failing.
+                let (sig, rec): (k256::ecdsa::Signature, k256::ecdsa::RecoveryId) = k.sign_prehash_recoverable(digest.as_slice());
+                let bytes = sig.to_bytes();
+                Answer::Ok(
+                    DynSolValue::Tuple(vec![
+                        DynSolValue::Uint(U256::from(27 + rec.to_byte()), 8),
+                        DynSolValue::FixedBytes(B256::from_slice(&bytes[..32]), 32),
+                        DynSolValue::FixedBytes(B256::from_slice(&bytes[32..]), 32),
+                    ])
+                    .abi_encode_params(),
+                )
             }
             "label" => {
                 self.labels.insert(addr(0), args[1].as_str().unwrap_or("").to_string());
@@ -1797,7 +1794,7 @@ fn signing_key(pk: U256) -> Option<k256::ecdsa::SigningKey> {
 }
 
 fn key_address(k: &k256::ecdsa::SigningKey) -> Address {
-    let point = k.verifying_key().to_encoded_point(false);
+    let point = k.verifying_key().to_sec1_point(false);
     Address::from_slice(&keccak256(&point.as_bytes()[1..])[12..])
 }
 

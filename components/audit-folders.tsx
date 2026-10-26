@@ -2,7 +2,7 @@ import { useState } from "react";
 import { createPortal } from "react-dom";
 import { Plus, X } from "lucide-react";
 import { inDesktop } from "@/lib/open-web";
-import { readReportDirs, saveReportDirs } from "@/lib/report-dirs";
+import { readExtraReportDirs, saveReportDirs } from "@/lib/report-dirs";
 import { readEntryPoints, saveEntryPoints } from "@/lib/entry-points";
 
 /**
@@ -72,9 +72,9 @@ function PathList({ folder, label, values, onChange, pick, addLabel, placeholder
 	);
 }
 
-/** One project's audit report folders; removing the last one goes back to the defaults. */
+/** One project's added audit report folders (audit/, audits/ and reports/ are always read, so they aren't listed). */
 export function AuditFolders({ folder, label }: { folder: string; label?: string }) {
-	const [dirs, setDirs] = useState(() => readReportDirs(folder));
+	const [dirs, setDirs] = useState(() => readExtraReportDirs(folder));
 	return <PathList folder={folder} label={label} values={dirs} onChange={(next) => setDirs(saveReportDirs(folder, next.join(",")))} pick="folder" addLabel="Add folder" placeholder="docs/audits" />;
 }
 

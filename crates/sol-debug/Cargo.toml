@@ -14,7 +14,7 @@ categories = ["development-tools::debugging", "command-line-utilities"]
 alloy-dyn-abi = { version = "1", features = ["eip712"] }
 anyhow = "1"
 clap = { version = "4", features = ["derive"] }
-k256 = { version = "0.13", features = ["ecdsa"] }
+k256 = { version = "0.14", features = ["ecdsa"] }
 formal-ast = { version = "0.1.0", path = "../formal-ast" }
 ratatui = "0.30"
 revm = { version = "43", default-features = false, features = ["std"] }

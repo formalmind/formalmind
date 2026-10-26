@@ -162,6 +162,7 @@ pub fn run() {
             local::folder_add,
             local::folder_remove,
             local::folder_scan,
+            local::folder_git_graph,
             local::folder_tree,
             local::repo_local,
             local::folder_repo,
