@@ -2237,7 +2237,7 @@ export function SwarmPanel({ folder, name, scan, bridge, session, file: openPath
 								<i />
 							</span>
 							<span className="font-medium" style={{ color: colorOf(working.role) }}>{working.role}</span>
-							<span className="truncate">{working.text}</span>
+							<span className="fm-text-shimmer truncate">{working.text}</span>
 						</p>
 					) : null}
 					{finished ? <p className="rounded-lg border px-3 py-2 text-xs text-muted-foreground">Finished: {finished.text}</p> : null}
