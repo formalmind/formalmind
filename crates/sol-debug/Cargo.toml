@@ -23,7 +23,7 @@ serde_json = { version = "1", features = ["arbitrary_precision", "preserve_order
 toml = "0.8"
 tree-sitter-highlight = "0.25"
 tree-sitter-solidity = "1.2.13"
-ureq = "2"
+ureq = "3"
 
 [[bin]]
 name = "sol-debug"
