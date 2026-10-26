@@ -1478,11 +1478,11 @@ export function SwarmCursor({ role, x, y, say, turn, thinking, where, onWhereEnt
 				{(() => {
 					const pill = (
 						<>
-							{turn ? <span className="size-1.5 animate-pulse rounded-full bg-white" aria-hidden /> : null}
-							{role}
+							{/* Its turn or working: the name shimmers. */}
+							<span className={turn || thinking ? "fm-text-shimmer-light" : undefined}>{role}</span>
 							{/* Working right now: a small spinner by the name. */}
 							{thinking ? <span className="size-2 animate-spin rounded-full border border-white/25 border-t-white/80 [animation-duration:1.4s] motion-reduce:animate-none" aria-label="working" /> : null}
-							{turn ? <span className="font-normal opacity-80">· turn</span> : null}
+							{turn ? <span className="fm-text-shimmer-light font-normal">· turn</span> : null}
 						</>
 					);
 					const style = { backgroundColor: color };
