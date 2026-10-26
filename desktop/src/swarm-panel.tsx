@@ -1040,9 +1040,9 @@ export function BugsView({ folder, files, invoke, apiBase, bugs, openBug, setOpe
 
 export type Mode = "code" | "chat" | "swarm" | "roadmap" | "audit" | "bugs" | "debug";
 
-const PANE_WIDTH = 640;
+const PANE_WIDTH = 440;
 
-/** The Mac app's pane views, in the order the chat's top-right icons show them. */
+/** The views the Mac app shows in the middle, in the order the title bar's icons show them. */
 const PANE_VIEWS: { id: Mode; label: string; icon: typeof Code2 }[] = [
 	{ id: "swarm", label: "Canvas", icon: Network },
 	{ id: "audit", label: "Proofs", icon: ScanSearch },
@@ -1541,13 +1541,14 @@ export function SwarmPanel({ folder, name, scan, bridge, session, file: openPath
 		setChatSize({ w: 416, h: null });
 		store.set("fm:chat-size", JSON.stringify({ w: 416, h: null }));
 	};
-	// The Mac app's right pane: whether it is open and its width, dragged from its left edge. Kept across launches.
+	// The Mac app's chat pane on the right: whether it is open and its width, dragged from its left edge. Kept across
+	// launches.
 	const [paneOpen, setPaneOpen] = useState(() => store.get("fm:pane-open") !== "0");
-	const [paneWidth, setPaneWidth] = useState(() => Number(store.get("fm:pane-width")) || PANE_WIDTH);
+	const [paneWidth, setPaneWidth] = useState(() => Number(store.get("fm:chat-pane-width")) || PANE_WIDTH);
 	const startPaneResize = (e: React.PointerEvent) => {
 		e.preventDefault();
 		const start = { x: e.clientX, w: paneWidth };
-		// Room for the chat: it keeps at least 420px.
+		// Room for the view in the middle: it keeps at least 420px.
 		const max = (root.current?.clientWidth ?? 1200) - 420;
 		let last = paneWidth;
 		const move = (ev: PointerEvent) => {
@@ -1557,14 +1558,14 @@ export function SwarmPanel({ folder, name, scan, bridge, session, file: openPath
 		const up = () => {
 			window.removeEventListener("pointermove", move);
 			window.removeEventListener("pointerup", up);
-			store.set("fm:pane-width", String(last));
+			store.set("fm:chat-pane-width", String(last));
 		};
 		window.addEventListener("pointermove", move);
 		window.addEventListener("pointerup", up);
 	};
 	const resetPaneWidth = () => {
 		setPaneWidth(PANE_WIDTH);
-		store.set("fm:pane-width", String(PANE_WIDTH));
+		store.set("fm:chat-pane-width", String(PANE_WIDTH));
 	};
 	// Markdown files open rendered; the toggle shows their source (the choice is kept).
 	const [mdSource, setMdSource] = useState(() => store.get("fm:md-view") === "source");
@@ -2147,27 +2148,33 @@ export function SwarmPanel({ folder, name, scan, bridge, session, file: openPath
 	// What the right pane can show: the open one is highlighted, and clicking it again closes the pane.
 	const paneTools = (
 		<span className="ml-1 inline-flex shrink-0 items-center gap-0.5">
-			{[...PANE_VIEWS, ...(debug ? [{ id: "debug" as Mode, label: "Debug", icon: Terminal }] : [])].map(({ id, label, icon: Icon }) => {
-				const on = paneOpen && mode === id;
-				return (
-					<button
-						key={id}
-						type="button"
-						aria-pressed={on}
-						title={on ? `Close ${label}` : label}
-						aria-label={label}
-						onClick={() => {
-							const open = !on;
-							if (open) setMode(id);
-							setPaneOpen(open);
-							store.set("fm:pane-open", open ? "1" : "0");
-						}}
-						className={`inline-flex size-7 items-center justify-center rounded-md ${on ? "bg-background text-foreground shadow-sm" : "text-muted-foreground hover:bg-background hover:text-foreground"}`}
-					>
-						<Icon className="size-4" />
-					</button>
-				);
-			})}
+			{[...PANE_VIEWS, ...(debug ? [{ id: "debug" as Mode, label: "Debug", icon: Terminal }] : [])].map(({ id, label, icon: Icon }) => (
+				<button
+					key={id}
+					type="button"
+					aria-pressed={mode === id}
+					title={label}
+					aria-label={label}
+					onClick={() => setMode(id)}
+					className={`inline-flex size-7 items-center justify-center rounded-md ${mode === id ? "bg-background text-foreground shadow-sm" : "text-muted-foreground hover:bg-background hover:text-foreground"}`}
+				>
+					<Icon className="size-4" />
+				</button>
+			))}
+			{/* The chat pane on the right: open or close it. */}
+			<button
+				type="button"
+				aria-pressed={paneOpen}
+				title={paneOpen ? "Hide the chat" : "Talk to the swarm"}
+				aria-label="Chat"
+				onClick={() => {
+					setPaneOpen(!paneOpen);
+					store.set("fm:pane-open", paneOpen ? "0" : "1");
+				}}
+				className={`ml-1 inline-flex size-7 items-center justify-center rounded-md ${paneOpen ? "bg-background text-foreground shadow-sm" : "text-muted-foreground hover:bg-background hover:text-foreground"}`}
+			>
+				<TalkIcon className="size-4" />
+			</button>
 		</span>
 	);
 	// The conversation with the swarm: its sessions, budget and Stop on a gray bar, the messages and composer under it.
@@ -2543,18 +2550,16 @@ export function SwarmPanel({ folder, name, scan, bridge, session, file: openPath
 					slot,
 				)}
 				{actionsSlot ? createPortal(<>{ctxMenu}{costMenu}{paneTools}</>, actionsSlot) : null}
-				{/* The chat in the middle; the views open beside it. */}
-				<div className="flex min-w-0 flex-1 flex-col">
-					<div className="mx-auto flex h-full min-h-0 w-full max-w-3xl flex-col px-4 pb-3 pt-2">{chatPanel}</div>
+				{/* The view in the middle (Canvas, Proofs, Bugs, Code); the chat in the right pane. */}
+				<div className="relative min-w-0 flex-1" style={{ "--fm-top": "0px" } as React.CSSProperties}>
+					<div className="absolute inset-0 flex flex-col overflow-hidden">{modeViews}</div>
 				</div>
 				{paneOpen ? (
-					<>
-						<section className="relative flex min-h-0 shrink-0 flex-col overflow-hidden bg-background" style={{ width: paneWidth, "--fm-top": "0px" } as React.CSSProperties}>
-							<div className="absolute inset-0 flex flex-col overflow-hidden">{modeViews}</div>
-							{/* The view's card edge is the handle: drag the pane's left margin to resize, double-click for the default width. */}
-							<div onPointerDown={startPaneResize} onDoubleClick={resetPaneWidth} title="Drag to resize" className="absolute inset-y-0 left-1 z-30 w-4 cursor-col-resize" />
-						</section>
-					</>
+					<section className="relative flex min-h-0 shrink-0 flex-col px-3 pb-3 pt-2" style={{ width: paneWidth }}>
+						{chatPanel}
+						{/* Drag the pane's left margin to resize; double-click for the default width. */}
+						<div onPointerDown={startPaneResize} onDoubleClick={resetPaneWidth} title="Drag to resize" className="absolute inset-y-0 left-0 z-30 w-3 cursor-col-resize" />
+					</section>
 				) : null}
 			</div>
 		);
