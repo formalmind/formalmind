@@ -33,8 +33,10 @@ doesn't go on through the whole plan.
      tree, so a writer the agent missed is still checked.
 2. **Confirm.** The chat asks "is this what you meant?", with the claim restated in its own words, the functions it
    would be proved for, and the assumptions it made. Under the question are two or three replies it drafted for you:
-   one that confirms, and one or two that correct the likeliest misreadings. Click one to put it in the message box,
-   edit it if you like, and send. Or answer with **Yes** or **Edit** in the list.
+   one that confirms, and one or two that correct the likeliest misreadings. Open questions wait above the message
+   box, one at a time: pick a reply, **Next** to the following question, and **Send** answers them all. **Something
+   else…** lets you answer in your own words, and **Skip** leaves a question for later. Or answer with **Yes** or
+   **Edit** in the list.
 3. **Prove.** Each function becomes its own proof job, through the same prove, check and review loop as the plan.
    The theorem is named for the statement (`S01.Morpho_setFeeRecipient`) and lives in
    `formal/Refinement/Statements/S01/`. The swarm checks that it exists under that name and has no `sorry`, and shows
