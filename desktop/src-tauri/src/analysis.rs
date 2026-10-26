@@ -174,7 +174,7 @@ fn o_id(o: &debug::Opened) -> u32 {
     serde_json::to_value(o).ok().and_then(|v| v["id"].as_u64()).unwrap_or(0) as u32
 }
 
-fn coverage_opts(folder: &str, input: &Value) -> concolity::coverage::Options {
+pub(crate) fn coverage_opts(folder: &str, input: &Value) -> concolity::coverage::Options {
     let include = strings(&input["include"]);
     concolity::coverage::Options {
         root: PathBuf::from(folder),
@@ -250,7 +250,7 @@ fn tasks() -> &'static std::sync::Mutex<std::collections::HashMap<String, Vec<Ta
 }
 
 /// Runs coverage, explore or a forge command in the background; returns its task number.
-fn spawn_task(app: &AppHandle, folder: &str, tool: &str, input: Value) -> Result<usize, String> {
+pub(crate) fn spawn_task(app: &AppHandle, folder: &str, tool: &str, input: Value) -> Result<usize, String> {
     if !matches!(tool, "coverage" | "explore" | "run") {
         return Err(format!("{tool} can't run in the background: coverage, explore or run"));
     }
@@ -274,6 +274,8 @@ fn spawn_task(app: &AppHandle, folder: &str, tool: &str, input: Value) -> Result
             _ => crate::executor::run_command(std::path::Path::new(&folder), input["command"].as_str().unwrap_or("")).await.unwrap_or_else(|e| format!("error: {e}")),
         };
         let _ = tx.send(Some(out));
+        // The Reach page reads the new coverage and explore results.
+        let _ = tauri::Emitter::emit(&app, "reach:updated", json!({ "folder": folder, "tool": tool }));
         // Tell the chat; the session that started it is whichever hunt runs in this folder.
         crate::swarm::emit_in_folder(&app, &folder, "status", "hunter", "hunt", format!("background task {id} finished in {}: {what}", took_s(started.elapsed().as_secs())));
     });
@@ -295,11 +297,16 @@ fn start_task(app: &AppHandle, folder: &str, input: &Value) -> String {
     }
 }
 
+/// The folder's background tasks: each one's number, what it runs, its status and time so far.
+pub(crate) fn task_list(folder: &str) -> Value {
+    let all = tasks().lock().unwrap();
+    Value::Array(all.get(folder).map(|l| l.iter().enumerate().map(|(i, t)| json!({ "id": i + 1, "task": t.what, "status": if t.done.borrow().is_some() { "done" } else { "running" }, "seconds": t.started.elapsed().as_secs() })).collect()).unwrap_or_default())
+}
+
 async fn task_results(folder: &str, input: &Value) -> String {
     let Some(id) = input["id"].as_u64().map(|n| n as usize) else {
-        let all = tasks().lock().unwrap();
-        let list: Vec<Value> = all.get(folder).map(|l| l.iter().enumerate().map(|(i, t)| json!({ "id": i + 1, "task": t.what, "status": if t.done.borrow().is_some() { "done" } else { "running" }, "seconds": t.started.elapsed().as_secs() })).collect()).unwrap_or_default();
-        return if list.is_empty() { "no background tasks".into() } else { Value::Array(list).to_string() };
+        let list = task_list(folder);
+        return if list.as_array().is_none_or(|l| l.is_empty()) { "no background tasks".into() } else { list.to_string() };
     };
     let rx = tasks().lock().unwrap().get(folder).and_then(|l| l.get(id.wrapping_sub(1))).map(|t| t.done.clone());
     let Some(mut rx) = rx else { return format!("error: no background task {id}") };
@@ -436,9 +443,11 @@ async fn explore(folder: &str, input: &Value) -> Result<Value, String> {
         seeds: 2,
         only: input["only"].as_str().filter(|s| !s.is_empty()).map(str::to_string),
         target: input["target"].as_str().and_then(location),
+        campaign: None,
     };
     let report = tauri::async_runtime::spawn_blocking(move || concolity::explore::run(&opts)).await.map_err(|e| e.to_string())?.map_err(|e| format!("{e:#}"))?;
     let full = report.to_json();
+    save_explore(folder, &full);
     // The agent gets the sides something was learned about; the rest are counted.
     let mut counts = serde_json::Map::new();
     let mut by_line = vec![];
@@ -458,6 +467,25 @@ async fn explore(folder: &str, input: &Value) -> Result<Value, String> {
         "solver_calls": full["solver_calls"],
         "seconds": full["ms"].as_u64().unwrap_or(0) / 1000,
     }))
+}
+
+/// Keeps explore's outcomes in `.formal/explore.json` for the Reach page: a narrow run (`target`, `only`) updates the
+/// sides it explored and keeps the rest.
+fn save_explore(folder: &str, report: &Value) {
+    let path = PathBuf::from(folder).join(".formal/explore.json");
+    let key = |t: &Value| format!("{}:{}:{}:{}:{}", t["file"].as_str().unwrap_or(""), t["line"], t["code"].as_str().unwrap_or(""), t["pc"], t["jumped"]);
+    let mut all: std::collections::BTreeMap<String, Value> = std::fs::read_to_string(&path)
+        .ok()
+        .and_then(|t| serde_json::from_str::<Value>(&t).ok())
+        .map(|v| v["targets"].as_array().cloned().unwrap_or_default().into_iter().map(|t| (key(&t), t)).collect())
+        .unwrap_or_default();
+    for t in report["targets"].as_array().into_iter().flatten() {
+        all.insert(key(t), t.clone());
+    }
+    let updated = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0);
+    let doc = json!({ "updated": updated, "targets": all.into_values().collect::<Vec<_>>(), "findings": report["findings"] });
+    let _ = std::fs::create_dir_all(path.parent().unwrap());
+    let _ = std::fs::write(&path, serde_json::to_string_pretty(&doc).unwrap_or_default());
 }
 
 #[cfg(test)]
