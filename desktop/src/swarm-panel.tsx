@@ -8,7 +8,7 @@ import { ArrowDown, Bug, Check, ChevronDown, ChevronRight, Code2, Copy, Crosshai
 
 // The project roadmap (GitHub Projects-style), the same view the web app had on its own page.
 import { motion as vimMotion, search as vimSearch, setVimMode, useVimMode, type Cursor } from "@/components/vim-mode";
-import { useSearchParams } from "react-router";
+import { useNavigate, useSearchParams } from "react-router";
 import { ChatComposer } from "@/components/chat-composer";
 import { useReportDirs } from "@/lib/report-dirs";
 import { auditJsonPath, parseAuditDoc, type AuditDoc, type AuditFindingDoc } from "@/lib/audit-format";
@@ -1632,11 +1632,20 @@ export function SwarmPanel({ folder, name, scan, bridge, session, file: openPath
 	const [model, setModel] = useState(() => store.get("fm:model") ?? MODELS[0].value);
 	
 	// Set in Settings (desktop/src/settings.tsx).
-	const [provider] = useState<Provider>(() => {
+	const [provider, setProvider] = useState<Provider>(() => {
 		const p = store.get("fm:provider");
 		// Claude Code (your Claude plan) unless you picked credits or a key in Settings.
 		return p === "anthropic" || p === "openai" || p === "formal" ? p : "claude-code";
 	});
+	// The Claude plan Claude Code is signed in to ("Claude Max plan"), or null when it can't run the agents here.
+	const [claudePlan, setClaudePlan] = useState<string | null>(null);
+	useEffect(() => {
+		void invoke<string>("claude_code_status").then(
+			(v) => setClaudePlan(v.match(/your (Claude \w+ plan)/)?.[1] ?? "Claude plan"),
+			() => setClaudePlan(null),
+		);
+	}, [invoke]);
+	const navigate = useNavigate();
 	// The models for how the agents are run: GPT on your OpenAI key, Claude otherwise.
 	const models = provider === "openai" ? OPENAI_MODELS : MODELS;
 	const pickedModel = models.some((m) => m.value === model) ? model : models[0].value;
@@ -2468,31 +2477,63 @@ export function SwarmPanel({ folder, name, scan, bridge, session, file: openPath
 		</DropdownMenu>
 	) : null;
 	// The run's spend against its cap, with the cap's menu; in the Mac app it sits in the title bar.
+	// Who pays for the agents, in the title bar: your Claude plan (no spend or cap; its usage limit applies), or the spend
+	// against its cap on credits or a key. A run keeps the route it started with; a change applies at the next start.
 	const costMenu = provider === "claude-code" ? (
-		// On your Claude plan nothing is metered: no spend or cap, the plan's usage limit applies.
-		<span className="inline-flex h-7 shrink-0 items-center rounded-md border bg-background px-2 text-[11px] text-muted-foreground" title="The agents run on Claude Code with your Claude plan (Settings → Models)">
-			Claude plan
-		</span>
+		<DropdownMenu>
+			<DropdownMenuTrigger className="inline-flex h-7 shrink-0 items-center gap-1 rounded-md border bg-background px-2 text-[11px] text-muted-foreground outline-none hover:text-foreground" title="The agents run on Claude Code with your Claude plan">
+				{claudePlan ?? "Claude plan"}
+				<ChevronDown className="size-3" />
+			</DropdownMenuTrigger>
+			<DropdownMenuContent align="end" className="w-56">
+				<DropdownMenuLabel className="text-xs font-normal text-muted-foreground">The agents run on</DropdownMenuLabel>
+				<DropdownMenuItem className="text-[13px]">
+					{claudePlan ?? "Claude plan"}
+					<Check className="ml-auto size-3.5" />
+				</DropdownMenuItem>
+				<p className="px-2 pb-1.5 text-[11px] text-muted-foreground">Nothing is metered; the plan's usage limit pauses the swarm.</p>
+				<DropdownMenuSeparator />
+				<DropdownMenuItem onSelect={() => navigate("/settings?section=models")} className="text-[13px]">Credits or a key instead…</DropdownMenuItem>
+			</DropdownMenuContent>
+		</DropdownMenu>
 	) : (
 		<DropdownMenu>
 			<DropdownMenuTrigger className="inline-flex h-7 shrink-0 items-center gap-1 rounded-md border bg-background px-2 text-[11px] tabular-nums text-muted-foreground outline-none hover:text-foreground" title="Spending cap">
 				{run || viewing ? `$${spent.toFixed(2)} / $${budget}` : `Budget $${budget}`}
 				<ChevronDown className="size-3" />
 			</DropdownMenuTrigger>
-			<DropdownMenuContent align="end">
+			<DropdownMenuContent align="end" className="w-56">
 				<DropdownMenuLabel className="text-xs font-normal text-muted-foreground">Stop the swarm at</DropdownMenuLabel>
-				<DropdownMenuRadioGroup
-					value={String(budget)}
-					onValueChange={(v) => {
-						setBudget(Number(v));
-						store.set(budgetKey, v);
-						if (run) void invoke("swarm_set_budget", { folder, run, usd: Number(v) });
-					}}
-				>
-					{BUDGETS.map((b) => (
-						<DropdownMenuRadioItem key={b} value={String(b)} disabled={Boolean(run) && b <= spent}>${b}</DropdownMenuRadioItem>
-					))}
-				</DropdownMenuRadioGroup>
+				{BUDGETS.map((b) => (
+					<DropdownMenuItem
+						key={b}
+						disabled={Boolean(run) && b <= spent}
+						onSelect={() => {
+							setBudget(b);
+							store.set(budgetKey, String(b));
+							if (run) void invoke("swarm_set_budget", { folder, run, usd: b });
+						}}
+						className="text-[13px] tabular-nums"
+					>
+						${b}
+						{b === budget ? <Check className="ml-auto size-3.5" /> : null}
+					</DropdownMenuItem>
+				))}
+				{claudePlan ? (
+					<>
+						<DropdownMenuSeparator />
+						<DropdownMenuItem
+							onSelect={() => {
+								setProvider("claude-code");
+								store.set("fm:provider", "claude-code");
+							}}
+							className="text-[13px]"
+						>
+							Use my {claudePlan}
+						</DropdownMenuItem>
+						{run ? <p className="px-2 pb-1.5 text-[11px] text-muted-foreground">This run keeps its key; Stop and Resume to switch.</p> : null}
+					</>
+				) : null}
 			</DropdownMenuContent>
 		</DropdownMenu>
 	);
