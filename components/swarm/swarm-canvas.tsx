@@ -650,7 +650,7 @@ export function SwarmCanvas({ state, fill = false, contain = false, title, actio
 	title?: ReactNode;
 	actions?: ReactNode;
 	/** A card on the board under the notebooks (the project's roadmap), as wide as the board; it scrolls inside. */
-	below?: { title: string; height: number; node: ReactNode };
+	below?: { title: string; height: number; node: ReactNode; /** Shown after the title, e.g. counts (the title keys the kept height). */ note?: string };
 	/** A fourth notebook card next to the others (the app's Context notebook); the four share the row. */
 	side?: { title: string; node: ReactNode };
 }) {
@@ -1121,7 +1121,7 @@ export function SwarmCanvas({ state, fill = false, contain = false, title, actio
 							className="absolute flex flex-col overflow-hidden rounded-xl border bg-card shadow-card"
 							style={{ left: PAD, top: panelsEnd + BELOW_GAP, width: W - PAD * 2, height: belowHeight }}
 						>
-							<div className="flex h-9 shrink-0 items-center border-b px-4 font-mono text-[12px] font-medium text-muted-foreground">{below.title}</div>
+							<div className="flex h-9 shrink-0 items-center gap-2 border-b px-4 font-mono text-[12px] font-medium text-muted-foreground">{below.title}{below.note ? <span className="font-sans text-[11px] font-normal">{below.note}</span> : null}</div>
 							<div data-scroll className="flex min-h-0 flex-1 flex-col overflow-auto">
 								{below.node}
 							</div>

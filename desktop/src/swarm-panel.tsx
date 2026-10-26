@@ -2289,7 +2289,9 @@ export function SwarmPanel({ folder, name, scan, bridge, session, file: openPath
 				}}
 				// The roadmap is the folder's own plan (.formal/plan.md, one item per AST function), nothing from GitHub.
 				below={{
-					title: "Roadmap",
+					// The Mac app's pane has no floating Plan card: the plan is this panel, with its counts.
+					title: slot ? "Plan" : "Roadmap",
+					note: slot ? `${plan.length ? `${done}/${plan.length}` : ""}${entryUnits.length ? ` · ${inPlan.size}/${entryUnits.length} entry points` : ""}` : undefined,
 					height: 640,
 					node: <div className="min-h-0 flex-1 overflow-y-auto">{planList}{entryList}</div>,
 				}}
@@ -2299,7 +2301,7 @@ export function SwarmPanel({ folder, name, scan, bridge, session, file: openPath
 				<div className="absolute right-3 top-3 flex items-center gap-2">{actions}</div>
 			</div>
 		)}
-		{mode === "swarm" ? (
+		{mode === "swarm" && !slot ? (
 			<section className={`pointer-events-auto absolute left-3 top-[max(var(--fm-top),0.75rem)] z-10 flex w-[min(20rem,calc(100%-1.5rem))] flex-col overflow-hidden rounded-2xl border bg-muted/80 p-1 shadow-pop backdrop-blur ${planOpen ? "max-h-[calc(100%-var(--fm-top)-1rem)]" : ""}`}>
 				<button type="button" onClick={() => setPlanOpen(!planOpen)} aria-expanded={planOpen} className="flex h-8 shrink-0 items-center gap-2 px-2.5 text-left">
 					<span className="font-mono text-[11px] font-medium uppercase tracking-wider text-muted-foreground">Plan</span>
