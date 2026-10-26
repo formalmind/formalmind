@@ -1,0 +1,42 @@
+# Proofs
+
+The Proofs page shows how much of each contract is proved in Lean, function by function. Pick a contract file at the
+top. The bar shows the share of its functions proved.
+
+## Where each function stands
+
+| Status | Means |
+|---|---|
+| **Proved** | a theorem without `sorry` names the function's generated definition |
+| **Has sorry** | a theorem names it, but its proof isn't finished |
+| **In Lean** | the model has a definition for it, but no theorem names it yet |
+| **Not modeled** | the model leaves it opaque (inline assembly, for example), so nothing can be proved about it yet |
+
+Proved functions sit in their own group at the top. The rest are grouped as the functions your scripts call, the
+other entry points, internal functions and libraries. The filters above the list show all of them, only the proved
+ones, the ones not proved yet, or the ones not modeled.
+
+Select a function to see its Solidity, the Lean definition generated from it (**Lean4 spec**), and the theorems that
+prove it (**Lean4 proof**), each opened at its line.
+
+## Where the model comes from
+
+The Lean model is generated from the compiler's syntax tree, one file per contract in
+`formal/Generated/<Contract>.lean`. Each Solidity function becomes a definition over the contract's storage. A call
+to another contract is an opaque step that returns whatever that contract returns, so a proof that relies on what a
+token or an oracle does says so in its assumptions.
+
+Proofs are about those generated definitions, never a hand-written copy of the code. A function counts as proved
+only when a theorem names its definition, fully qualified.
+
+## Checking proofs yourself
+
+The proofs are an ordinary Lake project in `formal/`:
+
+```bash
+cd formal
+lake exe cache get   # Mathlib, prebuilt
+lake build
+```
+
+`lake build` checks every proof. The swarm runs the same command before any proof goes to review.
