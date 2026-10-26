@@ -2187,7 +2187,7 @@ export function SwarmPanel({ folder, name, scan, bridge, session, file: openPath
 	};
 	// A stopped swarm starts just for the statements (and stops after), as it does to read a report.
 	const workOnStatements = () => {
-		if (!run && !concolic) void start(true);
+		if (!run) void start(true);
 	};
 	const afterStatement = (s: Statement[]) => {
 		setStatements(s);
@@ -2249,7 +2249,7 @@ export function SwarmPanel({ folder, name, scan, bridge, session, file: openPath
 								{working && working.item.startsWith(`${st.id}.`) && activity ? (
 									<span className="mt-0.5 flex items-center gap-1.5 truncate text-[11px] text-muted-foreground" title={activity.text}>
 										<span className="truncate">
-											<span className="font-medium" style={{ color: colorOf(working.role) }}>{roleName(working.role)}</span> · function {working.item.slice(st.id.length + 1)} · {activity.text}
+											<span className="font-medium" style={{ color: colorOf(working.role) }}>{working.role}</span> · function {working.item.slice(st.id.length + 1)} · {activity.text}
 										</span>
 									</span>
 								) : null}
