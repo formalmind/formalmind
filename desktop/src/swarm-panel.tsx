@@ -4,7 +4,7 @@ import { createPortal } from "react-dom";
 import { NvimTerminal } from "./nvim-terminal";
 import { reportError } from "@/lib/report-error";
 import { JsonTree } from "./json-tree";
-import { ArrowDown, Bug, Check, ChevronDown, Code2, Copy, FileCode2, FileDown, Network, Play, Plus, ScanSearch, Terminal, ThumbsDown, ThumbsUp, WandSparkles } from "lucide-react";
+import { ArrowDown, Bug, Check, ChevronDown, Code2, Copy, FileCode2, FileDown, Folder, Network, Play, Plus, ScanSearch, Terminal, ThumbsDown, ThumbsUp, WandSparkles } from "lucide-react";
 
 // The project roadmap (GitHub Projects-style), the same view the web app had on its own page.
 import { motion as vimMotion, search as vimSearch, setVimMode, useVimMode, type Cursor } from "@/components/vim-mode";
@@ -2240,7 +2240,7 @@ export function SwarmPanel({ folder, name, scan, bridge, session, file: openPath
 										<Play className="size-3" />{plan.some((i) => i.mark === " ") ? "Resume" : "Start"}
 									</button>
 								)}
-								<span className="inline-flex h-8 items-center gap-1.5 rounded-full bg-secondary px-3 text-[13px] font-medium text-secondary-foreground">{name}</span>
+								<span className="inline-flex h-8 items-center gap-1.5 rounded-full bg-secondary px-3 text-[13px] font-medium text-secondary-foreground" title={folder}><Folder className="size-3.5 shrink-0" />{name}</span>
 							</span>
 						}
 						extra={run ? (
