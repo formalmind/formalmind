@@ -11,13 +11,10 @@
 #
 name: "CodeQL Advanced"
 
+# The repository is private: code scanning needs GitHub Advanced Security there, which isn't enabled, so every
+# automatic run failed at the upload. Run it by hand once it is.
 on:
-  push:
-    branches: [ "main" ]
-  pull_request:
-    branches: [ "main" ]
-  schedule:
-    - cron: '23 4 * * 5'
+  workflow_dispatch:
 
 jobs:
   analyze:

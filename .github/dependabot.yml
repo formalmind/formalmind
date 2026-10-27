@@ -1,7 +1,8 @@
 # Dependabot opens update PRs weekly; security updates come as soon as an advisory lands.
 version: 2
 updates:
-  - package-ecosystem: npm
+  # The project is managed by Bun (bun.lock): the npm ecosystem can't update it.
+  - package-ecosystem: bun
     directory: /
     schedule:
       interval: weekly
