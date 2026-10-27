@@ -332,7 +332,14 @@ pub fn derive(ctx: &crate::swarm_ctx::Context, input: &Value) -> Result<Formaliz
                 "conservation" => "a successful call keeps the conserved quantity unchanged",
                 _ => "no call to it by another account makes the claim false",
             };
-            let entry = |u: &&crate::swarm_ctx::Unit| u.unit["internal"] != true && u.unit["writes"].as_array().is_some_and(|w| !w.is_empty());
+            let only = strings(&input["functions"]);
+            for f in &only {
+                if !units.iter().any(|u| u.name() == f.trim_matches('`') || u.lean() == f.trim_matches('`')) {
+                    return Err(format!("no function {f:?} in scope; `functions` lists them (Contract.fn)"));
+                }
+            }
+            let named = |u: &crate::swarm_ctx::Unit| only.is_empty() || only.iter().any(|f| u.name() == f.trim_matches('`') || u.lean() == f.trim_matches('`'));
+            let entry = |u: &&crate::swarm_ctx::Unit| u.unit["internal"] != true && u.unit["writes"].as_array().is_some_and(|w| !w.is_empty()) && named(u);
             for u in units.iter().filter(entry) {
                 obligations.push(format!("{}: {what}", place(u)));
             }
@@ -460,6 +467,7 @@ pub fn formalize_tool() -> Value {
             "kind": { "type": "string", "enum": ["function", "access", "invariant", "conservation", "sequence"] },
             "function": { "type": "string", "description": "function: the one function, as `functions` names it (Contract.fn)" },
             "obligation": { "type": "string", "description": "function: what to prove about it, one sentence" },
+            "functions": { "type": "array", "items": { "type": "string" }, "description": "invariant, conservation or sequence: only when the claim is about some entry points, those (Contract.fn as `functions` names them); left out, every entry point that changes state" },
             "variables": { "type": "array", "items": { "type": "string" }, "description": "access: the state variables, as `functions` lists them under writes" },
             "callers": { "type": "string", "description": "access: who may change them, in plain words (the owner, an authorized executor)" },
             "means": { "type": "string", "description": "The claim restated from your formalization alone, in plain words" },
@@ -883,6 +891,11 @@ mod tests {
         assert_eq!(f.obligations, vec!["`Vault.deposit` — Vault (src/Vault.sol): reverts when assets is 0"]);
         let later = derive(&ctx, &json!({ "kind": "invariant", "means": "totalSupply equals the sum of balanceOf" })).unwrap();
         assert!(later.asks() && !later.obligations.is_empty() && later.obligations.iter().all(|o| o.contains("holds after")), "{:?}", later.obligations);
+        let units = ctx.units();
+        let some = units.iter().find(|u| u.unit["internal"] != true && u.unit["writes"].as_array().is_some_and(|w| !w.is_empty())).unwrap();
+        let only = derive(&ctx, &json!({ "kind": "conservation", "means": "m", "functions": [some.name()] })).unwrap();
+        assert_eq!(only.obligations.len(), 1, "{:?}", only.obligations);
+        assert!(derive(&ctx, &json!({ "kind": "conservation", "means": "m", "functions": ["Nope.f"] })).is_err());
     }
 
     #[test]
