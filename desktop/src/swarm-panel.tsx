@@ -445,8 +445,10 @@ function parseAsk(text: string): { question: string; replies: string[] } {
 
 const askKey = (e: Ev) => `${e.run}:${e.at ?? ""}:${e.text}`;
 
-/** The agents' questions still waiting for you: asked, and not answered by a later message of yours. */
-export function useOpenQuestions(folder: string, events: Ev[]) {
+/** The agents' questions still waiting for you: asked, and not answered by a later message of yours. A question about
+ * a statement (`S-07: is this what you meant?`) stays only while that statement is still waiting for an answer: one
+ * confirmed, corrected or removed elsewhere (the statements list, the MCP) is no longer a question. */
+export function useOpenQuestions(folder: string, events: Ev[], waiting?: Set<string>) {
 	const key = `fm:answered:${folder}`;
 	const [answered, setAnswered] = useState<string[]>(() => {
 		try {
@@ -457,8 +459,8 @@ export function useOpenQuestions(folder: string, events: Ev[]) {
 	});
 	const open = useMemo(() => {
 		const said = new Set(events.filter((e) => e.kind === "you").map((e) => e.text.trim()));
-		return events.filter((e) => e.kind === "ask" && !answered.includes(askKey(e)) && !parseAsk(e.text).replies.some((r) => said.has(r.trim())));
-	}, [events, answered]);
+		return events.filter((e) => e.kind === "ask" && !answered.includes(askKey(e)) && !parseAsk(e.text).replies.some((r) => said.has(r.trim())) && !(waiting && /^S-\d+$/.test(e.item) && !waiting.has(e.item)));
+	}, [events, answered, waiting]);
 	const markAnswered = (asks: Ev[]) => {
 		const next = [...answered, ...asks.map(askKey)].slice(-500);
 		setAnswered(next);
@@ -2400,7 +2402,8 @@ export function SwarmPanel({ folder, name, scan, bridge, session, file: openPath
 			.catch((e) => setError(String(e)))
 			.finally(() => setDrafting(false));
 	};
-	const questions = useOpenQuestions(folder, events);
+	const waiting = useMemo(() => new Set(statements.filter((s) => s.mark === "?").map((s) => s.id)), [statements]);
+	const questions = useOpenQuestions(folder, events, waiting);
 	const send = async () => {
 		const text = say.trim();
 		if (!text || !run) return;
