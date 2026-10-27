@@ -200,7 +200,139 @@ pub fn check(output: Value, entry: &str) -> Result<Value> {
     if !errors.is_empty() {
         bail!("solc failed to compile {entry}:\n{}", errors.join("\n\n"));
     }
-    Ok(output)
+    let pre_08 = pragmas_rule_out_08(&output);
+    let output = normalize_builtins(output);
+    Ok(if pre_08 { unchecked_bodies(output) } else { output })
+}
+
+/// Before 0.8, Solidity's arithmetic wraps instead of reverting. The model reads every function and modifier body as
+/// `unchecked { … }`, which is what such code means.
+pub fn unchecked_bodies(mut output: Value) -> Value {
+    fn walk(n: &mut Value) {
+        match n {
+            Value::Object(m) => {
+                if matches!(m.get("nodeType").and_then(Value::as_str), Some("FunctionDefinition" | "ModifierDefinition")) {
+                    if let Some(body) = m.get_mut("body").filter(|b| b["nodeType"] == "Block") {
+                        body["nodeType"] = json!("UncheckedBlock");
+                    }
+                }
+                m.values_mut().for_each(walk);
+            }
+            Value::Array(a) => a.iter_mut().for_each(walk),
+            _ => {}
+        }
+    }
+    walk(&mut output["sources"]);
+    output
+}
+
+/// Whether some file's `pragma solidity` admits no 0.8 or later compiler, so the code was compiled before 0.8.
+fn pragmas_rule_out_08(output: &Value) -> bool {
+    let mut pragmas = vec![];
+    for source in output["sources"].as_object().into_iter().flatten().map(|(_, s)| s) {
+        for n in source["ast"]["nodes"].as_array().into_iter().flatten() {
+            let lits: Vec<&str> = n["literals"].as_array().into_iter().flatten().filter_map(Value::as_str).collect();
+            if n["nodeType"] == "PragmaDirective" && lits.first() == Some(&"solidity") {
+                pragmas.push(lits[1..].concat());
+            }
+        }
+    }
+    let modern = (0..=50).map(|p| [0, 8, p]).chain([[0, 9, 0], [1, 0, 0]]);
+    pragmas.iter().any(|p| !p.contains("||") && !modern.clone().any(|v| admits(p, v)))
+}
+
+/// Whether a `pragma solidity` range (its literals joined, as `>=0.4.22<0.6` or `^0.5.16`) admits version `v`.
+fn admits(range: &str, v: [u32; 3]) -> bool {
+    let mut rest = range.trim();
+    while !rest.is_empty() {
+        let op_len = ["^", "~", ">=", "<=", ">", "<", "="].iter().find(|o| rest.starts_with(**o)).map_or(0, |o| o.len());
+        let op = &rest[..op_len];
+        rest = rest[op_len..].trim_start();
+        let end = rest.find(|c: char| !(c.is_ascii_digit() || c == '.')).unwrap_or(rest.len());
+        let parts: Vec<u32> = rest[..end].split('.').filter_map(|p| p.parse().ok()).collect();
+        rest = rest[end..].trim_start();
+        if parts.is_empty() {
+            return true; // something this doesn't read: don't rule anything out
+        }
+        let b = [parts[0], *parts.get(1).unwrap_or(&0), *parts.get(2).unwrap_or(&0)];
+        let ok = match op {
+            "^" | "~" => {
+                let upper = if op == "~" || b[0] == 0 { [b[0], b[1] + 1, 0] } else { [b[0] + 1, 0, 0] };
+                v >= b && v < upper
+            }
+            ">=" => v >= b,
+            "<=" => v <= b,
+            ">" => v > b,
+            "<" => v < b,
+            _ => v == b,
+        };
+        if !ok {
+            return false;
+        }
+    }
+    true
+}
+
+/// Before 0.6, solc's AST points `msg`, `require`, `this` and the other built-ins at positive ids of declarations that
+/// aren't in the tree; from 0.6 they are negative. Gives them the ids solc 0.8 uses, so the graph and the Lean model
+/// read old code the same way.
+fn normalize_builtins(mut output: Value) -> Value {
+    fn ids(n: &Value, out: &mut std::collections::HashSet<i64>) {
+        match n {
+            Value::Object(m) => {
+                if let Some(id) = m.get("id").and_then(Value::as_i64) {
+                    out.insert(id);
+                }
+                m.values().for_each(|v| ids(v, out));
+            }
+            Value::Array(a) => a.iter().for_each(|v| ids(v, out)),
+            _ => {}
+        }
+    }
+    fn fix(n: &mut Value, known: &std::collections::HashSet<i64>) {
+        match n {
+            Value::Object(m) => {
+                let builtin = m.get("nodeType").and_then(Value::as_str) == Some("Identifier")
+                    && m.get("referencedDeclaration").and_then(Value::as_i64).is_some_and(|r| r >= 0 && !known.contains(&r));
+                if builtin {
+                    let id = match m.get("name").and_then(Value::as_str).unwrap_or("") {
+                        "abi" => -1,
+                        "addmod" => -2,
+                        "assert" => -3,
+                        "block" => -4,
+                        "blockhash" => -5,
+                        "ecrecover" => -6,
+                        "gasleft" => -7,
+                        "keccak256" | "sha3" => -8,
+                        "msg" => -15,
+                        "mulmod" => -16,
+                        "require" => -18,
+                        "revert" => -19,
+                        "sha256" => -22,
+                        "tx" => -26,
+                        "this" => -28,
+                        _ => -99,
+                    };
+                    m.insert("referencedDeclaration".into(), json!(id));
+                }
+                m.values_mut().for_each(|v| fix(v, known));
+            }
+            Value::Array(a) => a.iter_mut().for_each(|v| fix(v, known)),
+            _ => {}
+        }
+    }
+    let mut known = std::collections::HashSet::new();
+    ids(&output["sources"], &mut known);
+    fix(&mut output["sources"], &known);
+    output
+}
+
+/// Whether this solc takes `--base-path` (0.6.9 and later); None is whatever `solc` is installed, taken as recent.
+#[cfg(not(target_arch = "wasm32"))]
+fn takes_base_path(version: Option<&str>) -> bool {
+    let Some(v) = version else { return true };
+    let n: Vec<u32> = v.split('.').filter_map(|p| p.parse().ok()).collect();
+    n.as_slice() >= [0, 6, 9].as_slice()
 }
 
 /// Compiles the entry file (and whatever it imports) and returns solc's output: `sources.<path>.{id, ast}` and
@@ -210,8 +342,9 @@ pub fn compile(project: &Project, entry: &str) -> Result<Value> {
     use std::process::{Command, Stdio};
     let (input, version) = input(project, entry)?;
     let solc = solc_binary(version.as_deref())?;
+    let args: &[&str] = if takes_base_path(version.as_deref()) { &["--standard-json", "--base-path", ".", "--allow-paths", "."] } else { &["--standard-json", "--allow-paths", "."] };
     let mut child = Command::new(&solc)
-        .args(["--standard-json", "--base-path", ".", "--allow-paths", "."])
+        .args(args)
         .current_dir(&project.root)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
@@ -225,7 +358,9 @@ pub fn compile(project: &Project, entry: &str) -> Result<Value> {
     let out = child.wait_with_output()?;
     let output: Value = serde_json::from_slice(&out.stdout)
         .with_context(|| format!("solc printed no JSON: {}", String::from_utf8_lossy(&out.stderr)))?;
-    check(output, entry)
+    let output = check(output, entry)?;
+    let pre_08 = version.as_deref().is_some_and(|v| v.split('.').filter_map(|p| p.parse::<u32>().ok()).collect::<Vec<_>>() < vec![0, 8, 0]);
+    Ok(if pre_08 { unchecked_bodies(output) } else { output })
 }
 
 #[cfg(test)]
@@ -237,6 +372,43 @@ mod tests {
         assert_eq!(pragma_version("pragma solidity 0.8.30;"), Some("0.8.30".into()));
         assert_eq!(pragma_version("pragma solidity =0.8.26;"), Some("0.8.26".into()));
         assert_eq!(pragma_version("pragma solidity ^0.8.0;"), None);
+    }
+
+    #[test]
+    fn pragma_ranges() {
+        assert!(admits(">=0.4.22<0.6", [0, 5, 17]));
+        assert!(!admits(">=0.4.22<0.6", [0, 8, 0]));
+        assert!(admits("^0.8.20", [0, 8, 30]));
+        assert!(!admits("^0.8.20", [0, 8, 19]));
+        assert!(!admits("^0.7.6", [0, 8, 0]));
+        assert!(admits("0.5.16", [0, 5, 16]));
+        assert!(admits(">=0.5.0", [0, 8, 30]));
+    }
+
+    #[test]
+    fn old_code_is_unchecked() {
+        let ast = |pragma: &[&str]| {
+            let mut lits = vec!["solidity"];
+            lits.extend(pragma);
+            json!({ "sources": { "a.sol": { "id": 0, "ast": { "nodeType": "SourceUnit", "nodes": [
+                { "nodeType": "PragmaDirective", "literals": lits },
+                { "nodeType": "FunctionDefinition", "id": 1, "body": { "nodeType": "Block", "statements": [] } }
+            ] } } } })
+        };
+        let body = |o: Value| o["sources"]["a.sol"]["ast"]["nodes"][1]["body"]["nodeType"].clone();
+        assert_eq!(body(check(ast(&[">=", "0.4", ".22", "<", "0.6"]), "a.sol").unwrap()), "UncheckedBlock");
+        assert_eq!(body(check(ast(&["^", "0.8", ".20"]), "a.sol").unwrap()), "Block");
+    }
+
+    #[test]
+    fn old_builtins_get_negative_ids() {
+        let out = json!({ "sources": { "a.sol": { "id": 0, "ast": { "nodeType": "SourceUnit", "id": 5, "nodes": [
+            { "nodeType": "Identifier", "id": 6, "name": "msg", "referencedDeclaration": 260 },
+            { "nodeType": "Identifier", "id": 7, "name": "x", "referencedDeclaration": 5 }
+        ] } } } });
+        let out = normalize_builtins(out);
+        assert_eq!(out["sources"]["a.sol"]["ast"]["nodes"][0]["referencedDeclaration"], -15);
+        assert_eq!(out["sources"]["a.sol"]["ast"]["nodes"][1]["referencedDeclaration"], 5);
     }
 
     #[test]

@@ -2739,9 +2739,15 @@ impl<'g, 'a> Fx<'g, 'a> {
             if args[0]["nodeType"] == "Identifier" && args[0]["name"] == "this" {
                 return Ok("(← read).self".into());
             }
-            let a = self.expr(&args[0])?;
             let to = self.g.norm(&tstr(e));
             let from = self.g.norm(&tstr(&args[0]));
+            // Before 0.8, `uint(-1)` converts a negative literal: its two's complement, 2^bits - N.
+            if let (Some(n), Some(bits)) = (from.strip_prefix("int_const -").filter(|n| n.chars().all(|c| c.is_ascii_digit())), bits_of(&to)) {
+                if to.starts_with("uint") {
+                    return Ok(format!("(2 ^ {bits} - {n})"));
+                }
+            }
+            let a = self.expr(&args[0])?;
             let literal = from.starts_with("int_const") || from.starts_with("rational");
             if strip_location(&from) == "bytes" {
                 if let Some(n) = bytes_n(&to).or((to == "bytes32").then_some(32)) {
@@ -2812,6 +2818,25 @@ impl<'g, 'a> Fx<'g, 'a> {
             let t = self.fresh("__t");
             self.line(format!("let {t} ← ext.lowCall {addr} {value} {data}"));
             return Ok(t);
+        }
+        // `addr.transfer(v)` / `addr.send(v)`: the same low-level call with no data; transfer reverts when it fails,
+        // send returns whether it succeeded.
+        if callee["nodeType"] == "MemberAccess" && matches!(callee["memberName"].as_str(), Some("transfer" | "send")) && tstr(&callee["expression"]).starts_with("address") && args.len() == 1 {
+            let addr = self.expr(&callee["expression"])?;
+            let addr = self.atom(addr);
+            let value = self.expr(&args[0])?;
+            let value = self.atom(value);
+            self.g.ext.insert(
+                "lowCall : Nat → Nat → List Nat → M σ (Bool × List Nat)".into(),
+                "a low-level call (address, value, calldata) → (success, returndata); a failed call returns false and doesn't revert".into(),
+            );
+            let t = self.fresh("__t");
+            self.line(format!("let {t} ← ext.lowCall {addr} {value} []"));
+            if callee["memberName"] == "transfer" {
+                self.line(format!("if !{t}.1 then throw ⟨\"transfer\"⟩"));
+                return Ok("()".into());
+            }
+            return Ok(format!("{t}.1"));
         }
         if callee["nodeType"] == "MemberAccess" && matches!(callee["memberName"].as_str(), Some("wrap" | "unwrap")) && tstr(&callee["expression"]).starts_with("type(") {
             return self.expr(&args[0]);
