@@ -2790,7 +2790,7 @@ dependencies = [
 
 [[package]]
 name = "formalmind-desktop"
-version = "0.2.20"
+version = "0.2.21"
 dependencies = [
  "concolity",
  "fff-search",
