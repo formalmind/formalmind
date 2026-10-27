@@ -86,6 +86,6 @@ if [ "$(gh api "repos/$OLD" --jq .visibility 2>/dev/null)" = public ]; then
 fi
 rm -rf "$OUT"
 # The Windows installer is built here from the tag (.github/workflows/desktop-windows.yml).
-git tag -f "$TAG" HEAD >/dev/null && git push -q -f origin "refs/tags/$TAG"
+git push -q -f origin "HEAD:refs/tags/$TAG"
 gh workflow run desktop-windows.yml -R "$OLD" -f tag="$TAG" || echo "release: start the Windows build by hand: gh workflow run desktop-windows.yml -f tag=$TAG"
 echo "release: $TAG published"
