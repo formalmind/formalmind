@@ -14,6 +14,7 @@ Formal Mind keeps everything in your folder, as ordinary files you can read, edi
 
 | Path | What |
 |---|---|
+| `formalmind.toml` | where the Lean proofs live (`[lean]` `project`: the Lake project, `sources`: where Lake reads `Generated/` and `Refinement/`), written at the first start when there's a Lake project; edit it if yours lives elsewhere |
 | `.formal/plan.md` | the plan: one item per function, with its mark |
 | `.formal/statements.md` | your [statements](/statements) and how far each has got |
 | `.formal/queue.json` | the swarm's queue of jobs, so a quit resumes where it stopped |
@@ -22,7 +23,7 @@ Formal Mind keeps everything in your folder, as ordinary files you can read, edi
 | `.formal/proofs.json`, `.formal/statements.json` | which files and theorems proved each item |
 | `.formal/bugs/` | findings, one Markdown file each |
 | `.formal/findings.sarif` | suspicions and notes on lines, which editors with SARIF support show inline |
-| `formal/` | the Lean project: `Generated/` (the model of each contract), `Refinement/Swarm/` (proofs of the plan's items), `Refinement/Statements/` (proofs of statements) |
+| `formal/` | the Lean project (or wherever `formalmind.toml` says): `Generated/` (the model of each contract, rewritten when formal-ast can translate more of it), `Refinement/Swarm/` (proofs of the plan's items), `Refinement/Statements/` (proofs of statements) |
 | `test/formal/` | proof-of-concept tests for findings |
 | your audit folder | `formal-mind.audit.json`, `formal-mind-swarm.md`, the index's rows, and `.audit.json` files read from reports |
 

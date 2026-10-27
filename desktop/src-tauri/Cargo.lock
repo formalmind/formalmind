@@ -2790,7 +2790,7 @@ dependencies = [
 
 [[package]]
 name = "formalmind-desktop"
-version = "0.2.9"
+version = "0.2.10"
 dependencies = [
  "concolity",
  "fff-search",
@@ -2814,6 +2814,7 @@ dependencies = [
  "tauri-plugin-updater",
  "tiny_http",
  "tokio",
+ "toml 1.1.8+spec-1.1.0",
 ]
 
 [[package]]

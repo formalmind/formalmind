@@ -44,11 +44,85 @@ pub struct Context {
     pub contracts: Vec<Contract>,
     /// Why something couldn't be read (solc missing, a file that doesn't compile); shown to the planner.
     pub problems: Vec<String>,
+    /// Models rewritten because formal-ast now translates functions the file on disk left opaque (folder-relative
+    /// path, and what changed); proofs that used those functions' `Ext` fields need repair.
+    pub regenerated: Vec<String>,
 }
 
-/// The folder's Lake project: the folder itself, or formal/ in it.
+/// `formalmind.toml` at the folder's root: where its Lean proofs live, so every tool (the app, the swarm, an agent
+/// through the MCP) finds them in the same place.
+///
+/// ```toml
+/// [lean]
+/// project = "formal"   # the Lake project: the folder with the lakefile
+/// sources = "formal"   # where Lake reads Generated/ (the models) and Refinement/ (the proofs)
+/// ```
+pub const CONFIG: &str = "formalmind.toml";
+
+/// A `[lean]` path from formalmind.toml, folder-relative, kept inside the folder.
+fn configured(root: &Path, key: &str) -> Option<PathBuf> {
+    let text = std::fs::read_to_string(root.join(CONFIG)).ok()?;
+    let table: toml::Table = text.parse().ok()?;
+    let rel = table.get("lean")?.get(key)?.as_str()?.trim().trim_matches('/');
+    (!rel.split('/').any(|p| p == "..")).then(|| if rel.is_empty() || rel == "." { root.to_path_buf() } else { root.join(rel) })
+}
+
+fn has_lakefile(d: &Path) -> bool {
+    d.join("lakefile.toml").exists() || d.join("lakefile.lean").exists()
+}
+
+/// The folder's Lake project: formalmind.toml's `lean.project`, else the folder itself or formal/ in it.
 pub fn lake_dir(root: &Path) -> Option<PathBuf> {
-    [root.to_path_buf(), root.join("formal")].into_iter().find(|d| d.join("lakefile.toml").exists() || d.join("lakefile.lean").exists())
+    if let Some(d) = configured(root, "project").filter(|d| has_lakefile(d)) {
+        return Some(d);
+    }
+    [root.to_path_buf(), root.join("formal")].into_iter().find(|d| has_lakefile(d))
+}
+
+/// Where the Lake project's Lean sources are: formalmind.toml's `lean.sources`, else the lakefile's `srcDir` in the
+/// Lake project (Async Swap's `srcDir = "validation/lean"`), else the Lake project itself. `Generated/` and
+/// `Refinement/` live here, and module names are relative to it.
+pub fn lean_src(root: &Path) -> Option<PathBuf> {
+    let lake = lake_dir(root)?;
+    if let Some(d) = configured(root, "sources").filter(|d| d.starts_with(&lake)) {
+        return Some(d);
+    }
+    let toml = std::fs::read_to_string(lake.join("lakefile.toml")).ok();
+    let lean = std::fs::read_to_string(lake.join("lakefile.lean")).ok();
+    let src = toml
+        .as_deref()
+        .and_then(|t| t.lines().map(str::trim).find_map(|l| l.strip_prefix("srcDir").map(|r| r.trim_start().trim_start_matches('=').trim().trim_matches('"').to_string())))
+        .or_else(|| lean.as_deref().and_then(|t| t.split("srcDir").nth(1).and_then(|r| r.split('"').nth(1)).map(String::from)))
+        .filter(|s| !s.is_empty() && s != "." && !s.contains(".."));
+    Some(match src {
+        Some(s) => lake.join(s),
+        None => lake,
+    })
+}
+
+/// Writes formalmind.toml with the layout found, when the folder has a Lake project and no formalmind.toml yet.
+pub fn ensure_config(root: &Path) {
+    let path = root.join(CONFIG);
+    if path.exists() {
+        return;
+    }
+    let (Some(lake), Some(src)) = (lake_dir(root), lean_src(root)) else { return };
+    let rel = |d: &Path| match d.strip_prefix(root).map(|p| p.to_string_lossy().replace('\\', "/")) {
+        Ok(p) if !p.is_empty() => p,
+        _ => ".".to_string(),
+    };
+    let text = format!(
+        "# Formal Mind: where this repository's Lean proofs live (https://docs.formal.team/files).\n[lean]\n# The Lake project: the folder with the lakefile.\nproject = \"{}\"\n# Where Lake reads the sources: Generated/ (the models formal-ast writes) and Refinement/ (the proofs).\nsources = \"{}\"\n",
+        rel(&lake),
+        rel(&src)
+    );
+    let _ = std::fs::write(path, text);
+}
+
+/// How many functions a generated model translated, from its header (`Translated: 7 functions.`).
+fn translated_count(model: &str) -> Option<usize> {
+    let rest = model.split("Translated: ").nth(1)?;
+    rest.split(' ').next()?.parse().ok()
 }
 
 /// The contracts in scope that are deployed (by a script or by another in-scope contract) or called, as (file, name),
@@ -80,10 +154,15 @@ pub fn in_scope(root: &Path, problems: &mut Vec<String>) -> (Vec<(String, String
 /// Reads the folder through formal-ast: the scripts' entry points, then each entry contract's coverage, units and
 /// slices. Writes the generated model into the Lake project when it has none for a contract yet.
 pub fn context(root: &Path) -> Context {
+    context_with(root, true)
+}
+
+/// [`context`], writing models only when `write`: otherwise an out-of-date model is only noted in `regenerated`.
+pub fn context_with(root: &Path, write: bool) -> Context {
     let mut ctx = Context::default();
     let (files, scripts) = in_scope(root, &mut ctx.problems);
     let entry_points: Vec<Value> = scripts["entryPoints"].as_array().cloned().unwrap_or_default();
-    let lake = lake_dir(root);
+    let lake = lean_src(root);
     for (file, contract) in files {
         let (a, output) = match analyze_full(root, &file, Some(&contract)) {
             Ok(x) => x,
@@ -113,13 +192,26 @@ pub fn context(root: &Path) -> Context {
                 }
             })
             .collect();
-        // The model the provers write against: formal/Generated/<Contract>.lean, generated here when it is missing.
+        // The model the provers write against: Generated/<Contract>.lean in the Lake project's sources, generated here
+        // when it is missing, and again when formal-ast now translates more functions than the file on disk does.
         let mut model = None;
         if let Some(dir) = &lake {
             let path = dir.join("Generated").join(format!("{name}.lean"));
-            if !path.exists() {
-                let m = lean::Gen::new(&output, &a.graph, &a.scope).generate(&lean::ident(&name));
-                let _ = std::fs::create_dir_all(path.parent().unwrap_or(dir)).and_then(|_| std::fs::write(&path, m.text));
+            let on_disk = std::fs::read_to_string(&path).ok();
+            let m = lean::Gen::new(&output, &a.graph, &a.scope).generate(&lean::ident(&name));
+            let (old, new) = (on_disk.as_deref().and_then(translated_count), translated_count(&m.text));
+            if on_disk.is_none() || matches!((old, new), (Some(o), Some(n)) if n > o) {
+                if write {
+                    let _ = std::fs::create_dir_all(path.parent().unwrap_or(dir)).and_then(|_| std::fs::write(&path, &m.text));
+                }
+                if let (Some(o), Some(n)) = (old, new) {
+                    let rel = path.strip_prefix(root).unwrap_or(&path).to_string_lossy().replace('\\', "/");
+                    ctx.regenerated.push(if write {
+                        format!("{rel}: regenerated, {} more functions translated ({o} → {n}); proofs that used their `Ext` fields need repair", n - o)
+                    } else {
+                        format!("{rel}: out of date, formal-ast now translates {} more functions ({o} → {n}); refreshing the model (or starting the swarm) rewrites it", n - o)
+                    });
+                }
             }
             if path.exists() {
                 model = path.strip_prefix(root).ok().map(|p| p.to_string_lossy().replace('\\', "/"));
@@ -256,6 +348,9 @@ impl Context {
         for p in &self.problems {
             s.push_str(&format!("(couldn't read {p})\n"));
         }
+        for r in &self.regenerated {
+            s.push_str(&format!("({r})\n"));
+        }
         s
     }
 
@@ -285,7 +380,10 @@ impl Context {
         };
         let c = u.contract;
         let lean = u.lean();
-        let lib = lake.map(|d| d.strip_prefix(root).unwrap_or(d).to_string_lossy().to_string()).filter(|d| !d.is_empty()).unwrap_or_else(|| ".".into());
+        let rel = |d: &Path| d.strip_prefix(root).unwrap_or(d).to_string_lossy().replace('\\', "/");
+        let lake_rel = lake.map(rel).filter(|d| !d.is_empty()).unwrap_or_else(|| ".".into());
+        // Where Lake reads the sources (its srcDir), which can differ from where it runs.
+        let lib = lean_src(root).map(|d| rel(&d)).filter(|d| !d.is_empty()).unwrap_or_else(|| lake_rel.clone());
         let short = u.name().rsplit('.').next().unwrap_or("").trim_start_matches('_');
         let module = format!("{}{}", c.name, capitalize(short));
         let mut s = format!(
@@ -294,7 +392,7 @@ Prove what its slice says: the conditions under which it reverts (its guards), a
 (its footprint) and what it returns or hands to its external calls. \
 Write the proof as `{lib}/Refinement/Swarm/{module}.lean` (module `Refinement.Swarm.{module}`), starting with `import Generated.{}` (and `import Refinement.Monad` for its simp lemmas when the project has it). \
 Every theorem about the def must spell it fully qualified as `{lean}` in its statement — the Proofs page counts the function as proved only when a theorem without `sorry` names exactly that. \
-Check it with `lake build Refinement.Swarm.{module}` (lake runs in {lib}/). The swarm itself re-runs `lake build` and the coverage before your work goes to review.\n",
+Check it with `lake build Refinement.Swarm.{module}` (lake runs in {lake_rel}/). The swarm itself re-runs `lake build` and the coverage before your work goes to review.\n",
             u.name(),
             c.name,
             u.at(),
@@ -449,6 +547,23 @@ pub fn chrono_today() -> String {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn lean_sources_follow_the_config_then_the_lakefile() {
+        let root = std::env::temp_dir().join(format!("fm-src-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(root.join("validation/lean")).unwrap();
+        std::fs::write(root.join("lakefile.toml"), "name = \"x\"\nsrcDir = \"validation/lean\"\n").unwrap();
+        assert_eq!(super::lean_src(&root), Some(root.join("validation/lean")));
+        super::ensure_config(&root);
+        let cfg = std::fs::read_to_string(root.join(super::CONFIG)).unwrap();
+        assert!(cfg.contains("project = \".\"") && cfg.contains("sources = \"validation/lean\""), "{cfg}");
+        std::fs::write(root.join(super::CONFIG), "[lean]\nproject = \".\"\nsources = \"validation\"\n").unwrap();
+        assert_eq!(super::lean_src(&root), Some(root.join("validation")));
+        std::fs::write(root.join(super::CONFIG), "[lean]\nsources = \"../elsewhere\"\n").unwrap();
+        assert_eq!(super::lean_src(&root), Some(root.join("validation/lean")));
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
     use super::*;
 
     #[test]

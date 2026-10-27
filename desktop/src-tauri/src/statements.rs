@@ -587,7 +587,7 @@ pub fn review_task(s: &Statement, n: usize) -> String {
 pub async fn check_theorem(root: &Path, id: &str, lean: &str) -> Result<String, String> {
     let name = theorem_name(id, lean);
     let file = proof_file(id, lean);
-    let lake = crate::swarm_ctx::lake_dir(root).ok_or("there is no Lake project to check the theorem in")?;
+    let lake = crate::swarm_ctx::lean_src(root).ok_or("there is no Lake project to check the theorem in")?;
     let body = std::fs::read_to_string(lake.join(&file)).map_err(|_| format!("the proof isn't in {file}; write it there"))?;
     if !body.lines().any(|l| l.trim_start().strip_prefix("theorem ").is_some_and(|r| r.starts_with(&format!("{name} ")) || r == name)) {
         return Err(format!("{file} has no `theorem {name}`; name the theorem exactly that"));
@@ -823,6 +823,7 @@ mod tests {
                 slices: Default::default(),
             }],
             problems: vec![],
+            regenerated: vec![],
         }
     }
 

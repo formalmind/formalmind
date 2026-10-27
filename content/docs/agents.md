@@ -2,10 +2,29 @@
 
 Formal Mind has two MCP servers on formal.team, so Claude, ChatGPT, Cursor or any MCP client can work with it.
 
-## The account server
+## Connect your client
 
-`https://formal.team/mcp/account` acts on your own account. Add it as a connector in your client; the first time,
-it sends you to sign in with GitHub and asks you to allow the client.
+The account server, `https://formal.team/mcp/account`, acts on your own account. Add it once; the first time a tool
+runs, it sends you to sign in with GitHub and asks you to allow the client.
+
+- **Claude Code:** run the command below, then `/mcp` in a session to sign in.
+
+  ```bash
+  claude mcp add --transport http --scope user formalmind https://formal.team/mcp/account
+  ```
+
+- **Claude (claude.ai and the desktop app):** Settings → Connectors → **Add custom connector**, with that URL.
+- **ChatGPT:** Settings → Connectors, turn on **Developer mode** (under Advanced), then **Create** a connector with
+  that URL and OAuth.
+- **Cursor:** add it to `~/.cursor/mcp.json`:
+
+  ```json
+  { "mcpServers": { "formalmind": { "url": "https://formal.team/mcp/account" } } }
+  ```
+
+Any other MCP client that speaks Streamable HTTP and OAuth works the same way.
+
+## The account server
 
 | Tools | Scope |
 |---|---|
@@ -22,14 +41,33 @@ The app runs each one as if you'd clicked it there, with the model route and spe
 
 - **`mac_get`** reads: the added folders, Claude Code's sign-in, a folder's files and git graph, the plan,
   statements, bugs, proofs, queue and sessions, a session's history, the scope from your deploy scripts, a contract's
-  Lean coverage, a function's brief, Reach's map, and what the report costs.
+  Lean coverage, a function's slice, Reach's map, what the report costs, the **work map**, and a function's **brief**.
 - **`mac_do`** acts: add or remove a folder, start or stop the swarm, start the Bug Hunter, send a session a message,
-  set a cap, add, confirm, correct or mark statements, queue an audit report for triage, run a Reach tool, and
-  generate Formal Mind's report.
+  set a cap, add, confirm, correct or mark statements, queue an audit report for triage, run a Reach tool, generate
+  Formal Mind's report, **refresh the model**, and **check** and **submit** a proof.
 
 Each tool's description lists its operations and their arguments. An answer that takes longer than about 50 seconds
 (a report, say) comes back with an id; `mac_reply` fetches it. Your Mac has to be on, with the app signed in and
 **Settings → Phone** on. Your tokens, keys, the terminal and the debugger stay out of reach.
+
+## Work on the proofs as a remote agent
+
+Your own agent (Claude, ChatGPT, Cursor) can work through a folder's proofs alongside the swarm, through the same
+checks and the same reviewer:
+
+1. **`mac_get` `work_map`.** One JSON map of what's covered and what's left: every function in scope with its status
+   (`proved`, `has_sorry`, `in_lean`, `not_modeled` and why), the Lean def a theorem has to name, the generated
+   model, the file its proof goes in, the theorems that name it (file and line), its plan item, the open items to
+   take next (the ones your scripts call first), and any model formal-ast could now translate more of.
+2. **`mac_get` `brief`** for a function: exactly what the swarm's prover gets, its def, its slice, and where to write.
+3. **`mac_do` `check_proof`** with the file's path and content. It's written under the Lake sources' `Refinement/`
+   and checked the way the swarm checks its own: no `sorry`, `admit`, new axioms or `native_decide`, `lake build`
+   passes, and which functions the Proofs page now counts as proved. The answer has the build errors when it fails.
+4. **`mac_do` `submit_proof`** sends it to the swarm's reviewer, like its own prover's work. Approved, the item is
+   proved and goes into your audit file; otherwise the reviewer's notes come back in the session.
+
+If a function is `in_lean` in the work map but its def isn't in the model file yet (formal-ast learned to translate it
+after the file was written), **`mac_do` `refresh_model`** rewrites the model; `check_proof` does that first too.
 
 ## The public server
 

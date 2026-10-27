@@ -25,6 +25,8 @@ export const MAC_OPS = {
 	slice: { write: false, args: "entry, function", about: "the brief an agent gets for one function" },
 	reach: { write: false, args: "entry", about: "the Bug Hunter's call graph by what's known of each branch" },
 	report_quote: { write: false, args: "", about: "what Formal Mind's report costs for this folder and commit" },
+	work_map: { write: false, args: "", about: "what's covered and what's left, as JSON: every in-scope function's status (proved, has_sorry, in_lean, not_modeled), the Lean def a theorem must name, the model and where its proof goes, theorems with file and line, its plan item, the open items to take next, and models formal-ast could now translate more of" },
+	brief: { write: false, args: "function", about: "what the swarm's prover gets for a function (its Lean def, slice, and where to write the proof), by Lean def" },
 	// Actions
 	add_folder: { write: true, args: "path", about: "add a folder on the Mac (an absolute path; folder not needed)" },
 	remove_folder: { write: true, args: "path", about: "remove a folder from the list (its files stay)" },
@@ -41,6 +43,9 @@ export const MAC_OPS = {
 	triage: { write: true, args: "path", about: "queue an audit report (a file in the folder) for the swarm's auditor" },
 	reach_run: { write: true, args: "tool, target?", about: "run one Bug Hunter tool (coverage, explore) from Reach" },
 	report: { write: true, args: "dirs?", about: "generate Formal Mind's report ($150 from credits, once per repository and commit)" },
+	refresh_model: { write: true, args: "", about: "rewrite each generated model formal-ast now translates more of, so a def a proof needs exists in the file Lake builds" },
+	check_proof: { write: true, args: "path, content?", about: "write a .lean proof under the Lake sources' Refinement/ (when content is given) and check it as the swarm does: no sorry/admit/axiom/native_decide, lake build, which functions it proves" },
+	submit_proof: { write: true, args: "function, path, notes?", about: "send a checked proof to the swarm's reviewer, like its own prover's work; approved, the item is proved and goes into the audit file" },
 } as const;
 
 export type MacOp = keyof typeof MAC_OPS;

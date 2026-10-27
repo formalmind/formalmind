@@ -136,6 +136,18 @@ async function call(op: MacOp, folder: string, a: Record<string, unknown>): Prom
 			return invoke("reach_map", { folder, entry: await need("entry") });
 		case "report_quote":
 			return invoke("report_quote", { folder, apiBase: apiBase() });
+		case "work_map":
+			return invoke("swarm_work_map", { folder });
+		case "brief":
+			return invoke("swarm_brief", { folder, function: await need("function") });
+		case "refresh_model":
+			return { regenerated: await invoke<string[]>("swarm_refresh_model", { folder }) };
+		case "check_proof":
+			return invoke("swarm_check_proof", { folder, path: await need("path"), content: typeof a.content === "string" ? a.content : null });
+		case "submit_proof": {
+			const queued = await invoke("swarm_submit_proof", { folder, function: await need("function"), path: await need("path"), notes: s("notes") || null, session: s("run") || null });
+			return { queued, running: await workQueued(folder) };
+		}
 		case "start":
 			return { run: await swarmStart(folder, { goal: s("goal"), budget: usd("budget"), session: s("run") || undefined }) };
 		case "hunt":
