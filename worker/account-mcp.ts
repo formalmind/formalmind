@@ -601,7 +601,7 @@ async function callTool(name: string, args: Record<string, unknown>, caller: Cal
       const r = relay();
       let folder = "";
       // Ops about the Mac rather than one folder; health is for every folder when none is named.
-      const macWide = ["folders", "status", "add_folder", "remove_folder", "verify_repo"].includes(op) || (op === "health" && !str(args.folder));
+      const macWide = ["folders", "status", "add_folder", "remove_folder", "verify_repo", "answers"].includes(op) || (op === "health" && !str(args.folder));
       if (!macWide) {
         const wanted = str(args.folder);
         const { state } = await r.read(Number.MAX_SAFE_INTEGER, false);

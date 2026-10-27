@@ -39,6 +39,10 @@ pub struct Settings {
     /// App comment on that repository's pull requests with what the ledger says changed.
     #[serde(default)]
     pub github: std::collections::BTreeMap<String, bool>,
+    /// Settings → Questions: who answers the swarm's questions. "mcp" (the default): you, in the chat, or an MCP client
+    /// acting for you; "agent": the answerer agent (answerer.rs).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub answers: Option<String>,
     /// Settings → Phone: the relay through formal.team (the phone and the MCP). On unless turned off.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub relay: Option<bool>,
@@ -63,6 +67,10 @@ impl Settings {
     /// The effort to pass to Claude Code, when one was picked.
     pub fn effort(&self) -> Option<String> {
         self.effort.clone().filter(|e| ["low", "medium", "high", "xhigh", "max"].contains(&e.as_str()))
+    }
+
+    pub fn answers(&self) -> String {
+        self.answers.clone().filter(|a| a == "agent").unwrap_or_else(|| "mcp".into())
     }
 
     /// Whether this folder reports to GitHub (off unless turned on).

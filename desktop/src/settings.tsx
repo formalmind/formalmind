@@ -94,7 +94,11 @@ export function SettingsPage() {
 	const { folders } = useFolders();
 	// Each folder's Report to GitHub, as the backend keeps it (off unless turned on).
 	const [github, setGithub] = useState<Record<string, boolean>>({});
-	useEffect(() => void invoke<{ github?: Record<string, boolean> }>("settings_get").then((s) => setGithub(s.github ?? {}), () => {}), []);
+	const [answers, setAnswers] = useState<"mcp" | "agent">("mcp");
+	useEffect(() => void invoke<{ github?: Record<string, boolean>; answers?: string }>("settings_get").then((s) => {
+		setGithub(s.github ?? {});
+		setAnswers(s.answers === "agent" ? "agent" : "mcp");
+	}, () => {}), []);
 	const [repos, setRepos] = useState<Record<string, string>>({});
 	useEffect(() => void invoke<{ repos?: Record<string, string> }>("config_get").then((c) => setRepos(c.repos ?? {}), () => {}), []);
 
@@ -244,6 +248,27 @@ export function SettingsPage() {
 								/>
 							</label>
 						))}
+						<label className="flex items-center justify-between gap-4 border-t pt-3">
+							<span>
+								Questions
+								<span className="block text-xs text-muted-foreground">
+									Who answers when the swarm asks whether a statement means what you meant: you, or an MCP client acting
+									for you; or an answerer agent, which confirms or corrects each one once and leaves doubts for you.
+								</span>
+							</span>
+							<select
+								value={answers}
+								onChange={(e) => {
+									const who = e.target.value as "mcp" | "agent";
+									setAnswers(who);
+									void invoke("control", { op: "answers", folder: "", args: { who } }).catch(() => setAnswers(who === "agent" ? "mcp" : "agent"));
+								}}
+								className="rounded border bg-transparent px-2 py-1 text-xs"
+							>
+								<option value="mcp">You or the MCP</option>
+								<option value="agent">Answerer agent</option>
+							</select>
+						</label>
 					</Section> : null}
 					{section === "server" ? <Section title="Server">
 						<label className="flex items-center justify-between gap-4">

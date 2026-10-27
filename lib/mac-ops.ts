@@ -30,6 +30,8 @@ export const MAC_OPS = {
 	ledger: { write: false, args: "check?, force?", about: "the proof ledger: each function proved or not and why (its theorems built and checked by Lean, no sorry or extra axioms, a statement about the def, the reviewer's approval still matching the def and the theorems), with each theorem's statement and doc comment; check (default true) runs Lean when the sources changed" },
 	brief: { write: false, args: "function", about: "what the swarm's prover gets for a function (its Lean def, slice, and where to write the proof), by Lean def" },
 	// Actions
+	questions: { write: false, args: "", about: "the swarm's questions waiting for an answer: each statement's claim, what the swarm formalized it to mean, its assumptions and functions; answer with confirm_statement or correct_statement" },
+	answers: { write: true, args: "who", about: "who answers the swarm's questions: mcp (the default: you, or an MCP client acting for you) or agent (an answerer agent confirms or corrects each formalization once, and leaves doubts for you)" },
 	verify_repo: { write: true, args: "repo, ref?, goal?, budget?, path?", about: "verify any GitHub repository at a branch, tag or commit: the Mac forks it into formalmind, clones it (into ~/formal-targets unless path is given), checks out ref on its own branch, adds the folder with Report to GitHub on, and starts the swarm; each approved proof is committed (co-authored by formalmind[bot]) and pushed to the fork" },
 	add_folder: { write: true, args: "path", about: "add a folder on the Mac (an absolute path; folder not needed)" },
 	remove_folder: { write: true, args: "path", about: "remove a folder from the list (its files stay)" },

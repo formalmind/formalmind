@@ -63,6 +63,14 @@ state, showing that if it holds before a successful call it holds after; **conse
 quantity unchanged; a **sequence** claim shows no other account's call to each function can make it false. You confirm
 the formalization first, as for any statement.
 
+## Who answers
+
+When the swarm formalizes a statement it asks whether that's what you meant. Settings → GitHub → **Questions** picks who
+answers: **You or the MCP** (the default) leaves the question in the chat, and an MCP client can answer for you:
+`mac_get` `questions` lists what's waiting, `confirm_statement` or `correct_statement` answers, and `mac_swarm_events`
+with `kind: "ask"` and `after` the last `seq` it saw delivers each new question as it's asked. **Answerer agent** has an
+agent read each claim and its formalization: it confirms it, or corrects it once, and leaves anything it doubts for you.
+
 ## The README
 
 With Report to GitHub on, the app keeps a section of the folder's `README.md` current after each approval, always in

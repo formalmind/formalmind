@@ -1880,6 +1880,15 @@ async fn run_swarm(turn: &Turn<'_>) -> String {
                     }
                     if f.asks() {
                         turn.emit("ask", "assistant", &sid, crate::statements::ask_text(&sid, f));
+                        if crate::answerer::on() {
+                            let (folder, sid) = (turn.req.folder.clone(), sid.clone());
+                            tauri::async_runtime::spawn(async move {
+                                match crate::answerer::answer(&folder, &sid).await {
+                                    Ok(what) => eprintln!("answerer: {what}"),
+                                    Err(e) => eprintln!("answerer: {e}"),
+                                }
+                            });
+                        }
                     } else {
                         turn.emit("plan", "assistant", &sid, format!("{sid}: a {} statement; the swarm doesn't prove those yet", f.kind));
                     }

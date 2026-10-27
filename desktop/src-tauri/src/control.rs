@@ -71,6 +71,8 @@ pub const OPS: &[(&str, bool)] = &[
     ("ledger", false),
     ("add_folder", true),
     ("verify_repo", true),
+    ("questions", false),
+    ("answers", true),
     ("remove_folder", true),
     ("start", true),
     ("hunt", true),
@@ -176,6 +178,14 @@ pub async fn dispatch<E: Engine + ?Sized>(app: &E, op: &str, folder: &str, a: &V
         }
         "health" => return crate::health::swarm_health((!folder.is_empty()).then_some(folder), a["limit"].as_u64().map(|n| n as usize)),
         "add_folder" => return json_of(local::folder_add(need("path")?)),
+        "answers" => {
+            let who = need("who")?;
+            if who != "mcp" && who != "agent" {
+                return Err("who must be mcp or agent".into());
+            }
+            local::settings_set(json!({ "answers": who }))?;
+            return Ok(json!({ "answers": who }));
+        }
         "verify_repo" => {
             // Any GitHub repository at any branch, tag or commit: forked into formalmind, cloned, added, reporting to
             // the fork, and the swarm started on it.
@@ -274,6 +284,7 @@ pub async fn dispatch<E: Engine + ?Sized>(app: &E, op: &str, folder: &str, a: &V
             let statements = json_of(crate::statements::swarm_statement_mark(folder.clone(), need("id")?, need("mark")?))?;
             Ok(json!({ "statements": statements, "running": work_queued(app, &folder)? }))
         }
+        "questions" => Ok(json!(crate::answerer::questions(std::path::Path::new(&folder)))),
         "remove_statement" => json_of(crate::statements::swarm_remove_statement(folder, need("id")?)),
         "triage" => {
             swarm::swarm_triage(folder.clone(), need("path")?, opt("run"))?;
@@ -534,6 +545,9 @@ mod ops {
         assert!(err(&e, "set_budget", &f, json!({ "run": "swarm" })).await.contains("usd"));
         assert!(err(&e, "github", &f, json!({})).await.contains("on"));
         assert!(err(&e, "verify_repo", "", json!({ "repo": "not a repo" })).await.contains("owner/name"));
+        assert!(err(&e, "answers", &f, json!({ "who": "nobody" })).await.contains("mcp or agent"));
+        assert_eq!(ok(&e, "answers", "", json!({ "who": "agent" })).await["answers"], "agent");
+        assert_eq!(ok(&e, "questions", &f, json!({})).await, json!([]));
         // Every published operation is reached by these tests.
         let src = include_str!("control.rs");
         for (op, _) in OPS {

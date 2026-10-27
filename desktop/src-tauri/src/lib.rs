@@ -5,6 +5,7 @@
 
 mod anvil;
 mod analysis;
+mod answerer;
 mod ast;
 mod claude_code;
 mod control;
