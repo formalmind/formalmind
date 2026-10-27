@@ -127,6 +127,8 @@ fn lean_model_type_checks() {
     assert!(model.text.contains("-- assembly\n  modify fun w => ext.set w (let s := ext.get w; { s with locked := 1 })"));
     assert!(model.text.contains("def Vault.deposit"));
     assert!(model.text.contains("acc_set"));
+    // `mine ? accounts[msg.sender] : accounts[owner]`: a location whose getter and setter pick the branch.
+    assert!(model.text.contains("_set := if mine then (fun x => modify"), "{}", model.text);
     // OpenZeppelin's mulDiv gets the prelude's semantics; the fixture's own library is translated from its code.
     assert!(model.text.contains("MathLib.mulDivUp ext"));
     // Decimal and scientific literals become the exact Nat solc computes.
