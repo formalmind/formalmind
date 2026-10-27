@@ -45,7 +45,21 @@ flowchart TB
 - **Morpho Blue.** Also an EquiVM benchmark (byte-identical to mainnet); our Morpho Blue swarm proved 2 of 37 against
   the AST model.
 
+## Spike: EquiVM's WETH9 on this machine (2026-10-27)
+
+- `lake build Benchmarks.WETH9.Correct` at EquiVM `main` builds in about five minutes (3,515 jobs, Lean v4.29.0,
+  Mathlib from the cache).
+- The capstone is `Benchmarks.WETH9.weth9ContractCorrect : contractRefinementWF weth9StorageWF noGasBound config
+  weth9CreationBytecode contract`. Its side condition `weth9StorageWF` bounds the length of the stored `name` and
+  `symbol` strings when they are returned; `noGasBound` means no gas bound is assumed.
+- It rests on Lean's three standard axioms and on 2,611 `native_decide` axioms: concrete facts (decoding, storage
+  slots) checked by Lean's compiled evaluator, which EquiVM documents as part of its trusted base. Formal Mind's own
+  rule refuses `native_decide`, so the ledger can't count these proofs as they are. Either the bytecode layer accepts
+  `native_decide` as a stated part of its trusted base, or those facts are re-proved with `decide` (slower to check).
+
 ## Open questions
+
+- Accept `native_decide` in the bytecode layer, stated in the audit's trusted base, or require `decide`?
 
 - Keep the formal-ast model as the fast first pass, and refinement as the stronger layer? Or move statements to Stele
   outright?
