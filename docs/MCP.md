@@ -63,7 +63,10 @@ read through GitHub's public API, with the Worker's `GITHUB_TOKEN` when it has o
 | `add_project` | write | Adds a GitHub repository to the account's projects |
 | `plan_repository` | write | Runs the planner on a repository and saves the plan to the account |
 | `start_swarm` | write | Sets up `<repo>-proofs` for the hosted swarm |
-| `mac_swarm_send` | write | `say` / `start` / `stop` to the Mac, as the phone does; `start` spends credits or your Anthropic key |
+| `mac_swarm_send` | write | `say` / `start` / `stop` to the Mac, as the phone does; `start` runs on the route the app's Settings use |
+| `mac_get` | read | One of the app's reads on the Mac (`lib/mac-ops.ts`): folders, status, plan, statements, bugs, proofs, scope, coverage, … The Mac answers through the relay |
+| `mac_do` | write | One of the app's actions on the Mac (`lib/mac-ops.ts`): add a folder, start, hunt, stop, say, statements, triage, Reach, the report |
+| `mac_reply` | read | A `mac_get` / `mac_do` answer that came after the call stopped waiting, by its id |
 
 The public server (`/mcp`) has `get_audit_format`, `get_example_audit` (`section`: summary, findings, coverage,
 properties, full) and `get_app_release`.

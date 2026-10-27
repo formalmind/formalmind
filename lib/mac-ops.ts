@@ -1,0 +1,46 @@
+/**
+ * What an agent can ask the Mac app to do or read through the relay, by name: everything the folder page does, run
+ * the way the app runs it (desktop/src/relay.ts). `write` ones change something or spend; the rest only read.
+ * Secrets (tokens, keys), the terminal and the interactive debugger aren't here.
+ */
+export const MAC_OPS = {
+	// Reads
+	folders: { write: false, args: "", about: "the added folders and their sessions (folder not needed)" },
+	status: { write: false, args: "", about: "Claude Code's sign-in, whether an Anthropic or OpenAI key is set, and the model route Settings uses (folder not needed)" },
+	files: { write: false, args: "", about: "the folder's file tree" },
+	scan: { write: false, args: "", about: "the folder's Solidity and Lean files" },
+	git: { write: false, args: "", about: "the folder's git graph" },
+	read_file: { write: false, args: "path", about: "a file in the folder, by path relative to it" },
+	plan: { write: false, args: "", about: "the plan (.formal/plan.md): one item per function, with its mark" },
+	statements: { write: false, args: "", about: "the statements and how far each has got" },
+	bugs: { write: false, args: "", about: "the findings, each with its PoC" },
+	proofs: { write: false, args: "", about: "which files and theorems proved each item" },
+	queue: { write: false, args: "", about: "the swarm's job queue" },
+	sessions: { write: false, args: "", about: "the folder's sessions" },
+	running: { write: false, args: "", about: "the sessions running now" },
+	history: { write: false, args: "run", about: "a session's events from its log" },
+	scripts: { write: false, args: "", about: "what each deploy script deploys and calls: the scope" },
+	units: { write: false, args: "entry", about: "an entry file's units of work (functions with their footprint)" },
+	coverage: { write: false, args: "entry", about: "an entry file's Lean coverage, function by function" },
+	slice: { write: false, args: "entry, function", about: "the brief an agent gets for one function" },
+	reach: { write: false, args: "entry", about: "the Bug Hunter's call graph by what's known of each branch" },
+	report_quote: { write: false, args: "", about: "what Formal Mind's report costs for this folder and commit" },
+	// Actions
+	add_folder: { write: true, args: "path", about: "add a folder on the Mac (an absolute path; folder not needed)" },
+	remove_folder: { write: true, args: "path", about: "remove a folder from the list (its files stay)" },
+	start: { write: true, args: "goal?, budget?, run?", about: "start or resume the swarm, with the model route Settings uses" },
+	hunt: { write: true, args: "focus?, budget?, run?", about: "start the Bug Hunter (Concolic) on a focus, or the whole codebase" },
+	stop: { write: true, args: "run", about: "stop a session" },
+	say: { write: true, args: "run, text", about: "a message to a session, as if typed in its chat" },
+	set_budget: { write: true, args: "run, usd", about: "a session's spending cap" },
+	add_statement: { write: true, args: "text", about: "a claim in plain words; a stopped swarm starts just for statements" },
+	confirm_statement: { write: true, args: "id", about: "confirm a formalized statement means what you meant" },
+	correct_statement: { write: true, args: "id, text", about: "what a formalized statement should mean instead" },
+	mark_statement: { write: true, args: "id, mark", about: "set a statement's mark ([ ] [?] [~] [x] [!] [-])" },
+	remove_statement: { write: true, args: "id", about: "remove a statement" },
+	triage: { write: true, args: "path", about: "queue an audit report (a file in the folder) for the swarm's auditor" },
+	reach_run: { write: true, args: "tool, target?", about: "run one Bug Hunter tool (coverage, explore) from Reach" },
+	report: { write: true, args: "dirs?", about: "generate Formal Mind's report ($150 from credits, once per repository and commit)" },
+} as const;
+
+export type MacOp = keyof typeof MAC_OPS;

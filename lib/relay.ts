@@ -1,4 +1,7 @@
 import { currentRequest } from "@/worker/context";
+import { MAC_OPS, type MacOp } from "./mac-ops";
+
+export { MAC_OPS, type MacOp };
 
 /**
  * The swarm relay: the Mac app publishes its swarm sessions' events through formal.team and takes messages back, so
@@ -20,17 +23,24 @@ export type RelayFolder = { path: string; name: string; repo: string | null; ses
 /** The Mac's folders and their sessions; `name` is the computer's own (older Macs don't send it). */
 export type RelayState = { folders: RelayFolder[]; at: number; name?: string };
 
-/** What a client asks the Mac to do. `history` asks it to publish a session's events from its log. */
+
+/** What a client asks the Mac to do. `history` asks it to publish a session's events from its log; `call` runs one of
+ * MAC_OPS and the Mac posts a reply with its `id`. */
 export type RelayCommand =
 	| { type: "say"; folder: string; run: string; text: string }
 	| { type: "start"; folder: string; run?: string; goal?: string; budget?: number }
 	| { type: "stop"; folder: string; run: string }
-	| { type: "history"; folder: string; run: string };
+	| { type: "history"; folder: string; run: string }
+	| { type: "call"; folder: string; id: string; op: MacOp; args: Record<string, unknown> };
 
 export type RelayCommandRow = RelayCommand & { seq: number; at: number };
 
-/** What the Mac sends: its state, new events, or one session's history (in place of what the relay held for it). */
-export type RelayPublish = { state?: RelayState; events?: RelayEvent[]; history?: { folder: string; run: string; events: RelayEvent[] } };
+/** The Mac's answer to a `call`: its result, or why it failed. */
+export type RelayReply = { id: string; ok: boolean; result?: unknown; error?: string };
+
+/** What the Mac sends: its state, new events, one session's history (in place of what the relay held for it), or
+ * replies to calls. */
+export type RelayPublish = { state?: RelayState; events?: RelayEvent[]; history?: { folder: string; run: string; events: RelayEvent[] }; replies?: RelayReply[] };
 
 /** A client's read: events after its cursor, the Mac's state, and when the Mac last checked in. */
 export type RelayRead = { events: RelayRow[]; last: number; state: RelayState | null; macSeenAt: number | null };
@@ -40,6 +50,7 @@ type RelayStub = {
 	commands(after: number, wait: boolean): Promise<{ commands: RelayCommandRow[]; last: number }>;
 	send(command: RelayCommand): Promise<number>;
 	read(after: number, wait: boolean): Promise<RelayRead>;
+	reply(id: string, wait: boolean): Promise<RelayReply | null>;
 };
 
 /** The person's relay object, or null where the binding is missing (a build without it). */
@@ -55,6 +66,13 @@ export function parseCommand(body: unknown): RelayCommand | null {
 	const b = (body ?? {}) as Record<string, unknown>;
 	const folder = str(b.folder, 1000);
 	const run = str(b.run, 100);
+	if (b.type === "call") {
+		const op = str(b.op, 40);
+		const id = str(b.id, 64);
+		const args = b.args && typeof b.args === "object" && !Array.isArray(b.args) ? (b.args as Record<string, unknown>) : {};
+		if (!Object.hasOwn(MAC_OPS, op) || !/^[\w-]+$/.test(id) || JSON.stringify(args).length > 20_000) return null;
+		return { type: "call", folder, id, op: op as MacOp, args };
+	}
 	if (!folder) return null;
 	if (run && !/^[\w-]+$/.test(run)) return null;
 	switch (b.type) {

@@ -31,7 +31,7 @@ import { parseRepo, type RepoPlan } from "@/lib/plan";
 import { findingRow, planProgress, readAudits, reportSummary, REPORT_DIRS, where } from "@/lib/project-audits";
 import { openProject } from "@/lib/project-repo";
 import { listProjects } from "@/lib/projects";
-import { parseCommand, relayObject, type RelayEvent, type RelayRow } from "@/lib/relay";
+import { MAC_OPS, parseCommand, relayObject, type MacOp, type RelayEvent, type RelayRow } from "@/lib/relay";
 import { projectObject } from "@/lib/spend";
 import { getSwarmState } from "@/lib/swarm";
 import { currentRequest } from "@/worker/context";
@@ -62,6 +62,14 @@ const REF = { type: "string", description: "A branch, tag or commit; the default
 const REPO = { type: "string", description: "One of your projects, owner/name or its github.com URL" };
 const DIRS = { type: "array", items: { type: "string" }, description: `Report folders, repository-relative; default ${REPORT_DIRS.join(", ")}` };
 const FOLDER = { type: "string", description: "A folder added in the Mac app: its path, its name, or the owner/name of its GitHub origin (see mac_swarm)" };
+
+/** MAC_OPS of one kind, one line each, for a tool's description. */
+const opsList = (write: boolean) =>
+  Object.entries(MAC_OPS)
+    .filter(([, o]) => o.write === write)
+    .map(([name, o]) => `${name}${o.args ? ` (${o.args})` : ""}: ${o.about}`)
+    .join("; ");
+const OP_ARGS = { type: "object", description: "The operation's arguments, by name (see the list above)", additionalProperties: true };
 
 type AccountTool = Tool & { scope: Scope };
 
@@ -252,7 +260,7 @@ export const ACCOUNT_TOOLS: AccountTool[] = [
   {
     name: "mac_swarm_send",
     title: "Steer the Mac's swarm",
-    description: "Sends the desktop app a command through the relay, as the phone does: say (a message to a session's assistant, answered before the next turn: run and text), start (a session in a folder, optionally a goal, a budget in USD up to 1000, and the run to continue) or stop (run). The Mac runs it as if typed there; a command it doesn't pick up within 10 minutes is dropped. Consequential: start spends credits or the person's Anthropic key on the Mac. Returns the command's seq; follow with mac_swarm_events. Needs swarm:write.",
+    description: "Sends the desktop app a command through the relay, as the phone does: say (a message to a session's assistant, answered before the next turn: run and text), start (a session in a folder, optionally a goal, a budget in USD up to 1000, and the run to continue) or stop (run). The Mac runs it as if typed there; a command it doesn't pick up within 10 minutes is dropped. Consequential: start runs agents on the Mac with the model route its Settings use (the person's Claude plan, credits or key). Returns the command's seq; follow with mac_swarm_events. Needs swarm:write.",
     inputSchema: {
       type: "object",
       required: ["type", "folder"],
@@ -267,6 +275,46 @@ export const ACCOUNT_TOOLS: AccountTool[] = [
     },
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
     scope: "swarm:write",
+  },
+  {
+    name: "mac_get",
+    title: "Read from the Mac app",
+    description: `Reads from the desktop app on the person's Mac, through the relay, as the app's own pages do; the answer comes back from the Mac (waits up to ~50 s; if it hasn't come, mac_reply with the returned id). Operations: ${opsList(false)}. The Mac must be online with the app signed in and Settings → Phone on (mac_swarm shows it).`,
+    inputSchema: {
+      type: "object",
+      required: ["op"],
+      properties: {
+        op: { type: "string", enum: Object.keys(MAC_OPS).filter((k) => !MAC_OPS[k as MacOp].write) },
+        folder: FOLDER,
+        args: OP_ARGS,
+      },
+    },
+    annotations: { ...READ, idempotentHint: false },
+    scope: "swarm:read",
+  },
+  {
+    name: "mac_do",
+    title: "Act in the Mac app",
+    description: `Does anything the desktop app's folder page does, on the person's Mac, through the relay: the Mac runs it as if clicked there, with the model route and caps its Settings use, and answers with the result (waits up to ~50 s; then mac_reply with the returned id). Operations: ${opsList(true)}. Consequential: start, hunt, statements and triage run agents that spend the person's Claude plan, credits or key; report spends $150 of credits; add_folder lets the app (and these tools) read that folder.`,
+    inputSchema: {
+      type: "object",
+      required: ["op"],
+      properties: {
+        op: { type: "string", enum: Object.keys(MAC_OPS).filter((k) => MAC_OPS[k as MacOp].write) },
+        folder: FOLDER,
+        args: OP_ARGS,
+      },
+    },
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
+    scope: "swarm:write",
+  },
+  {
+    name: "mac_reply",
+    title: "A Mac call's answer",
+    description: "The Mac's answer to a mac_get or mac_do call that hadn't come back in time, by the id it returned (answers are kept 30 minutes). Waits up to ~25 s for it.",
+    inputSchema: { type: "object", required: ["id"], properties: { id: { type: "string" } } },
+    annotations: { ...READ, idempotentHint: false },
+    scope: "swarm:read",
   },
 ];
 
@@ -545,6 +593,32 @@ async function callTool(name: string, args: Record<string, unknown>, caller: Cal
       if (!command || command.type === "history") return failure("Not a command: say needs run and text, stop needs run, start takes an optional run, goal and budget (up to 1000).");
       const seq = await r.send(command);
       return json({ sent: command, seq, note: "Queued for the Mac; it picks commands up within seconds while online and drops them after 10 minutes." });
+    }
+    case "mac_get":
+    case "mac_do": {
+      const op = str(args.op) as MacOp;
+      if (!Object.hasOwn(MAC_OPS, op) || MAC_OPS[op].write !== (name === "mac_do")) return failure(`${op || "op"} isn't a ${name} operation.`);
+      const r = relay();
+      let folder = "";
+      if (!["folders", "status", "add_folder", "remove_folder"].includes(op)) {
+        const wanted = str(args.folder);
+        const { state } = await r.read(Number.MAX_SAFE_INTEGER, false);
+        const folders = state?.folders ?? [];
+        const match = folders.find((f) => [f.path, f.name, f.repo ?? ""].some((v) => v.toLowerCase() === wanted.toLowerCase()));
+        if (!match) return failure(`${wanted || "folder"} isn't one of the Mac's folders${folders.length ? `: ${folders.map((f) => f.path).join(", ")}` : " (it has published none; is the app signed in, with Settings → Phone on?)"}.`);
+        folder = match.path;
+      }
+      const command = parseCommand({ type: "call", folder, id: crypto.randomUUID(), op, args: args.args ?? {} });
+      if (!command || command.type !== "call") return failure("Arguments too large, or not an object.");
+      await r.send(command);
+      const reply = (await r.reply(command.id, true)) ?? (await r.reply(command.id, true));
+      if (!reply) return json({ id: command.id, pending: true, note: "The Mac hasn't answered yet (it may be offline, or the operation is long). Ask again with mac_reply." });
+      return reply.ok ? json({ id: command.id, result: reply.result }) : failure(`The Mac: ${reply.error}`);
+    }
+    case "mac_reply": {
+      const reply = await relay().reply(str(args.id), true);
+      if (!reply) return json({ id: str(args.id), pending: true });
+      return reply.ok ? json({ id: reply.id, result: reply.result }) : failure(`The Mac: ${reply.error}`);
     }
     default:
       throw new Error(`Unknown tool: ${name}`);
