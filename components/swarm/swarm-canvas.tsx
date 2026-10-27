@@ -1132,7 +1132,11 @@ export function SwarmCanvas({ state, fill = false, contain = false, title, actio
 					style={{
 						width: W,
 						height: boardH,
-						transform: `translate(${ox}px, ${oy}px) scale(${s})`,
+						// `zoom`, not `scale()`: the text is laid out again at the new size and stays sharp, where a scaled
+						// layer is drawn once and stretched (blurry in the Mac app's web view). Under `zoom` the translate is in
+						// the board's own units, hence the division.
+						zoom: s,
+						transform: `translate(${ox / s}px, ${oy / s}px)`,
 						...(fill ? {} : DOTS),
 					}}
 				>
