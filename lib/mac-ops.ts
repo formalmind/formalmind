@@ -15,7 +15,7 @@ export const MAC_OPS = {
 	statements: { write: false, args: "", about: "the statements and how far each has got" },
 	bugs: { write: false, args: "", about: "the findings, each with its PoC" },
 	proofs: { write: false, args: "", about: "which files and theorems proved each item" },
-	queue: { write: false, args: "", about: "the swarm's job queue" },
+	queue: { write: false, args: "run?, done?", about: "a session's job queue (the main one by default): its open jobs, and with done: true each finished job's result (approve, changes, bug) and its agent's summary, such as a reviewer's reasons" },
 	sessions: { write: false, args: "", about: "the folder's sessions" },
 	running: { write: false, args: "", about: "the sessions running now" },
 	history: { write: false, args: "run", about: "a session's events from its log" },

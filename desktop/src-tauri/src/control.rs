@@ -159,7 +159,7 @@ pub async fn dispatch(app: &AppHandle, op: &str, folder: &str, a: &Value) -> Res
         "statements" => json_of(crate::statements::swarm_statements(folder)),
         "bugs" => json_of(swarm::swarm_bugs(folder)),
         "proofs" => swarm::swarm_proofs(folder),
-        "queue" => swarm::swarm_queue(folder),
+        "queue" => swarm::swarm_queue_of(folder, opt("run"), a["done"].as_bool().unwrap_or(false)),
         "sessions" => json_of(swarm::swarm_sessions(folder)),
         "running" => Ok(json!(swarm::swarm_running(app.state::<Swarms>(), folder))),
         "history" => swarm::swarm_history(folder, need("run")?).map(|h| json!(h[h.len().saturating_sub(300)..])),

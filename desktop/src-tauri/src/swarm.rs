@@ -569,12 +569,28 @@ fn save_transcript(root: &Path, run: &str, job: u64, messages: &[Value]) {
 /// The queue as the app sees it: jobs not done yet, oldest first, and the session's spend.
 #[tauri::command(async)]
 pub fn swarm_queue(folder: String) -> Result<Value, String> {
+    swarm_queue_of(folder, None, false)
+}
+
+/// A session's queue (the folder's main one by default): its open jobs, and with `done`, each finished one's result
+/// (approve, changes, bug) and its agent's summary: a reviewer's reasons, a prover's account.
+pub fn swarm_queue_of(folder: String, run: Option<String>, done: bool) -> Result<Value, String> {
     if !local::read()?.allows(&folder) {
         return Err("Add the folder first".into());
     }
-    let q = load_queue(&queue_file(Path::new(&folder), "swarm"));
+    let run = run.filter(|r| !r.is_empty() && r.chars().all(|c| c.is_ascii_alphanumeric() || c == '-')).unwrap_or_else(|| "swarm".into());
+    let q = load_queue(&queue_file(Path::new(&folder), &run));
     let open: Vec<Value> = q.jobs.iter().filter(|j| j.state != "done").map(|j| json!({ "id": j.id, "kind": j.kind, "item": j.item, "state": j.state, "attempt": j.attempt })).collect();
-    Ok(json!({ "open": open, "spent": q.spent, "done": q.jobs.iter().filter(|j| j.state == "done").count() }))
+    let mut out = json!({ "run": run, "open": open, "spent": q.spent, "done": q.jobs.iter().filter(|j| j.state == "done").count() });
+    if done {
+        out["finished"] = json!(q
+            .jobs
+            .iter()
+            .filter(|j| j.state == "done")
+            .map(|j| json!({ "id": j.id, "kind": j.kind, "item": j.item, "attempt": j.attempt, "result": j.result, "summary": j.summary.chars().take(4000).collect::<String>(), "files": j.files }))
+            .collect::<Vec<_>>());
+    }
+    Ok(out)
 }
 
 // ---- roles ----
