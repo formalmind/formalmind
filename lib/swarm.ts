@@ -21,7 +21,7 @@ const SWARM_WORKFLOW = "formalmind-swarm.yml";
 /** Shared by every request in this server instance, so polling clients don't multiply GitHub calls. */
 const CACHE_MS = 10_000;
 
-export type SwarmRole = "dispatcher" | "planner" | "prover" | "rebuilder" | "reviewer" | "merger" | "editor" | "chief" | "assistant" | "hunter";
+export type SwarmRole = "dispatcher" | "planner" | "prover" | "rebuilder" | "reviewer" | "merger" | "editor" | "chief" | "assistant";
 
 /** Where the rebuild cycle stands, from the editor's `<!-- fm-cycle n=<k> phase=<phase> -->` ledger marker. */
 export interface SwarmCycle {

@@ -12,7 +12,6 @@ import swarm from "@/content/docs/swarm.md";
 import statements from "@/content/docs/statements.md";
 import proofs from "@/content/docs/proofs.md";
 import bugs from "@/content/docs/bugs.md";
-import bugHunter from "@/content/docs/bug-hunter.md";
 import models from "@/content/docs/models.md";
 import files from "@/content/docs/files.md";
 import agents from "@/content/docs/agents.md";
@@ -26,7 +25,6 @@ const TEXT: Record<string, string> = {
   statements,
   proofs,
   bugs,
-  "bug-hunter": bugHunter,
   models,
   files,
   agents,

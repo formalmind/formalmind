@@ -18,7 +18,7 @@ read. Nothing is uploaded. `src-tauri/src/local.rs` has it, with a test (`cargo 
 
 `src/swarm-panel.tsx` (the Mac app's layout; the website keeps its tabs and the floating chat):
 
-- **The view fills the middle**: Canvas, Proofs, Bugs or Code (and Debug where it's on).
+- **The view fills the middle**: Canvas, Proofs, Bugs or Code.
 - **The chat is the right pane**: talk to the agents, start or resume the swarm. Drag the line between them to resize it
   (double-click for the default); its width and whether it's open are kept. While the swarm runs, the send button is
   Stop until you type. A working agent's current task shimmers.

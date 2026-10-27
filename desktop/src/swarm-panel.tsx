@@ -1,10 +1,10 @@
 import { MarkGithubIcon } from "@primer/octicons-react";
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { NvimTerminal } from "./nvim-terminal";
 import { reportError } from "@/lib/report-error";
 import { JsonTree } from "./json-tree";
-import { ArrowDown, Bug, Check, ChevronDown, ChevronRight, CircleCheck, CircleX, LoaderCircle, MoreHorizontal, Pause, Code2, Copy, Crosshair, FileCode2, Folder, Network, Play, Plus, ScanSearch, Square, SquareCheck, Terminal, ThumbsDown, ThumbsUp, WandSparkles, Waypoints } from "lucide-react";
+import { ArrowDown, Bug, Check, ChevronDown, ChevronRight, CircleCheck, CircleX, LoaderCircle, MoreHorizontal, Pause, Code2, Copy, FileCode2, Folder, Network, Play, Plus, ScanSearch, Square, SquareCheck, ThumbsDown, ThumbsUp, WandSparkles } from "lucide-react";
 
 // The project roadmap (GitHub Projects-style), the same view the web app had on its own page.
 import { motion as vimMotion, search as vimSearch, setVimMode, useVimMode, type Cursor } from "@/components/vim-mode";
@@ -13,7 +13,6 @@ import { ChatComposer } from "@/components/chat-composer";
 import { useReportDirs } from "@/lib/report-dirs";
 import { auditJsonPath, parseAuditDoc, type AuditDoc, type AuditFindingDoc } from "@/lib/audit-format";
 import { readEntryPoints, setMainEntryPoint } from "@/lib/entry-points";
-import { ReachView } from "./reach";
 import { ChatScrubber } from "./chat-scrubber";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuRadioGroup, DropdownMenuRadioItem, DropdownMenuSeparator, DropdownMenuSub, DropdownMenuSubContent, DropdownMenuSubTrigger, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { ChatMarkdown } from "@/components/chat-markdown";
@@ -1310,7 +1309,7 @@ export function BugsView({ folder, files, invoke, bugs, openBug, setOpenBug, wit
 	);
 }
 
-export type Mode = "code" | "chat" | "swarm" | "roadmap" | "audit" | "bugs" | "debug" | "concolic" | "reach";
+export type Mode = "code" | "chat" | "swarm" | "roadmap" | "audit" | "bugs";
 
 const PANE_WIDTH = 440;
 
@@ -1327,20 +1326,16 @@ const MODES: { id: Mode; label: string; icon: typeof Code2 }[] = [
 	{ id: "swarm", label: "Swarm", icon: Network },
 	{ id: "audit", label: "Proofs", icon: ScanSearch },
 	{ id: "bugs", label: "Bugs", icon: Bug },
-	// The bug search: the hunter alone on its own canvas (coverage, concolic explore, its debugger, PoCs). Desktop only.
-	{ id: "concolic", label: "Concolic", icon: Crosshair },
-	// The protocol's call graph, each function by what's known of its branches (run, solved, unsat). Desktop only.
-	{ id: "reach", label: "Reach", icon: Waypoints },
 ];
 
 /**
- * The page's modes, Debug and then the folder's name, as one macOS-style segmented control. The Mac app shows it in its
+ * The page's modes and the folder's name, as one macOS-style segmented control. The Mac app shows it in its
  * title bar; the web app centres it at the top of the page.
  */
 /** Where the selected tab's pill last was, so a new page's tabs slide from there instead of jumping. */
 let lastPill: { left: number; width: number } | null = null;
 
-export function NavGroup({ name, git, onDebug, mode, onMode, inBar, compact, concolic = false }: { name: string; git: boolean; onDebug?: () => void; mode: Mode; onMode: (m: Mode) => void; inBar?: boolean; compact?: boolean; concolic?: boolean }) {
+export function NavGroup({ name, git, mode, onMode, inBar, compact }: { name: string; git: boolean; mode: Mode; onMode: (m: Mode) => void; inBar?: boolean; compact?: boolean }) {
 	const seg = "relative z-10 inline-flex shrink-0 items-center gap-1.5 rounded-md px-2.5 text-[12px] font-medium outline-none transition-colors duration-200 focus-visible:ring-2 focus-visible:ring-ring";
 	const h = inBar ? "h-6" : "h-7";
 	// One white pill under the selected tab, sliding between tabs (and across pages) rather than jumping.
@@ -1367,7 +1362,7 @@ export function NavGroup({ name, git, onDebug, mode, onMode, inBar, compact, con
 					style={{ left: pill.left, width: pill.width }}
 				/>
 			) : null}
-			{MODES.filter((m) => (m.id !== "concolic" && m.id !== "reach") || concolic).map(({ id, label, icon: Icon }) =>
+			{MODES.map(({ id, label, icon: Icon }) =>
 				// The Code tab is the folder itself: its name, with the GitHub mark when it is a git repository.
 				id === "code" ? (
 					<button key={id} type="button" role="tab" aria-selected={mode === id} aria-label={`Code · ${name}`} title={`Code · ${name}`} onClick={() => onMode(id)} className={`${tab(mode === id)} min-w-0`}>
@@ -1381,12 +1376,6 @@ export function NavGroup({ name, git, onDebug, mode, onMode, inBar, compact, con
 					</button>
 				),
 			)}
-			{onDebug ? (
-				<button type="button" role="tab" aria-selected={mode === "debug"} onClick={onDebug} title="Debug this folder's scripts and tests" className={tab(mode === "debug")}>
-					<Bug className="size-3.5" />
-					{compact ? null : "Debug"}
-				</button>
-			) : null}
 		</div>
 	);
 }
@@ -1405,17 +1394,12 @@ export function TalkIcon({ className }: { className?: string }) {
 }
 
 /**
- * The mode a link asks for, as the page has it: Debug only with a debugger (else Code); Roadmap and Chat have no tab
- * now (the roadmap is on the Swarm canvas), so they open Swarm. The Chat view stays in the code for later.
+ * The mode a link asks for, as the page has it: Roadmap and Chat have no tab now (the roadmap is on the Swarm canvas),
+ * so they open Swarm, as do links to tabs that are gone (Debug, Concolic, Reach). The Chat view stays in the code for
+ * later.
  */
-/** A bug-search session (the hunter alone, on the Concolic tab). */
-const isHunt = (run: string | null | undefined) => Boolean(run?.startsWith("hunt-"));
-
-function resolveMode(asked: Mode, hasDebug: boolean, hasConcolic = false): Mode {
-	if (asked === "debug" && !hasDebug) return "code";
-	if ((asked === "concolic" || asked === "reach") && !hasConcolic) return "swarm";
-	if (asked === "roadmap" || asked === "chat") return "swarm";
-	return asked;
+function resolveMode(asked: string): Mode {
+	return (["code", "swarm", "audit", "bugs"] as const).find((m) => m === asked) ?? "swarm";
 }
 
 /** A slot in the Mac app's title bar (desktop/src/tabs.tsx), when there is one: the left one for the page's name, the
@@ -1739,14 +1723,10 @@ export function AuditView({ folder, scan, invoke, onOpenFile, reload = 0 }: { fo
 }
 
 /**
- * `debug` (the desktop app) renders Debug mode — the folder's Foundry tests in the debugger — for a test file;
- * without it there is no Debug mode.
- */
-/**
  * `defaultMode` is the tab without a ?mode; `onSwarm` sends the Swarm tab elsewhere (the website's imported repositories
  * keep their swarm on the project canvas).
  */
-export function SwarmPanel({ folder, name, scan, bridge, session, file: openPath, actions, debug, agentDebug, defaultMode, onSwarm }: { folder: string; name: string; scan: Scan | null; bridge: Bridge; session?: string | null; file?: string | null; actions?: React.ReactNode; debug?: (file: string | null, test: string | null, onPick: (file: string) => void) => React.ReactNode; agentDebug?: (props: { onActive: (role: string) => void; onClose: () => void; colorOf: (role: string) => string }) => React.ReactNode; defaultMode?: Mode; onSwarm?: () => void }) {
+export function SwarmPanel({ folder, name, scan, bridge, session, file: openPath, actions, defaultMode, onSwarm }: { folder: string; name: string; scan: Scan | null; bridge: Bridge; session?: string | null; file?: string | null; actions?: React.ReactNode; defaultMode?: Mode; onSwarm?: () => void }) {
 	const { invoke, listen, apiBase } = bridge;
 	// Every session running in this folder: each is its own swarm, and they keep working while you read another.
 	const [runs, setRuns] = useState<string[]>([]);
@@ -1796,11 +1776,6 @@ export function SwarmPanel({ folder, name, scan, bridge, session, file: openPath
 	// `url`: a PDF, shown in the browser's own viewer instead of as text.
 	const [file, setFile] = useState<{ path: string; text: string; url?: string } | null>(null);
 	const [planOpen, setPlanOpen] = useState(false);
-	// The agent whose debugger is being watched (it opens when an agent starts debugging), and whether it's shown.
-	const [debugging, setDebugging] = useState<string | null>(null);
-	const [watchDebug, setWatchDebug] = useState(true);
-	const onDebugActive = useCallback((role: string) => setDebugging(role), []);
-	const hideDebug = useCallback(() => setWatchDebug(false), []);
 	const [chatOpen, setChatOpen] = useState(() => store.get("fm:chat-open") !== "0");
 	// How many agent messages you had seen when the chat was folded; the button counts the ones since.
 	const [seen, setSeen] = useState(0);
@@ -1927,13 +1902,9 @@ export function SwarmPanel({ folder, name, scan, bridge, session, file: openPath
 	};
 	// The page's mode (Code, Swarm, Audit) and the open file live in the URL, so they survive reloads.
 	const [params, setParams] = useSearchParams();
-	// Debug mode exists only where the page is given a debugger; an old link to it opens Code instead.
-	const asked = (params.get("mode") as Mode | null) ?? defaultMode ?? "swarm";
 	// The roadmap lives on the Swarm canvas now and Chat has no tab; old links to either open Swarm.
-	const mode = resolveMode(asked, Boolean(debug), Boolean(agentDebug));
-	// Swarm and Concolic share the canvas, the chat and the agent's debugger; Concolic's sessions are bug searches.
-	const canvas = mode === "swarm" || mode === "concolic";
-	const concolic = mode === "concolic";
+	const mode = resolveMode(params.get("mode") ?? defaultMode ?? "swarm");
+	const canvas = mode === "swarm";
 	// The main contract's entry points, read from the AST, so the plan can name the ones each item covers.
 	const [entryUnits, setEntryUnits] = useState<AstUnit[]>([]);
 	const mainSource = (scan?.solidity ?? []).find((f) => f.startsWith("src/") && !f.endsWith(".t.sol") && !f.endsWith(".s.sol")) ?? null;
@@ -1974,14 +1945,6 @@ export function SwarmPanel({ folder, name, scan, bridge, session, file: openPath
 		setParams(next);
 	};
 	const markLine = Number(params.get("line")) || null;
-	/** Debug mode on a test file (the debugger compiles it and lists its tests). */
-	const debugFile = (path: string) => {
-		const next = new URLSearchParams(params);
-		next.set("file", path);
-		next.set("mode", "debug");
-		next.delete("line");
-		setParams(next);
-	};
 	// Code navigation (solidity-language-server in the app): ⌘/Ctrl-click goes to the definition; resting on a
 	// symbol shows its hover.
 	const [hover, setHover] = useState<{ x: number; y: number; text: string } | null>(null);
@@ -2084,7 +2047,7 @@ export function SwarmPanel({ folder, name, scan, bridge, session, file: openPath
 	const run = viewing && runs.includes(viewing) ? viewing : null;
 	// Grouped once per change of the events (a long session has about a thousand): typing in the composer re-renders the
 	// panel, and must not regroup the history, rebuild the board or redraw every message.
-	const chatBlocks = useMemo(() => blocks(events.filter((e) => e.kind !== "status" && e.kind !== "context" && !(concolic && e.kind === "start"))), [events, concolic]);
+	const chatBlocks = useMemo(() => blocks(events.filter((e) => e.kind !== "status" && e.kind !== "context")), [events]);
 	const scrubItems = useMemo(
 		() =>
 			chatBlocks.map((b) =>
@@ -2241,17 +2204,6 @@ export function SwarmPanel({ folder, name, scan, bridge, session, file: openPath
 		// eslint-disable-next-line react-hooks/exhaustive-deps
 	}, [openPath, folder]);
 	// Sessions are picked from the chat card's title (the sidebar holds the folder's files).
-	// Switching between Swarm and Concolic opens the latest session of that tab's kind (or an empty one).
-	useEffect(() => {
-		if (!canvas || session === "new" || isHunt(viewing) === concolic) return;
-		const latest = sessions.find((x) => isHunt(x.run) === concolic);
-		if (latest) load(latest.run);
-		else {
-			setViewing(null);
-			setEvents([]);
-		}
-		// eslint-disable-next-line react-hooks/exhaustive-deps
-	}, [mode, sessions]);
 	const pickSession = (run: string) => {
 		const next = new URLSearchParams(params);
 		next.set("run", run);
@@ -2274,20 +2226,6 @@ export function SwarmPanel({ folder, name, scan, bridge, session, file: openPath
 	// route, the model and the cap from the settings.
 	const start = async () => {
 		setError(null);
-		// On Concolic, start is a bug search: the hunter alone, on the focus you typed, in a hunt-* session.
-		if (concolic) {
-			try {
-				const { run: id } = await invoke<{ run: string }>("control", { op: "hunt", folder, args: { focus: goal.trim(), run: viewing && isHunt(viewing) ? viewing : `hunt-${Date.now().toString(16)}` } });
-				if (!viewing || !isHunt(viewing)) setEvents([]);
-				setGoal("");
-				setRuns((r) => (r.includes(id) ? r : [...r, id]));
-				setViewing(id);
-				void listSessions();
-			} catch (e) {
-				setError(String(e));
-			}
-			return;
-		}
 		// A new session starts empty; Resume carries on below the chat you're reading.
 		const fresh = session === "new" && !viewing;
 		if (fresh) setEvents([]);
@@ -2344,8 +2282,7 @@ export function SwarmPanel({ folder, name, scan, bridge, session, file: openPath
 	// The latest end of the session (a resumed one has several), so the reason shown is the current one.
 	const finished = !run ? [...events].reverse().find((e) => e.kind === "done") : undefined;
 	const shown = chatBlocks;
-	// Concolic's board has no plan: the hunter alone, with its notebook and ledger.
-	const board = useMemo(() => localBoard(folder, concolic ? [] : plan, events, Boolean(run), budget), [folder, plan, events, run, budget, concolic]);
+	const board = useMemo(() => localBoard(folder, plan, events, Boolean(run), budget), [folder, plan, events, run, budget]);
 	const itemTitle = (steps: Row[]) => {
 		const r = steps.find((x) => "call" in x) ?? steps[0];
 		const item = r ? ("call" in r ? r.call.item : r.note.item) : "";
@@ -2647,7 +2584,7 @@ export function SwarmPanel({ folder, name, scan, bridge, session, file: openPath
 		return () => ro.disconnect();
 	}, []);
 	const compact = width < (slot ? 1100 : 820);
-	const nav = <NavGroup name={name} git={Boolean(scan?.git)} onDebug={debug ? () => setMode("debug") : undefined} mode={mode} onMode={setMode} inBar={Boolean(slot)} compact={compact} concolic={Boolean(agentDebug)} />;
+	const nav = <NavGroup name={name} git={Boolean(scan?.git)} mode={mode} onMode={setMode} inBar={Boolean(slot)} compact={compact} />;
 	// The working agent's context window, with its breakdown; in the Mac app it sits in the title bar.
 	const ctxMenu = working && ctx && ctxPct !== null ? (
 		<DropdownMenu>
@@ -2726,7 +2663,7 @@ export function SwarmPanel({ folder, name, scan, bridge, session, file: openPath
 	// What the right pane can show: the open one is highlighted, and clicking it again closes the pane.
 	const paneTools = (
 		<span className="ml-1 inline-flex shrink-0 items-center gap-0.5">
-			{[...PANE_VIEWS, ...(agentDebug ? [{ id: "concolic" as Mode, label: "Concolic", icon: Crosshair }, { id: "reach" as Mode, label: "Reach", icon: Waypoints }] : []), ...(debug ? [{ id: "debug" as Mode, label: "Debug", icon: Terminal }] : [])].map(({ id, label, icon: Icon }) => (
+			{PANE_VIEWS.map(({ id, label, icon: Icon }) => (
 				<button
 					key={id}
 					type="button"
@@ -2759,7 +2696,7 @@ export function SwarmPanel({ folder, name, scan, bridge, session, file: openPath
 	const chatPanel = (
 		<>
 				<div className="flex h-8 shrink-0 items-center gap-1 pl-3 pr-0.5">
-					<button type="button" onClick={() => pickSession("new")} aria-label="New chat" title={concolic ? "New bug search" : "New chat"} className="grid size-7 shrink-0 place-items-center rounded-full text-muted-foreground hover:bg-background hover:text-foreground">
+					<button type="button" onClick={() => pickSession("new")} aria-label="New chat" title="New chat" className="grid size-7 shrink-0 place-items-center rounded-full text-muted-foreground hover:bg-background hover:text-foreground">
 						<Plus className="size-3.5" />
 					</button>
 					<DropdownMenu>
@@ -2770,7 +2707,7 @@ export function SwarmPanel({ folder, name, scan, bridge, session, file: openPath
 						<DropdownMenuContent align="start" className="w-64">
 							<DropdownMenuLabel className="text-xs font-normal text-muted-foreground">Sessions in {name}</DropdownMenuLabel>
 							{/* The session you're reading stays highlighted, with a check on the right. */}
-							{sessions.filter((x) => isHunt(x.run) === concolic).map((x, i) => (
+							{sessions.map((x, i) => (
 								<DropdownMenuItem key={x.run} onSelect={() => pickSession(x.run)} aria-current={x.run === viewing} className={`text-[13px] ${x.run === viewing ? "bg-accent text-accent-foreground" : ""}`}>
 									<span className="truncate">{x.title || (x.run === "swarm" ? "Main session" : `Session ${sessions.length - i}`)}</span>
 									{runs.includes(x.run) ? <span className="ml-auto shrink-0 text-[11px] text-muted-foreground">running</span> : null}
@@ -2854,14 +2791,14 @@ export function SwarmPanel({ folder, name, scan, bridge, session, file: openPath
 						value={run ? say : goal}
 						onChange={(e) => (run ? setSay(e.target.value) : setGoal(e.target.value))}
 						onSubmit={() => void (run ? send() : start())}
-						// One button: ↑ starts (Concolic: once you've said what to look at) and sends; while it runs, an empty box
+						// One button: ↑ starts and sends; while it runs, an empty box
 						// makes it Stop, which stops the session.
 						onStop={() => void invoke("swarm_stop", { folder, run })}
 						isLoading={Boolean(run)}
-						allowEmpty={!run && !concolic}
+						allowEmpty={!run}
 						sendClassName="btn-dark !px-0"
 						sendDisabled={!run && Boolean(ownKey) && !hasKey}
-						sendTitle={run ? (say.trim() ? "Send" : "Stop the session") : ownKey && !hasKey ? `Add your ${ownKey} key in Settings first` : concolic ? "Start the bug search with this message" : "Start the swarm"}
+						sendTitle={run ? (say.trim() ? "Send" : "Stop the session") : ownKey && !hasKey ? `Add your ${ownKey} key in Settings first` : "Start the swarm"}
 						modelPicker={{
 							value: pickedModel,
 							options: models,
@@ -2881,10 +2818,10 @@ export function SwarmPanel({ folder, name, scan, bridge, session, file: openPath
 								store.set("fm:effort", v);
 							},
 						} : undefined}
-						placeholder={run ? (concolic ? "Talk to the hunter: a question, a lead, where to look next…" : "Talk to the agents: a question, a new focus, an idea to check…") : concolic ? "What should the hunter look at? Router.swap, the fee path, settlement…" : "What should the swarm focus on? (optional) ↑ starts it"}
+						placeholder={run ? "Talk to the agents: a question, a new focus, an idea to check…" : "What should the swarm focus on? (optional) ↑ starts it"}
 						context={
 							<span className="inline-flex items-center gap-1.5">
-								{run || concolic ? null : (
+								{run ? null : (
 									<button type="button" onClick={() => void start()} disabled={Boolean(ownKey) && !hasKey} title={ownKey && !hasKey ? `Add your ${ownKey} key in Settings first` : "Start the swarm"} className="btn-dark inline-flex h-7 items-center gap-1.5 px-2.5 text-[12px] disabled:opacity-50">
 										<Play className="size-3" />{plan.some((i) => i.mark === " ") ? "Resume" : "Start"}
 									</button>
@@ -2905,17 +2842,16 @@ export function SwarmPanel({ folder, name, scan, bridge, session, file: openPath
 		</>
 	);
 
-	// What the page shows besides the chat: the canvas, Code, Proofs, Bugs or Debug. The Mac app opens it in the right
+	// What the page shows besides the chat: the canvas, Code, Proofs or Bugs. The Mac app opens it in the right
 	// pane; the web shows it full page with the chat floating over the canvas.
 	const modeViews = (
 		<>
-		{/* Swarm and Concolic show the canvas; Code and Audit replace it. The name and the controls stay in every mode. */}
+		{/* Swarm shows the canvas; Code and Audit replace it. The name and the controls stay in every mode. */}
 		{canvas ? (
 			<SwarmCanvas
 				state={board}
 				fill
 				local
-				roles={concolic ? ["hunter"] : undefined}
 				repo={folder}
 				actions={actions}
 				// An agent's name tag opens the chat addressed to it.
@@ -2941,8 +2877,7 @@ export function SwarmPanel({ folder, name, scan, bridge, session, file: openPath
 					),
 				}}
 				// The roadmap is the folder's own plan (.formal/plan.md, one item per AST function), nothing from GitHub.
-				// Concolic's board has no plan: the hunter alone.
-				below={concolic ? undefined : {
+				below={{
 					// The Mac app's pane has no floating Plan card: the plan is this panel, with its counts.
 					title: slot ? "Plan" : "Roadmap",
 					note: slot ? `${plan.length ? `${done}/${plan.length}` : ""}${entryUnits.length ? ` · ${inPlan.size}/${entryUnits.length} entry points` : ""}` : undefined,
@@ -2951,7 +2886,7 @@ export function SwarmPanel({ folder, name, scan, bridge, session, file: openPath
 				}}
 				// In the Mac app the folder's git tree has a card of its own beside the plan: where the swarm works, HEAD and its
 				// uncommitted proofs.
-				beside={slot && scan?.git && !concolic ? { title: "Git", width: 440, node: <GitTree folder={folder} invoke={invoke} working={Boolean(run)} flat /> } : undefined}
+				beside={slot && scan?.git ? { title: "Git", width: 440, node: <GitTree folder={folder} invoke={invoke} working={Boolean(run)} flat /> } : undefined}
 			/>
 		) : (
 			<div className="relative h-full w-full bg-background">
@@ -2977,11 +2912,6 @@ export function SwarmPanel({ folder, name, scan, bridge, session, file: openPath
 							<FileCode2 className="size-3.5 shrink-0 text-muted-foreground" />
 							<Breadcrumbs root={name} path={file.path} files={tree} onOpen={view} />
 							<span className="ml-auto flex items-center gap-1">
-								{debug && /\.[ts]\.sol$/.test(file.path) ? (
-									<button type="button" onClick={() => debugFile(file.path)} title={`Debug ${file.path.endsWith(".s.sol") ? "this script" : "a test in this file"}`} className="inline-flex h-6 items-center gap-1 rounded-md px-2 text-[11px] text-muted-foreground hover:bg-muted hover:text-foreground">
-										<Bug className="size-3" />Debug
-									</button>
-								) : null}
 								{/\.(md|markdown)$/i.test(file.path) ? (
 									<span role="tablist" aria-label="Markdown view" className="mr-1 inline-flex h-6 items-center rounded-md border bg-muted/60 p-0.5">
 										{(["Preview", "Source"] as const).map((v) => {
@@ -3118,11 +3048,6 @@ export function SwarmPanel({ folder, name, scan, bridge, session, file: openPath
 				)}
 			</div>
 		) : null}
-		{mode === "debug" && debug ? (
-			<div className="pointer-events-auto absolute inset-x-0 bottom-0 top-[var(--fm-top)] z-10 flex min-h-0 bg-background">
-				{debug(openPath && /\.[ts]\.sol$/.test(openPath) ? openPath : null, params.get("test"), debugFile)}
-			</div>
-		) : null}
 		{mode === "bugs" ? (
 			<BugsView
 				folder={folder}
@@ -3140,11 +3065,6 @@ export function SwarmPanel({ folder, name, scan, bridge, session, file: openPath
 				}}
 			/>
 		) : null}
-		{mode === "reach" ? (
-			<div className="pointer-events-auto absolute bottom-3 left-3 right-3 top-[max(var(--fm-top),0.75rem)] z-10 flex min-h-0 flex-col overflow-hidden rounded-2xl border bg-muted/60 p-1">
-				<ReachView folder={folder} scan={scan} invoke={invoke} listen={listen} onOpenFile={view} />
-			</div>
-		) : null}
 		{mode === "audit" ? (
 			<div data-fm-proofs className="pointer-events-auto absolute bottom-3 left-3 right-3 top-[var(--fm-top)] z-10 flex min-h-0 flex-col overflow-hidden rounded-2xl border bg-muted/60 p-1">
 				<AuditView folder={folder} scan={scan} invoke={invoke} onOpenFile={view} reload={reload} />
@@ -3161,22 +3081,6 @@ export function SwarmPanel({ folder, name, scan, bridge, session, file: openPath
 				{/* The view in the middle (Canvas, Proofs, Bugs, Code); the chat in the right pane. */}
 				<div className="relative min-w-0 flex-1" style={{ "--fm-top": "0px" } as React.CSSProperties}>
 					<div className="absolute inset-0 flex flex-col overflow-hidden">{modeViews}</div>
-					{/* An agent's debugger, watched over the canvas: mounted with it so it hears every move, shown once an agent debugs. */}
-					{canvas && agentDebug ? (
-						<>
-							<section
-								aria-label="Agent's debugger"
-								className={`pointer-events-auto absolute inset-3 z-10 flex flex-col overflow-hidden rounded-2xl border bg-background/95 p-2 shadow-pop backdrop-blur ${debugging && watchDebug ? "" : "hidden"}`}
-							>
-								{agentDebug({ onActive: onDebugActive, onClose: hideDebug, colorOf })}
-							</section>
-							{debugging && !watchDebug ? (
-								<button type="button" onClick={() => setWatchDebug(true)} className="pointer-events-auto absolute bottom-3 left-1/2 z-10 -translate-x-1/2 rounded-full border bg-muted/90 px-3 py-1.5 text-[12px] shadow-pop backdrop-blur hover:bg-muted">
-									<span className="font-medium" style={{ color: colorOf(debugging) }}>{roleName(debugging)}</span> is debugging · watch
-								</button>
-							) : null}
-						</>
-					) : null}
 				</div>
 				{paneOpen ? (
 					<section className="relative flex min-h-0 shrink-0 flex-col border-l px-3 pb-3 pt-2" style={{ width: paneWidth }}>
@@ -3197,24 +3101,6 @@ export function SwarmPanel({ folder, name, scan, bridge, session, file: openPath
 				{modeViews}
 				{nav}
 			</div>
-
-			{/* An agent's debugger, watched: mounted in Swarm mode so it hears every move, shown once an agent debugs. */}
-			{canvas && agentDebug ? (
-				<>
-					<section
-						aria-label="Agent's debugger"
-						className={`pointer-events-auto absolute bottom-3 left-3 z-10 flex flex-col overflow-hidden rounded-2xl border bg-background/95 p-2 shadow-pop backdrop-blur ${debugging && watchDebug ? "" : "hidden"}`}
-						style={{ top: "calc(var(--fm-top) + 2.75rem)", right: chatOpen ? `calc(min(${chatSize.w}px, 100% - 1.5rem) + 1.5rem)` : "4.5rem" }}
-					>
-						{agentDebug({ onActive: onDebugActive, onClose: hideDebug, colorOf })}
-					</section>
-					{debugging && !watchDebug ? (
-						<button type="button" onClick={() => setWatchDebug(true)} className="pointer-events-auto absolute bottom-3 left-1/2 z-10 -translate-x-1/2 rounded-full border bg-muted/90 px-3 py-1.5 text-[12px] shadow-pop backdrop-blur hover:bg-muted">
-							<span className="font-medium" style={{ color: colorOf(debugging) }}>{roleName(debugging)}</span> is debugging · watch
-						</button>
-					) : null}
-				</>
-			) : null}
 
 			{/* The chat: start and steer the swarm, the plan, and the agents' messages. */}
 			{/* The chat floats over the canvas on the right: a gray title bar with the run's controls, the white chat inside.

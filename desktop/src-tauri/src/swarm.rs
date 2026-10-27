@@ -22,25 +22,6 @@ const DEFAULT_MODEL: &str = "claude-opus-5-5";
 /// Tool steps per agent turn; proofs take more than plans and reviews.
 const MAX_STEPS: usize = 40;
 const PROVER_STEPS: usize = 90;
-/// The hunter's instructions (the API's system prompt and Claude Code's appended one).
-pub(crate) const HUNTER: &str = "You hunt for vulnerabilities in the contracts. Work like an auditor: understand the code and suspect specific bugs first, then use the tools to prove or kill each suspicion. Don't reach for a tool before you know what you're looking for. \
-The maintainer reads your messages as you go: always say what you're about to do and why, in a sentence or two, before you do it (\"Reading AsyncFiller.updatePrice: it rewrites an order's terms, so I'm checking what it re-validates.\"), and after a result, what it showed and what you'll do next. Never run tools silently, one after another, without saying what they're for. \
-1. Read. Given a focus (a function, a flow such as the fee path), start there; otherwise start from the entry points that move value or change authority (swap, fill, match, cancel, claim, withdraw, admin setters). Follow each one through its callees: who may call it, what it checks, what it reads and writes, what it pays out, what it calls. \
-2. Look for the patterns bugs follow, and write each suspicion down as a hypothesis with its place (file:line) and what would be wrong: \
-- access: a state change or payout with no caller check, a check on the wrong address (tx.origin, an executor the user didn't authorize, a forwarded msg.sender), a signature that can be replayed (no nonce, no domain, no binding to the order's incarnation), a missing deadline; \
-- arithmetic: rounding that favours the caller (floor where the protocol should ceil), division before multiplication, a downcast that truncates (uint128(x)), unchecked blocks, fees or bids computed on a different amount than the one charged, units mixed up (decimals, price scales); \
-- accounting: an amount credited twice or never debited, escrow released before it's settled, totals that stop matching their parts after a partial fill, cancel or reprice, value stranded with no way out; \
-- state: a check made before an external call and relied on after it (reentrancy, including read-only), a mapping keyed so that two things collide, a stale value read from storage or memory, transient storage left set across calls of one transaction, an order or position reused after it was closed; \
-- ordering and inputs: front-running a price or a match, a zero or max value that skips a guard, an empty array, a duplicate entry, a token that returns false, takes a fee on transfer or reenters; \
-- trust: an external call to an address a caller supplies, a return value not checked, assumptions about a hook, an oracle or the PoolManager that the code doesn't enforce. \
-Tag each hypothesis on its line (`tag`, kind suspicion) as you form it, so the maintainer sees what you're chasing. \
-Long tasks run in the background so you can keep reading: run_in_background starts coverage, explore or a forge command and gives you a task number; background_results lists your tasks, and with an id returns the result (wait: true waits for it). Coverage of the whole suite is already running as task 1 when you start. \
-3. Test the hypotheses, most damaging first. `coverage` (with no arguments it waits for task 1 rather than running again; cached when the code hasn't changed) shows whether the suite even reaches that code and which branch sides it never takes; `explore`, narrowed with `only` to the fuzz tests that reach it, solves for inputs that take those sides and finds inputs that make a test fail (already reduced); the debugger shows exactly what the bytecode does: debug_open the test file, debug_run a test (with explore's inputs as `args`), debug_look revert and lines, debug_watch the storage the hypothesis is about and debug_move continue to its writes. \
-4. A real bug: write a Foundry PoC under test/formal/ (reuse the repo's test setup under test/) with the inputs as constants, whose test passes by demonstrating the issue; run it with `forge test --match-path <file>`; then report_bug with the scenario, impact and recommendation written as an audit report states a finding, and `location` as file:line. It lands on the Bugs page and on that line in the maintainer's editor. A hypothesis the tests refute: say why, and retag it (kind assumption or invariant) if what you learned is worth keeping. \
-Don't change the contracts or the existing tests. A test that fails because the test itself is wrong is not a bug in the contracts: say so and move on. End with one paragraph: the hypotheses you chased, the bugs you reported (IDs), and what's left open.";
-
-/// A hunt runs coverage, explore and many debugger moves before it writes a PoC.
-const HUNTER_STEPS: usize = 150;
 const MAX_ATTEMPTS: usize = 3;
 
 pub struct Swarm {
@@ -99,7 +80,8 @@ pub struct SwarmRequest {
     pub budget_usd: f64,
     /// formal.team (or a local Worker) and the desktop session token, from the app.
     pub api_base: String,
-    /// "formal" (formal.team credits, the default) or "anthropic" (your own key from the keychain, straight to Anthropic).
+    /// "claude-code" (your Claude plan), "anthropic" or "openai" (your own key from the keychain); "formal"
+    /// (formal.team's metered route) still works for accounts with credits but is no longer offered.
     pub provider: Option<String>,
     /// claude-opus-5-5 (default), claude-sonnet-5-5 or claude-haiku-5-5.
     pub model: Option<String>,
@@ -107,9 +89,6 @@ pub struct SwarmRequest {
     pub session: Option<String>,
     /// Only the jobs already queued (e.g. reading an audit report), then stop, instead of going on to the plan.
     pub only_queued: Option<bool>,
-    /// A bug-search session: the hunter alone, on this focus ("" for the whole codebase). Nothing else is queued.
-    #[serde(default)]
-    pub hunt: Option<String>,
 }
 
 fn anthropic_entry() -> Result<keyring::Entry, String> {
@@ -173,15 +152,7 @@ struct SwarmEvent {
 
 /// An event to the app (the `swarm` event; the relay passes it on to the MCP) and to the session's log,
 /// .formal/runs/<run>.jsonl.
-/// An event for the running bug search in a folder (a background task finishing): its hunt-* session, if one runs.
-pub(crate) fn emit_in_folder(app: &AppHandle, folder: &str, kind: &'static str, role: &str, item: &str, text: String) {
-    let run = app.state::<Swarms>().0.lock().unwrap().keys().filter_map(|k| k.strip_prefix(&format!("{folder}\n")).map(str::to_string)).find(|r| r.starts_with("hunt-"));
-    if let Some(run) = run {
-        emit_as(app, folder, &run, kind, role, item, text);
-    }
-}
-
-/// An event of a running session, from outside its Turn (the Claude Code hunter and its MCP server), with the
+/// An event of a running session, from outside its Turn, with the
 /// session's spend so the chat's header doesn't jump.
 pub(crate) fn emit_as(app: &AppHandle, folder: &str, run: &str, kind: &'static str, role: &str, item: &str, text: String) {
     let spent = app.state::<Swarms>().0.lock().unwrap().get(&key(folder, run)).map(|s| *s.spent.lock().unwrap()).unwrap_or(0.0);
@@ -596,15 +567,6 @@ pub fn swarm_queue_of(folder: String, run: Option<String>, done: bool) -> Result
 // ---- roles ----
 
 fn system(role: &str, folder: &str, goal: &str) -> String {
-    // The hunter tests the bytecode; the swarm's Lean setup (models, theorems, the plan) isn't its business.
-    if role == "hunter" {
-        let _ = goal;
-        return format!(
-            "You are Formal Mind's Bug Hunter, working in the Foundry project at {folder} (paths are relative to it). Tools run here, on the maintainer's machine: \
-coverage, explore, debug_open, debug_run, debug_move, debug_break, debug_watch, debug_look, tag, report_bug, read_file and write_file (the project's files), and run (`forge test` and `forge build` only). \
-The maintainer watches your debugger while you work.\n\n{HUNTER}"
-        );
-    }
     let root = Path::new(folder);
     let lake = crate::swarm_ctx::lake_dir(root).map(|d| d.strip_prefix(root).map(|p| p.to_string_lossy().to_string()).unwrap_or_default()).map(|d| if d.is_empty() { ".".to_string() } else { d });
     // Where Lake reads the sources (the lakefile's srcDir), which can differ from where it runs.
@@ -616,7 +578,6 @@ The maintainer watches your debugger while you work.\n\n{HUNTER}"
     let common = format!(
         "You are the formalmind {role}, one agent of a small swarm verifying the Ethereum smart contracts in a local folder ({folder}). \
 Paths are relative to that folder. Tools run here, on the maintainer's machine. What you know about the Solidity comes from formal-ast, which reads solc's AST: `functions` lists every function in scope (the contracts the Foundry scripts deploy or call, with their bases), each with its Lean def, place and status on the Proofs page; `function` gives one function's slice (its guards, the storage it reads and writes, the state it touches, its code and its callees' code). Don't list or grep the Solidity sources. The other tools: read_file (numbered line ranges; for Lean files and the test setup a PoC needs), search (regex over the Lean project's .lean files, for lemmas), find (files by name, fuzzy), write_file, run (only lake/forge, no shell), report_bug. Proofs must be pure Lean: no #eval or IO. \
-To see what the bytecode actually does, debug it yourself: debug_open a test file, debug_run a test (a fuzz test with args), then debug_move (over, into, out, continue, back), debug_break, debug_watch a storage variable and debug_look (revert, writes, lines) until you know why; the maintainer watches your debugger. coverage shows which lines and branch sides no test reaches, and explore solves for inputs that reach them (its findings are inputs that make a test fail: debug_run them, then write the PoC). \
 The shared state is .formal/: plan.md is the checklist (`- [ ]` todo, `- [x]` proven, `- [!]` blocked or a bug). {lean} \
 Never leave `sorry`, `admit`, `native_decide` or new axioms. \
 If you find a real bug (a reachable violation of an intended property, loss of funds, broken accounting, access control), first write a Foundry PoC test under test/formal/ (e.g. test/formal/RouterMatchBook.t.sol, reusing the repo's test setup under test/) whose test passes by demonstrating the exploit, run it with `forge test --match-path <file>`, then call report_bug with that path: it is filed in audit/README.md as an open finding. \
@@ -626,7 +587,6 @@ The maintainer follows your work in the chat and sees only what you write, so ne
     let job = match role {
         "prover" => "Take the plan item you're given and prove it against the generated def named in your task: read the def in the model and the function's slice (call `function` for any callee you need), state the property as a theorem that names the def fully qualified, prove it, and check with `lake build <Module>`. When it checks, call record_property with the notes for Formal Mind's report: what the proof establishes (third person, what holds), its assumptions and the theorems' names. Reuse the project's existing lemmas (search the Lake project for simp lemmas about the monad). If the property is false, that's a bug: show it with a Foundry PoC and call report_bug, with its scenario, impact and recommendation written as an audit report states them. Address the reviewer's notes if there are any. Explain the mathematics as you go, as a mathematician would to a colleague: state the property formally (the invariant, pre- and postcondition, or implication, e.g. `totalSupplyShares = Σ supplyShares`), name the proof strategy (induction on the call sequence, case split on the guard, rewriting with a lemma, contradiction, monotonicity, a tautology the simp set closes) and why it applies, and when Lean's goal changes, say what the remaining goal means in plain logic.",
         "auditor" => "You are turning an audit report (attached, or in your task) into the standard audit format (formalmind.audit/v1) that the app shows on its Bugs page. First call record_report once with the report's facts: its title, the auditing firm, the authors, the date (YYYY-MM-DD), the commit and repository it reviewed, the files in scope, and a two-sentence summary. Then call record_finding once per finding, in the report's order, for every finding it lists including informational and gas ones: the report's own ID (H-01, M-2, L-03…; number them F-01, F-02… when it has none), the title, the severity as the report rates it, the full description (the report's words, cleaned of page headers and footers), its impact, its recommendation, the team's response if the report gives one, the locations (repository paths like src/PoolManager.sol with the line when given), the page it starts on, and the status the report gave (reportStatus). Then check the current code for each finding and set `status`: fixed (the issue is gone; say what changed in evidence and name the test that covers it), works as expected (intended, or invalid for this code; say why), acknowledged (accepted, as the report or code says), or open (still there). Use `functions`, `function`, read_file and `forge test --match-path …` for that. Don't fix code or write tests. End with one line: how many findings, and how many of each status.",
-        "hunter" => HUNTER,
         "reviewer" => "Review the prover's work on the plan item: does the Lean statement really say what the Solidity does (read the def in the generated model and the function's slice, in your task), is it about the generated def rather than a restatement, does it check, is there any sorry/admit/axiom? Then call verdict exactly once: approve, or changes with concrete notes. Check the prover's notes for the report too (in your task): does the statement say exactly what the theorems prove about the Solidity, no more, are the assumptions complete, and is it written as a report states a property (third person, what holds, never \"no bug found\")? When you approve, they go into Formal Mind's audit file; pass `statement`, `assumptions` or `theorems` only to correct them, or to write them if the prover gave none. Do not edit proofs yourself. If you spot a real bug in the contract, say so in your notes; the prover writes the PoC.",
         _ => "The maintainer wrote to the swarm. Answer them directly and briefly, using the tools to look things up. If they ask for a change of focus or a new property, update .formal/plan.md accordingly.",
     };
@@ -647,17 +607,6 @@ pub(crate) fn report_bug_tool() -> Value {
 
 fn tools(role: &str) -> Value {
     let s = |props: Value, req: Vec<&str>| json!({ "type": "object", "properties": props, "required": req, "additionalProperties": false });
-    // The hunter's kit: the bytecode tools, the project's files, forge, and reporting. No formal-ast slices, Lean or plan.
-    if role == "hunter" {
-        let mut t = vec![
-            json!({ "name": "read_file", "description": "Read a text file in the project (Solidity, tests, the test setup a PoC needs). Long files come back in numbered slices: pass start_line and end_line (up to 300 lines at a time).", "input_schema": s(json!({ "path": { "type": "string" }, "start_line": { "type": "integer" }, "end_line": { "type": "integer" } }), vec!["path"]) }),
-            json!({ "name": "write_file", "description": "Create or overwrite a file in the project (a PoC under test/formal/).", "input_schema": s(json!({ "path": { "type": "string" }, "content": { "type": "string" } }), vec!["path", "content"]) }),
-            json!({ "name": "run", "description": "Run `forge build` or `forge test [args]` in the project. Returns exit code and output.", "input_schema": s(json!({ "command": { "type": "string" } }), vec!["command"]) }),
-            report_bug_tool(),
-        ];
-        t.extend(crate::analysis::tools());
-        return Value::Array(t);
-    }
     let mut t = vec![
         json!({ "name": "functions", "description": "Every function in scope, from formal-ast (solc's AST): the contracts the Foundry scripts deploy or call and their bases, each function with its Lean def, place, footprint and status on the Proofs page.", "input_schema": s(json!({}), vec![]) }),
         json!({ "name": "function", "description": "One function's slice from formal-ast: its guards, the storage it reads and writes, the state declarations it touches, its code and its callees' code. By name (`Contract.fn`) or Lean def.", "input_schema": s(json!({ "name": { "type": "string" } }), vec!["name"]) }),
@@ -741,8 +690,6 @@ struct Turn<'a> {
     queue: PathBuf,
     /// formal-ast's view of the folder for the current job (read again at each job, and after a proof).
     ctx: Mutex<Option<Arc<crate::swarm_ctx::Context>>>,
-    /// Each agent's debugger: a session in the app's `Debuggers` (the Debug view follows it), by role.
-    debug: Mutex<HashMap<String, u32>>,
     /// The current agent turn's health record (crate::health), written when the turn ends.
     health: Mutex<Option<crate::health::Turn>>,
 }
@@ -848,7 +795,7 @@ impl Turn<'_> {
             "messages": messages, "tools": tools(role),
             // Automatic prompt caching: the stable prefix (system, tools, history) is read back cheaply each step.
             "cache_control": { "type": "ephemeral" },
-            "output_config": { "effort": if role == "prover" || role == "hunter" { "high" } else { "medium" } },
+            "output_config": { "effort": if role == "prover" { "high" } else { "medium" } },
         });
         if let Some(c) = compaction {
             body["compaction"] = c;
@@ -1031,11 +978,7 @@ impl Turn<'_> {
                 }
                 n if crate::analysis::is_tool(n) => {
                     self.emit("tool", role, item, format!("{name} {shown}"));
-                    let session = self.debug.lock().unwrap().get(role).copied();
-                    let (r, opened) = crate::analysis::call(self.app, &self.req.folder, role, session, name, input).await;
-                    if let Some(id) = opened {
-                        self.debug.lock().unwrap().insert(role.to_string(), id);
-                    }
+                    let r = crate::analysis::call(&self.req.folder, role, name, input).await;
                     self.emit("result", role, item, r.chars().take(500).collect());
                     r
                 }
@@ -1272,7 +1215,6 @@ impl Turn<'_> {
         self.emit("status", role, item, format!("{role} is working"));
         let steps = match role {
             "prover" => PROVER_STEPS,
-            "hunter" => HUNTER_STEPS,
             _ => MAX_STEPS,
         };
         let window = context_window(model_of(self.req));
@@ -1352,23 +1294,6 @@ impl Turn<'_> {
             }
             if results.is_empty() || reply["stop_reason"].as_str() != Some("tool_use") {
                 return Ok(out);
-            }
-            // In a bug search, what you write while the Bug Hunter works reaches it at its next step, not after its turn.
-            if self.run.starts_with("hunt-") {
-                let said: Vec<String> = with_queue(&self.queue, |q| {
-                    q.jobs
-                        .iter_mut()
-                        .filter(|j| j.kind == "answer" && j.state == "queued")
-                        .map(|j| {
-                            j.state = "done".into();
-                            j.summary = "read by the Bug Hunter while it worked".into();
-                            j.text.clone()
-                        })
-                        .collect()
-                });
-                for text in said {
-                    results.push(json!({ "type": "text", "text": format!("The maintainer says (while you work): {text}") }));
-                }
             }
             messages.push(json!({ "role": "user", "content": results }));
             keep(&messages);
@@ -1573,11 +1498,8 @@ async fn run_swarm(turn: &Turn<'_>) -> String {
     let _ = std::fs::create_dir_all(root.join(".formal"));
     // Where the proofs live, written down once for every tool that reads them (formalmind.toml).
     crate::swarm_ctx::ensure_config(&root);
-    // The plan follows the AST: every function in scope that it doesn't list yet is added at each start. A bug search
-    // (the hunter alone, sessions hunt-*) has no plan.
-    if turn.req.hunt.is_none() && !turn.run.starts_with("hunt-") {
-        sync_plan(turn, &root).await;
-    }
+    // The plan follows the AST: every function in scope that it doesn't list yet is added at each start.
+    sync_plan(turn, &root).await;
     loop {
         if turn.swarm.stop.load(Ordering::SeqCst) {
             return "paused: resume anytime, the queue carries on".into();
@@ -1594,7 +1516,7 @@ async fn run_swarm(turn: &Turn<'_>) -> String {
 
         // A run for queued work (a report to read, a statement you added or confirmed) also takes the statements
         // waiting for the swarm, then stops.
-        let statement_work = !turn.run.starts_with("hunt-") && (crate::statements::awaiting_formalize(&root).is_some() || crate::statements::next_obligation(&root, read_plan(&root).iter().all(|i| i.mark != " " && i.mark != "~")).is_some());
+        let statement_work = crate::statements::awaiting_formalize(&root).is_some() || crate::statements::next_obligation(&root, read_plan(&root).iter().all(|i| i.mark != " " && i.mark != "~")).is_some();
         if turn.req.only_queued.unwrap_or(false) && !statement_work && with_queue(&turn.queue, |q| !q.jobs.iter().any(|j| j.state == "running" || j.state == "queued")) {
             return "done: the queued work is finished".into();
         }
@@ -1602,9 +1524,8 @@ async fn run_swarm(turn: &Turn<'_>) -> String {
         // A plan item another session in this folder is working on is left to it.
         let me = key(&turn.req.folder, turn.run);
         let free = |j: &Job| !matches!(j.kind.as_str(), "prove" | "review") || !j.statement.is_empty() || !claimed_by_other(&turn.req.folder, j.item, &me);
-        let hunting = turn.run.starts_with("hunt-");
-        let formalize = (!hunting).then(|| crate::statements::awaiting_formalize(&root).map(|s| s.id)).flatten();
-        let obligation = (!hunting).then(|| crate::statements::next_obligation(&root, read_plan(&root).iter().all(|i| i.mark != " " && i.mark != "~"))).flatten();
+        let formalize = crate::statements::awaiting_formalize(&root).map(|s| s.id);
+        let obligation = crate::statements::next_obligation(&root, read_plan(&root).iter().all(|i| i.mark != " " && i.mark != "~"));
         let next = with_queue(&turn.queue, |q| {
             let pick = q.jobs.iter().position(|j| j.state == "running" && free(j))
                 .or_else(|| q.jobs.iter().position(|j| j.state == "queued" && j.kind == "answer"))
@@ -1667,13 +1588,6 @@ async fn run_swarm(turn: &Turn<'_>) -> String {
         };
 
         let outcome = match job.kind.as_str() {
-            // In a bug search you talk to the hunter (on Claude Code: its conversation, resumed); elsewhere, the assistant.
-            "answer" if turn.run.starts_with("hunt-") && turn.req.provider.as_deref() == Some("claude-code") => {
-                crate::claude_code::hunt(turn.app, &turn.req.folder, turn.run, job.id, resumed, "", turn.req.model.as_deref(), &turn.swarm.stop, Some(&job.text))
-                    .await
-                    .map(|(summary, bug)| Outcome { summary, bug, ..Default::default() })
-            }
-            "answer" if turn.run.starts_with("hunt-") => turn.agent("hunter", "you", format!("The maintainer says:\n\n{}{resume_note}", job.text)).await,
             "answer" => turn.agent("assistant", "you", format!("The maintainer says:\n\n{}{}{resume_note}", job.text, crate::statements::waiting_note(&root))).await,
             // A statement in plain words: what it claims about the code, and the functions it would be proved for.
             "formalize" => match crate::statements::load(&root).ok().and_then(|all| all.into_iter().find(|s| s.id == job.text)) {
@@ -1697,20 +1611,6 @@ async fn run_swarm(turn: &Turn<'_>) -> String {
                     Err(e) => json!(format!("The report {report} can't be read ({e}). Say so and stop.")),
                 };
                 turn.agent("auditor", "report", content).await
-            }
-            // A hunt for vulnerabilities: coverage, explore, the debugger, PoCs and report_bug (`text` is an optional focus).
-            "hunt" => {
-                turn.emit("status", "hunter", "hunt", if job.text.is_empty() { "hunting".into() } else { format!("hunting: {}", job.text) });
-                // Coverage of the whole suite takes minutes on a big one: it runs while the Bug Hunter reads.
-                crate::analysis::warm_coverage(turn.app, &turn.req.folder, turn.run);
-                let focus = if job.text.is_empty() { "the contracts in src/".to_string() } else { job.text.clone() };
-                if turn.req.provider.as_deref() == Some("claude-code") {
-                    crate::claude_code::hunt(turn.app, &turn.req.folder, turn.run, job.id, resumed, &focus, turn.req.model.as_deref(), &turn.swarm.stop, None)
-                        .await
-                        .map(|(summary, bug)| Outcome { summary, bug, ..Default::default() })
-                } else {
-                    turn.agent("hunter", "hunt", format!("Hunt for vulnerabilities in {focus}.{resume_note}")).await
-                }
             }
             "plan" => {
                 let _ = &resume_note;
@@ -1947,7 +1847,6 @@ async fn run_swarm(turn: &Turn<'_>) -> String {
             ("prove", None, _) if gate.is_some() => turn.emit("plan", "prover", &id, format!("item {id}: the check failed, back to the prover")),
             ("prove", None, _) => turn.emit("plan", "prover", &id, format!("item {id} checks; to review")),
             ("triage", _, _) => turn.emit("plan", "auditor", "report", format!("read {}: its findings are in Bugs", job.text)),
-            ("hunt", _, _) => turn.emit("plan", "hunter", "hunt", format!("hunt done{}", out.bug.as_ref().map(|b| format!(": last bug {b}")).unwrap_or_default())),
             _ => {}
         }
     }
@@ -2009,19 +1908,8 @@ pub fn swarm_start(app: AppHandle, swarms: State<'_, Swarms>, request: SwarmRequ
     merge_old_sessions(Path::new(&request.folder));
     let qf = queue_file(Path::new(&request.folder), &run);
     let spent = load_queue(&qf).spent;
-    // A bug search queues the hunt and nothing else; otherwise what you typed before starting is a message too: the
-    // assistant answers it first (as with one sent while it runs).
-    // A new hunt's message (the chat's first, in a bug search): shown as yours once the session has started.
-    let mut asked: Option<String> = None;
-    if let Some(focus) = request.hunt.as_deref() {
-        // Resuming a bug search carries on its hunt; only a session with none waiting gets a new one.
-        with_queue(&qf, |q| {
-            if !q.jobs.iter().any(|j| j.kind == "hunt" && (j.state == "queued" || j.state == "running")) {
-                enqueue(q, "hunt", 0, focus.trim(), 1, "");
-                asked = Some(focus.trim().to_string()).filter(|f| !f.is_empty());
-            }
-        });
-    } else if let Some(text) = request.goal.as_deref().map(str::trim).filter(|t| !t.is_empty()) {
+    // What you typed before starting is a message too: the assistant answers it first (as with one sent while it runs).
+    if let Some(text) = request.goal.as_deref().map(str::trim).filter(|t| !t.is_empty()) {
         with_queue(&qf, |q| {
             enqueue(q, "answer", 0, text, 1, "");
         });
@@ -2032,17 +1920,9 @@ pub fn swarm_start(app: AppHandle, swarms: State<'_, Swarms>, request: SwarmRequ
     let id = run.clone();
     tauri::async_runtime::spawn(async move {
         let client = reqwest::Client::builder().timeout(Duration::from_secs(600)).build().unwrap_or_default();
-        let turn = Turn { app: &app, run: &id, req: &request, swarm: &swarm, client, job: Mutex::new(None), queue: swarm.queue.clone(), ctx: Mutex::new(None), debug: Mutex::new(HashMap::new()), health: Mutex::new(None) };
+        let turn = Turn { app: &app, run: &id, req: &request, swarm: &swarm, client, job: Mutex::new(None), queue: swarm.queue.clone(), ctx: Mutex::new(None), health: Mutex::new(None) };
         // The session's title: the focus it was given (the latest start's focus wins).
-        let title = match request.hunt.as_deref().map(str::trim) {
-            Some("") => "Bug search".to_string(),
-            Some(f) => format!("Bug search: {f}"),
-            None => request.goal.clone().unwrap_or_default(),
-        };
-        turn.emit("start", "swarm", "", title);
-        if let Some(text) = asked {
-            turn.emit("you", "you", "", text);
-        }
+        turn.emit("start", "swarm", "", request.goal.clone().unwrap_or_default());
         turn.emit("status", "swarm", "", "resuming".into());
         let outcome = run_swarm(&turn).await;
         turn.emit("done", "swarm", "", outcome);
@@ -2104,19 +1984,6 @@ pub fn swarm_triage(folder: String, path: String, session: Option<String>) -> Re
     Ok(())
 }
 
-/// Queues a hunt for vulnerabilities (the hunter role), optionally focused (`Router.swap`, `the fee path`).
-#[tauri::command]
-pub fn swarm_hunt(folder: String, focus: Option<String>, session: Option<String>) -> Result<(), String> {
-    if !local::read()?.allows(&folder) {
-        return Err("Add the folder first".into());
-    }
-    let qf = queue_file(Path::new(&folder), session.as_deref().unwrap_or("swarm"));
-    with_queue(&qf, |q| {
-        enqueue(q, "hunt", 0, focus.as_deref().unwrap_or("").trim(), 1, "");
-    });
-    Ok(())
-}
-
 /// A message to the swarm: queued as an "answer" job (on disk, so a quit can't lose it), answered before the next turn.
 /// It is a `you` event in the session too, so the chat shows it wherever it was sent from (here or through the MCP).
 #[tauri::command]
@@ -2127,14 +1994,8 @@ pub fn swarm_say(app: AppHandle, swarms: State<'_, Swarms>, folder: String, run:
         let spent = *s.spent.lock().unwrap();
         (s.queue.clone(), spent)
     };
-    // `@hunter <focus>` asks for a bug search: queued for the hunter, not answered by the assistant.
-    with_queue(&qf, |q| match text.trim().strip_prefix("@hunter") {
-        Some(focus) => {
-            enqueue(q, "hunt", 0, focus.trim(), 1, "");
-        }
-        None => {
-            enqueue(q, "answer", 0, &text, 1, "");
-        }
+    with_queue(&qf, |q| {
+        enqueue(q, "answer", 0, &text, 1, "");
     });
     emit_event(&app, SwarmEvent { folder, run, kind: "you", role: "you".into(), item: String::new(), text, spent, at: now_ms() as u64 });
     Ok(())
@@ -2437,22 +2298,6 @@ mod tests {
 
     use super::*;
 
-    /// The hunter tests the bytecode: no formal-ast slices, Lean search or plan talk in its kit or its prompt.
-    #[test]
-    fn the_hunter_has_its_own_kit() {
-        let names: Vec<String> = tools("hunter").as_array().unwrap().iter().map(|t| t["name"].as_str().unwrap().to_string()).collect();
-        for gone in ["functions", "function", "search", "record_property", "verdict"] {
-            assert!(!names.iter().any(|n| n == gone), "{gone} in {names:?}");
-        }
-        for has in ["coverage", "explore", "debug_run", "tag", "report_bug", "read_file", "write_file", "run"] {
-            assert!(names.iter().any(|n| n == has), "{has} missing from {names:?}");
-        }
-        let sys = system("hunter", "/p", "");
-        assert!(!sys.contains("Lean") && !sys.contains("theorem") && sys.contains("coverage"), "{sys}");
-        assert!(sys.contains("always say what you're about to do and why"), "the hunter explains itself");
-        assert!(sys.contains("Look for the patterns bugs follow"), "the hunter reads for bug patterns before it runs tools");
-    }
-
     #[test]
     fn a_claimed_item_is_left_to_its_session() {
         let (a, b) = (key("/f-claims", "swarm"), key("/f-claims", "s-1"));
@@ -2483,7 +2328,7 @@ mod tests {
         save_transcript(&root, "swarm", id, &[json!({"role": "user", "content": "go"}), json!({"role": "assistant", "content": [{"type": "tool_use"}]})]);
         assert_eq!(load_transcript(&root, "swarm", id).unwrap().len(), 2);
         // Another session's job with the same id is its own conversation.
-        assert!(load_transcript(&root, "hunt-1", id).is_none());
+        assert!(load_transcript(&root, "s-1", id).is_none());
         std::fs::remove_dir_all(root).unwrap();
     }
 

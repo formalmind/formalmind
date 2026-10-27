@@ -1,6 +1,6 @@
 # Bugs and reports
 
-The Bugs page gathers every finding about the folder: the swarm's, the Bug Hunter's, and the ones in audit reports
+The Bugs page gathers every finding about the folder: the swarm's and the ones in audit reports
 you already have.
 
 ## Findings from the swarm

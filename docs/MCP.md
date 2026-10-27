@@ -63,7 +63,7 @@ read through GitHub's public API, with the Worker's `GITHUB_TOKEN` when it has o
 | `start_swarm` | write | Sets up `<repo>-proofs` for the hosted swarm |
 | `mac_swarm_send` | write | `say` / `start` / `stop` to the Mac; `start` runs on the route the app's Settings use |
 | `mac_get` | read | One of the app's reads on the Mac (`lib/mac-ops.ts`): folders, status, plan, statements, bugs, proofs, scope, coverage, … The Mac answers through the relay |
-| `mac_do` | write | One of the app's actions on the Mac (`lib/mac-ops.ts`): add a folder, verify any GitHub repository at a branch or commit (`verify_repo`), start, hunt, stop, say, statements, triage, Reach |
+| `mac_do` | write | One of the app's actions on the Mac (`lib/mac-ops.ts`): add a folder, verify any GitHub repository at a branch or commit (`verify_repo`), start, stop, say, statements, triage, Reach |
 | `mac_get` `work_map` / `brief`, `mac_do` `refresh_model` / `check_proof` / `submit_proof` | read / write | A remote prover: what's covered and left, a function's brief, checking and submitting a proof as the swarm's own |
 | `mac_reply` | read | A `mac_get` / `mac_do` answer that came after the call stopped waiting, by its id |
 | `mac_watch` | read | Waits up to ~50 s for the next event that needs attention (a question, a bug, a blocked item, a proof, an error, a session ending) and returns it with its `seq`; call again with `after` to keep watching |
@@ -106,12 +106,8 @@ flow by hand. The relay can be fed as the Mac by POSTing `{state, events}` to `/
 ## Not here yet: a local MCP
 
 Some of the tools run only on the Mac, against the working tree, so the Worker can't serve them. They belong in a
-local (stdio) MCP server, from the desktop app or from concolity itself:
+local (stdio) MCP server from the desktop app:
 
-- **sol-debug**: the desktop app's Solidity debugger (`desktop/src-tauri/src/debug.rs`, on anvil): step a test or
-  script, read the stack, memory and storage at a step, set breakpoints.
-- **concolity**: coverage of a test run, concolic explore of a function for inputs that reach new branches or revert,
-  and its SARIF findings (`.formal/findings.sarif`).
 - **formal-ast on the working tree**: units, slices and Lean coverage of uncommitted code
   (`desktop/src-tauri/src/ast.rs`). The website runs the same crate as wasm in the browser, but the Worker doesn't:
   solc-js is too big for it. Server-side coverage comes from the committed `audit/formal-mind.audit.json`.
