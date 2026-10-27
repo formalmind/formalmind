@@ -2072,6 +2072,23 @@ impl<'g, 'a> Fx<'g, 'a> {
                 if c.len() == 1 { self.lpath(&c[0]) } else { bail("tuple path") }
             }
             "FunctionCall" => self.storage_return(e),
+            // `c ? book.bids : book.asks`: a location chosen once, here, as a getter and setter that pick the branch.
+            "Conditional" => {
+                let c = self.expr(&e["condition"])?;
+                let c = self.atom(c);
+                let a = self.lpath(&e["trueExpression"])?;
+                let b = self.lpath(&e["falseExpression"])?;
+                // An array index checks its bounds when the location is made, which only the chosen branch may do.
+                if [&a, &b].iter().any(|p| p.steps.iter().any(|st| matches!(st, Step::Arr(_)))) {
+                    return bail("conditional storage reference into an array");
+                }
+                let (ga, sa) = self.lens_args(&a)?;
+                let (gb, sb) = self.lens_args(&b)?;
+                let l = self.fresh("__ref");
+                self.line(format!("let {l}_get := if {c} then {ga} else {gb}"));
+                self.line(format!("let {l}_set := if {c} then {sa} else {sb}"));
+                Ok(Path { base: Base::Lens(l), steps: vec![] })
+            }
             other => bail(format!("can't write through {other}")),
         }
     }

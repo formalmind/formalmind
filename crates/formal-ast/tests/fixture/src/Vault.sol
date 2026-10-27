@@ -61,6 +61,11 @@ contract Vault is Base, IVault {
         history.push(assets);
     }
 
+    function clearDebt(bool mine) external {
+        Account storage acc = mine ? accounts[msg.sender] : accounts[owner];
+        acc.debt = 0;
+    }
+
     function _credit(Account storage acc, uint256 shares) internal {
         acc.shares += shares;
     }
