@@ -21,7 +21,7 @@ export type RelaySession = { run: string; title: string; outcome: string; spent:
 export type RelayFolder = { path: string; name: string; repo: string | null; sessions: RelaySession[] };
 /** The Mac's folders and their sessions, published whenever they change. */
 /** The Mac's folders and their sessions; `name` is the computer's own (older Macs don't send it). */
-export type RelayState = { folders: RelayFolder[]; at: number; name?: string };
+export type RelayState = { folders: RelayFolder[]; at: number; name?: string; version?: string };
 
 
 /** What a client asks the Mac to do. `history` asks it to publish a session's events from its log; `call` runs one of

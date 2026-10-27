@@ -235,7 +235,7 @@ export const ACCOUNT_TOOLS: AccountTool[] = [
   {
     name: "mac_swarm",
     title: "The Mac's swarm",
-    description: "The swarm running in the account's desktop app, through the formal.team relay: whether the Mac is online and when it was last seen, its name, and each added folder (path, name, GitHub origin) with its sessions (run id, title, outcome, spent in USD, running). The work and the files stay on the Mac; this is what it publishes. Empty until the app has signed in with the relay on (Settings → Phone). Needs swarm:read.",
+    description: "The swarm running in the account's desktop app, through the formal.team relay: whether the Mac is online and when it was last seen, its name, the app's version, and each added folder (path, name, GitHub origin) with its sessions (run id, title, outcome, spent in USD, running). The work and the files stay on the Mac; this is what it publishes. Empty until the app has signed in with the relay on (Settings → Phone). Needs swarm:read.",
     inputSchema: { type: "object", properties: {} },
     annotations: { ...READ, idempotentHint: false },
     scope: "swarm:read",

@@ -58,7 +58,7 @@ impl Relay {
             })
             .collect();
         let at = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_millis() as u64).unwrap_or(0);
-        self.post(json!({ "state": { "folders": folders, "at": at, "name": local::machine_name() } })).await;
+        self.post(json!({ "state": { "folders": folders, "at": at, "name": local::machine_name(), "version": env!("CARGO_PKG_VERSION") } })).await;
     }
 
     async fn flush(&self) {
