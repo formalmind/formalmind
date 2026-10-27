@@ -67,8 +67,10 @@ the formalization first, as for any statement.
 
 When the swarm formalizes a statement it asks whether that's what you meant. Settings → GitHub → **Questions** picks who
 answers: **You or the MCP** (the default) leaves the question in the chat, and an MCP client can answer for you:
-`mac_get` `questions` lists what's waiting, `confirm_statement` or `correct_statement` answers, and `mac_swarm_events`
-with `kind: "ask"` and `after` the last `seq` it saw delivers each new question as it's asked. **Answerer agent** has an
+`mac_get` `questions` lists what's waiting, `confirm_statement` or `correct_statement` answers, and `mac_watch`
+waits for the next thing that needs attention (a question, a bug, a blocked item, a proof, an error) and
+returns it; call it again with the `after` it returned to keep watching without missing one. `mac_get` `diagnose`
+explains a blocked item: the proof, another file, or the app. **Answerer agent** has an
 agent read each claim and its formalization: it confirms it, or corrects it once, and leaves anything it doubts for you.
 
 ## The README

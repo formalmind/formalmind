@@ -10,6 +10,7 @@ mod ast;
 mod claude_code;
 mod control;
 mod debug;
+mod diagnose;
 mod executor;
 mod file_search;
 #[cfg(test)]

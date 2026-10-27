@@ -31,7 +31,7 @@ import { parseRepo, type RepoPlan } from "@/lib/plan";
 import { findingRow, planProgress, readAudits, reportSummary, REPORT_DIRS, where } from "@/lib/project-audits";
 import { openProject } from "@/lib/project-repo";
 import { listProjects } from "@/lib/projects";
-import { MAC_OPS, parseCommand, relayObject, type MacOp, type RelayEvent, type RelayRow } from "@/lib/relay";
+import { MAC_OPS, attention, parseCommand, relayObject, type MacOp, type RelayEvent, type RelayRow } from "@/lib/relay";
 import { projectObject } from "@/lib/spend";
 import { getSwarmState } from "@/lib/swarm";
 import { currentRequest } from "@/worker/context";
@@ -237,6 +237,20 @@ export const ACCOUNT_TOOLS: AccountTool[] = [
     title: "The Mac's swarm",
     description: "The swarm running in the account's desktop app, through the formal.team relay: whether the Mac is online and when it was last seen, its name, the app's version, and each added folder (path, name, GitHub origin) with its sessions (run id, title, outcome, spent in USD, running). The work and the files stay on the Mac; this is what it publishes. Empty until the app has signed in with the relay on (Settings → Phone). Needs swarm:read.",
     inputSchema: { type: "object", properties: {} },
+    annotations: { ...READ, idempotentHint: false },
+    scope: "swarm:read",
+  },
+  {
+    name: "mac_watch",
+    title: "Wait for the Mac's swarm to need you",
+    description: "Waits (up to ~50 s) until the Mac's swarm does something that needs attention, then returns it: a question waiting for an answer (answer with mac_get questions, then mac_do confirm_statement or correct_statement), a bug filed, an item blocked (mac_get diagnose tells why), a statement or item proved, an error, or a session that ended. Pass after (the last seq from the previous call) so nothing is missed or seen twice; the first call starts from now. Call it again in a loop to keep watching. Filter by folder. Needs swarm:read.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        folder: FOLDER,
+        after: { type: "integer", minimum: 0, description: "The last seq a previous call returned" },
+      },
+    },
     annotations: { ...READ, idempotentHint: false },
     scope: "swarm:read",
   },
@@ -556,6 +570,31 @@ async function callTool(name: string, args: Record<string, unknown>, caller: Cal
         name: state?.name ?? null,
         folders: (state?.folders ?? []).map((f) => ({ ...f, sessions: f.sessions.map((s) => ({ ...s, spent: Math.round(s.spent * 100) / 100 })) })),
       });
+    }
+    case "mac_watch": {
+      const r = relay();
+      const folder = lower(args.folder);
+      let after = Math.max(0, Number(args.after) || 0);
+      if (!after) after = (await r.read(0, false)).last;
+      const until = Date.now() + 50_000;
+      while (Date.now() < until) {
+        const { events, last, state } = await r.read(after, true);
+        const folders = state?.folders ?? [];
+        const inFolder = (path: string) => {
+          if (!folder) return true;
+          const f = folders.find((x) => x.path === path);
+          return path.toLowerCase() === folder || f?.name.toLowerCase() === folder || f?.repo?.toLowerCase() === folder;
+        };
+        const needs = events
+          .filter((e: RelayRow) => e.kind !== "history" && inFolder(e.folder))
+          .flatMap((e: RelayRow) => {
+            const why = attention(e);
+            return why ? [{ why, ...eventRow(e) }] : [];
+          });
+        after = last;
+        if (needs.length) return json({ last, events: needs });
+      }
+      return json({ last: after, events: [], note: "nothing needed attention yet; call again with this after" });
     }
     case "mac_swarm_events": {
       const r = relay();

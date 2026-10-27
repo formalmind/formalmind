@@ -72,6 +72,7 @@ pub const OPS: &[(&str, bool)] = &[
     ("add_folder", true),
     ("verify_repo", true),
     ("questions", false),
+    ("diagnose", false),
     ("answers", true),
     ("remove_folder", true),
     ("start", true),
@@ -283,6 +284,10 @@ pub async fn dispatch<E: Engine + ?Sized>(app: &E, op: &str, folder: &str, a: &V
         "mark_statement" => {
             let statements = json_of(crate::statements::swarm_statement_mark(folder.clone(), need("id")?, need("mark")?))?;
             Ok(json!({ "statements": statements, "running": work_queued(app, &folder)? }))
+        }
+        "diagnose" => {
+            let item = need("item")?;
+            Ok(crate::diagnose::diagnose(&item, &crate::diagnose::events_of(std::path::Path::new(&folder), &item)))
         }
         "questions" => Ok(json!(crate::answerer::questions(std::path::Path::new(&folder)))),
         "remove_statement" => json_of(crate::statements::swarm_remove_statement(folder, need("id")?)),
@@ -548,6 +553,7 @@ mod ops {
         assert!(err(&e, "answers", &f, json!({ "who": "nobody" })).await.contains("mcp or agent"));
         assert_eq!(ok(&e, "answers", "", json!({ "who": "agent" })).await["answers"], "agent");
         assert_eq!(ok(&e, "questions", &f, json!({})).await, json!([]));
+        assert_eq!(ok(&e, "diagnose", &f, json!({ "item": "1" })).await["cause"], "unknown");
         // Every published operation is reached by these tests.
         let src = include_str!("control.rs");
         for (op, _) in OPS {

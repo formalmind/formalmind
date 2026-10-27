@@ -68,6 +68,7 @@ read through GitHub's public API, with the Worker's `GITHUB_TOKEN` when it has o
 | `mac_do` | write | One of the app's actions on the Mac (`lib/mac-ops.ts`): add a folder, verify any GitHub repository at a branch or commit (`verify_repo`), start, hunt, stop, say, statements, triage, Reach, the report |
 | `mac_get` `work_map` / `brief`, `mac_do` `refresh_model` / `check_proof` / `submit_proof` | read / write | A remote prover: what's covered and left, a function's brief, checking and submitting a proof as the swarm's own |
 | `mac_reply` | read | A `mac_get` / `mac_do` answer that came after the call stopped waiting, by its id |
+| `mac_watch` | read | Waits up to ~50 s for the next event that needs attention (a question, a bug, a blocked item, a proof, an error, a session ending) and returns it with its `seq`; call again with `after` to keep watching |
 
 `mac_get` and `mac_do` run the desktop app's control API (`desktop/src-tauri/src/control.rs`, whose operations
 `lib/mac-ops.ts` publishes; a test keeps the two equal). The app's pages call the same API, and the relay that serves

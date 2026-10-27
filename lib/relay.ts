@@ -91,3 +91,16 @@ export function parseCommand(body: unknown): RelayCommand | null {
 			return null;
 	}
 }
+
+/** Why an event needs someone's attention (mac_watch), or null for the swarm's ordinary progress: a question waiting
+ * for an answer, a bug filed, an item blocked, a statement or item proved, an error, a session that ended. */
+export function attention(e: { kind: string; text: string; item?: string }): string | null {
+	const text = e.text ?? "";
+	if (e.kind === "ask") return "question";
+	if (e.kind === "bug") return "bug";
+	if (e.kind === "error") return "error";
+	if (e.kind === "done") return "session ended";
+	if (e.kind === "plan" && /\bblocked\b/.test(text)) return "blocked";
+	if (e.kind === "plan" && /\bproved\b|\bproven\b/.test(text)) return "proved";
+	return null;
+}
