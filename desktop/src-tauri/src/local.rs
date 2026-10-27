@@ -82,8 +82,18 @@ impl Config {
     }
 }
 
+#[cfg(test)]
+thread_local! {
+    /// A test's own ~/.formalmind, so tests never read or write the real one (per thread: tests run in parallel).
+    pub static TEST_HOME: std::cell::RefCell<Option<PathBuf>> = const { std::cell::RefCell::new(None) };
+}
+
 /// ~/.formalmind (or %USERPROFILE%\.formalmind on Windows).
 pub fn home() -> Result<PathBuf, String> {
+    #[cfg(test)]
+    if let Some(h) = TEST_HOME.with(|h| h.borrow().clone()) {
+        return Ok(h);
+    }
     let base = std::env::var_os("HOME").or_else(|| std::env::var_os("USERPROFILE")).ok_or("No home folder")?;
     Ok(PathBuf::from(base).join(".formalmind"))
 }

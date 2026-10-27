@@ -109,6 +109,9 @@ const RESERVED: &[&str] = &[
 const MODEL_NAMES: &[&str] = &["State", "Ext", "Env", "Revert", "M", "World"];
 
 /// A Lean identifier: `«…»` when the Solidity name isn't a plain Lean identifier.
+/// The monad's operations generated bodies call unqualified; no def may be named like them.
+const MONAD_OPS: [&str; 5] = ["get", "read", "modify", "throw", "pure"];
+
 pub fn ident(name: &str) -> String {
     let plain = name.chars().next().is_some_and(|c| c.is_ascii_alphabetic()) && name.chars().all(|c| c.is_ascii_alphanumeric() || c == '_');
     if plain && !KEYWORDS.contains(&name) { name.to_string() } else { format!("«{name}»") }
@@ -353,7 +356,11 @@ impl<'a> Gen<'a> {
         }
         let func = &self.g.functions[&f];
         let c = self.g.contracts.get(&func.contract).map(|c| c.name.as_str()).unwrap_or("Free");
-        let base = format!("{}.{}", ident(c), ident(&func.name));
+        // Inside a def `C.f`, Lean resolves names in `C` first, so a function named like the monad's operations the
+        // bodies call unqualified (`get`, `read`, `modify`, `throw`, `pure`) would shadow them: a contract's `get()`
+        // turned `(← get)` into a call to itself. Those get a trailing underscore.
+        let short = if MONAD_OPS.contains(&func.name.as_str()) { format!("{}_", func.name) } else { func.name.clone() };
+        let base = format!("{}.{}", ident(c), ident(&short));
         let taken = self.fn_name.values().any(|n| n == &base);
         let name = if taken { format!("{}.{}", ident(c), ident(&format!("{}_{}", func.name, f))) } else { base };
         self.fn_name.insert(f, name.clone());

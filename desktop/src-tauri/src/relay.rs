@@ -4,6 +4,7 @@
 //! ([`crate::control::dispatch`]), as if done in the app, and calls get their answer back. Off when Settings → Phone
 //! is turned off, or while the app isn't signed in.
 
+use crate::control::Engine;
 use crate::local;
 use serde_json::{json, Value};
 use std::sync::{Arc, Mutex};
@@ -67,42 +68,66 @@ impl Relay {
         }
     }
 
-    /// One command, done as the app does it; a call's result (or error) goes back as its reply.
+    /// One command, done as the app does it, then sent where it goes.
     async fn run(&self, cmd: &Value) {
-        let s = |k: &str| cmd[k].as_str().unwrap_or("").to_string();
-        let folder = s("folder");
-        let outcome: Result<Value, String> = match cmd["type"].as_str() {
-            Some("call") => {
-                let reply = match crate::control::dispatch(&self.app, &s("op"), &folder, &cmd["args"]).await {
-                    Ok(result) => json!({ "id": s("id"), "ok": true, "result": result }),
-                    Err(e) => json!({ "id": s("id"), "ok": false, "error": e }),
-                };
-                self.post(json!({ "replies": [reply] })).await;
-                Ok(Value::Null)
-            }
-            Some("say") => crate::control::dispatch(&self.app, "say", &folder, &json!({ "run": s("run"), "text": s("text") })).await,
-            Some("stop") => crate::control::dispatch(&self.app, "stop", &folder, &json!({ "run": s("run") })).await,
-            Some("start") => crate::control::dispatch(&self.app, "start", &folder, &json!({ "goal": cmd["goal"], "budget": cmd["budget"], "run": cmd["run"] })).await,
-            Some("history") => {
-                let run = s("run");
-                let events = crate::swarm::swarm_history(folder.clone(), run.clone()).unwrap_or_default();
-                let events: Vec<Value> = events[events.len().saturating_sub(600)..].iter().map(|e| {
+        let out = handle(&self.app, cmd).await;
+        if let Some(reply) = out.reply {
+            self.post(json!({ "replies": [reply] })).await;
+        }
+        if let Some(history) = out.history {
+            self.post(json!({ "history": history })).await;
+        }
+        self.queue.lock().unwrap().extend(out.errors);
+    }
+}
+
+/// What a command produced: a call's reply, a session's history, or an error said in its session (so the phone sees
+/// why nothing happened).
+#[derive(Default)]
+pub struct Handled {
+    pub reply: Option<Value>,
+    pub history: Option<Value>,
+    pub errors: Vec<Value>,
+}
+
+/// One command from the relay (lib/relay.ts `RelayCommand`), done through the control API.
+pub async fn handle<E: Engine + ?Sized>(engine: &E, cmd: &Value) -> Handled {
+    let s = |k: &str| cmd[k].as_str().unwrap_or("").to_string();
+    let folder = s("folder");
+    let mut out = Handled::default();
+    let outcome: Result<Value, String> = match cmd["type"].as_str() {
+        Some("call") => {
+            out.reply = Some(match crate::control::dispatch(engine, &s("op"), &folder, &cmd["args"]).await {
+                Ok(result) => json!({ "id": s("id"), "ok": true, "result": result }),
+                Err(e) => json!({ "id": s("id"), "ok": false, "error": e }),
+            });
+            Ok(Value::Null)
+        }
+        Some("say") => crate::control::dispatch(engine, "say", &folder, &json!({ "run": s("run"), "text": s("text") })).await,
+        Some("stop") => crate::control::dispatch(engine, "stop", &folder, &json!({ "run": s("run") })).await,
+        Some("start") => crate::control::dispatch(engine, "start", &folder, &json!({ "goal": cmd["goal"], "budget": cmd["budget"], "run": cmd["run"] })).await,
+        Some("history") => {
+            let run = s("run");
+            let events = crate::swarm::swarm_history(folder.clone(), run.clone()).unwrap_or_default();
+            let events: Vec<Value> = events[events.len().saturating_sub(600)..]
+                .iter()
+                .map(|e| {
                     let mut e = e.clone();
                     e["folder"] = json!(folder);
                     e["run"] = json!(run);
                     e
-                }).collect();
-                self.post(json!({ "history": { "folder": folder, "run": run, "events": events } })).await;
-                Ok(Value::Null)
-            }
-            _ => Ok(Value::Null),
-        };
-        // Said in the session, so the phone sees why nothing happened.
-        if let Err(e) = outcome {
-            let run = cmd["run"].as_str().filter(|r| !r.is_empty()).unwrap_or("swarm");
-            self.queue.lock().unwrap().push(json!({ "folder": folder, "run": run, "kind": "error", "role": "swarm", "item": "", "text": e, "spent": 0 }));
+                })
+                .collect();
+            out.history = Some(json!({ "folder": folder, "run": run, "events": events }));
+            Ok(Value::Null)
         }
+        _ => Ok(Value::Null),
+    };
+    if let Err(e) = outcome {
+        let run = cmd["run"].as_str().filter(|r| !r.is_empty()).unwrap_or("swarm");
+        out.errors.push(json!({ "folder": folder, "run": run, "kind": "error", "role": "swarm", "item": "", "text": e, "spent": 0 }));
     }
+    out
 }
 
 /// Starts the relay for the app's life.
