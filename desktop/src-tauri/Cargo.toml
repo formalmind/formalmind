@@ -28,7 +28,7 @@ regex = "1"
 # The agents' file search: an index per folder, kept current by a watcher.
 fff-search = "=0.11.0"
 # A file write's diff for the chat.
-similar = "2"
+similar = "3"
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
 tokio = { version = "1", features = ["process", "time", "io-util", "sync", "macros"] }
 # The swarm's tools over MCP for Claude Code (127.0.0.1, one turn).
