@@ -295,7 +295,7 @@ export const ACCOUNT_TOOLS: AccountTool[] = [
   {
     name: "mac_do",
     title: "Act in the Mac app",
-    description: `Does anything the desktop app's folder page does, on the person's Mac, through the relay: the Mac runs it as if clicked there, with the model route and caps its Settings use, and answers with the result (waits up to ~50 s; then mac_reply with the returned id). Operations: ${opsList(true)}. Consequential: start, hunt, statements and triage run agents that spend the person's Claude plan, credits or key; report spends $150 of credits; add_folder lets the app (and these tools) read that folder.`,
+    description: `Does anything the desktop app's folder page does, on the person's Mac, through the relay: the Mac runs it as if clicked there, with the model route and caps its Settings use, and answers with the result (waits up to ~50 s; then mac_reply with the returned id). Operations: ${opsList(true)}. Consequential: start, hunt, statements and triage run agents that spend the person's Claude plan, credits or key; report spends $150 of credits; add_folder lets the app (and these tools) read that folder; verify_repo forks a repository into formalmind, starts the swarm on it and pushes each approved proof to the fork.`,
     inputSchema: {
       type: "object",
       required: ["op"],
@@ -601,7 +601,7 @@ async function callTool(name: string, args: Record<string, unknown>, caller: Cal
       const r = relay();
       let folder = "";
       // Ops about the Mac rather than one folder; health is for every folder when none is named.
-      const macWide = ["folders", "status", "add_folder", "remove_folder"].includes(op) || (op === "health" && !str(args.folder));
+      const macWide = ["folders", "status", "add_folder", "remove_folder", "verify_repo"].includes(op) || (op === "health" && !str(args.folder));
       if (!macWide) {
         const wanted = str(args.folder);
         const { state } = await r.read(Number.MAX_SAFE_INTEGER, false);

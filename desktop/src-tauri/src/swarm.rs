@@ -1836,6 +1836,7 @@ async fn run_swarm(turn: &Turn<'_>) -> String {
                                     eprintln!("record_property: {e}");
                                 }
                                 statement_proved = Some(job.statement.clone());
+                                crate::publish::after_approval(&root, &format!("statement {} proved", job.statement));
                             }
                             Ok(_) => {}
                             Err(e) => eprintln!("statements: {e}"),
@@ -1845,6 +1846,7 @@ async fn run_swarm(turn: &Turn<'_>) -> String {
                         mark('x');
                         // The ledger keeps the approval for this def and these theorems as they are now.
                         crate::ledger::approve(&root, &job.text, &out.summary);
+                        crate::publish::after_approval(&root, &format!("proved {}", job.text));
                         // The prover's notes, with what the reviewer corrected.
                         if let Some(p) = merge_property(job.property.as_ref(), out.property.as_ref()) {
                             if let Err(e) = crate::swarm_ctx::record_property(&root, job.item, &job.text, &files, &p) {

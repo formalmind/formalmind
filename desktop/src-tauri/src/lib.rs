@@ -21,6 +21,7 @@ mod local;
 mod lsp;
 mod openai;
 mod platform;
+mod publish;
 mod reach;
 mod relay;
 mod report;

@@ -70,6 +70,7 @@ pub const OPS: &[(&str, bool)] = &[
     ("brief", false),
     ("ledger", false),
     ("add_folder", true),
+    ("verify_repo", true),
     ("remove_folder", true),
     ("start", true),
     ("hunt", true),
@@ -174,6 +175,28 @@ pub async fn dispatch<E: Engine + ?Sized>(app: &E, op: &str, folder: &str, a: &V
         }
         "health" => return crate::health::swarm_health((!folder.is_empty()).then_some(folder), a["limit"].as_u64().map(|n| n as usize)),
         "add_folder" => return json_of(local::folder_add(need("path")?)),
+        "verify_repo" => {
+            // Any GitHub repository at any branch, tag or commit: forked into formalmind, cloned, added, reporting to
+            // the fork, and the swarm started on it.
+            let repo = need("repo")?;
+            let name = crate::publish::copy_name(crate::publish::repo_of(&format!("https://github.com/{}", repo.trim_start_matches("https://github.com/"))).as_deref(), std::path::Path::new(&repo));
+            let git_ref = s("ref");
+            let dir = match opt("path") {
+                Some(p) => std::path::PathBuf::from(p),
+                None => {
+                    let home = std::env::var_os("HOME").map(std::path::PathBuf::from).ok_or("no home folder")?;
+                    let tag = if git_ref.is_empty() { String::new() } else { format!("-{}", crate::publish::branch_for(&git_ref).replace('/', "-")) };
+                    home.join("formal-targets").join(format!("{name}{tag}"))
+                }
+            };
+            let d = dir.clone();
+            let branch = tokio::task::spawn_blocking(move || crate::publish::checkout(&repo, &git_ref, &d)).await.map_err(|e| e.to_string())??;
+            let path = dir.to_string_lossy().into_owned();
+            local::folder_add(path.clone())?;
+            local::settings_set(json!({ "github": { path.clone(): true } }))?;
+            let run = start(app, &path, opt("goal"), None, false, None, usd("budget"))?;
+            return Ok(json!({ "folder": path, "branch": branch, "fork": format!("{}/{name}", crate::publish::ORG), "run": run }));
+        }
         "remove_folder" => {
             let path = need("path")?;
             if !local::read()?.folders.contains(&path) {
@@ -509,6 +532,7 @@ mod ops {
         assert!(err(&e, "read_file", &f, json!({ "path": "../../etc/passwd" })).await.contains("outside"));
         assert!(err(&e, "set_budget", &f, json!({ "run": "swarm" })).await.contains("usd"));
         assert!(err(&e, "github", &f, json!({})).await.contains("on"));
+        assert!(err(&e, "verify_repo", "", json!({ "repo": "not a repo" })).await.contains("owner/name"));
         // Every published operation is reached by these tests.
         let src = include_str!("control.rs");
         for (op, _) in OPS {

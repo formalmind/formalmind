@@ -98,7 +98,17 @@ after the file was written), **`mac_do` `refresh_model`** rewrites the model; `c
 
 Every folder works locally unless you turn on **Report to GitHub** for it (Settings → GitHub, or `mac_do` `github`
 with `{"on": true}`). Off, nothing reaches GitHub: no commits, pushes, issues or comments. On, Formal Mind's GitHub App
-comments on that repository's pull requests with what the proof ledger says changed.
+comments on that repository's pull requests with what the proof ledger says changed, and the app itself (never an
+agent) commits each approved proof, co-authored by `formalmind[bot]`, and pushes it to the project's copy in the
+`formalmind` organization on GitHub: the repository itself when it is formalmind's, otherwise a fork, created the first
+time (a folder with no GitHub origin gets a new public repository). It never pushes anywhere else.
+
+## Verify any repository
+
+**`mac_do` `verify_repo`** with `{"repo": "owner/name", "ref": "<branch, tag or commit>"}` starts a project from any
+GitHub repository: the Mac forks it into `formalmind`, clones it with its submodules into `~/formal-targets/` (or
+`path`), checks out `ref` on its own branch (`verify-<short sha>` for a commit), adds the folder with Report to GitHub
+on, and starts the swarm (`goal` and `budget` as for `start`). Each approved proof lands on that branch of the fork.
 
 ## The public server
 
