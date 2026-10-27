@@ -38,6 +38,8 @@ export type Bridge = {
 import type { Diagnostic } from "@/lib/ast/run";
 
 export type Ev = { folder?: string; run: string; kind: "start" | "status" | "context" | "say" | "ask" | "tool" | "result" | "you" | "bug" | "plan" | "done" | "error"; role: string; item: string; text: string; spent: number; /** ms since the epoch (newer logs) */ at?: number };
+/** One function's entry in the proof ledger (`ledger` op). */
+type LedgerEntry = { lean: string; status: "proved" | "partly proved" | "pending" | "unproved" | "not_modeled"; covers?: string[]; notYet: string[] };
 type Item = { index: number; mark: string; text: string };
 /** A claim in .formal/statements.md (desktop/src-tauri/src/statements.rs), for the swarm to prove or disprove. */
 type Statement = { id: string; mark: string; author: string; text: string; details: string[]; obligations: { mark: string; text: string }[] };
@@ -1839,6 +1841,9 @@ export function SwarmPanel({ folder, name, scan, bridge, session, file: openPath
 	const [runs, setRuns] = useState<string[]>([]);
 	const [events, setEvents] = useState<Ev[]>([]);
 	const [plan, setPlan] = useState<Item[]>([]);
+	// The proof ledger (src-tauri/src/ledger.rs): each function's checked status, by Lean def. The plan's marks come
+	// from it, so an item shows proved only when the ledger says so.
+	const [ledger, setLedger] = useState<Record<string, LedgerEntry>>({});
 	const [statements, setStatements] = useState<Statement[]>([]);
 	const [claim, setClaim] = useState("");
 	const [claimError, setClaimError] = useState<string | null>(null);
@@ -2210,7 +2215,14 @@ export function SwarmPanel({ folder, name, scan, bridge, session, file: openPath
 
 	// Ticks when the swarm proves an item or files a finding, so Audit's coverage, Bugs and the file tree read again.
 	const [reload, setReload] = useState(0);
+	// `check` runs Lean when the sources changed (after a proof or at a session's end); otherwise the last check is read.
+	const readLedger = (check = false) =>
+		void invoke<{ entries: LedgerEntry[] }>("control", { op: "ledger", folder, args: { check } }).then(
+			(l) => setLedger(Object.fromEntries(l.entries.map((e) => [e.lean, e]))),
+			() => {},
+		);
 	const refresh = () => {
+		readLedger();
 		void invoke<Item[]>("swarm_plan", { folder }).then(setPlan, () => {});
 		void invoke<Statement[]>("swarm_statements", { folder }).then((s) => setStatements(s ?? []), () => {});
 		void invoke<Bug[]>("swarm_bugs", { folder }).then(setBugs, () => {});
@@ -2246,7 +2258,9 @@ export function SwarmPanel({ folder, name, scan, bridge, session, file: openPath
 				setReload((n) => n + 1);
 				void invoke<{ files: string[] }>("folder_tree", { path: folder }).then((t) => setTree(t.files), () => {});
 			}
+			if (payload.kind === "plan" && / proven$/.test(payload.text)) readLedger(true);
 			if (payload.kind === "done") {
+				readLedger(true);
 				setRuns((r) => r.filter((x) => x !== payload.run));
 				void listSessions();
 			}
@@ -2405,7 +2419,11 @@ export function SwarmPanel({ folder, name, scan, bridge, session, file: openPath
 	const working = run ? [...events].reverse().find((e) => e.kind === "status" && e.role !== "swarm") : undefined;
 	// What the working agent did last (a tool call, or the step it's thinking on), shown under its plan item.
 	const activity = working ? [...events].reverse().find((e) => (e.kind === "tool" || e.kind === "status") && e.role === working.role) : undefined;
-	const done = plan.filter((i) => i.mark === "x").length;
+	// An item's ledger entry: the Lean def its text names first (`Morpho.supply`).
+	const entryOf = (i: Item) => ledger[i.text.split("`")[1] ?? ""];
+	// Its mark: proved and partly proved from the ledger; blocked from the plan.
+	const markOf = (i: Item) => (i.mark === "!" ? "!" : entryOf(i)?.status === "proved" ? "x" : entryOf(i)?.status === "partly proved" ? "~" : " ");
+	const done = plan.filter((i) => markOf(i) === "x").length;
 	// Entry points a plan item names, matched as whole words in its text.
 	// constructor, receive and fallback have no name of their own in the AST.
 	const label = (u: AstUnit) => u.function || (u.name.split(".").pop() ?? u.name);
@@ -2483,15 +2501,24 @@ export function SwarmPanel({ folder, name, scan, bridge, session, file: openPath
 								return (
 									<li key={i.index} className={`rounded-md ${working && working.item === String(i.index) ? "bg-muted" : ""}`}>
 										<button type="button" disabled={!proof} onClick={() => setOpenItem(expanded ? null : i.index)} className="flex w-full gap-2 px-2 py-1 text-left enabled:hover:bg-muted/60 rounded-md">
-											<span className={`mt-px grid size-3.5 shrink-0 place-items-center rounded border ${i.mark === "x" ? "border-emerald-500 bg-emerald-500 text-white" : i.mark === "!" ? "border-amber-500 text-amber-600" : ""}`}>
+											<span title={entryOf(i)?.notYet?.join("; ") || undefined} className={`mt-px grid size-3.5 shrink-0 place-items-center rounded border ${markOf(i) === "x" ? "border-emerald-500 bg-emerald-500 text-white" : markOf(i) === "~" ? "border-emerald-500 text-emerald-600" : markOf(i) === "!" ? "border-amber-500 text-amber-600" : ""}`}>
 												{/* Drawn marks, so they sit centred at any zoom (text glyphs ride their baseline). */}
-												{i.mark === "x" ? <Check className="size-2.5" strokeWidth={3.5} /> : i.mark === "!" ? (
+												{markOf(i) === "x" ? <Check className="size-2.5" strokeWidth={3.5} /> : markOf(i) === "~" ? (
+													<svg viewBox="0 0 10 10" className="size-2.5" aria-hidden><path d="M5 1a4 4 0 0 1 0 8z" fill="currentColor" /></svg>
+												) : markOf(i) === "!" ? (
 													<svg viewBox="0 0 10 10" className="size-2.5" aria-hidden><path d="M5 2v3.6" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" /><circle cx="5" cy="7.9" r="1" fill="currentColor" /></svg>
 												) : null}
 											</span>
 											<span className="min-w-0 flex-1">
 												{/* The item's text is markdown (bold names, `code`), rendered inline. */}
-												<ChatMarkdown className={`[&_p]:my-0 [&_p]:leading-5 ${i.mark === "x" ? "text-muted-foreground" : ""}`}>{i.text}</ChatMarkdown>
+												<ChatMarkdown className={`[&_p]:my-0 [&_p]:leading-5 ${markOf(i) === "x" ? "text-muted-foreground" : ""}`}>{i.text}</ChatMarkdown>
+												{/* What the ledger still needs, once a proof exists: what it covers, what's missing, the review. */}
+												{entryOf(i) && entryOf(i).status !== "proved" && entryOf(i).status !== "unproved" && entryOf(i).notYet?.length ? (
+													<span className="mt-0.5 block text-[11px] text-muted-foreground">
+														{entryOf(i).status === "partly proved" ? "Partly proved: " : ""}
+														{entryOf(i).notYet.join("; ")}
+													</span>
+												) : null}
 												{working && working.item === String(i.index) && activity ? (
 													<span className="mt-0.5 flex items-center gap-1.5 truncate text-[11px] text-muted-foreground" title={activity.text}>
 														<span className="truncate">
