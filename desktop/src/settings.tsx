@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { useSearchParams } from "react-router";
 import { invoke } from "@tauri-apps/api/core";
-import { ArrowUpRight, Crosshair, FolderSearch, Server, Smartphone, Sparkles, SquareCode, type LucideIcon } from "lucide-react";
+import { ArrowUpRight, Cable, Crosshair, FolderSearch, Server, Sparkles, SquareCode, type LucideIcon } from "lucide-react";
 import { apiBase, DEFAULT_API, setApiBase } from "./api";
 import { setVimMode, useVimMode } from "@/components/vim-mode";
 import { AuditFolders, EntryPoints } from "@/components/audit-folders";
@@ -62,7 +62,7 @@ function ApiKey({ vendor, name, placeholder, onSaved }: { vendor: "anthropic" | 
 const SECTIONS = [
 	{ id: "models", title: "Models", icon: Sparkles, group: "This computer" },
 	{ id: "editor", title: "Editor", icon: SquareCode, group: "This computer" },
-	{ id: "phone", title: "Phone", icon: Smartphone, group: "This computer" },
+	{ id: "remote", title: "Remote control (MCP)", icon: Cable, group: "This computer" },
 	{ id: "github", title: "GitHub", icon: ArrowUpRight, group: "This computer" },
 	{ id: "server", title: "Server", icon: Server, group: "This computer" },
 	{ id: "entry-points", title: "Entry points", icon: Crosshair, group: "Projects" },
@@ -193,13 +193,13 @@ export function SettingsPage() {
 								<AuditFolders key={path} folder={path} label={repo} />
 							))}
 					</Section> : null}
-					{section === "phone" ? <Section title="Phone">
+					{section === "remote" ? <Section title="Remote control (MCP)">
 						<label className="flex items-center justify-between gap-4">
 							<span>
-								<span className="font-medium">Follow and steer the swarm from your phone</span>
+								<span className="font-medium">Let agents follow and steer the swarm through the MCP</span>
 								<span className="block text-xs text-muted-foreground">
-									The swarm keeps running here. What its agents say goes to your formal.team account as it happens, and messages, Start
-									and Stop from Formal Mind on your iPhone come back to this Mac. Your code stays here.
+									The swarm keeps running here. What its agents say goes to your formal.team account as it happens, and the MCP's
+									mac_* tools (from Claude, ChatGPT or Cursor, signed in as you) come back to this Mac. Your code stays here.
 								</span>
 							</span>
 							<input

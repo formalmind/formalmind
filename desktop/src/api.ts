@@ -87,7 +87,7 @@ export async function exchangeCode(code: string) {
 
 /**
  * The settings the pages keep (`fm:` keys in localStorage), pushed to the backend's (~/.formalmind/config.json), which
- * decides with them whatever started the work: the folder page, the phone, an agent through the MCP. Any change to an
+ * decides with them whatever started the work: the folder page, an agent through the MCP. Any change to an
  * `fm:` key pushes them again.
  */
 export async function syncSettings() {

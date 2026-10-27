@@ -1,4 +1,3 @@
-import { GetTheApp } from "@/components/get-the-app";
 import { AddProjectHost } from "@/components/add-project";
 import { WebHome } from "@/components/web-home";
 import { lazy, Suspense, useEffect, useState } from "react";
@@ -135,7 +134,6 @@ export function App() {
 
 	return (
 		<ThemeProvider>
-			<GetTheApp />
 			<Routes>
 				<Route path="/welcome" element={<Title text="Formal Mind · Prove your Solidity correct"><Landing signedIn={signedIn} /></Title>} />
 				<Route path="/login" element={signedIn ? <Navigate to="/" replace /> : <Title text="Log in · Formal Mind"><LoginPage /></Title>} />

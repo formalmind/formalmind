@@ -9,7 +9,7 @@ updates:
       minor-and-patch:
         update-types: [minor, patch]
   - package-ecosystem: cargo
-    directories: [/desktop/src-tauri, /mobile/src-tauri, /crates/formal-ast, /crates/formal-ast-wasm, /crates/sol-debug]
+    directories: [/desktop/src-tauri, /crates/formal-ast, /crates/formal-ast-wasm, /crates/sol-debug]
     schedule:
       interval: weekly
     ignore:

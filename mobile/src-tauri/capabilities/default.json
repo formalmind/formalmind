@@ -1,7 +1,0 @@
-{
-  "$schema": "../gen/schemas/mobile-schema.json",
-  "identifier": "default",
-  "description": "What the app's window may do",
-  "windows": ["main"],
-  "permissions": ["core:default", "deep-link:default", "opener:default"]
-}

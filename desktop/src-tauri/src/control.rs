@@ -1,5 +1,5 @@
 //! The app's control API: every operation the app does, by name, in one place (lib/mac-ops.ts is its published list).
-//! The folder page, the relay (the phone and the MCP through formal.team) and anything else that drives the app call
+//! The folder page, the relay (the MCP through formal.team) and anything else that drives the app call
 //! [`dispatch`], so they all do the same thing the same way: the backend decides the model route, the caps and when
 //! a run starts; whoever asks only says what they want.
 

@@ -95,7 +95,6 @@ Formal Mind runs an OAuth 2.0 authorization server at ${ORIGIN} (RFC 8414 metada
 /* Roadmap, kept apart from what exists. */
 export const PLANNED = `## Planned, not built
 
-- **The iPhone app on the App Store.** It is not published yet (lib/downloads.ts).
 - **Driving the local swarm from outside the app.** The swarm is started, steered and stopped in the desktop app; there is no API or MCP tool for it.
 - **A public verification-work API.** The credential layer exists (OAuth 2.0 tokens from ${ORIGIN}, see ${ORIGIN}/auth.md). An API for submitting verification work and reading its results is next, and will take the same tokens.
 - **An A2A agent card.** None is published, because there is no agent-to-agent endpoint to describe.`;

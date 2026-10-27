@@ -61,7 +61,7 @@ read through GitHub's public API, with the Worker's `GITHUB_TOKEN` when it has o
 | `add_project` | write | Adds a GitHub repository to the account's projects |
 | `plan_repository` | write | Runs the planner on a repository and saves the plan to the account |
 | `start_swarm` | write | Sets up `<repo>-proofs` for the hosted swarm |
-| `mac_swarm_send` | write | `say` / `start` / `stop` to the Mac, as the phone does; `start` runs on the route the app's Settings use |
+| `mac_swarm_send` | write | `say` / `start` / `stop` to the Mac; `start` runs on the route the app's Settings use |
 | `mac_get` | read | One of the app's reads on the Mac (`lib/mac-ops.ts`): folders, status, plan, statements, bugs, proofs, scope, coverage, … The Mac answers through the relay |
 | `mac_do` | write | One of the app's actions on the Mac (`lib/mac-ops.ts`): add a folder, verify any GitHub repository at a branch or commit (`verify_repo`), start, hunt, stop, say, statements, triage, Reach |
 | `mac_get` `work_map` / `brief`, `mac_do` `refresh_model` / `check_proof` / `submit_proof` | read / write | A remote prover: what's covered and left, a function's brief, checking and submitting a proof as the swarm's own |

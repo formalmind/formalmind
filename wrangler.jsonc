@@ -37,7 +37,7 @@
 	],
 	// Users (migrations/): `wrangler d1 migrations apply formalmind-users --remote`.
 	// One Durable Object per project (worker/project-do.ts): spend now; lease, queue and dispatcher later.
-	// One per person (worker/relay-do.ts): the swarm relay between the Mac app and the phone.
+	// One per person (worker/relay-do.ts): the swarm relay between the Mac app and the MCP.
 	"durable_objects": {
 		"bindings": [
 			{ "name": "PROJECT", "class_name": "ProjectDO" },

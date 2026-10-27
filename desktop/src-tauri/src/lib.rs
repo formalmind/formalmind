@@ -137,7 +137,7 @@ pub fn run() {
         .manage(swarm::Swarms::default())
         .manage(debug::Debuggers::default())
         .setup(|app| {
-            // The relay (the phone and agents through the MCP) runs in the backend, whatever the window is doing.
+            // The relay (agents through the MCP) runs in the backend, whatever the window is doing.
             relay::start(app.handle());
             // Installed builds register formalmind:// from tauri.conf.json; this covers `tauri dev` on Windows/Linux.
             #[cfg(any(windows, target_os = "linux"))]

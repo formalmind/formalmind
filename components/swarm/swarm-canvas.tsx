@@ -639,7 +639,7 @@ export function SwarmCanvas({ state, fill = false, contain = false, title, actio
 	state: SwarmState | null;
 	/** Only these agents are on the board (the app's Concolic tab: the hunter alone); all of them when unset. */
 	roles?: SwarmRole[];
-	/** How fast the replay plays: 2 is twice as lively (the phone's introduction); 1 is the landing page's pace. */
+	/** How fast the replay plays: 2 is twice as lively; 1 is the landing page's pace. */
 	pace?: number;
 	/** A swarm running on this computer (the desktop app): no dispatcher schedule to show. */
 	local?: boolean;

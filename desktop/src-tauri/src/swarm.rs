@@ -171,7 +171,7 @@ struct SwarmEvent {
     at: u64,
 }
 
-/// An event to the app (the `swarm` event; the relay passes it on to the phone) and to the session's log,
+/// An event to the app (the `swarm` event; the relay passes it on to the MCP) and to the session's log,
 /// .formal/runs/<run>.jsonl.
 /// An event for the running bug search in a folder (a background task finishing): its hunt-* session, if one runs.
 pub(crate) fn emit_in_folder(app: &AppHandle, folder: &str, kind: &'static str, role: &str, item: &str, text: String) {
@@ -221,7 +221,7 @@ fn release_folder(root: &Path) {
 }
 
 /// The sessions running now, by folder, sent to every window as `swarm-running` whenever one starts or ends, by any
-/// route (the folder page, the phone, an agent through the MCP, a quit). The pages and the relay take this as the
+/// route (the folder page, an agent through the MCP, a quit). The pages and the relay take this as the
 /// truth instead of working it out from the events.
 fn broadcast_running(app: &AppHandle) {
     let mut by_folder: HashMap<String, Vec<String>> = HashMap::new();
@@ -2118,7 +2118,7 @@ pub fn swarm_hunt(folder: String, focus: Option<String>, session: Option<String>
 }
 
 /// A message to the swarm: queued as an "answer" job (on disk, so a quit can't lose it), answered before the next turn.
-/// It is a `you` event in the session too, so the chat shows it wherever it was sent from (here or the phone).
+/// It is a `you` event in the session too, so the chat shows it wherever it was sent from (here or through the MCP).
 #[tauri::command]
 pub fn swarm_say(app: AppHandle, swarms: State<'_, Swarms>, folder: String, run: String, text: String) -> Result<(), String> {
     let (qf, spent) = {

@@ -18,7 +18,7 @@ type Row = { seq: number; folder: string; run: string; kind: string; role: strin
 
 /**
  * One person's swarm relay (lib/relay.ts): the Mac app publishes its sessions' events and state here and long-polls
- * for commands; clients (the phone) long-poll the events and send commands. Waiting reads are held in memory and
+ * for commands; the MCP's tools long-poll the events and send commands. Waiting reads are held in memory and
  * answered as soon as something arrives.
  */
 export class RelayDO extends DurableObject {

@@ -214,7 +214,7 @@ export const ACCOUNT_TOOLS: AccountTool[] = [
   {
     name: "mac_swarm",
     title: "The Mac's swarm",
-    description: "The swarm running in the account's desktop app, through the formal.team relay: whether the Mac is online and when it was last seen, its name, the app's version, and each added folder (path, name, GitHub origin) with its sessions (run id, title, outcome, spent in USD, running). The work and the files stay on the Mac; this is what it publishes. Empty until the app has signed in with the relay on (Settings → Phone). Needs swarm:read.",
+    description: "The swarm running in the account's desktop app, through the formal.team relay: whether the Mac is online and when it was last seen, its name, the app's version, and each added folder (path, name, GitHub origin) with its sessions (run id, title, outcome, spent in USD, running). The work and the files stay on the Mac; this is what it publishes. Empty until the app has signed in with the relay on (Settings → Remote control (MCP)). Needs swarm:read.",
     inputSchema: { type: "object", properties: {} },
     annotations: { ...READ, idempotentHint: false },
     scope: "swarm:read",
@@ -253,7 +253,7 @@ export const ACCOUNT_TOOLS: AccountTool[] = [
   {
     name: "mac_swarm_send",
     title: "Steer the Mac's swarm",
-    description: "Sends the desktop app a command through the relay, as the phone does: say (a message to a session's assistant, answered before the next turn: run and text), start (a session in a folder, optionally a goal, a budget in USD up to 1000, and the run to continue) or stop (run). The Mac runs it as if typed there; a command it doesn't pick up within 10 minutes is dropped. Consequential: start runs agents on the Mac with the model route its Settings use (the person's Claude plan, credits or key). Returns the command's seq; follow with mac_swarm_events. Needs swarm:write.",
+    description: "Sends the desktop app a command through the relay: say (a message to a session's assistant, answered before the next turn: run and text), start (a session in a folder, optionally a goal, a budget in USD up to 1000, and the run to continue) or stop (run). The Mac runs it as if typed there; a command it doesn't pick up within 10 minutes is dropped. Consequential: start runs agents on the Mac with the model route its Settings use (the person's Claude plan, credits or key). Returns the command's seq; follow with mac_swarm_events. Needs swarm:write.",
     inputSchema: {
       type: "object",
       required: ["type", "folder"],
@@ -595,7 +595,7 @@ async function callTool(name: string, args: Record<string, unknown>, caller: Cal
       const { state } = await r.read(Number.MAX_SAFE_INTEGER, false);
       const folders = state?.folders ?? [];
       const match = folders.find((f) => [f.path, f.name, f.repo ?? ""].some((v) => v.toLowerCase() === wanted.toLowerCase()));
-      if (!match) return failure(`${wanted || "folder"} isn't one of the Mac's folders${folders.length ? `: ${folders.map((f) => f.path).join(", ")}` : " (it has published none; is the app signed in, with Settings → Phone on?)"}.`);
+      if (!match) return failure(`${wanted || "folder"} isn't one of the Mac's folders${folders.length ? `: ${folders.map((f) => f.path).join(", ")}` : " (it has published none; is the app signed in, with Settings → Remote control (MCP) on?)"}.`);
       const command = parseCommand({ ...args, folder: match.path });
       if (!command || command.type === "history") return failure("Not a command: say needs run and text, stop needs run, start takes an optional run, goal and budget (up to 1000).");
       const seq = await r.send(command);
@@ -614,7 +614,7 @@ async function callTool(name: string, args: Record<string, unknown>, caller: Cal
         const { state } = await r.read(Number.MAX_SAFE_INTEGER, false);
         const folders = state?.folders ?? [];
         const match = folders.find((f) => [f.path, f.name, f.repo ?? ""].some((v) => v.toLowerCase() === wanted.toLowerCase()));
-        if (!match) return failure(`${wanted || "folder"} isn't one of the Mac's folders${folders.length ? `: ${folders.map((f) => f.path).join(", ")}` : " (it has published none; is the app signed in, with Settings → Phone on?)"}.`);
+        if (!match) return failure(`${wanted || "folder"} isn't one of the Mac's folders${folders.length ? `: ${folders.map((f) => f.path).join(", ")}` : " (it has published none; is the app signed in, with Settings → Remote control (MCP) on?)"}.`);
         folder = match.path;
       }
       const command = parseCommand({ type: "call", folder, id: crypto.randomUUID(), op, args: args.args ?? {} });

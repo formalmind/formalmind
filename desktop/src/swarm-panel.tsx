@@ -912,7 +912,7 @@ function PocView({ folder, invoke, path, fns, onOpenFile }: { folder: string; in
 /**
  * The audit findings of a folder's report folders (`dirs`): each index's rows (README.md / INDEX.md) and each
  * standard audit file, with Formal Mind's own rows shown once. The reports are the other files there. Bugs on the Mac
- * and the web, and the phone's Bugs, read them this way.
+ * and the web read them this way.
  */
 export function useAuditFindings(folder: string, files: string[], invoke: Bridge["invoke"], dirs: string[], reload = 0) {
 	const inDirs = files.filter((f) => /\.(md|markdown|txt|pdf)$/i.test(f) && dirs.some((d) => f.startsWith(`${d.replace(/\/+$/, "")}/`))).sort();
@@ -2177,7 +2177,7 @@ export function SwarmPanel({ folder, name, scan, bridge, session, file: openPath
 			}
 		});
 		// Which sessions run is the app's to say (swarm-running, sent whenever one starts or ends, by any route: this
-		// page, the phone, an agent through the MCP); a check on focus and every 15 s catches anything missed.
+		// page, an agent through the MCP); a check on focus and every 15 s catches anything missed.
 		const offRunning = listen<Record<string, string[]>>("swarm-running", ({ payload }) => setRuns(payload[folder] ?? []));
 		const check = () => void invoke<string[]>("swarm_running", { folder }).then(setRuns, () => {});
 		const every = setInterval(check, 15_000);
@@ -2270,7 +2270,7 @@ export function SwarmPanel({ folder, name, scan, bridge, session, file: openPath
 	}, [events]);
 
 	// `onlyQueued`: a run for the work already queued (reading a report), which stops when that's done.
-	// The page says what to start; the backend (its control API, as the phone and the MCP use it) picks the model
+	// The page says what to start; the backend (its control API, as the MCP uses it) picks the model
 	// route, the model and the cap from the settings.
 	const start = async () => {
 		setError(null);

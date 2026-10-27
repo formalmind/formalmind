@@ -198,11 +198,11 @@ or a finding filed. In dev builds `FM_SWARM_AUTOSTART=<added folder>` starts tha
 `FM_SWARM_BUDGET`, `FM_SWARM_PROVIDER=anthropic`, `FM_SWARM_MODEL`, `FM_SWARM_GOAL`, `FM_SWARM_SESSION`), for driving a run without clicking.
 
 
-## The phone
+## Remote control (MCP)
 
-Signed in, the app relays its swarm through formal.team so Formal Mind for iPhone (`mobile/`) can follow and steer it
-(`src/relay.ts`; Settings → Phone turns it off). Every `swarm` event is posted to `/api/relay/mac` as it happens,
-with the added folders and their sessions; the app long-polls the same route for commands from the phone (a message,
+Signed in, the app relays its swarm through formal.team so the MCP's `mac_*` tools can follow and steer it
+(`src/relay.ts`; Settings → Remote control (MCP) turns it off). Every `swarm` event is posted to `/api/relay/mac` as it happens,
+with the added folders and their sessions; the app long-polls the same route for commands from the MCP (a message,
 Start, Stop, a session's history) and runs them as if typed here. The relay is one Durable Object per person
 (`worker/relay-do.ts`, `lib/relay.ts`) holding the recent events and the commands waiting for the Mac (dropped after
 10 minutes). Nothing runs there: the swarm, the files and the tools stay on this Mac. A message sent with `swarm_say`
