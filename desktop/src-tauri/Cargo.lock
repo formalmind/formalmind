@@ -1477,7 +1477,7 @@ dependencies = [
 
 [[package]]
 name = "formalmind-desktop"
-version = "0.2.25"
+version = "0.2.26"
 dependencies = [
  "fff-search",
  "formal-ast",
