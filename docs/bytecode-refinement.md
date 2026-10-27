@@ -57,9 +57,14 @@ flowchart TB
   rule refuses `native_decide`, so the ledger can't count these proofs as they are. Either the bytecode layer accepts
   `native_decide` as a stated part of its trusted base, or those facts are re-proved with `decide` (slower to check).
 
-## Open questions
+## Decision: `native_decide` in the bytecode layer (2026-10-27)
 
-- Accept `native_decide` in the bytecode layer, stated in the audit's trusted base, or require `decide`?
+The bytecode layer accepts `native_decide`, and says so. Proofs that carry a property to the bytecode through EquiVM
+may rest on `native_decide` facts; every audit that cites them lists "Lean's compiled evaluator, for the concrete
+facts in the bytecode proofs" in its trusted base, with the count. Proofs about the source model and about Stele specs
+keep the strict rule: no `native_decide`.
+
+## Open questions
 
 - Keep the formal-ast model as the fast first pass, and refinement as the stronger layer? Or move statements to Stele
   outright?
