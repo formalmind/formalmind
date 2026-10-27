@@ -34,7 +34,7 @@ pub struct ForkInfo {
 impl Backend {
     /// A fork of the chain at `url`, pinned to its latest block.
     pub fn fork(url: &str) -> anyhow::Result<(Backend, ForkInfo)> {
-        let agent = ureq::AgentBuilder::new().timeout(std::time::Duration::from_secs(30)).build();
+        let agent: ureq::Agent = ureq::Agent::config_builder().timeout_global(Some(std::time::Duration::from_secs(30))).build().into();
         let rpc = Rpc { url: url.to_string(), block: "latest".into(), agent, errors: Arc::new(Mutex::new(vec![])) };
         let chain = rpc.call("eth_chainId", json!([])).ok_or_else(|| anyhow::anyhow!("{} didn't answer eth_chainId{}", url, rpc.last_error()))?;
         let head = rpc.call("eth_getBlockByNumber", json!(["latest", false])).ok_or_else(|| anyhow::anyhow!("{} didn't answer eth_getBlockByNumber", url))?;
@@ -53,9 +53,9 @@ impl Backend {
 impl Rpc {
     fn call(&self, method: &str, params: Value) -> Option<Value> {
         let body = json!({ "jsonrpc": "2.0", "id": 1, "method": method, "params": params });
-        let res = self.agent.post(&self.url).set("content-type", "application/json").send_string(&body.to_string());
+        let res = self.agent.post(&self.url).header("content-type", "application/json").send(body.to_string());
         let out: Result<Value, String> = match res {
-            Ok(r) => r.into_string().map_err(|e| e.to_string()).and_then(|s| serde_json::from_str(&s).map_err(|e| e.to_string())),
+            Ok(mut r) => r.body_mut().read_to_string().map_err(|e| e.to_string()).and_then(|s| serde_json::from_str(&s).map_err(|e| e.to_string())),
             Err(e) => Err(e.to_string()),
         };
         match out {
