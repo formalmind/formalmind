@@ -563,16 +563,13 @@ pub fn set_obligation(root: &Path, id: &str, n: usize, mark: char) -> Result<cha
 
 /// The theorem an obligation must prove, by name: `S01.Vault_setFee` for `Vault.setFee` in S-01.
 pub fn theorem_name(id: &str, lean: &str) -> String {
-    format!("{}.{}", id.replace('-', ""), lean.replace('.', "_"))
+    let parts: Vec<String> = lean.split('.').map(|p| crate::swarm_ctx::name_part(p, false)).collect();
+    format!("{}.{}", id.replace('-', ""), parts.join("_"))
 }
 
 /// Where its proof goes, under the Lake project: `Proofs/Statements/S01/VaultSetFee.lean`.
 pub fn proof_file(id: &str, lean: &str, proofs: &str) -> String {
-    let module: String = lean.split('.').map(|p| {
-        let p = p.trim_start_matches('_');
-        let mut c = p.chars();
-        c.next().map(|f| f.to_uppercase().collect::<String>() + c.as_str()).unwrap_or_default()
-    }).collect();
+    let module: String = lean.split('.').map(|p| crate::swarm_ctx::name_part(p, true)).collect();
     format!("{proofs}/Statements/{}/{module}.lean", id.replace('-', ""))
 }
 
@@ -978,6 +975,9 @@ mod tests {
     #[test]
     fn the_theorem_and_its_file_are_named_for_the_statement() {
         assert_eq!(theorem_name("S-01", "Vault.setFee"), "S01.Vault_setFee");
+        assert_eq!(proof_file("S-01", "WETH9.«»", "Refinement"), "Refinement/Statements/S01/WETH9Fallback.lean");
+        assert_eq!(theorem_name("S-01", "WETH9.«»"), "S01.WETH9_fallback");
+        assert_eq!(theorem_name("S-01", "Vault._setFee"), "S01.Vault__setFee");
         assert_eq!(proof_file("S-01", "Vault._setFee", "Refinement"), "Refinement/Statements/S01/VaultSetFee.lean");
         let s = confirmed(&folder("task"));
         let t = obligation_task(&s, 2, "formal", "Refinement");

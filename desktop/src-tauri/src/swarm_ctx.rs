@@ -415,7 +415,7 @@ impl Context {
         // Where Lake reads the sources (its srcDir), which can differ from where it runs.
         let lib = lean_src(root).map(|d| rel(&d)).filter(|d| !d.is_empty()).unwrap_or_else(|| lake_rel.clone());
         let short = u.name().rsplit('.').next().unwrap_or("").trim_start_matches('_');
-        let module = format!("{}{}", c.name, capitalize(short));
+        let module = format!("{}{}", c.name, name_part(short, true));
         let (specs, proofs) = layout(root);
         let mut s = format!(
             "## The target\n\n`{}` in {} ({}) — Lean def `{lean}` in the generated model `{}`.\n{}\n\
@@ -451,6 +451,15 @@ fn status(f: &Func) -> String {
         (None, false, false) => "named only by theorems with sorry".into(),
         (None, false, true) => "NOT PROVED".into(),
     }
+}
+
+/// One part of a Lean def's name as it may appear in a file or theorem name: the receive/fallback function (`«»`, no
+/// name in Solidity) is `fallback`, guillemets and other characters a module name can't hold are dropped, and for a
+/// file the part is capitalized (`_setFee` → `SetFee`).
+pub fn name_part(part: &str, file: bool) -> String {
+    let p: String = part.chars().filter(|c| c.is_alphanumeric() || *c == '_').collect();
+    let p = if p.trim_matches('_').is_empty() { "fallback".to_string() } else { p };
+    if file { capitalize(p.trim_start_matches('_')) } else { p }
 }
 
 fn capitalize(s: &str) -> String {

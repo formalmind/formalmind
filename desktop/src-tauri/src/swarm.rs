@@ -2211,9 +2211,7 @@ fn plan_item_for(root: &Path, lean: &str) -> Option<PlanItem> {
 fn proof_file_for(root: &Path, contract: &str, function: &str) -> String {
     let lake = crate::swarm_ctx::lean_src(root).unwrap_or_else(|| root.join("formal"));
     let lib = lake.strip_prefix(root).map(|p| p.to_string_lossy().replace('\\', "/")).unwrap_or_default();
-    let short = function.rsplit('.').next().unwrap_or("").trim_start_matches('_');
-    let mut c = short.chars();
-    let cap = c.next().map(|f| f.to_uppercase().collect::<String>() + c.as_str()).unwrap_or_default();
+    let cap = crate::swarm_ctx::name_part(function.rsplit('.').next().unwrap_or(""), true);
     format!("{}{}/Swarm/{contract}{cap}.lean", if lib.is_empty() { String::new() } else { format!("{lib}/") }, crate::swarm_ctx::layout(root).1)
 }
 
