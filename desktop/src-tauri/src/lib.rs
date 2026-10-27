@@ -11,6 +11,8 @@ mod control;
 mod debug;
 mod executor;
 mod file_search;
+#[cfg(test)]
+mod fuzz;
 mod health;
 mod ledger;
 mod swarm;

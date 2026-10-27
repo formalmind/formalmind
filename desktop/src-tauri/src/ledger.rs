@@ -63,9 +63,27 @@ fn lean_libs(root: &Path) -> BTreeSet<String> {
 
 /// A file's module, from the Lake sources (`formal/Refinement/Swarm/X.lean` → `Refinement.Swarm.X`), when Lake builds it.
 fn module_of(src: &Path, root: &Path, file: &str, libs: &BTreeSet<String>) -> Option<String> {
-    let rel = root.join(file).strip_prefix(src).ok()?.to_string_lossy().replace('\\', "/");
-    let module = rel.strip_suffix(".lean")?.replace('/', ".");
-    libs.contains(module.split('.').next()?).then_some(module)
+    // `.` segments dropped; `..` or an empty segment is no module (a fuzzed `formal/Refinement/./X.lean` gave
+    // `Refinement...X`).
+    let mut parts: Vec<String> = vec![];
+    for c in Path::new(file).components() {
+        match c {
+            std::path::Component::CurDir => {}
+            std::path::Component::Normal(p) => parts.push(p.to_string_lossy().to_string()),
+            _ => return None,
+        }
+    }
+    let rel_src = src.strip_prefix(root).ok()?;
+    let src_parts: Vec<String> = rel_src.components().map(|c| c.as_os_str().to_string_lossy().to_string()).collect();
+    let inside = parts.strip_prefix(src_parts.as_slice())?;
+    let (last, dirs) = inside.split_last()?;
+    let name = last.strip_suffix(".lean")?;
+    let names: Vec<&str> = dirs.iter().map(String::as_str).chain([name]).collect();
+    if names.iter().any(|n| n.is_empty() || !n.chars().all(|c| c.is_alphanumeric() || c == '_' || c == '\'')) {
+        return None;
+    }
+    let module = names.join(".");
+    libs.contains(names[0]).then_some(module)
 }
 
 /// One hash of every `.lean` file in the Lake sources: a theorem's check depends on everything it imports, so the
@@ -136,6 +154,21 @@ fn covers(ty: &str, def: &str) -> Vec<&'static str> {
 
 /// What a function's proof has to cover to count as fully proved.
 const FULL: [&str; 3] = ["reverts", "writes", "returns"];
+
+#[cfg(test)]
+pub(crate) fn covers_for_test(ty: &str, def: &str) -> Vec<&'static str> {
+    covers(ty, def)
+}
+
+#[cfg(test)]
+pub(crate) fn is_lean_error_for_test(line: &str) -> bool {
+    is_lean_error(line)
+}
+
+#[cfg(test)]
+pub(crate) fn module_of_for_test(src: &Path, root: &Path, file: &str, libs: &BTreeSet<String>) -> Option<String> {
+    module_of(src, root, file, libs)
+}
 
 /// A line Lean prints for an error: `path:12:3: error: …`, or `error: …` on its own.
 fn is_lean_error(line: &str) -> bool {
