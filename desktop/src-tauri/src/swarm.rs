@@ -402,6 +402,9 @@ pub fn swarm_bugs(folder: String) -> Result<Vec<Bug>, String> {
 }
 
 
+/// A Claude Code turn stopped because the swarm's tools (its `formalmind` MCP bridge) didn't connect.
+const NO_TOOLS: &str = "the agent's tools didn't connect";
+
 // ---- the durable queue: .formal/queue.json ----
 //
 // Every unit of work is a job: plan, prove item N, review item N, answer the maintainer. A job is marked running before
@@ -1062,6 +1065,13 @@ impl Turn<'_> {
                                 let _ = cc.child.kill().await;
                                 return Err(format!("Claude Code started in {}, not the folder {}", v["cwd"].as_str().unwrap_or("?"), cc.root.display()));
                             }
+                            // Without its tools the agent can only write tool calls out as text that nothing runs (a
+                            // reviewer did that 321 times, then asked for changes it never checked). Stop the turn instead.
+                            let tools = v["mcp_servers"].as_array().and_then(|a| a.iter().find(|m| m["name"] == "formalmind")).and_then(|m| m["status"].as_str()).unwrap_or("missing");
+                            if tools != "connected" {
+                                let _ = cc.child.kill().await;
+                                return Err(format!("{NO_TOOLS} (Claude Code reported them {tools})"));
+                            }
                             for (kind, text) in events_of(&v) {
                                 self.emit(kind, role, item, text);
                             }
@@ -1106,7 +1116,18 @@ impl Turn<'_> {
     async fn agent(&self, role: &str, item: &str, task: impl Into<Value>) -> Result<Outcome, String> {
         let task: Value = task.into();
         if self.req.provider.as_deref() == Some("claude-code") {
-            return self.agent_on_claude_code(role, item, task).await;
+            // A turn whose tools didn't connect is stopped before the agent works; try twice more, then pause.
+            let mut tries = 0;
+            loop {
+                match self.agent_on_claude_code(role, item, task.clone()).await {
+                    Err(e) if e.starts_with(NO_TOOLS) && tries < 2 => {
+                        tries += 1;
+                        self.emit("status", role, item, format!("{e}; starting the turn again"));
+                        tokio::time::sleep(Duration::from_secs(3 * tries)).await;
+                    }
+                    other => return other,
+                }
+            }
         }
         let root = PathBuf::from(&self.req.folder);
         let (key, base) = self.session(role, item).await?;
