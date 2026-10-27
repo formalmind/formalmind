@@ -4,7 +4,8 @@ import { createPortal } from "react-dom";
 import { NvimTerminal } from "./nvim-terminal";
 import { reportError } from "@/lib/report-error";
 import { JsonTree } from "./json-tree";
-import { ArrowDown, Bug, Check, ChevronDown, ChevronRight, CircleCheck, CircleX, LoaderCircle, MoreHorizontal, Pause, Code2, Copy, FileCode2, Folder, Network, Play, Plus, ScanSearch, Square, SquareCheck, ThumbsDown, ThumbsUp, WandSparkles } from "lucide-react";
+import { inDesktop } from "@/lib/open-web";
+import { ArrowDown, Bug, MessageSquare, Check, ChevronDown, ChevronRight, CircleCheck, CircleX, LoaderCircle, MoreHorizontal, Pause, Code2, Copy, FileCode2, Folder, Network, Play, Plus, ScanSearch, Square, SquareCheck, ThumbsDown, ThumbsUp, WandSparkles } from "lucide-react";
 
 // The project roadmap (GitHub Projects-style), the same view the web app had on its own page.
 import { motion as vimMotion, search as vimSearch, setVimMode, useVimMode, type Cursor } from "@/components/vim-mode";
@@ -215,19 +216,16 @@ export function Steps({ steps, running, title, onPause }: { steps: Row[]; runnin
 	const elapsed = startAt && endAt ? took(endAt - startAt) : null;
 	const changed = items.filter((c) => c.call.text.startsWith("write_file")).length;
 	const broke = items.filter((c) => failed(c.result)).length;
-	const status = running
-		? { label: "Working", cls: "bg-violet-500/15 text-violet-700 dark:text-violet-300" }
-		: items.some((c) => !c.result)
-			? { label: "Stopped", cls: "bg-muted text-muted-foreground" }
-			: { label: "Done", cls: "bg-emerald-500/15 text-emerald-700 dark:text-emerald-400" };
+	const status = { label: running ? "Working" : items.some((c) => !c.result) ? "Stopped" : "Done" };
 	const folded = view.fold && !running;
 	const summary = () => [`${role}${item ? ` · item ${item}` : ""}${title ? ` · ${title}` : ""}`, ...items.map((c) => `${failed(c.result) ? "✗" : "✓"} ${c.call.text}`), ...trailing.map((n) => n.text)].join("\n");
 	return (
-		<div className="overflow-hidden rounded-xl border bg-card text-[13px]">
-			<div className="flex items-center gap-2 border-b px-3 py-2">
+		// Flat on the page, as the chat's text is: who and what, then one line per step, no box around it.
+		<div className="text-[13px]">
+			<div className="flex items-center gap-2 py-1">
 				<span className="shrink-0 font-medium capitalize" style={{ color: colorOf(role) }}>{role}</span>
 				{title || item ? <span className="min-w-0 truncate text-foreground">{title ?? `item ${item}`}</span> : null}
-				<span className={`shrink-0 rounded px-1.5 py-0.5 text-[11px] ${status.cls}`}>{status.label}</span>
+				<span className="shrink-0 text-[12px] text-muted-foreground">{status.label}</span>
 				<DropdownMenu>
 					<DropdownMenuTrigger className="ml-auto grid size-6 shrink-0 place-items-center rounded-md text-muted-foreground outline-none hover:bg-muted hover:text-foreground" aria-label="Card options">
 						<MoreHorizontal className="size-4" />
@@ -256,21 +254,21 @@ export function Steps({ steps, running, title, onPause }: { steps: Row[]; runnin
 				</DropdownMenu>
 			</div>
 			{folded ? (
-				<button type="button" onClick={() => setView({ fold: false })} className="flex w-full items-center gap-2 px-3 py-2 text-left text-muted-foreground hover:bg-muted/40">
+				<button type="button" onClick={() => setView({ fold: false })} className="flex w-full items-center gap-2 py-1 text-left text-muted-foreground hover:text-foreground">
 					<CircleCheck className="size-4 shrink-0 text-emerald-600 dark:text-emerald-400" />
 					Finished · {items.length} {items.length === 1 ? "step" : "steps"}
 					{changed ? <span className="rounded bg-violet-500/15 px-1.5 text-[11px] text-violet-700 dark:text-violet-300">{changed} changed</span> : null}
 					{broke ? <span className="rounded bg-amber-500/15 px-1.5 text-[11px] text-amber-700 dark:text-amber-300">{broke} to check</span> : null}
 				</button>
 			) : (
-				<ul className="divide-y">
+				<ul>
 					{items.map((c, i) => (
 						<CardStep key={i} step={c} running={running && i === items.length - 1 && !c.result} now={now} view={view} defaultOpen={running && i === items.length - 1} />
 					))}
 					{trailing.map((n, i) => <NoteRow key={`n${i}`} e={n} />)}
 				</ul>
 			)}
-			<div className="flex items-center gap-2 border-t px-3 py-1.5 text-[11px] text-muted-foreground">
+			<div className="flex items-center gap-2 py-1 text-[11px] text-muted-foreground">
 				<span className="tabular-nums">
 					{items.length} {items.length === 1 ? "step" : "steps"}
 					{elapsed ? ` · ${elapsed}` : ""}
@@ -297,17 +295,16 @@ function CardStep({ step, running, now, view, defaultOpen }: { step: { call: Ev;
 	const wrote = tool === "write_file";
 	return (
 		<li>
-			<button type="button" onClick={() => setOpen(!open)} aria-expanded={open} className={`flex w-full items-start gap-2 px-3 text-left hover:bg-muted/40 ${view.compact ? "py-1" : "py-2"}`}>
-				<span className="mt-0.5 shrink-0">
-					{running ? <LoaderCircle className="size-4 animate-spin text-muted-foreground" /> : bad ? <CircleX className="size-4 text-red-500" /> : <CircleCheck className="size-4 text-muted-foreground" />}
-				</span>
+			<button type="button" onClick={() => setOpen(!open)} aria-expanded={open} className={`group/step flex w-full items-start gap-2 text-left text-muted-foreground hover:text-foreground ${view.compact ? "py-0.5" : "py-1"}`}>
+				{running ? <LoaderCircle className="mt-0.5 size-3.5 shrink-0 animate-spin" /> : bad ? <CircleX className="mt-0.5 size-3.5 shrink-0 text-red-500" /> : null}
 				<span className="min-w-0 flex-1">
 					<span className="flex min-w-0 items-center gap-2">
-						<span className="shrink-0 text-foreground">{isRun ? (running ? "Running" : "Ran") : tool}</span>
+						<span className="shrink-0">{isRun ? (running ? "Running" : "Ran") : tool}</span>
 						{view.paths && arg ? <span className="min-w-0 truncate font-mono text-[12px] text-muted-foreground">{arg}</span> : null}
 						{wrote ? <span className="shrink-0 rounded bg-violet-500/15 px-1.5 text-[11px] text-violet-700 dark:text-violet-300">Changed</span> : null}
 						{bad ? <span className="shrink-0 rounded bg-red-500/15 px-1.5 text-[11px] text-red-700 dark:text-red-400">Failed</span> : null}
-						{elapsed ? <span className="ml-auto shrink-0 tabular-nums text-[11px] text-muted-foreground">{elapsed}</span> : null}
+						<ChevronRight className={`size-3.5 shrink-0 transition-transform ${open ? "rotate-90" : ""}`} />
+						{elapsed ? <span className="ml-auto shrink-0 tabular-nums text-[11px]">{elapsed}</span> : null}
 					</span>
 					{!view.compact && step.notes.length ? <span className="mt-0.5 line-clamp-2 block text-[12px] text-muted-foreground">{step.notes.map((n) => n.text).join(" ")}</span> : null}
 					{running ? (
@@ -318,7 +315,7 @@ function CardStep({ step, running, now, view, defaultOpen }: { step: { call: Ev;
 				</span>
 			</button>
 			{open ? (
-				<div className="space-y-1.5 border-t bg-muted/30 px-3 py-2">
+				<div className="space-y-1.5 py-1 pl-5">
 					<p className="whitespace-pre-wrap break-all font-mono text-[11px] text-foreground/80">$ {step.call.text}</p>
 					{step.result?.text.includes("\n```diff\n") ? (
 						<DiffOutput text={step.result.text} />
@@ -337,7 +334,7 @@ function NoteRow({ e }: { e: Ev }) {
 	const [open, setOpen] = useState(false);
 	return (
 		<li>
-			<button type="button" onClick={() => setOpen(!open)} aria-expanded={open} className="flex w-full items-center gap-2 px-3 py-2 text-left text-muted-foreground hover:bg-muted/50">
+			<button type="button" onClick={() => setOpen(!open)} aria-expanded={open} className="flex w-full items-center gap-2 py-1 text-left text-muted-foreground hover:text-foreground">
 				<span className={`min-w-0 flex-1 ${open ? "whitespace-pre-wrap" : "truncate"}`}>{e.text}</span>
 				{open ? null : <ChevronRight className="size-3.5 shrink-0" />}
 			</button>
@@ -1315,6 +1312,7 @@ const PANE_WIDTH = 440;
 
 /** The views the Mac app shows in the middle, in the order the title bar's icons show them. */
 const PANE_VIEWS: { id: Mode; label: string; icon: typeof Code2 }[] = [
+	{ id: "chat", label: "Chat", icon: MessageSquare },
 	{ id: "swarm", label: "Canvas", icon: Network },
 	{ id: "audit", label: "Proofs", icon: ScanSearch },
 	{ id: "bugs", label: "Bugs", icon: Bug },
@@ -1399,7 +1397,7 @@ export function TalkIcon({ className }: { className?: string }) {
  * later.
  */
 function resolveMode(asked: string): Mode {
-	return (["code", "swarm", "audit", "bugs"] as const).find((m) => m === asked) ?? "swarm";
+	return (["chat", "code", "swarm", "audit", "bugs"] as const).find((m) => m === asked) ?? "swarm";
 }
 
 /** A slot in the Mac app's title bar (desktop/src/tabs.tsx), when there is one: the left one for the page's name, the
@@ -1903,7 +1901,8 @@ export function SwarmPanel({ folder, name, scan, bridge, session, file: openPath
 	// The page's mode (Code, Swarm, Audit) and the open file live in the URL, so they survive reloads.
 	const [params, setParams] = useSearchParams();
 	// The roadmap lives on the Swarm canvas now and Chat has no tab; old links to either open Swarm.
-	const mode = resolveMode(params.get("mode") ?? defaultMode ?? "swarm");
+	// In the Mac app the chat is the page: it opens first; the website keeps the canvas.
+	const mode = resolveMode(params.get("mode") ?? defaultMode ?? (inDesktop() ? "chat" : "swarm"));
 	const canvas = mode === "swarm";
 	// The main contract's entry points, read from the AST, so the plan can name the ones each item covers.
 	const [entryUnits, setEntryUnits] = useState<AstUnit[]>([]);
@@ -3078,11 +3077,18 @@ export function SwarmPanel({ folder, name, scan, bridge, session, file: openPath
 			<div ref={root} className="relative flex h-full min-h-0 flex-1">
 				{/* The folder's tab names it, in its own place among the tabs; only the page's actions go to the title bar. */}
 				{actionsSlot ? createPortal(<>{ctxMenu}{costMenu}{paneTools}</>, actionsSlot) : null}
-				{/* The view in the middle (Canvas, Proofs, Bugs, Code); the chat in the right pane. */}
-				<div className="relative min-w-0 flex-1" style={{ "--fm-top": "0px" } as React.CSSProperties}>
-					<div className="absolute inset-0 flex flex-col overflow-hidden">{modeViews}</div>
-				</div>
-				{paneOpen ? (
+				{mode === "chat" ? (
+					// The chat as the page: one centred column, as wide as reads well.
+					<div className="relative flex min-h-0 min-w-0 flex-1 justify-center px-4 pb-3 pt-2">
+						<div className="flex min-h-0 w-full max-w-3xl flex-col">{chatPanel}</div>
+					</div>
+				) : (
+					// The view in the middle (Canvas, Proofs, Bugs, Code); the chat in the right pane.
+					<div className="relative min-w-0 flex-1" style={{ "--fm-top": "0px" } as React.CSSProperties}>
+						<div className="absolute inset-0 flex flex-col overflow-hidden">{modeViews}</div>
+					</div>
+				)}
+				{paneOpen && mode !== "chat" ? (
 					<section className="relative flex min-h-0 shrink-0 flex-col border-l px-3 pb-3 pt-2" style={{ width: paneWidth }}>
 						{chatPanel}
 						{/* Drag the separator to resize; double-click for the default width. */}
