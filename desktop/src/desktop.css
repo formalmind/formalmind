@@ -29,13 +29,14 @@
 }
 
 /* One text size and weight across the app, the file tree's: 13px, regular. Headings, chat markdown, labels and chips all
-   use it. What measures its own text keeps its sizes: the Neovim terminal (xterm), maths (KaTeX) and diagrams (SVG). */
-.fm-shell *:not(.xterm, .xterm *, .katex, .katex *, svg, svg *) {
+   use it. What measures its own text keeps its sizes: the Neovim terminal (xterm), maths (KaTeX), diagrams (SVG) and
+   the display face (the wordmark, the account name, the home headline). */
+.fm-shell *:not(.xterm, .xterm *, .katex, .katex *, svg, svg *, .font-display, .font-display *) {
 	font-size: 13px !important;
 	font-weight: 400 !important;
 }
 /* The bigger sizes' line heights would leave gaps around 13px text. */
-.fm-shell :is([class*="text-lg"], [class*="text-xl"], [class*="text-2xl"], [class*="text-3xl"], [class*="text-4xl"], [class*="text-5xl"], [class*="text-6xl"], h1, h2, h3, h4):not(.katex *) {
+.fm-shell :is([class*="text-lg"], [class*="text-xl"], [class*="text-2xl"], [class*="text-3xl"], [class*="text-4xl"], [class*="text-5xl"], [class*="text-6xl"], h1, h2, h3, h4):not(.katex *, .font-display, .font-display *) {
 	line-height: 20px !important;
 }
 /* Monospace at 13px reads bigger than the file tree's 13px sans (as wide as sans at 15px), so on the Proofs page (the
