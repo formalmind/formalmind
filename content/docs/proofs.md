@@ -41,6 +41,10 @@ function counts as proved only when all of these hold:
 - Lean checks each theorem (`#check`, `#print axioms`): no `sorry`, no axiom beyond Lean's own (`propext`,
   `Classical.choice`, `Quot.sound`);
 - at least one checked theorem's statement is about the def itself;
+- together, the checked theorems say **when it reverts, what it writes and what it returns**. The ledger reads this
+  from the statements as Lean prints them (`Except.error`, `ext.set`, `Except.ok`), and also notes money invariants
+  such as conservation. A function whose approved theorems cover less, a conservation theorem alone say, shows as
+  **partly proved**, with what it covers and what's missing;
 - the swarm's reviewer approved those theorems for that def. The approval holds a fingerprint of the def's generated
   text and of each theorem, so if either changes it lapses, and the function is reviewed again.
 

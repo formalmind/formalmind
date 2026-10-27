@@ -104,6 +104,34 @@ struct Checked {
     error: Option<String>,
 }
 
+/// What a checked statement about `def` covers, read from its type as Lean prints it: when it reverts (`Except.error`),
+/// what it writes (`ext.set`), what it returns (`Except.ok`), and money invariants (the conserved
+/// ledger, held balances).
+fn covers(ty: &str, def: &str) -> Vec<&'static str> {
+    let mut out = vec![];
+    if !ty.contains(def) {
+        return out;
+    }
+    if ty.contains("Except.error") {
+        out.push("reverts");
+    }
+    // The storage it leaves, spelled out (`w' = ext.set w …`, `Except.ok (r, ext.set w …)`); a conserved quantity of
+    // the post-state (`L.J ext w' t = …`) isn't a statement of what was written.
+    if ty.contains("ext.set") {
+        out.push("writes");
+    }
+    if ty.contains("Except.ok") {
+        out.push("returns");
+    }
+    if ty.contains("L.J") || ty.contains(".held") {
+        out.push("conservation");
+    }
+    out
+}
+
+/// What a function's proof has to cover to count as fully proved.
+const FULL: [&str; 3] = ["reverts", "writes", "returns"];
+
 /// A line Lean prints for an error: `path:12:3: error: …`, or `error: …` on its own.
 fn is_lean_error(line: &str) -> bool {
     line.starts_with("error:") || line.contains(": error:")
@@ -237,7 +265,10 @@ pub async fn build(root: &Path, check: bool, force: bool) -> Result<Value, Strin
     if check && !wanted.is_empty() && (force || !fresh || missing) {
         results = check_all(root, &wanted).await?;
         let at = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_millis() as u64).unwrap_or(0);
-        ledger["checked"] = json!({ "at": at, "sources": sources, "results": results });
+        // Read again before writing: an approval recorded while Lean ran (by the swarm, minutes) must not be lost.
+        let checked = json!({ "at": at, "sources": sources, "results": results });
+        ledger = load(root);
+        ledger["checked"] = checked;
         save(root, &ledger);
     }
     let checked_now = ledger["checked"]["sources"].as_str() == Some(sources.as_str());
@@ -271,6 +302,7 @@ pub async fn build(root: &Path, check: bool, force: bool) -> Result<Value, Strin
                     "sorry": t.sorry || extra.iter().any(|a| *a == "sorryAx"),
                     "extraAxioms": extra,
                     "namesDef": r.is_some_and(|r| r.ty.contains(&f.lean)),
+                    "covers": r.map(|r| covers(&r.ty, &f.lean)).unwrap_or_default(),
                     "error": r.and_then(|r| r.error.clone()),
                 })
             })
@@ -313,7 +345,16 @@ pub async fn build(root: &Path, check: bool, force: bool) -> Result<Value, Strin
         if !approved_for_now && !legacy {
             reasons.push(format!("the reviewer's approval: {review_state}"));
         }
-        let is_proved = reasons.is_empty();
+        // What the checked, built theorems cover together; fully proved needs reverts, writes and returns.
+        let mut covered: Vec<String> = counted.iter().filter(|r| r["checked"] == true).flat_map(|r| r["covers"].as_array().cloned().unwrap_or_default()).filter_map(|c| c.as_str().map(String::from)).collect();
+        covered.sort();
+        covered.dedup();
+        let missing: Vec<&str> = FULL.iter().copied().filter(|c| !covered.iter().any(|x| x == c)).collect();
+        let is_proved = reasons.is_empty() && missing.is_empty();
+        let partly = reasons.is_empty() && !missing.is_empty();
+        if !missing.is_empty() {
+            reasons.push(format!("covers {}; not yet {}", if covered.is_empty() { "nothing of its behaviour".to_string() } else { covered.join(", ") }, missing.join(", ")));
+        }
         if is_proved {
             proved += 1;
         }
@@ -323,7 +364,8 @@ pub async fn build(root: &Path, check: bool, force: bool) -> Result<Value, Strin
             "lean": f.lean,
             "model": c.model,
             "defHash": def_hash,
-            "status": if is_proved { "proved" } else if rows.is_empty() { "unproved" } else { "pending" },
+            "status": if is_proved { "proved" } else if partly { "partly proved" } else if rows.is_empty() { "unproved" } else { "pending" },
+            "covers": covered,
             "review": { "state": review_state, "at": review["at"], "notes": review["notes"] },
             "theorems": rows,
             "notYet": reasons,
@@ -376,6 +418,15 @@ pub async fn swarm_ledger(folder: String, check: Option<bool>, force: Option<boo
 #[cfg(test)]
 mod tests {
     #[test]
+    fn coverage_comes_from_the_statement() {
+        let spec = "@S : ∀ … , Morpho.Morpho.setFeeRecipient ext r e w =\n if e.sender ≠ o then Except.error { reason := \"require\" } else Except.ok ((), ext.set w s)";
+        assert_eq!(super::covers(spec, "Morpho.setFeeRecipient"), ["reverts", "writes", "returns"]);
+        let conserve = "@C : … MorphoProofs.wp (Morpho.Morpho.supply ext p a s o d) (fun x w' => ∀ t, L.J ext w' t = L.J ext w t) e w";
+        assert_eq!(super::covers(conserve, "Morpho.supply"), ["conservation"]);
+        assert!(super::covers(conserve, "Morpho.borrow").is_empty());
+    }
+
+    #[test]
     fn hashes_are_stable() {
         assert_eq!(super::hash(""), "cbf29ce484222325");
         assert_eq!(super::hash("a"), "af63dc4c8601ec8c");
@@ -407,7 +458,7 @@ mod probe {
     async fn probe() {
         let root = std::path::PathBuf::from(std::env::var("PROBE").unwrap());
         if let Ok(item) = std::env::var("APPROVE") {
-            super::approve(&root, &item, "approved by the ledger probe");
+            super::approve(&root, &item, &std::env::var("NOTES").unwrap_or_else(|_| "approved by the ledger probe".into()));
         }
         let l = super::build(&root, true, std::env::var("FORCE").is_ok()).await.unwrap();
         println!("PROVED {} of {} | checked {}", l["proved"], l["functions"], l["checked"]);
