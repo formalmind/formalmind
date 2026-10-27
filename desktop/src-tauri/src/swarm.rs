@@ -2502,3 +2502,48 @@ mod property_tests {
         assert!(merge_property(None, Some(&json!({ "decision": "approve" }))).is_none());
     }
 }
+
+/// The commands the MCP drives (lib/mac-ops.ts), on a real folder with a `.lifecycle-test` file:
+/// `FM_LIFECYCLE_FOLDER=<folder> cargo test --lib lifecycle -- --ignored`. desktop/scripts/lifecycle.sh tests the app.
+#[cfg(test)]
+mod lifecycle {
+    use std::path::Path;
+
+    fn folder() -> String {
+        let f = std::env::var("FM_LIFECYCLE_FOLDER").expect("FM_LIFECYCLE_FOLDER: a folder with a .lifecycle-test file");
+        assert!(Path::new(&f).join(".lifecycle-test").exists(), "{f} has no .lifecycle-test file");
+        f
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    #[ignore]
+    async fn remote_ops() {
+        let f = folder();
+        // refresh_model: the models are in the Lake sources.
+        super::swarm_refresh_model(f.clone()).unwrap();
+        // work_map: every in-scope function, with a status and where its proof goes.
+        let map = super::swarm_work_map(f.clone()).unwrap();
+        let fns: Vec<serde_json::Value> = map["contracts"].as_array().unwrap().iter().flat_map(|c| c["functions"].as_array().cloned().unwrap_or_default()).collect();
+        assert!(!fns.is_empty(), "{map}");
+        assert!(fns.iter().all(|x| ["proved", "has_sorry", "in_lean", "not_modeled"].contains(&x["status"].as_str().unwrap_or(""))), "{map}");
+        let target = fns.iter().find(|x| x["status"] != "not_modeled").expect("a modeled function");
+        let def = target["lean"].as_str().unwrap().to_string();
+        let sources = map["sources"].as_str().unwrap_or(".").to_string();
+        assert!(target["proofFile"].as_str().unwrap().starts_with(&format!("{sources}/Refinement/Swarm/")), "{target}");
+        // brief: the prover's brief, pointing at the Lake sources.
+        let brief = super::swarm_brief(f.clone(), def.clone()).unwrap();
+        assert!(brief.contains(&def) && brief.contains(&format!("{sources}/Refinement/Swarm/")), "{brief}");
+        // check_proof: a sound file builds; a sorry is refused; a path outside Refinement/ is refused.
+        let path = format!("{sources}/Refinement/Swarm/LifecycleProbe.lean");
+        let good = super::swarm_check_proof(f.clone(), path.clone(), Some("theorem lifecycle_probe : 1 + 1 = 2 := rfl\n".into())).await.unwrap();
+        let bad = super::swarm_check_proof(f.clone(), path.clone(), Some("theorem lifecycle_probe : 1 = 2 := sorry\n".into())).await.unwrap();
+        let outside = super::swarm_check_proof(f.clone(), format!("{sources}/Generated/LifecycleProbe.lean"), Some(String::new())).await;
+        let _ = std::fs::remove_file(Path::new(&f).join(&path));
+        assert_eq!(good["ok"], true, "{good}");
+        assert_eq!(bad["ok"], false, "{bad}");
+        assert!(outside.is_err());
+        // health: reads the log back for the folder.
+        let h = crate::health::swarm_health(Some(f.clone()), Some(10)).unwrap();
+        assert!(h["turns"].is_number() && h["healthy"].is_boolean(), "{h}");
+    }
+}

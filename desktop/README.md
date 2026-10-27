@@ -55,6 +55,24 @@ That starts Vite on :1420 and opens the app. It talks to https://formal.team by 
 Chat needs `OPENAI_API_KEY` in `.dev.vars`, and the swarm state needs `GITHUB_TOKEN` there too (unauthenticated
 GitHub requests hit the rate limit fast); `gh auth token` gives you one.
 
+## Test the lifecycle
+
+Before a release, run the app the way a person does, on a small project:
+
+```bash
+desktop/scripts/lifecycle.sh ~/developer/asyncswap/formal-targets/weth9
+```
+
+It starts a dev build as its own app (beside the installed one) with the swarm started on the folder on your Claude
+plan, and checks that the start writes the plan, `formalmind.toml` and the model into the Lake sources; that each
+agent turn has its tools and a clean line in `turns.jsonl`; that a quit mid-job resumes with its tools; and that a
+function ends proved and approved. It resets the folder's swarm state, so it only runs in a folder with a
+`.lifecycle-test` file. The commands the MCP drives (`work_map`, `brief`, `check_proof`, `health`) have their own test:
+
+```bash
+cd desktop/src-tauri && FM_LIFECYCLE_FOLDER=~/developer/asyncswap/formal-targets/weth9 cargo test --lib lifecycle -- --ignored
+```
+
 ## Build
 
 ```bash
