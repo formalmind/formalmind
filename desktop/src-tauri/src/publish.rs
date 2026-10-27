@@ -89,13 +89,17 @@ pub fn publish(root: &Path, what: &str) -> Result<Option<String>, String> {
     if cmd(root, "git", &["rev-parse", "--is-inside-work-tree"]).is_err() {
         cmd(root, "git", &["init", "-q", "-b", "main"])?;
     }
-    // The lock says which app runs here; it means nothing anywhere else.
+    // The lock says which app runs here, and .formal/check/ holds the ledger's scratch files; neither means anything
+    // anywhere else.
     let ignore = root.join(".gitignore");
-    let have = std::fs::read_to_string(&ignore).unwrap_or_default();
-    if !have.lines().any(|l| l.trim() == ".formal/run.lock") {
-        let sep = if have.is_empty() || have.ends_with('\n') { "" } else { "\n" };
-        std::fs::write(&ignore, format!("{have}{sep}.formal/run.lock\n")).map_err(|e| e.to_string())?;
-        let _ = cmd(root, "git", &["rm", "-q", "--cached", "--ignore-unmatch", ".formal/run.lock"]);
+    let mut have = std::fs::read_to_string(&ignore).unwrap_or_default();
+    for local in [".formal/run.lock", ".formal/check/"] {
+        if !have.lines().any(|l| l.trim() == local) {
+            let sep = if have.is_empty() || have.ends_with('\n') { "" } else { "\n" };
+            have = format!("{have}{sep}{local}\n");
+            std::fs::write(&ignore, &have).map_err(|e| e.to_string())?;
+            let _ = cmd(root, "git", &["rm", "-q", "-r", "--cached", "--ignore-unmatch", local.trim_end_matches('/')]);
+        }
     }
     cmd(root, "git", &["add", "-A"])?;
     let commit = if cmd(root, "git", &["diff", "--cached", "--quiet"]).is_err() {
@@ -297,12 +301,14 @@ mod tests {
         cmd(&work, "git", &["remote", "add", REMOTE, bare.to_str().unwrap()]).unwrap();
         std::fs::write(work.join("A.lean"), "theorem a : True := trivial\n").unwrap();
         std::fs::write(work.join(".formal/run.lock"), "123").unwrap();
+        std::fs::create_dir_all(work.join(".formal/check")).unwrap();
+        std::fs::write(work.join(".formal/check/x.lean"), "-- scratch").unwrap();
         let c = publish(&work, "`X.f` proved").unwrap();
         assert!(c.is_some());
         let log = cmd(&bare, "git", &["log", "-1", "--format=%B", "main"]).unwrap();
         assert!(log.contains("`X.f` proved") && log.contains(BOT), "{log}");
         let files = cmd(&bare, "git", &["ls-tree", "-r", "--name-only", "main"]).unwrap();
-        assert!(files.contains("A.lean") && !files.contains("run.lock"), "{files}");
+        assert!(files.contains("A.lean") && !files.contains("run.lock") && !files.contains(".formal/check"), "{files}");
         // Nothing new: no commit, nothing fails.
         assert_eq!(publish(&work, "again").unwrap(), None);
         let _ = std::fs::remove_dir_all(&base);
