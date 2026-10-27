@@ -96,7 +96,7 @@ function sitemapXml(): Response {
 export const AGENT_LINKS_MARKDOWN = `## For agents
 
 - [llms.txt](${ORIGIN}/llms.txt) and [llms-full.txt](${ORIGIN}/llms-full.txt): orientation and the full account of the swarm
-- [MCP server card](${ORIGIN}/.well-known/mcp/server-card.json): read-only MCP server at ${ORIGIN}/mcp (the audit format, an example audit, the desktop app's latest release) and the account server at ${ORIGIN}/mcp/account (your projects' files, audits, findings and Proofs coverage, usage, credits, your Mac's swarm, plan and start; OAuth 2.0)
+- [MCP server card](${ORIGIN}/.well-known/mcp/server-card.json): read-only MCP server at ${ORIGIN}/mcp (the audit format, an example audit, the desktop app's latest release) and the account server at ${ORIGIN}/mcp/account (your projects' files, audits, findings and Proofs coverage, usage, credits, plan and start, and the desktop app on your Mac: everything it does, read and driven remotely; OAuth 2.0)
 - [Agent Skills](${ORIGIN}/.well-known/agent-skills/index.json): how to run the local swarm, how to onboard a repository, how to read Formal Mind's results in a repository, and how to connect Formal Mind as an MCP connector
 - [API catalog](${ORIGIN}/.well-known/api-catalog): the open plan endpoint, the two MCP servers and the token-capable account routes
 - [auth.md](${ORIGIN}/auth.md): GitHub sign-in for people; the OAuth 2.0 authorization server, scopes and tokens for agents`;
@@ -113,7 +113,7 @@ ${SHORT} The full account, how the swarm works and where it keeps its files incl
 
 ## Agents
 
-- [MCP server card](${ORIGIN}/.well-known/mcp/server-card.json): read-only tools at ${ORIGIN}/mcp (Streamable HTTP, no auth): get_audit_format, get_example_audit, get_app_release; and the account server at ${ORIGIN}/mcp/account (OAuth 2.0, GitHub sign-in): my_projects, my_usage, my_credits, swarm_state, list_files, read_file, list_audits, list_findings, get_finding, proofs_coverage, report_quote, mac_swarm, mac_swarm_events, add_project, plan_repository, start_swarm, mac_swarm_send
+- [MCP server card](${ORIGIN}/.well-known/mcp/server-card.json): read-only tools at ${ORIGIN}/mcp (Streamable HTTP, no auth): get_audit_format, get_example_audit, get_app_release; and the account server at ${ORIGIN}/mcp/account (OAuth 2.0, GitHub sign-in): my_projects, my_usage, my_credits, swarm_state, list_files, read_file, list_audits, list_findings, get_finding, proofs_coverage, report_quote, mac_swarm, mac_swarm_events, mac_get, mac_reply, add_project, plan_repository, start_swarm, mac_swarm_send, mac_do (mac_get and mac_do read and drive everything the desktop app does on the person's Mac)
 - [Skill: connect-formal-mind-as-mcp](${ORIGIN}/.well-known/agent-skills/connect-formal-mind-as-mcp/SKILL.md): add ${ORIGIN}/mcp/account to Claude, ChatGPT or Cursor and act on your own account
 - [Skill: run-the-local-swarm](${ORIGIN}/.well-known/agent-skills/run-the-local-swarm/SKILL.md): run the swarm on a folder in the desktop app; proofs, bugs and state stay in the folder
 - [Skill: onboard-a-repository](${ORIGIN}/.well-known/agent-skills/onboard-a-repository/SKILL.md): plan a repository, add it as a project, optionally set up specs from its commits
