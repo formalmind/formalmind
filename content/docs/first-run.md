@@ -19,7 +19,7 @@ functions your scripts call first. Then it works through the plan one function a
 on the item it's working on, and the chat shows what it says and the tools it runs.
 
 If the project has no Lean setup yet, the first prover creates one in `formal/`. The Lean model of each contract is
-generated into `formal/Generated/`.
+generated into `formal/Specs/`.
 
 ## While it runs
 

@@ -143,7 +143,7 @@ export const ACCOUNT_TOOLS: AccountTool[] = [
       properties: {
         repo: REPO,
         ref: REF,
-        prefix: { type: "string", description: "Only paths under this folder, e.g. src or formal/Refinement" },
+        prefix: { type: "string", description: "Only paths under this folder, e.g. src or formal/Proofs" },
         ext: { type: "string", description: "Only files with this extension, without the dot" },
         limit: { type: "integer", minimum: 1, maximum: 5000, default: 1000 },
       },

@@ -70,7 +70,7 @@ checks and the same reviewer:
    **`mac_get` `ledger`** says, for each function, whether it's proved and what's missing, with each theorem's
    statement as Lean prints it and its doc comment.
 2. **`mac_get` `brief`** for a function: exactly what the swarm's prover gets, its def, its slice, and where to write.
-3. **`mac_do` `check_proof`** with the file's path and content. It's written under the Lake sources' `Refinement/`
+3. **`mac_do` `check_proof`** with the file's path and content. It's written under the Lake sources' `Proofs/`
    and checked the way the swarm checks its own: no `sorry`, `admit`, new axioms or `native_decide`, `lake build`
    passes, and which functions the Proofs page now counts as proved. The answer has the build errors when it fails.
 4. **`mac_do` `submit_proof`** sends it to the swarm's reviewer, like its own prover's work. Approved, the item is

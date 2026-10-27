@@ -82,6 +82,31 @@ pub fn lake_dir(root: &Path) -> Option<PathBuf> {
 /// Where the Lake project's Lean sources are: formalmind.toml's `lean.sources`, else the lakefile's `srcDir` in the
 /// Lake project (Async Swap's `srcDir = "validation/lean"`), else the Lake project itself. `Generated/` and
 /// `Refinement/` live here, and module names are relative to it.
+/// A Lake project for a folder that has none: `formal/` with the two libraries, `Specs` (the generated models) and
+/// `Proofs` (the proofs about them), on the toolchain the swarm proves with.
+pub fn scaffold(root: &Path) -> std::io::Result<()> {
+    let dir = root.join("formal");
+    std::fs::create_dir_all(dir.join("Specs"))?;
+    std::fs::create_dir_all(dir.join("Proofs"))?;
+    std::fs::write(dir.join("lean-toolchain"), "leanprover/lean4:v4.35.0\n")?;
+    std::fs::write(
+        dir.join("lakefile.toml"),
+        "name = \"formal\"\ndefaultTargets = [\"Specs\", \"Proofs\"]\n\n[[lean_lib]]\nname = \"Specs\"\nglobs = [\"Specs.+\"]\n\n[[lean_lib]]\nname = \"Proofs\"\nglobs = [\"Proofs.+\"]\n",
+    )?;
+    std::fs::write(dir.join(".gitignore"), ".lake/\n")
+}
+
+/// The two folders under the Lake sources: the generated models and the proofs about them. New projects use `Specs/`
+/// and `Proofs/`; a project laid out before that (`Generated/`, `Refinement/`) keeps its names.
+pub fn layout(root: &Path) -> (&'static str, &'static str) {
+    let lakefile = lake_dir(root).map(|d| {
+        ["lakefile.toml", "lakefile.lean"].iter().filter_map(|f| std::fs::read_to_string(d.join(f)).ok()).collect::<String>()
+    });
+    let declared = lakefile.is_some_and(|t| t.contains("\"Refinement\"") || t.contains("lean_lib Refinement") || t.contains("\"Generated\"") || t.contains("lean_lib Generated"));
+    let legacy = declared || lean_src(root).is_some_and(|d| d.join("Generated").is_dir() || d.join("Refinement").is_dir());
+    if legacy { ("Generated", "Refinement") } else { ("Specs", "Proofs") }
+}
+
 pub fn lean_src(root: &Path) -> Option<PathBuf> {
     let lake = lake_dir(root)?;
     if let Some(d) = configured(root, "sources").filter(|d| d.starts_with(&lake)) {
@@ -162,6 +187,11 @@ pub fn context_with(root: &Path, write: bool) -> Context {
     let mut ctx = Context::default();
     let (files, scripts) = in_scope(root, &mut ctx.problems);
     let entry_points: Vec<Value> = scripts["entryPoints"].as_array().cloned().unwrap_or_default();
+    if write && !files.is_empty() && lake_dir(root).is_none() {
+        if let Err(e) = scaffold(root) {
+            ctx.problems.push(format!("couldn't set up formal/: {e}"));
+        }
+    }
     let lake = lean_src(root);
     for (file, contract) in files {
         let (a, output) = match analyze_full(root, &file, Some(&contract)) {
@@ -192,11 +222,11 @@ pub fn context_with(root: &Path, write: bool) -> Context {
                 }
             })
             .collect();
-        // The model the provers write against: Generated/<Contract>.lean in the Lake project's sources, generated here
+        // The model the provers write against: Specs/<Contract>.lean (Generated/ in older projects) in the Lake project's sources, generated here
         // when it is missing, and again when formal-ast now translates more functions than the file on disk does.
         let mut model = None;
         if let Some(dir) = &lake {
-            let path = dir.join("Generated").join(format!("{name}.lean"));
+            let path = dir.join(layout(root).0).join(format!("{name}.lean"));
             let on_disk = std::fs::read_to_string(&path).ok();
             let m = lean::Gen::new(&output, &a.graph, &a.scope).generate(&lean::ident(&name));
             let (old, new) = (on_disk.as_deref().and_then(translated_count), translated_count(&m.text));
@@ -386,13 +416,14 @@ impl Context {
         let lib = lean_src(root).map(|d| rel(&d)).filter(|d| !d.is_empty()).unwrap_or_else(|| lake_rel.clone());
         let short = u.name().rsplit('.').next().unwrap_or("").trim_start_matches('_');
         let module = format!("{}{}", c.name, capitalize(short));
+        let (specs, proofs) = layout(root);
         let mut s = format!(
             "## The target\n\n`{}` in {} ({}) — Lean def `{lean}` in the generated model `{}`.\n{}\n\
 Prove what its slice says: the conditions under which it reverts (its guards), and on success the storage it writes \
 (its footprint) and what it returns or hands to its external calls. \
-Write the proof as `{lib}/Refinement/Swarm/{module}.lean` (module `Refinement.Swarm.{module}`), starting with `import Generated.{}` (and `import Refinement.Monad` for its simp lemmas when the project has it). \
+Write the proof as `{lib}/{proofs}/Swarm/{module}.lean` (module `{proofs}.Swarm.{module}`), starting with `import {specs}.{}` (and `import {proofs}.Monad` for its simp lemmas when the project has it). \
 Every theorem about the def must spell it fully qualified as `{lean}` in its statement — the Proofs page counts the function as proved only when a theorem without `sorry` names exactly that. \
-Check it with `lake build Refinement.Swarm.{module}` (lake runs in {lake_rel}/). The swarm itself re-runs `lake build` and the coverage before your work goes to review.\n",
+Check it with `lake build {proofs}.Swarm.{module}` (lake runs in {lake_rel}/). The swarm itself re-runs `lake build` and the coverage before your work goes to review.\n",
             u.name(),
             c.name,
             u.at(),
@@ -851,5 +882,20 @@ mod internal_tests {
         assert!(props[0]["description"].as_str().unwrap().ends_with("**Assumptions.** `ext.get` returns what `ext.set` wrote."));
         assert_eq!(props[0]["theorems"][0]["name"], "swap_owner");
         let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn new_projects_get_specs_and_proofs_and_old_ones_keep_their_names() {
+        let base = std::env::temp_dir().join(format!("fm-layout-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&base);
+        let (new, old) = (base.join("new"), base.join("old"));
+        std::fs::create_dir_all(&new).unwrap();
+        super::scaffold(&new).unwrap();
+        assert_eq!(super::layout(&new), ("Specs", "Proofs"));
+        assert!(std::fs::read_to_string(new.join("formal/lakefile.toml")).unwrap().contains("name = \"Proofs\""));
+        std::fs::create_dir_all(old.join("formal/Generated")).unwrap();
+        std::fs::write(old.join("formal/lakefile.toml"), "name = \"x\"\n").unwrap();
+        assert_eq!(super::layout(&old), ("Generated", "Refinement"));
+        let _ = std::fs::remove_dir_all(&base);
     }
 }

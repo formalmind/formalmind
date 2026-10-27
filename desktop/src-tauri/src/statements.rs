@@ -566,14 +566,14 @@ pub fn theorem_name(id: &str, lean: &str) -> String {
     format!("{}.{}", id.replace('-', ""), lean.replace('.', "_"))
 }
 
-/// Where its proof goes, under the Lake project: `Refinement/Statements/S01/VaultSetFee.lean`.
-pub fn proof_file(id: &str, lean: &str) -> String {
+/// Where its proof goes, under the Lake project: `Proofs/Statements/S01/VaultSetFee.lean`.
+pub fn proof_file(id: &str, lean: &str, proofs: &str) -> String {
     let module: String = lean.split('.').map(|p| {
         let p = p.trim_start_matches('_');
         let mut c = p.chars();
         c.next().map(|f| f.to_uppercase().collect::<String>() + c.as_str()).unwrap_or_default()
     }).collect();
-    format!("Refinement/Statements/{}/{module}.lean", id.replace('-', ""))
+    format!("{proofs}/Statements/{}/{module}.lean", id.replace('-', ""))
 }
 
 /// The backticked def an obligation line names first.
@@ -583,7 +583,7 @@ pub fn def_of(obligation: &str) -> Option<&str> {
 
 /// What the prover gets on top of the function's brief: the statement, what it was confirmed to mean, and the theorem
 /// to prove by name and file.
-pub fn obligation_task(s: &Statement, n: usize, lib: &str) -> String {
+pub fn obligation_task(s: &Statement, n: usize, lib: &str, proofs: &str) -> String {
     let o = &s.obligations[n - 1];
     let lean = def_of(&o.text).unwrap_or("");
     let means = s.details.iter().find_map(|d| d.strip_prefix("means: ")).unwrap_or("");
@@ -599,7 +599,7 @@ Name the theorem `{}` exactly (write `theorem {} …`, not inside a namespace) a
         o.text.split_once("): ").map_or(o.text.as_str(), |(_, w)| w),
         theorem_name(&s.id, lean),
         theorem_name(&s.id, lean),
-        proof_file(&s.id, lean),
+        proof_file(&s.id, lean, proofs),
     )
 }
 
@@ -620,7 +620,7 @@ pub fn review_task(s: &Statement, n: usize) -> String {
 /// should be in, it depends on no `sorryAx`, and its type names the def. Returns the type as Lean prints it.
 pub async fn check_theorem(root: &Path, id: &str, lean: &str) -> Result<String, String> {
     let name = theorem_name(id, lean);
-    let file = proof_file(id, lean);
+    let file = proof_file(id, lean, crate::swarm_ctx::layout(root).1);
     let lake = crate::swarm_ctx::lean_src(root).ok_or("there is no Lake project to check the theorem in")?;
     let body = std::fs::read_to_string(lake.join(&file)).map_err(|_| format!("the proof isn't in {file}; write it there"))?;
     if !body.lines().any(|l| l.trim_start().strip_prefix("theorem ").is_some_and(|r| r.starts_with(&format!("{name} ")) || r == name)) {
@@ -978,9 +978,9 @@ mod tests {
     #[test]
     fn the_theorem_and_its_file_are_named_for_the_statement() {
         assert_eq!(theorem_name("S-01", "Vault.setFee"), "S01.Vault_setFee");
-        assert_eq!(proof_file("S-01", "Vault._setFee"), "Refinement/Statements/S01/VaultSetFee.lean");
+        assert_eq!(proof_file("S-01", "Vault._setFee", "Refinement"), "Refinement/Statements/S01/VaultSetFee.lean");
         let s = confirmed(&folder("task"));
-        let t = obligation_task(&s, 2, "formal");
+        let t = obligation_task(&s, 2, "formal", "Refinement");
         assert!(t.contains("`S01.Vault_initialize`") && t.contains("formal/Refinement/Statements/S01/VaultInitialize.lean"), "{t}");
         assert!(t.contains("Only the owner's calls write `fee`.") && t.contains("initialize runs once"), "{t}");
         assert!(review_task(&s, 1).contains("reverts unless the owner calls, before it writes fee"));
@@ -1018,7 +1018,7 @@ mod tests {
         std::fs::create_dir_all(lake.join("Refinement/Statements/S01")).unwrap();
         std::fs::write(lake.join("lakefile.toml"), "name = \"fixture\"\ndefaultTargets = [\"Refinement\"]\n\n[[lean_lib]]\nname = \"Refinement\"\nglobs = [\"Refinement.+\"]\n").unwrap();
         std::fs::write(lake.join("lean-toolchain"), "leanprover/lean4:v4.35.0\n").unwrap();
-        let file = lake.join(proof_file("S-01", "Vault.setFee"));
+        let file = lake.join(proof_file("S-01", "Vault.setFee", "Refinement"));
         let write = |body: &str| std::fs::write(&file, format!("def Vault.setFee (owner sender fee : Nat) : Option Nat := if sender = owner then some fee else none\n\n{body}\n")).unwrap();
         write("theorem S01.Vault_setFee (owner sender fee : Nat) (h : sender ≠ owner) : Vault.setFee owner sender fee = none := by\n  simp [Vault.setFee, h]");
         let build = crate::executor::call_tool(&d, "run", &json!({ "command": "lake build" })).await;

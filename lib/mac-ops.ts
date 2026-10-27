@@ -52,7 +52,7 @@ export const MAC_OPS = {
 	github: { write: true, args: "on", about: "turn the folder's Report to GitHub on or off: off (the default) keeps everything local; on lets Formal Mind's GitHub App comment on the repository's pull requests with what the ledger says changed" },
 	report: { write: true, args: "dirs?", about: "generate Formal Mind's report ($150 from credits, once per repository and commit)" },
 	refresh_model: { write: true, args: "", about: "rewrite each generated model formal-ast now translates more of, so a def a proof needs exists in the file Lake builds" },
-	check_proof: { write: true, args: "path, content?", about: "write a .lean proof under the Lake sources' Refinement/ (when content is given) and check it as the swarm does: no sorry/admit/axiom/native_decide, lake build, which functions it proves" },
+	check_proof: { write: true, args: "path, content?", about: "write a .lean proof under the Lake sources' Proofs/ (when content is given) and check it as the swarm does: no sorry/admit/axiom/native_decide, lake build, which functions it proves" },
 	submit_proof: { write: true, args: "function, path, notes?", about: "send a checked proof to the swarm's reviewer, like its own prover's work; approved, the item is proved and goes into the audit file" },
 } as const;
 

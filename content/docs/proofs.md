@@ -22,7 +22,7 @@ prove it (**Lean4 proof**), each opened at its line.
 ## Where the model comes from
 
 The Lean model is generated from the compiler's syntax tree, one file per contract in
-`formal/Generated/<Contract>.lean`. Each Solidity function becomes a definition over the contract's storage. A call
+`formal/Specs/<Contract>.lean`. Each Solidity function becomes a definition over the contract's storage. A call
 to another contract is an opaque step that returns whatever that contract returns, so a proof that relies on what a
 token or an oracle does says so in its assumptions.
 
