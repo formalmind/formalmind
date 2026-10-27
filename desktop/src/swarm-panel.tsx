@@ -2337,12 +2337,14 @@ export function SwarmPanel({ folder, name, scan, bridge, session, file: openPath
 	}, [events]);
 
 	// `onlyQueued`: a run for the work already queued (reading a report), which stops when that's done.
-	const start = async (onlyQueued = false) => {
+	// The page says what to start; the backend (its control API, as the phone and the MCP use it) picks the model
+	// route, the model and the cap from the settings.
+	const start = async () => {
 		setError(null);
 		// On Concolic, start is a bug search: the hunter alone, on the focus you typed, in a hunt-* session.
 		if (concolic) {
 			try {
-				const id = await invoke<string>("swarm_start", { request: { folder, goal: null, budget_usd: budget, api_base: apiBase(), provider, model: pickedModel, session: viewing && isHunt(viewing) ? viewing : `hunt-${Date.now().toString(16)}`, only_queued: true, hunt: goal.trim() } });
+				const { run: id } = await invoke<{ run: string }>("control", { op: "hunt", folder, args: { focus: goal.trim(), run: viewing && isHunt(viewing) ? viewing : `hunt-${Date.now().toString(16)}` } });
 				if (!viewing || !isHunt(viewing)) setEvents([]);
 				setGoal("");
 				setRuns((r) => (r.includes(id) ? r : [...r, id]));
@@ -2357,7 +2359,7 @@ export function SwarmPanel({ folder, name, scan, bridge, session, file: openPath
 		const fresh = session === "new" && !viewing;
 		if (fresh) setEvents([]);
 		try {
-			const id = await invoke<string>("swarm_start", { request: { folder, goal: goal.trim() || null, budget_usd: budget, api_base: apiBase(), provider, model: pickedModel, session: fresh ? `s-${Date.now().toString(16)}` : viewing ?? "swarm", only_queued: onlyQueued } });
+			const { run: id } = await invoke<{ run: string }>("control", { op: "start", folder, args: { goal: goal.trim(), run: fresh ? `s-${Date.now().toString(16)}` : viewing ?? "swarm" } });
 			setRuns((r) => (r.includes(id) ? r : [...r, id]));
 			setViewing(id);
 			void listSessions();
@@ -2562,30 +2564,24 @@ export function SwarmPanel({ folder, name, scan, bridge, session, file: openPath
 	const addClaim = () => {
 		const text = claim.trim();
 		if (!text) return;
-		invoke<Statement>("swarm_add_statement", { folder, text }).then(
+		invoke("control", { op: "add_statement", folder, args: { text } }).then(
 			() => {
 				setClaim("");
 				setClaimError(null);
 				refresh();
-				workOnStatements();
 			},
 			(e) => setClaimError(String(e)),
 		);
 	};
-	// A stopped swarm starts just for the statements (and stops after), as it does to read a report.
-	const workOnStatements = () => {
-		if (!run && !concolic) void start(true);
-	};
-	const afterStatement = (s: Statement[]) => {
-		setStatements(s);
-		workOnStatements();
-	};
-	const setStatementMark = (id: string, mark: string) => void invoke<Statement[]>("swarm_statement_mark", { folder, id, mark }).then(afterStatement, (e) => setClaimError(String(e)));
-	const confirmStatement = (id: string) => void invoke<Statement[]>("swarm_confirm_statement", { folder, id }).then(afterStatement, (e) => setClaimError(String(e)));
+	// Statement work goes through the backend, which starts a stopped swarm just for it (and stops after).
+	const statementOp = (op: string, args: Record<string, string>) => invoke<{ statements: Statement[] }>("control", { op, folder, args }).then((r) => r.statements);
+	const afterStatement = (s: Statement[]) => setStatements(s);
+	const setStatementMark = (id: string, mark: string) => void statementOp("mark_statement", { id, mark }).then(afterStatement, (e) => setClaimError(String(e)));
+	const confirmStatement = (id: string) => void statementOp("confirm_statement", { id }).then(afterStatement, (e) => setClaimError(String(e)));
 	// What you say a formalized statement should mean instead (empty: just try again).
 	const [correcting, setCorrecting] = useState<{ id: string; text: string } | null>(null);
 	const correctStatement = (id: string, text: string) =>
-		void invoke<Statement[]>("swarm_correct_statement", { folder, id, text }).then(
+		void statementOp("correct_statement", { id, text }).then(
 			(s) => {
 				afterStatement(s);
 				setCorrecting(null);
@@ -3183,10 +3179,9 @@ export function SwarmPanel({ folder, name, scan, bridge, session, file: openPath
 				onOpenFile={view}
 				reload={reload}
 				onFilesChanged={() => void invoke<{ files: string[] }>("folder_tree", { path: folder }).then((t) => setTree(t.files), () => {})}
-				// Queued for the swarm's auditor; a stopped swarm starts just for it (and stops after).
+				// Queued for the swarm's auditor; the backend starts a stopped swarm just for it (and stops after).
 				onTriage={async (path) => {
-					await invoke("swarm_triage", { folder, path, session: viewing && viewing !== "new" ? viewing : "swarm" });
-					if (!run) await start(true);
+					await invoke("control", { op: "triage", folder, args: { path, run: viewing && viewing !== "new" ? viewing : "swarm" } });
 				}}
 			/>
 		) : null}

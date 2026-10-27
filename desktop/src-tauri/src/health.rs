@@ -14,6 +14,8 @@ const MAX_BYTES: u64 = 20 * 1024 * 1024;
 const REPEATS: u32 = 8;
 /// This many failed `lake build`s in one turn.
 const LAKE_FAILS: u32 = 6;
+/// This many commands hitting the time limit in one turn (a proof the kernel can't check in time, retried).
+const TIMEOUTS: u32 = 2;
 
 fn log_file() -> PathBuf {
     crate::platform::log_dir().join("turns.jsonl")
@@ -38,6 +40,8 @@ pub struct Turn {
     calls: HashMap<String, u32>,
     lake_ok: u32,
     lake_failed: u32,
+    /// Commands that hit the 15-minute limit, run directly or in the background.
+    timeouts: u32,
     /// The context the turn used at its largest, in tokens.
     pub tokens: u64,
 }
@@ -61,6 +65,7 @@ impl Turn {
             calls: HashMap::new(),
             lake_ok: 0,
             lake_failed: 0,
+            timeouts: 0,
             tokens: 0,
         }
     }
@@ -69,6 +74,9 @@ impl Turn {
     pub fn tool(&mut self, name: &str, input: &Value, answer: &str) {
         self.tool_calls += 1;
         *self.calls.entry(format!("{name} {input}")).or_default() += 1;
+        if answer.contains("Timed out after") {
+            self.timeouts += 1;
+        }
         if name == "run" && input["command"].as_str().is_some_and(|c| c.trim_start().starts_with("lake build")) {
             if answer.starts_with("exit 0") {
                 self.lake_ok += 1;
@@ -102,6 +110,9 @@ impl Turn {
         if self.lake_failed >= LAKE_FAILS {
             out.push(format!("`lake build` failed {} times", self.lake_failed));
         }
+        if self.timeouts >= TIMEOUTS {
+            out.push(format!("{} commands hit the 15-minute limit; the proof may be too heavy for the kernel as written", self.timeouts));
+        }
         out
     }
 
@@ -122,6 +133,7 @@ impl Turn {
             "toolCalls": self.tool_calls,
             "textCalls": self.text_calls,
             "lake": { "ok": self.lake_ok, "failed": self.lake_failed },
+            "timeouts": self.timeouts,
             "tokens": self.tokens,
             "seconds": self.started.elapsed().as_secs(),
             "ended": ended,
@@ -194,9 +206,13 @@ mod tests {
         for _ in 0..LAKE_FAILS {
             t.tool("run", &json!({ "command": "lake build" }), "exit 1\nerror: x");
         }
+        for _ in 0..TIMEOUTS {
+            t.tool("background_results", &json!({ "id": 1, "wait": true }), "error: Timed out after 15 minutes");
+        }
         let a = t.anomalies("done");
         assert!(a.iter().any(|x| x.contains("`read_file`") && x.contains(&REPEATS.to_string())), "{a:?}");
         assert!(a.iter().any(|x| x.contains("lake build")), "{a:?}");
+        assert!(a.iter().any(|x| x.contains("15-minute limit")), "{a:?}");
     }
 
     #[test]

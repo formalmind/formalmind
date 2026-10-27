@@ -84,3 +84,46 @@ export async function exchangeCode(code: string) {
 	if (!res.ok || !body.token) throw new Error(body.error ?? `Sign-in failed (${res.status}).`);
 	await saveToken(body.token);
 }
+
+/**
+ * The settings the pages keep (`fm:` keys in localStorage), pushed to the backend's (~/.formalmind/config.json), which
+ * decides with them whatever started the work: the folder page, the phone, an agent through the MCP. Any change to an
+ * `fm:` key pushes them again.
+ */
+export async function syncSettings() {
+	const get = (k: string) => {
+		try {
+			return localStorage.getItem(k);
+		} catch {
+			return null;
+		}
+	};
+	const budgets: Record<string, number> = {};
+	try {
+		for (let i = 0; i < localStorage.length; i++) {
+			const k = localStorage.key(i);
+			const usd = k?.startsWith("fm:budget:") ? Number(get(k)) : NaN;
+			if (k && usd > 0) budgets[k.slice("fm:budget:".length)] = usd;
+		}
+	} catch {
+		// No storage (a private window): the backend keeps what it had.
+	}
+	await invoke("settings_set", {
+		patch: { api_base: apiBase(), provider: get("fm:provider"), model: get("fm:model"), relay: get("fm:relay") !== "0", budgets },
+	}).catch(() => {});
+}
+
+const changed = (storage: Storage, key: string) => {
+	if (storage === localStorage && key.startsWith("fm:")) void syncSettings();
+};
+const setItem = Storage.prototype.setItem;
+Storage.prototype.setItem = function (this: Storage, key: string, value: string) {
+	setItem.call(this, key, value);
+	changed(this, key);
+};
+const removeItem = Storage.prototype.removeItem;
+Storage.prototype.removeItem = function (this: Storage, key: string) {
+	removeItem.call(this, key);
+	changed(this, key);
+};
+

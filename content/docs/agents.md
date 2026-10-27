@@ -42,13 +42,21 @@ The app runs each one as if you'd clicked it there, with the model route and spe
 - **`mac_get`** reads: the added folders, Claude Code's sign-in, a folder's files and git graph, the plan,
   statements, bugs, proofs, queue and sessions, a session's history, the scope from your deploy scripts, a contract's
   Lean coverage, a function's slice, Reach's map, what the report costs, the **work map**, and a function's **brief**.
-- **`mac_do`** acts: add or remove a folder, start or stop the swarm, start the Bug Hunter, send a session a message,
+- **`mac_do`** acts: add or remove a folder, start, **pause** or **resume** the swarm, start the Bug Hunter, send a session a message,
   set a cap, add, confirm, correct or mark statements, queue an audit report for triage, run a Reach tool, generate
   Formal Mind's report, **refresh the model**, and **check** and **submit** a proof.
 
 Each tool's description lists its operations and their arguments. An answer that takes longer than about 50 seconds
-(a report, say) comes back with an id; `mac_reply` fetches it. Your Mac has to be on, with the app signed in and
-**Settings → Phone** on. Your tokens, keys, the terminal and the debugger stay out of reach.
+(a report, say) comes back with an id; `mac_reply` fetches it. Your Mac has to be on, with the app running and signed
+in and **Settings → Phone** on; no window needs to be open. Your tokens, keys, the terminal and the debugger stay out
+of reach.
+
+**`pause`** stops a session at once, including a long `lean` or `forge` run it's waiting on, and keeps its job;
+**`resume`** carries on from the queue on your Claude plan (or whichever route Settings picks).
+
+These are the same operations the app's own pages use: the app runs them in its background process, with the model
+route and the caps from your Settings, whoever asks. Whatever an agent starts or stops shows on the folder's page at
+once.
 
 ## Work on the proofs as a remote agent
 

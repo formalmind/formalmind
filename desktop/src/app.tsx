@@ -14,7 +14,7 @@ import { SidebarProvider } from "@/components/ui/sidebar";
 import { WorkspaceContent } from "@/components/workspace-content";
 import { SWARM_REPO } from "@/lib/swarm-repo";
 import type { SessionData } from "@/lib/session";
-import { apiBase, clearToken, exchangeCode, loadToken } from "./api";
+import { apiBase, clearToken, exchangeCode, loadToken, syncSettings } from "./api";
 
 import { DebugPage } from "./debug";
 import { LocalFolderPage, LocalFolders, useFolders, useRepoSource } from "./local";
@@ -22,7 +22,6 @@ import { onboarded, SetupSteps, SignInStep } from "./onboarding";
 import { SettingsPage } from "./settings";
 import { TabBar } from "./tabs";
 import { UpdateNotice } from "./update";
-import { relayOn, startRelay } from "./relay";
 
 const UsagePage = lazy(() => import("@/components/usage/usage-page").then((m) => ({ default: m.UsagePage })));
 const pages = () => import("@/components/projects/project-pages");
@@ -130,21 +129,9 @@ export function DesktopApp() {
 		return () => document.removeEventListener("click", onClick, true);
 	}, []);
 
-	// Signed in: the swarm's events go to the phone through formal.team, and its commands come back (./relay.ts).
-	const signedIn = !!user;
-	useEffect(() => {
-		if (!signedIn) return;
-		let stop = relayOn() ? startRelay() : null;
-		const toggle = () => {
-			stop?.();
-			stop = relayOn() ? startRelay() : null;
-		};
-		window.addEventListener("fm:relay", toggle);
-		return () => {
-			window.removeEventListener("fm:relay", toggle);
-			stop?.();
-		};
-	}, [signedIn]);
+	// The backend runs the relay and the swarm with the settings the pages keep: they're pushed to it at launch, and
+	// again whenever one changes (api.ts).
+	useEffect(() => void syncSettings(), []);
 
 	const [setUp, setSetUp] = useState(onboarded);
 	if (user === undefined) return null;

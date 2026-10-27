@@ -7,6 +7,7 @@ mod anvil;
 mod analysis;
 mod ast;
 mod claude_code;
+mod control;
 mod debug;
 mod executor;
 mod file_search;
@@ -18,6 +19,7 @@ mod lsp;
 mod openai;
 mod platform;
 mod reach;
+mod relay;
 mod report;
 mod statements;
 mod term;
@@ -130,6 +132,8 @@ pub fn run() {
         .manage(swarm::Swarms::default())
         .manage(debug::Debuggers::default())
         .setup(|app| {
+            // The relay (the phone and agents through the MCP) runs in the backend, whatever the window is doing.
+            relay::start(app.handle());
             // Installed builds register formalmind:// from tauri.conf.json; this covers `tauri dev` on Windows/Linux.
             #[cfg(any(windows, target_os = "linux"))]
             app.deep_link().register_all()?;
@@ -162,7 +166,7 @@ pub fn run() {
             token_get,
             token_set,
             token_clear,
-            local::config_get,
+            local::config_get, local::settings_get, local::settings_set, control::control,
             local::folder_add,
             local::folder_remove,
             local::folder_scan,

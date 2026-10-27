@@ -53,7 +53,7 @@ turns_before=$( [ -f "$TURNS" ] && wc -l <"$TURNS" || echo 0)
 
 APP_PID=""
 start_app() {
-	(cd "$HERE" && VITE_FM_RELAY=0 FM_SWARM_AUTOSTART="$FOLDER" FM_SWARM_PROVIDER=claude-code FM_SWARM_BUDGET=50 \
+	(cd "$HERE" && VITE_FM_RELAY=0 FM_RELAY=0 FM_SWARM_AUTOSTART="$FOLDER" FM_SWARM_PROVIDER=claude-code FM_SWARM_BUDGET=50 \
 		exec bunx tauri dev --config '{"identifier":"team.formal.desktop.lifecycle","productName":"Formal Mind Lifecycle"}' >>"$OUT/app.log" 2>&1) &
 	APP_PID=$!
 }

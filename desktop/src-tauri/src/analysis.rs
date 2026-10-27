@@ -241,6 +241,9 @@ struct Task {
     what: String,
     started: std::time::Instant,
     done: tokio::sync::watch::Receiver<Option<String>>,
+    /// Its run, so a pause can cancel it (its command's process dies with it: kill_on_drop).
+    handle: Option<tauri::async_runtime::JoinHandle<()>>,
+    cancel: Option<std::sync::Arc<tokio::sync::watch::Sender<Option<String>>>>,
 }
 
 /// Each folder's background tasks, by number (one list per folder: the bug search's tasks).
@@ -262,11 +265,13 @@ pub(crate) fn spawn_task(app: &AppHandle, folder: &str, tool: &str, input: Value
     let id = {
         let mut all = tasks().lock().unwrap();
         let list = all.entry(folder.to_string()).or_default();
-        list.push(Task { what: what.clone(), started: std::time::Instant::now(), done: rx });
+        list.push(Task { what: what.clone(), started: std::time::Instant::now(), done: rx, handle: None, cancel: None });
         list.len()
     };
+    let tx = std::sync::Arc::new(tx);
     let (app, folder, tool) = (app.clone(), folder.to_string(), tool.to_string());
-    tauri::async_runtime::spawn(async move {
+    let (task_folder, task_tx) = (folder.clone(), tx.clone());
+    let handle = tauri::async_runtime::spawn(async move {
         let started = std::time::Instant::now();
         let out = match tool.as_str() {
             "coverage" => coverage(&folder, &input).await.map(|v| v.to_string()).unwrap_or_else(|e| format!("error: {e}")),
@@ -279,7 +284,31 @@ pub(crate) fn spawn_task(app: &AppHandle, folder: &str, tool: &str, input: Value
         // Tell the chat; the session that started it is whichever hunt runs in this folder.
         crate::swarm::emit_in_folder(&app, &folder, "status", "hunter", "hunt", format!("background task {id} finished in {}: {what}", took_s(started.elapsed().as_secs())));
     });
+    if let Some(t) = tasks().lock().unwrap().get_mut(&task_folder).and_then(|l| l.get_mut(id - 1)) {
+        t.handle = Some(handle);
+        t.cancel = Some(task_tx);
+    }
+
     Ok(id)
+}
+
+/// Cancels the folder's background tasks still running (a pause): each one's process is killed, and anyone waiting on
+/// it gets "cancelled". Returns how many were.
+pub(crate) fn cancel_tasks(folder: &str) -> usize {
+    let mut n = 0;
+    for t in tasks().lock().unwrap().get_mut(folder).into_iter().flatten() {
+        if t.done.borrow().is_some() {
+            continue;
+        }
+        if let Some(h) = t.handle.take() {
+            h.abort();
+        }
+        if let Some(c) = t.cancel.take() {
+            let _ = c.send(Some("cancelled: the swarm was paused".into()));
+        }
+        n += 1;
+    }
+    n
 }
 
 fn took_s(s: u64) -> String {

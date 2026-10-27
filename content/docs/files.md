@@ -18,6 +18,7 @@ Formal Mind keeps everything in your folder, as ordinary files you can read, edi
 | `.formal/plan.md` | the plan: one item per function, with its mark |
 | `.formal/statements.md` | your [statements](/statements) and how far each has got |
 | `.formal/queue.json` | the swarm's queue of jobs, so a quit resumes where it stopped |
+| `.formal/run.lock` | which app's swarm is working in the folder, so a second copy of the app can't run it at the same time |
 | `.formal/jobs/` | each job's full agent conversation |
 | `.formal/runs/` | every session's event log, one JSON line per event |
 | `.formal/proofs.json`, `.formal/statements.json` | which files and theorems proved each item |

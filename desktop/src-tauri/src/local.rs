@@ -13,6 +13,49 @@ pub struct Config {
     /// ~/.formalmind/repos, or a folder you already had that is that repository.
     #[serde(default)]
     pub repos: std::collections::BTreeMap<String, String>,
+    /// What the agents run with, kept here so the backend decides it whatever started the work (the folder page, the
+    /// phone, an agent through the MCP, a schedule). The Settings page and the folder page write it.
+    #[serde(default)]
+    pub settings: Settings,
+}
+
+#[derive(Serialize, Deserialize, Default, Clone)]
+pub struct Settings {
+    /// formal.team, or another server set on the sign-in screen.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub api_base: Option<String>,
+    /// "claude-code" (your Claude plan, the default), "formal" (credits), "anthropic" or "openai" (your key).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub provider: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub model: Option<String>,
+    /// Each folder's spending cap in USD, by path.
+    #[serde(default)]
+    pub budgets: std::collections::BTreeMap<String, f64>,
+    /// Settings → Phone: the relay through formal.team (the phone and the MCP). On unless turned off.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub relay: Option<bool>,
+}
+
+impl Settings {
+    pub const DEFAULT_API: &'static str = "https://formal.team";
+
+    pub fn api_base(&self) -> String {
+        self.api_base.clone().filter(|b| !b.is_empty()).unwrap_or_else(|| Self::DEFAULT_API.into())
+    }
+
+    /// Claude Code (your Claude plan) unless credits or a key were picked, as the Settings and folder pages default.
+    pub fn provider(&self) -> String {
+        self.provider.clone().filter(|p| ["claude-code", "formal", "anthropic", "openai"].contains(&p.as_str())).unwrap_or_else(|| "claude-code".into())
+    }
+
+    pub fn budget(&self, folder: &str) -> f64 {
+        self.budgets.get(folder).copied().filter(|b| *b > 0.0).unwrap_or(5.0)
+    }
+
+    pub fn relay(&self) -> bool {
+        self.relay.unwrap_or(true)
+    }
 }
 
 impl Config {
@@ -49,6 +92,33 @@ fn write(config: &Config) -> Result<(), String> {
 #[tauri::command]
 pub fn config_get() -> Result<Config, String> {
     read()
+}
+
+/// The backend's settings.
+#[tauri::command]
+pub fn settings_get() -> Result<Settings, String> {
+    Ok(read()?.settings)
+}
+
+/// Sets some of the backend's settings: each key given replaces its value (`budgets` merges by folder); `null` clears it.
+#[tauri::command]
+pub fn settings_set(patch: serde_json::Value) -> Result<Settings, String> {
+    let mut config = read()?;
+    let mut current = serde_json::to_value(&config.settings).map_err(|e| e.to_string())?;
+    for (k, v) in patch.as_object().into_iter().flatten() {
+        if k == "budgets" {
+            for (folder, usd) in v.as_object().into_iter().flatten() {
+                current["budgets"][folder] = usd.clone();
+            }
+        } else if v.is_null() {
+            current.as_object_mut().map(|o| o.remove(k));
+        } else {
+            current[k] = v.clone();
+        }
+    }
+    config.settings = serde_json::from_value(current).map_err(|e| format!("settings: {e}"))?;
+    write(&config)?;
+    Ok(config.settings)
 }
 
 #[tauri::command]
@@ -389,5 +459,15 @@ mod repo_tests {
         assert_eq!(github_repo("https://github.com/asyncswap/contracts.git").as_deref(), Some("asyncswap/contracts"));
         assert_eq!(github_repo("git@github.com:a/b").as_deref(), Some("a/b"));
         assert_eq!(github_repo("https://gitlab.com/a/b"), None);
+    }
+}
+
+#[cfg(test)]
+mod settings_tests {
+    #[test]
+    fn the_claude_plan_is_the_default_route() {
+        assert_eq!(super::Settings::default().provider(), "claude-code");
+        let credits = super::Settings { provider: Some("formal".into()), ..Default::default() };
+        assert_eq!(credits.provider(), "formal");
     }
 }

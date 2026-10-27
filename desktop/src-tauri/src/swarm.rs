@@ -188,6 +188,38 @@ pub(crate) fn emit_as(app: &AppHandle, folder: &str, run: &str, kind: &'static s
     emit_event(app, SwarmEvent { folder: folder.into(), run: run.into(), kind, role: role.into(), item: item.into(), text, spent, at: now_ms() as u64 });
 }
 
+/// `.formal/run.lock`: the process id of the app whose swarm works in the folder. Sessions in one app share a folder;
+/// two apps (two installs, a dev build) would write the same queue and proofs, so a second one is refused.
+fn run_lock(root: &Path) -> PathBuf {
+    root.join(".formal").join("run.lock")
+}
+
+/// Whether a process with this id is running (a crashed app's lock is stale).
+fn alive(pid: u32) -> bool {
+    #[cfg(unix)]
+    return std::process::Command::new("kill").args(["-0", &pid.to_string()]).stderr(std::process::Stdio::null()).status().is_ok_and(|s| s.success());
+    #[cfg(not(unix))]
+    return std::process::Command::new("tasklist").args(["/FI", &format!("PID eq {pid}"), "/NH"]).output().is_ok_and(|o| String::from_utf8_lossy(&o.stdout).contains(&pid.to_string()));
+}
+
+/// Takes the folder for this app, unless another running app has it.
+fn claim_folder(root: &Path) -> Result<(), String> {
+    let me = std::process::id();
+    let holder = std::fs::read_to_string(run_lock(root)).ok().and_then(|t| t.trim().parse::<u32>().ok());
+    if let Some(pid) = holder.filter(|p| *p != me && alive(*p)) {
+        return Err(format!("Another Formal Mind (process {pid}) is running this folder's swarm; pause it there first"));
+    }
+    let _ = std::fs::create_dir_all(root.join(".formal"));
+    std::fs::write(run_lock(root), me.to_string()).map_err(|e| format!(".formal/run.lock: {e}"))
+}
+
+/// Gives the folder back when this app's last session in it ends.
+fn release_folder(root: &Path) {
+    if std::fs::read_to_string(run_lock(root)).ok().and_then(|t| t.trim().parse::<u32>().ok()) == Some(std::process::id()) {
+        let _ = std::fs::remove_file(run_lock(root));
+    }
+}
+
 /// The sessions running now, by folder, sent to every window as `swarm-running` whenever one starts or ends, by any
 /// route (the folder page, the phone, an agent through the MCP, a quit). The pages and the relay take this as the
 /// truth instead of working it out from the events.
@@ -901,7 +933,17 @@ impl Turn<'_> {
     /// recorded (files written, notes, a verdict, a bug) kept in `out`.
     /// A tool call from the agent, run and counted in the turn's health record.
     async fn tool(&self, role: &str, item: &str, name: &str, input: &Value, out: &mut Outcome) -> String {
-        let answer = self.run_tool(role, item, name, input, out).await;
+        // A pause cuts through a tool the agent is waiting on (a background build, a long run) instead of waiting for it.
+        let stop = &self.swarm.stop;
+        let stopped = async {
+            while !stop.load(Ordering::SeqCst) {
+                tokio::time::sleep(Duration::from_millis(300)).await;
+            }
+        };
+        let answer = tokio::select! {
+            a = self.run_tool(role, item, name, input, out) => a,
+            _ = stopped => "stopped: the swarm was paused; this call didn't finish".to_string(),
+        };
         if let Some(h) = self.health.lock().unwrap().as_mut() {
             h.tool(name, input, &answer);
         }
@@ -1897,6 +1939,7 @@ pub fn swarm_start(app: AppHandle, swarms: State<'_, Swarms>, request: SwarmRequ
     if swarms.0.lock().unwrap().contains_key(&key(&request.folder, &run)) {
         return Err("This session is already running".into());
     }
+    claim_folder(Path::new(&request.folder))?;
     merge_old_sessions(Path::new(&request.folder));
     let qf = queue_file(Path::new(&request.folder), &run);
     let spent = load_queue(&qf).spent;
@@ -1943,6 +1986,9 @@ pub fn swarm_start(app: AppHandle, swarms: State<'_, Swarms>, request: SwarmRequ
             let swarms = app.state::<Swarms>();
             let mut map = swarms.0.lock().unwrap();
             map.remove(&k);
+            if !map.keys().any(|other| other.starts_with(&key(&request.folder, ""))) {
+                release_folder(Path::new(&request.folder));
+            }
             map.len()
         };
         broadcast_running(&app);
@@ -1956,8 +2002,15 @@ pub fn swarm_start(app: AppHandle, swarms: State<'_, Swarms>, request: SwarmRequ
 
 #[tauri::command]
 pub fn swarm_stop(swarms: State<'_, Swarms>, folder: String, run: String) {
-    if let Some(s) = swarms.0.lock().unwrap().get(&key(&folder, &run)) {
+    let map = swarms.0.lock().unwrap();
+    if let Some(s) = map.get(&key(&folder, &run)) {
         s.stop.store(true, Ordering::SeqCst);
+    }
+    // The folder's background tasks (a long lean or forge run, coverage) stop with the last session working in it.
+    let prefix = key(&folder, "");
+    let others = map.iter().any(|(k, s)| k.starts_with(&prefix) && *k != key(&folder, &run) && !s.stop.load(Ordering::SeqCst));
+    if !others {
+        crate::analysis::cancel_tasks(&folder);
     }
 }
 
@@ -2296,6 +2349,26 @@ pub fn swarm_submit_proof(folder: String, function: String, path: String, notes:
 
 #[cfg(test)]
 mod tests {
+
+    #[test]
+    fn one_app_per_folder() {
+        let root = std::env::temp_dir().join(format!("fm-lock-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        // Ours: taken again freely, given back.
+        assert!(claim_folder(&root).is_ok());
+        assert!(claim_folder(&root).is_ok());
+        release_folder(&root);
+        assert!(!run_lock(&root).exists());
+        // A live other app (this test's parent process) holds it: refused.
+        let parent = std::os::unix::process::parent_id();
+        std::fs::write(run_lock(&root), parent.to_string()).unwrap();
+        assert!(claim_folder(&root).is_err());
+        // A dead one's lock is stale.
+        std::fs::write(run_lock(&root), "4000000").unwrap();
+        assert!(claim_folder(&root).is_ok());
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
     use super::*;
 
     /// The hunter tests the bytecode: no formal-ast slices, Lean search or plan talk in its kit or its prompt.

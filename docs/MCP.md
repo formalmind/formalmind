@@ -69,6 +69,10 @@ read through GitHub's public API, with the Worker's `GITHUB_TOKEN` when it has o
 | `mac_get` `work_map` / `brief`, `mac_do` `refresh_model` / `check_proof` / `submit_proof` | read / write | A remote prover: what's covered and left, a function's brief, checking and submitting a proof as the swarm's own |
 | `mac_reply` | read | A `mac_get` / `mac_do` answer that came after the call stopped waiting, by its id |
 
+`mac_get` and `mac_do` run the desktop app's control API (`desktop/src-tauri/src/control.rs`, whose operations
+`lib/mac-ops.ts` publishes; a test keeps the two equal). The app's pages call the same API, and the relay that serves
+these tools runs in the app's backend process (`desktop/src-tauri/src/relay.rs`), so it answers with no window open.
+
 The public server (`/mcp`) has `get_audit_format`, `get_example_audit` (`section`: summary, findings, coverage,
 properties, full) and `get_app_release`.
 
