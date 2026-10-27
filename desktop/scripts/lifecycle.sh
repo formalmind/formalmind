@@ -4,12 +4,12 @@
 # agent turn has its tools and a clean health line; a quit mid-job resumes with its tools; and a function ends proved
 # and approved. The dev build runs as its own app (team.formal.desktop.lifecycle), beside the installed one.
 #
-#   desktop/scripts/lifecycle.sh [folder]      # the folder needs a .lifecycle-test file: its swarm state is reset
+#   desktop/scripts/lifecycle.sh [folder]   (default: formal-targets/lifecycle-weth9)      # the folder needs a .lifecycle-test file: its swarm state is reset
 #
 # Then the commands the MCP drives: cd desktop/src-tauri && FM_LIFECYCLE_FOLDER=<folder> cargo test --lib lifecycle -- --ignored
 set -uo pipefail
 
-FOLDER=$(cd "${1:-$HOME/developer/asyncswap/formal-targets/weth9}" && pwd)
+FOLDER=$(cd "${1:-$HOME/developer/asyncswap/formal-targets/lifecycle-weth9}" && pwd)
 HERE=$(cd "$(dirname "$0")/.." && pwd)
 TURNS="$HOME/Library/Logs/Formal Mind/turns.jsonl"
 OUT=$(mktemp -d /tmp/fm-lifecycle.XXXXXX)

@@ -60,7 +60,7 @@ GitHub requests hit the rate limit fast); `gh auth token` gives you one.
 Before a release, run the app the way a person does, on a small project:
 
 ```bash
-desktop/scripts/lifecycle.sh ~/developer/asyncswap/formal-targets/weth9
+desktop/scripts/lifecycle.sh ~/developer/asyncswap/formal-targets/lifecycle-weth9
 ```
 
 It starts a dev build as its own app (beside the installed one) with the swarm started on the folder on your Claude
@@ -70,7 +70,7 @@ function ends proved and approved. It resets the folder's swarm state, so it onl
 `.lifecycle-test` file. The commands the MCP drives (`work_map`, `brief`, `check_proof`, `health`) have their own test:
 
 ```bash
-cd desktop/src-tauri && FM_LIFECYCLE_FOLDER=~/developer/asyncswap/formal-targets/weth9 cargo test --lib lifecycle -- --ignored
+cd desktop/src-tauri && FM_LIFECYCLE_FOLDER=~/developer/asyncswap/formal-targets/lifecycle-weth9 cargo test --lib lifecycle -- --ignored
 ```
 
 ## Build
