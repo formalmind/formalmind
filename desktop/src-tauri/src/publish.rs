@@ -3,6 +3,7 @@
 //! work with formalmind[bot] as co-author and pushes it to the formalmind organization's copy of the project, forking
 //! the project there (or creating it) the first time. Nothing is pushed anywhere else.
 
+use serde_json::Value;
 use std::path::Path;
 use std::process::Command;
 use std::sync::Mutex;
@@ -147,17 +148,101 @@ pub fn checkout(repo: &str, git_ref: &str, dir: &Path) -> Result<String, String>
     Ok(branch)
 }
 
-/// After an approval: publish in the background when the folder reports to GitHub; failures go to the log.
+const START: &str = "<!-- formal-mind:start -->";
+const END: &str = "<!-- formal-mind:end -->";
+
+fn cell(s: &str) -> String {
+    s.replace('|', "\\|").replace('\n', " ")
+}
+
+/// The README's verification section, always in the same format: every function with its status from the proof ledger
+/// and its theorems, then every statement with its mark and author. Built from the ledger and the statements, so it
+/// says only what they say.
+pub fn readme_section(ledger: &Value, statements: &[crate::statements::Statement]) -> String {
+    let mut out = vec![START.to_string(), "## Verification".into(), String::new()];
+    out.push(format!(
+        "{} of {} functions proved: each theorem built and checked by Lean (no `sorry`, no axioms beyond Lean's own) and approved by the reviewer, kept in the proof ledger (`.formal/ledger.json`).",
+        ledger["proved"], ledger["functions"]
+    ));
+    out.extend([String::new(), "### Functions".into(), String::new(), "| Function | Status | Theorems | Shows |".into(), "|---|---|---|---|".into()]);
+    for e in ledger["entries"].as_array().into_iter().flatten() {
+        let theorems: Vec<String> = e["theorems"].as_array().into_iter().flatten().map(|t| {
+            let name = t["theorem"].as_str().unwrap_or("");
+            let file = t["file"].as_str().unwrap_or("");
+            format!("[`{name}`]({file}#L{})", t["line"].as_u64().unwrap_or(1))
+        }).collect();
+        let covers: Vec<&str> = e["covers"].as_array().into_iter().flatten().filter_map(Value::as_str).collect();
+        out.push(format!(
+            "| `{}` | {} | {} | {} |",
+            e["lean"].as_str().unwrap_or(""),
+            e["status"].as_str().unwrap_or("").replace('_', " "),
+            if theorems.is_empty() { "none yet".into() } else { theorems.join(", ") },
+            if covers.is_empty() { "—".into() } else { covers.join(", ") }
+        ));
+    }
+    out.extend([String::new(), "### Statements".into(), String::new()]);
+    if statements.is_empty() {
+        out.push("None yet. Add claims to `.formal/statements.md`; the swarm proves or disproves each one.".into());
+    } else {
+        out.extend(["| # | Claim | By | Status | Proved by |".into(), "|---|---|---|---|---|".into()]);
+        for s in statements {
+            let status = match s.mark.as_str() {
+                "x" => "proved",
+                "!" => "disproved",
+                "~" => "working",
+                "?" => "waiting for the maintainer",
+                "-" => "can't be proved against this model",
+                _ => "open",
+            };
+            let kind = crate::statements::kind(s).map(|k| format!(" ({k})")).unwrap_or_default();
+            let done = s.obligations.iter().filter(|o| o.mark == "x").count();
+            let progress = if s.obligations.is_empty() { "—".to_string() } else { format!("{done} of {} entry points", s.obligations.len()) };
+            out.push(format!("| {} | {} | {} | {status}{kind} | {progress} |", s.id, cell(&s.text), s.author));
+        }
+    }
+    out.extend([String::new(), "Check it yourself: `cd formal && lake build`.".into(), END.into()]);
+    out.join("\n")
+}
+
+/// Writes the section into README.md, replacing the previous one; what else the README says is kept as written.
+pub fn refresh_readme(root: &Path, section: &str) -> Result<(), String> {
+    let path = root.join("README.md");
+    let have = std::fs::read_to_string(&path).unwrap_or_default();
+    let next = match (have.find(START), have.find(END)) {
+        (Some(a), Some(b)) if b > a => format!("{}{section}{}", &have[..a], &have[b + END.len()..]),
+        _ if have.is_empty() => format!("# {}\n\n{section}\n", root.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default()),
+        _ => format!("{}\n\n{section}\n", have.trim_end()),
+    };
+    if next != have {
+        std::fs::write(&path, next).map_err(|e| e.to_string())?;
+    }
+    Ok(())
+}
+
+/// After an approval, when the folder reports to GitHub: the README's section from the ledger, then commit and push,
+/// in the background; failures go to the log.
 pub fn after_approval(root: &Path, what: &str) {
     let folder = root.to_string_lossy().into_owned();
     if !crate::local::read().map(|c| c.settings.github(&folder)).unwrap_or(false) {
         return;
     }
     let (root, what) = (root.to_path_buf(), what.to_string());
-    std::thread::spawn(move || match publish(&root, &what) {
-        Ok(Some(c)) => eprintln!("publish: {c} pushed to {ORG}"),
-        Ok(None) => {}
-        Err(e) => eprintln!("publish: {e}"),
+    tauri::async_runtime::spawn(async move {
+        match crate::ledger::build(&root, true, false).await {
+            Ok(ledger) => {
+                let statements = crate::statements::load(&root).unwrap_or_default();
+                if let Err(e) = refresh_readme(&root, &readme_section(&ledger, &statements)) {
+                    eprintln!("publish: README: {e}");
+                }
+            }
+            Err(e) => eprintln!("publish: ledger: {e}"),
+        }
+        match tokio::task::spawn_blocking(move || publish(&root, &what)).await {
+            Ok(Ok(Some(c))) => eprintln!("publish: {c} pushed to {ORG}"),
+            Ok(Ok(None)) => {}
+            Ok(Err(e)) => eprintln!("publish: {e}"),
+            Err(e) => eprintln!("publish: {e}"),
+        }
     });
 }
 
@@ -177,6 +262,25 @@ mod tests {
         assert_eq!(branch_for("refs/heads/release/v2"), "release/v2");
         assert_eq!(branch_for("v1.0 rc"), "v1.0-rc");
         assert!(m.starts_with("Formal Mind: - [ ] `WETH9.deposit`") && m.ends_with(&format!("{BOT}\n")));
+    }
+
+    #[test]
+    fn the_readme_section_is_replaced_and_the_rest_kept() {
+        let d = std::env::temp_dir().join(format!("fm-readme-{}", std::process::id()));
+        std::fs::create_dir_all(&d).unwrap();
+        std::fs::write(d.join("README.md"), "# X\n\nWritten by hand.\n").unwrap();
+        let ledger = serde_json::json!({ "proved": 1, "functions": 2, "entries": [
+            { "lean": "X.f", "status": "proved", "covers": ["reverts", "writes"], "theorems": [{ "theorem": "f_spec", "file": "formal/F.lean", "line": 3 }] },
+            { "lean": "X.g", "status": "unproved", "covers": [], "theorems": [] } ] });
+        let st = crate::statements::Statement { id: "S-01".into(), mark: "~".into(), author: "you".into(), text: "a | b".into(), details: vec!["kind: invariant".into()], obligations: vec![] };
+        refresh_readme(&d, &readme_section(&ledger, &[st.clone()])).unwrap();
+        refresh_readme(&d, &readme_section(&ledger, &[st])).unwrap();
+        let r = std::fs::read_to_string(d.join("README.md")).unwrap();
+        assert!(r.starts_with("# X\n\nWritten by hand."));
+        assert_eq!(r.matches(START).count(), 1);
+        assert!(r.contains("| `X.f` | proved | [`f_spec`](formal/F.lean#L3) | reverts, writes |"), "{r}");
+        assert!(r.contains("| S-01 | a \\| b | you | working (invariant) | — |"), "{r}");
+        let _ = std::fs::remove_dir_all(&d);
     }
 
     /// Commits with the co-author and pushes to an existing formalmind remote (a local bare repo here, so no network).

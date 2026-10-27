@@ -55,8 +55,17 @@ doesn't go on through the whole plan.
 | `[!]` | disproved, or blocked after three tries |
 | `[-]` | can't be proved against the generated model |
 
-## Coming next
+## Claims across calls
 
-Claims across calls are formalized and recorded, but not proved yet: an **invariant** that always holds
-("`totalSupply` equals the sum of balances"), **conservation** (what each call changes in total), and claims about
-**sequences** of calls. Trying to disprove each statement with a fuzzer before proving it is planned as well.
+Claims about the whole contract are proved one entry point at a time, after every function in the plan is covered:
+an **invariant** ("the sum of balances never exceeds the ETH held") gets one obligation per function that changes
+state, showing that if it holds before a successful call it holds after; **conservation** shows each call keeps the
+quantity unchanged; a **sequence** claim shows no other account's call to each function can make it false. You confirm
+the formalization first, as for any statement.
+
+## The README
+
+With Report to GitHub on, the app keeps a section of the folder's `README.md` current after each approval, always in
+the same format: every function with its status from the proof ledger, its theorems and what they cover, then every
+statement with who wrote it, its status and how many entry points are proved. Whatever else the README says stays as
+written. Trying to disprove each statement with a fuzzer before proving it is planned.

@@ -219,7 +219,14 @@ pub fn kind(s: &Statement) -> Option<&str> {
 }
 
 /// The kinds the swarm proves so far; the others are formalized, then wait for a later step.
-const PROVABLE: [&str; 2] = ["function", "access"];
+const PROVABLE: [&str; 5] = ["function", "access", "invariant", "conservation", "sequence"];
+/// Properties of the whole contract: proved one entry point at a time, after every plan item is covered.
+const PROPERTIES: [&str; 3] = ["invariant", "conservation", "sequence"];
+
+/// Whether a statement is about the whole contract (invariant, conservation, sequence), not one function.
+pub fn is_property(s: &Statement) -> bool {
+    kind(s).is_some_and(|k| PROPERTIES.contains(&k))
+}
 
 /// Lines under a statement that come from the maintainer or the agent that proposed it, kept when it is formalized again.
 fn kept(detail: &str) -> bool {
@@ -228,6 +235,12 @@ fn kept(detail: &str) -> bool {
 
 /// The next open statement nobody has formalized yet.
 pub fn awaiting_formalize(root: &Path) -> Option<Statement> {
+    // Properties formalized before the swarm proved them were left without obligations: formalize them again.
+    for s in load(root).unwrap_or_default() {
+        if s.details.iter().any(|d| d.ends_with("statements come later")) {
+            let _ = rewrite(root, &s.id, ' ', &[], &[]);
+        }
+    }
     load(root).ok()?.into_iter().find(|s| s.mark == " " && kind(s).is_none())
 }
 
@@ -311,8 +324,21 @@ pub fn derive(ctx: &crate::swarm_ctx::Context, input: &Value) -> Result<Formaliz
             }
         }
         "invariant" | "conservation" | "sequence" => {
+            // A property of the whole contract, proved inductively: one obligation per entry point that changes state,
+            // each showing a successful call keeps it (a sequence: that no other account's call breaks it).
             details.push(format!("kind: {kind}"));
-            details.push(format!("note: the swarm proves function and access statements so far; {kind} statements come later"));
+            let what = match kind.as_str() {
+                "invariant" => "if it holds before a successful call, it holds after",
+                "conservation" => "a successful call keeps the conserved quantity unchanged",
+                _ => "no call to it by another account makes the claim false",
+            };
+            let entry = |u: &&crate::swarm_ctx::Unit| u.unit["internal"] != true && u.unit["writes"].as_array().is_some_and(|w| !w.is_empty());
+            for u in units.iter().filter(entry) {
+                obligations.push(format!("{}: {what}", place(u)));
+            }
+            if obligations.is_empty() {
+                details.push("note: no entry point in scope changes state, so nothing can break it".into());
+            }
         }
         k => return Err(format!("no kind {k:?}: function, access, invariant, conservation or sequence")),
     }
@@ -481,8 +507,8 @@ pub fn waiting_note(root: &Path) -> String {
 /// The next obligation to prove: of a confirmed statement (open or working, of a kind the swarm proves), the first
 /// one not proved or blocked. Its number counts from 1 within the statement. The loop asks only when its queue has
 /// nothing queued or running, so one marked working then lost its job (a queue cleared by hand) and is taken again.
-pub fn next_obligation(root: &Path) -> Option<(Statement, usize)> {
-    load(root).ok()?.into_iter().filter(|s| (s.mark == " " || s.mark == "~") && kind(s).is_some_and(|k| PROVABLE.contains(&k))).find_map(|s| {
+pub fn next_obligation(root: &Path, plan_done: bool) -> Option<(Statement, usize)> {
+    load(root).ok()?.into_iter().filter(|s| (s.mark == " " || s.mark == "~") && kind(s).is_some_and(|k| PROVABLE.contains(&k)) && (plan_done || !is_property(s))).find_map(|s| {
         let n = s.obligations.iter().position(|o| o.mark == " " || o.mark == "~")? + 1;
         Some((s, n))
     })
@@ -856,7 +882,7 @@ mod tests {
         let f = derive(&ctx, &json!({ "kind": "function", "function": "Vault.deposit", "obligation": "reverts when assets is 0", "means": "deposit(0) reverts" })).unwrap();
         assert_eq!(f.obligations, vec!["`Vault.deposit` — Vault (src/Vault.sol): reverts when assets is 0"]);
         let later = derive(&ctx, &json!({ "kind": "invariant", "means": "totalSupply equals the sum of balanceOf" })).unwrap();
-        assert!(!later.asks() && later.obligations.is_empty());
+        assert!(later.asks() && !later.obligations.is_empty() && later.obligations.iter().all(|o| o.contains("holds after")), "{:?}", later.obligations);
     }
 
     #[test]
@@ -913,16 +939,16 @@ mod tests {
         // Not confirmed yet: nothing to prove.
         let waiting = add(&d, "you", "deposit(0) reverts", ' ', &[]).unwrap();
         record(&d, &waiting.id, &derive(&vault(), &json!({ "kind": "function", "function": "Vault.deposit", "obligation": "reverts when assets is 0", "means": "deposit(0) reverts" })).unwrap()).unwrap();
-        assert!(next_obligation(&d).is_none());
+        assert!(next_obligation(&d, true).is_none());
         let s = confirmed(&d);
-        assert_eq!(next_obligation(&d).map(|(s, n)| (s.id, n)), Some((s.id.clone(), 1)));
+        assert_eq!(next_obligation(&d, true).map(|(s, n)| (s.id, n)), Some((s.id.clone(), 1)));
         assert_eq!(set_obligation(&d, &s.id, 1, '~').unwrap(), '~');
         // Still the first: working and nothing queued means its job was lost.
-        assert_eq!(next_obligation(&d).map(|(_, n)| n), Some(1));
+        assert_eq!(next_obligation(&d, true).map(|(_, n)| n), Some(1));
         assert_eq!(set_obligation(&d, &s.id, 1, 'x').unwrap(), '~');
-        assert_eq!(next_obligation(&d).map(|(_, n)| n), Some(2));
+        assert_eq!(next_obligation(&d, true).map(|(_, n)| n), Some(2));
         assert_eq!(set_obligation(&d, &s.id, 2, 'x').unwrap(), 'x');
-        assert!(next_obligation(&d).is_none());
+        assert!(next_obligation(&d, true).is_none());
         let done = load(&d).unwrap().into_iter().find(|x| x.id == s.id).unwrap();
         assert_eq!(done.obligations.iter().map(|o| o.mark.as_str()).collect::<Vec<_>>(), vec!["x", "x"]);
         assert_eq!(done.mark, "x");
@@ -933,7 +959,7 @@ mod tests {
         let t = confirmed(&b);
         set_obligation(&b, &t.id, 1, 'x').unwrap();
         assert_eq!(set_obligation(&b, &t.id, 2, '!').unwrap(), '!');
-        assert!(next_obligation(&b).is_none());
+        assert!(next_obligation(&b, true).is_none());
     }
 
     #[test]

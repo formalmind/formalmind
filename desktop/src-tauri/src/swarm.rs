@@ -1563,7 +1563,7 @@ async fn run_swarm(turn: &Turn<'_>) -> String {
 
         // A run for queued work (a report to read, a statement you added or confirmed) also takes the statements
         // waiting for the swarm, then stops.
-        let statement_work = !turn.run.starts_with("hunt-") && (crate::statements::awaiting_formalize(&root).is_some() || crate::statements::next_obligation(&root).is_some());
+        let statement_work = !turn.run.starts_with("hunt-") && (crate::statements::awaiting_formalize(&root).is_some() || crate::statements::next_obligation(&root, read_plan(&root).iter().all(|i| i.mark != " " && i.mark != "~")).is_some());
         if turn.req.only_queued.unwrap_or(false) && !statement_work && with_queue(&turn.queue, |q| !q.jobs.iter().any(|j| j.state == "running" || j.state == "queued")) {
             return "done: the queued work is finished".into();
         }
@@ -1573,7 +1573,7 @@ async fn run_swarm(turn: &Turn<'_>) -> String {
         let free = |j: &Job| !matches!(j.kind.as_str(), "prove" | "review") || !j.statement.is_empty() || !claimed_by_other(&turn.req.folder, j.item, &me);
         let hunting = turn.run.starts_with("hunt-");
         let formalize = (!hunting).then(|| crate::statements::awaiting_formalize(&root).map(|s| s.id)).flatten();
-        let obligation = (!hunting).then(|| crate::statements::next_obligation(&root)).flatten();
+        let obligation = (!hunting).then(|| crate::statements::next_obligation(&root, read_plan(&root).iter().all(|i| i.mark != " " && i.mark != "~"))).flatten();
         let next = with_queue(&turn.queue, |q| {
             let pick = q.jobs.iter().position(|j| j.state == "running" && free(j))
                 .or_else(|| q.jobs.iter().position(|j| j.state == "queued" && j.kind == "answer"))
