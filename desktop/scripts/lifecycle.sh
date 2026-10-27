@@ -1,6 +1,6 @@
 #!/bin/bash
 # Formal Mind's lifecycle test: a dev build of the app runs the swarm on a small project (WETH9 by default), on your
-# Claude plan, and this checks what a person would: the start writes the plan, formalmind.toml and the model; every
+# Claude plan, with no focus (so the plan goes through prover, check and reviewer), and this checks what a person would: the start writes the plan, formalmind.toml and the model; every
 # agent turn has its tools and a clean health line; a quit mid-job resumes with its tools; and a function ends proved
 # and approved. The dev build runs as its own app (team.formal.desktop.lifecycle), beside the installed one.
 #
@@ -37,8 +37,10 @@ wait_for() {
 command -v claude >/dev/null || { echo "Claude Code isn't installed"; exit 2; }
 
 # A fresh start: the swarm's state, the generated model, the proofs and formalmind.toml go; the contracts stay.
-rm -rf "$FOLDER/.formal" "$FOLDER/formalmind.toml" "$FOLDER/formal/Refinement/Swarm" "$FOLDER/formal/Generated"
+rm -rf "$FOLDER/.formal" "$FOLDER/formalmind.toml" "$FOLDER/formal/Refinement" "$FOLDER/formal/Generated"
 mkdir -p "$FOLDER/formal/Refinement/Swarm"
+# Its agents' saved Claude Code conversations go too, so nothing resumes from a previous run.
+rm -rf "$HOME/.formalmind/claude-code/$(basename "$FOLDER")-"*
 python3 -I - "$FOLDER" <<'EOF'
 import json, os, sys
 p = os.path.expanduser("~/.formalmind/config.json")
@@ -51,8 +53,7 @@ turns_before=$( [ -f "$TURNS" ] && wc -l <"$TURNS" || echo 0)
 
 APP_PID=""
 start_app() {
-	(cd "$HERE" && FM_SWARM_AUTOSTART="$FOLDER" FM_SWARM_PROVIDER=claude-code FM_SWARM_BUDGET=50 \
-		FM_SWARM_GOAL="Prove WETH9's functions; start with the smallest." \
+	(cd "$HERE" && VITE_FM_RELAY=0 FM_SWARM_AUTOSTART="$FOLDER" FM_SWARM_PROVIDER=claude-code FM_SWARM_BUDGET=50 \
 		exec bunx tauri dev --config '{"identifier":"team.formal.desktop.lifecycle","productName":"Formal Mind Lifecycle"}' >>"$OUT/app.log" 2>&1) &
 	APP_PID=$!
 }
@@ -105,7 +106,13 @@ bad = [t for t in map(json.loads, sys.stdin) if t.get("tools") not in ("connecte
 sys.exit(1 if bad else 0)' && ok "every turn after the restart had its tools" || no "a turn ran without its tools"
 
 echo "4. A function proved and approved"
-wait_for 2400 "a plan item is proved" grep -q '^- \[x\]' "$FOLDER/.formal/plan.md"
+# Approved by the swarm's reviewer, not just ticked: the review job for the item ended with approve.
+approved() { python3 -I -c '
+import json, sys
+q = json.load(open(sys.argv[1]))
+sys.exit(0 if any(j["kind"] == "review" and j["state"] == "done" and j.get("result") == "approve" for j in q["jobs"]) else 1)' "$FOLDER/.formal/queue.json"; }
+wait_for 2400 "the reviewer approves a proof" approved
+grep -q '^- \[x\]' "$FOLDER/.formal/plan.md" && ok "its plan item is ticked" || no "its plan item is ticked"
 
 stop_app
 trap - EXIT

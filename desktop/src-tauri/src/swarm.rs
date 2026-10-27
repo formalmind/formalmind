@@ -188,6 +188,19 @@ pub(crate) fn emit_as(app: &AppHandle, folder: &str, run: &str, kind: &'static s
     emit_event(app, SwarmEvent { folder: folder.into(), run: run.into(), kind, role: role.into(), item: item.into(), text, spent, at: now_ms() as u64 });
 }
 
+/// The sessions running now, by folder, sent to every window as `swarm-running` whenever one starts or ends, by any
+/// route (the folder page, the phone, an agent through the MCP, a quit). The pages and the relay take this as the
+/// truth instead of working it out from the events.
+fn broadcast_running(app: &AppHandle) {
+    let mut by_folder: HashMap<String, Vec<String>> = HashMap::new();
+    for k in app.state::<Swarms>().0.lock().unwrap().keys() {
+        if let Some((folder, run)) = k.split_once('\n') {
+            by_folder.entry(folder.to_string()).or_default().push(run.to_string());
+        }
+    }
+    let _ = app.emit("swarm-running", by_folder);
+}
+
 fn emit_event(app: &AppHandle, ev: SwarmEvent) {
     let log = runs_dir(&ev.folder);
     let _ = std::fs::create_dir_all(&log);
@@ -489,6 +502,11 @@ fn session_of(req: &SwarmRequest) -> String {
 }
 
 fn enqueue(q: &mut Queue, kind: &str, item: usize, text: &str, attempt: usize, notes: &str) -> u64 {
+    // A new queue numbers its jobs from now, not from 1: a job's Claude Code conversation is kept by its number outside
+    // the folder, so after .formal/ is deleted a fresh job 1 would otherwise resume an old job 1's conversation.
+    if q.next_id == 0 {
+        q.next_id = SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0);
+    }
     q.next_id += 1;
     let id = q.next_id;
     q.jobs.push(Job { id, kind: kind.into(), item, text: text.into(), state: "queued".into(), attempt, notes: notes.into(), ..Default::default() });
@@ -988,9 +1006,10 @@ impl Turn<'_> {
                     self.emit("result", role, item, r.clone());
                     r
                 }
-                // The swarm keeps .formal/ (it ticks plan items only after the check and the review).
-                "write_file" if role == "prover" && input["path"].as_str().unwrap_or("").trim_start_matches("./").starts_with(".formal") => {
-                    "error: .formal/ is the swarm's; it ticks the plan item once your proof checks and is approved".to_string()
+                // The swarm keeps .formal/ (it ticks plan items only after the check and the review), whichever agent
+                // asks: an assistant once marked a whole plan proved by writing plan.md, past the reviewer.
+                "write_file" if inside(&root, input["path"].as_str().unwrap_or("")).is_ok_and(|p| p.starts_with(root.join(".formal"))) => {
+                    "error: .formal/ is the swarm's; it ticks a plan item once its proof checks and the reviewer approves it".to_string()
                 }
                 _ => {
                     if name == "write_file" {
@@ -1689,6 +1708,10 @@ async fn run_swarm(turn: &Turn<'_>) -> String {
             let Some(j) = q.jobs.iter_mut().find(|j| j.id == job.id) else { return };
             j.state = "done".into();
             j.summary = out.summary.clone();
+            // An approval is recorded on the review itself, like "changes" and "bug" are.
+            if job.kind == "review" && out.bug.is_none() && matches!(out.verdict, Some((true, _))) {
+                j.result = "approve".into();
+            }
             for f in &out.files {
                 if !j.files.contains(f) {
                     j.files.push(f.clone());
@@ -1896,6 +1919,7 @@ pub fn swarm_start(app: AppHandle, swarms: State<'_, Swarms>, request: SwarmRequ
     }
     let swarm = Arc::new(Swarm { stop: AtomicBool::new(false), folder: request.folder.clone(), queue: qf.clone(), spent: Mutex::new(spent), budget: Mutex::new(request.budget_usd.max(spent)), compact_now: AtomicBool::new(false) });
     swarms.0.lock().unwrap().insert(key(&request.folder, &run), swarm.clone());
+    broadcast_running(&app);
     let id = run.clone();
     tauri::async_runtime::spawn(async move {
         let client = reqwest::Client::builder().timeout(Duration::from_secs(600)).build().unwrap_or_default();
@@ -1921,6 +1945,7 @@ pub fn swarm_start(app: AppHandle, swarms: State<'_, Swarms>, request: SwarmRequ
             map.remove(&k);
             map.len()
         };
+        broadcast_running(&app);
         // Quit (⌘Q) while this was working: the last session to finish closes the app.
         if left == 0 && QUIT_WHEN_DONE.load(Ordering::SeqCst) {
             app.exit(0);

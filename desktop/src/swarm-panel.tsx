@@ -2210,6 +2210,10 @@ export function SwarmPanel({ folder, name, scan, bridge, session, file: openPath
 	};
 
 	useEffect(() => {
+		// Another folder's chat and sessions never carry over: the page starts empty and loads this folder's.
+		setEvents([]);
+		setViewing(null);
+		setRuns([]);
 		refresh();
 		void invoke<boolean>(provider === "openai" ? "openai_key_status" : "anthropic_key_status").then(setHasKey);
 		void invoke<string[]>("swarm_running", { folder }).then(async (r) => {
@@ -2239,7 +2243,18 @@ export function SwarmPanel({ folder, name, scan, bridge, session, file: openPath
 				void listSessions();
 			}
 		});
-		return () => void off.then((f) => f());
+		// Which sessions run is the app's to say (swarm-running, sent whenever one starts or ends, by any route: this
+		// page, the phone, an agent through the MCP); a check on focus and every 15 s catches anything missed.
+		const offRunning = listen<Record<string, string[]>>("swarm-running", ({ payload }) => setRuns(payload[folder] ?? []));
+		const check = () => void invoke<string[]>("swarm_running", { folder }).then(setRuns, () => {});
+		const every = setInterval(check, 15_000);
+		window.addEventListener("focus", check);
+		return () => {
+			void off.then((f) => f());
+			void offRunning.then((f) => f());
+			clearInterval(every);
+			window.removeEventListener("focus", check);
+		};
 		// eslint-disable-next-line react-hooks/exhaustive-deps
 	}, [folder]);
 	// A session picked in the sidebar; "new" is an empty one that gets its own queue when started.

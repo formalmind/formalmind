@@ -12,6 +12,8 @@ import { apiBase } from "./api";
  */
 
 export const relayOn = () => {
+	// A dev build for a test (desktop/scripts/lifecycle.sh) stays off the relay, so it never answers for your app.
+	if (import.meta.env.VITE_FM_RELAY === "0") return false;
 	try {
 		return localStorage.getItem("fm:relay") !== "0";
 	} catch {
@@ -238,6 +240,8 @@ export function startRelay(): () => void {
 		flushing ??= setTimeout(flush, 400);
 		if (payload.kind === "start" || payload.kind === "done") stateSoon();
 	});
+	// A session started or ended by any route: the phone and the MCP see it at once.
+	const offRunning = listen("swarm-running", () => stateSoon());
 	publishState();
 	const every = setInterval(publishState, 60_000);
 
@@ -276,5 +280,6 @@ export function startRelay(): () => void {
 		if (stateDue) clearTimeout(stateDue);
 		flush();
 		void off.then((f) => f());
+		void offRunning.then((f) => f());
 	};
 }
