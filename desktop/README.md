@@ -14,6 +14,32 @@ the `@/` alias, nothing copied), plus what only a native app can do. Runs on mac
 (skipping `.git`, `node_modules`, `lib`, `dependencies`, `out`, `cache`, `target`, `.lake`, `dist`). Only folders you added can be
 read. Nothing is uploaded. `src-tauri/src/local.rs` has it, with a test (`cargo test` in `src-tauri/`).
 
+## A folder's page
+
+`src/swarm-panel.tsx` (the Mac app's layout; the website keeps its tabs and the floating chat):
+
+- **The view fills the middle**: Canvas, Proofs, Bugs or Code (and Debug where it's on).
+- **The chat is the right pane**: talk to the agents, start or resume the swarm. Drag the line between them to resize it
+  (double-click for the default); its width and whether it's open are kept. While the swarm runs, the send button is
+  Stop until you type. A working agent's current task shimmers.
+- **The title bar**: the folder's name on the left. On the right, before refresh, settings and the bell, the page's
+  actions (a slot in `src/tabs.tsx`): the working agent's context meter, the spend and its cap, the view icons, and the
+  chat icon that opens and closes the pane.
+- **Canvas**: the agents, their notebooks, and two cards under them that grow to show all they hold (drag a bottom edge
+  to set a height): the **plan** (`.formal/plan.md`, rendered as markdown) and the **git tree** (`src/git-tree.tsx`).
+  The tree shows every branch's latest commits and HEAD's own line, marks HEAD, and puts the uncommitted work above it,
+  "proving here" while the swarm runs. It reads `git log` and `git status` through `folder_git_graph`; nothing is
+  written.
+- **Proofs**: proved functions in their own group on top, then those with a sorry, the modelled ones, and the ones not
+  modelled. The list resizes from its card's edge; a squeezed detail stacks the Solidity above the Lean.
+- **Bugs**: Formal Mind's report, the swarm's findings, and the folder's audit reports. `audit/`, `audits/` and
+  `reports/` are always read; Settings → Audit reports adds other folders.
+
+A folder's icon in the sidebar pulses green while agents work in it.
+
+**One text size.** Text across the signed-in app is 13px and regular, the file tree's size (`src/desktop.css`). The
+Neovim terminal, KaTeX and SVG keep their own sizes, since they measure their text.
+
 ## Develop
 
 Needs Rust (`rustup`) and, on Linux, the [Tauri system packages](https://tauri.app/start/prerequisites/).
@@ -126,11 +152,28 @@ can be raised to keep going.
 nowhere and pushes nothing; its tools can't run git. Activity shows in the app (the Swarm canvas, the plan card, the
 Proofs and Bugs pages), and the canvas links nowhere outside it.
 
-**Who pays for the model.** Files, `lake` and `forge` run here; only the model calls leave, by exactly one of two
-routes, picked in Settings → Models (`fm:provider`): **formal.team credits** (`/api/desktop/model-session` mints a
-session per agent turn with the desktop sign-in, charged as `local/<folder>` with the agent and item), or **your own
-Anthropic key** from the keychain (`team.formal.desktop` / `anthropic`), straight to `api.anthropic.com`. Every event
-is logged to `.formal/runs/<run>.jsonl`.
+**Who pays for the model.** Files, `lake` and `forge` run here; only the model calls leave, by exactly one route,
+picked in Settings → Models (`fm:provider`; Claude Code unless you pick another): **formal.team credits** (`/api/desktop/model-session` mints a
+session per agent turn with the desktop sign-in, charged as `local/<folder>` with the agent and item), **your own
+Anthropic key** from the keychain (`team.formal.desktop` / `anthropic`), straight to `api.anthropic.com`, or
+**Claude Code on your Claude plan** (`claude-code`). Every event is logged to `.formal/runs/<run>.jsonl`.
+
+**On Claude Code** (`src-tauri/src/claude_code.rs`), each agent turn is one `claude -p` in the folder, with the
+`claude` you installed and signed in to yourself (Max or Pro; Settings shows what `claude auth status` reports, and
+Start refuses until it is signed in). The app never sees or stores the sign-in, and it unsets `ANTHROPIC_API_KEY` for
+the run so the plan pays, not a stray key. The role keeps everything it has on the API: its system prompt replaces
+Claude Code's (`--system-prompt`), Claude Code's own tools are off (`--tools ""`), and the role's tools are served by
+the swarm over MCP on 127.0.0.1 with a per-turn token (`Bridge`), answered by the same code as on the API, so the
+plan, the check, review, `report_bug` and the files a prover writes work the same. Nothing from your Claude Code setup
+or the project reaches the agent (`--setting-sources ""`: no settings, hooks, CLAUDE.md, skills or other MCP
+servers). The task goes in as a stream-json message, so an audit report's PDF is still a document. Each job has its
+own Claude session id, kept in `~/.formalmind/claude-code/<project>-<hash>/<run>/` with the raw stream and stderr, so a
+quit mid-job resumes the conversation (`--resume`). Nothing is added to the session's spend; your plan's usage limits
+apply instead, and hitting one pauses the swarm with the job still running (Start again after the reset).
+Anthropic allows this because the person signs in to the unmodified Claude Code binary with their own plan. The app
+must never offer a Claude login itself, handle Claude credentials, or route one person's plan for someone else
+(code.claude.com/docs/en/legal-and-compliance). Plan limits assume ordinary, individual use, so a swarm left running
+for a long time will hit them.
 
 The Swarm canvas follows the events: the working agent sits on its item saying what it's doing, the Swarm notebook
 lists the current turn's steps, the ledger has a line per turn, and the Proofs page and Bugs read again when an item is proven

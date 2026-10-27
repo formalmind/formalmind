@@ -9,7 +9,7 @@ import { AuditFolders, EntryPoints } from "@/components/audit-folders";
 import { useFolders } from "./local";
 import { relayOn } from "./relay";
 
-type Provider = "formal" | "anthropic" | "openai";
+type Provider = "formal" | "anthropic" | "openai" | "claude-code";
 const read = (k: string) => {
 	try {
 		return localStorage.getItem(k);
@@ -75,8 +75,14 @@ type SectionId = (typeof SECTIONS)[number]["id"];
 export function SettingsPage() {
 	const [provider, setProvider] = useState<Provider>(() => {
 		const p = read("fm:provider");
-		return p === "anthropic" || p === "openai" ? p : "formal";
+		// Claude Code (your Claude plan) unless you picked credits or a key; the web app uses credits.
+		return p === "anthropic" || p === "openai" || p === "formal" ? p : "claude-code";
 	});
+	// Claude Code on this computer: its version and plan, or why it can't run the agents on your own Claude plan.
+	const [claudeCode, setClaudeCode] = useState<{ ok: boolean; text: string } | null>(null);
+	useEffect(() => {
+		void invoke<string>("claude_code_status").then((v) => setClaudeCode({ ok: true, text: v }), (e) => setClaudeCode({ ok: false, text: String(e) }));
+	}, []);
 	const [base, setBase] = useState(apiBase());
 	const [saved, setSaved] = useState<string | null>(null);
 	const [params, setParams] = useSearchParams();
@@ -137,14 +143,20 @@ export function SettingsPage() {
 						<label className="flex items-center justify-between gap-4">
 							<span>
 								<span className="font-medium">Run agents via</span>
-								<span className="block text-xs text-muted-foreground">Credits run Claude, metered by formal.team and shown in Billing. Your own key goes straight to Anthropic (Claude) or OpenAI (GPT-5).</span>
+								<span className="block text-xs text-muted-foreground">Claude Code runs every agent on your own Claude plan (Max or Pro), through the `claude` you're signed in to: nothing is charged to credits or a key, and your plan's usage limits apply. Credits run Claude, metered by formal.team and shown in Billing. Your own key goes straight to Anthropic (Claude) or OpenAI (GPT-5).</span>
 							</span>
 							<select value={provider} onChange={(e) => pick(e.target.value as Provider)} className="h-8 rounded-lg border bg-background px-2 text-sm">
+								<option value="claude-code" disabled={claudeCode?.ok === false}>Claude Code (my Claude plan)</option>
 								<option value="formal">formal.team credits</option>
 								<option value="anthropic">My Anthropic key</option>
 								<option value="openai">My OpenAI key</option>
 							</select>
 						</label>
+						{claudeCode ? (
+							<p className={`text-xs ${claudeCode.ok ? "text-muted-foreground" : "text-amber-600"}`}>
+								{claudeCode.ok ? `${claudeCode.text}. With it picked, the swarm and the Bug Hunter run on it.` : claudeCode.text}
+							</p>
+						) : null}
 						<ApiKey vendor="anthropic" name="Anthropic" placeholder="sk-ant-…" onSaved={() => flash("Key saved")} />
 						<ApiKey vendor="openai" name="OpenAI" placeholder="sk-…" onSaved={() => flash("Key saved")} />
 					</Section> : null}
@@ -169,7 +181,7 @@ export function SettingsPage() {
 						</label>
 					</Section> : null}
 					{section === "audit-reports" ? <Section title="Audit reports">
-						<p className="text-xs text-muted-foreground">Where each project's audit reports are read from for Bugs, relative to the project.</p>
+						<p className="text-xs text-muted-foreground">Bugs reads each project's audit reports from audit/, audits/ and reports/. Add any other folder, relative to the project.</p>
 						{folders.length + Object.keys(repos).length === 0 ? <p className="text-xs text-muted-foreground">Add a folder or import a repository in the sidebar first.</p> : null}
 						{folders.map((f) => (
 							<AuditFolders key={f} folder={f} />

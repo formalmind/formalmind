@@ -27,7 +27,7 @@ import { APP_REPO, AUDIT_FORMAT_RAW, EXAMPLE_AUDIT_RAW, EXAMPLE_REPO, ORIGIN, SH
 z.config({ jitless: true });
 
 const MCP_URL = `${ORIGIN}/mcp`;
-export const MCP_VERSION = "0.3.0";
+export const MCP_VERSION = "0.4.0";
 const PROTOCOL_VERSIONS = ["2025-03-26", "2025-06-18", "2025-11-25"];
 
 const AUDIT_SECTIONS = ["summary", "findings", "coverage", "properties", "full"] as const;
@@ -172,7 +172,7 @@ export function serverCard(): Response {
     version: MCP_VERSION,
     title: "Formal Mind",
     description:
-      "Two remotes. /mcp: read-only tools, no authentication: the formalmind.audit/v1 format Formal Mind's Bugs tab reads, Formal Mind's audit of an example repository (Async Swap's contracts) in that format, and the desktop app's latest release. /mcp/account: the signed-in person's own projects, usage, credits and hosted swarm state, plus planning a repository and setting up its specs, behind an OAuth 2.0 access token from this host's authorization server (GitHub sign-in; RFC 9728 metadata at /.well-known/oauth-protected-resource/mcp/account, RFC 8414 at /.well-known/oauth-authorization-server). The swarm itself runs locally in the desktop app; see the Agent Skills at /.well-known/agent-skills/index.json.",
+      "Two remotes. /mcp: read-only tools, no authentication: the formalmind.audit/v1 format Formal Mind's Bugs tab reads, Formal Mind's audit of an example repository (Async Swap's contracts) in that format, and the desktop app's latest release. /mcp/account: the signed-in person's own projects (their files, formalmind.audit/v1 reports, findings and Proofs coverage, read from GitHub at a commit), usage, credits, the hosted swarm's state and the desktop app's swarm through the relay, plus adding and planning a repository, setting up its specs, and reading and driving everything the desktop app does on the person's Mac (mac_get, mac_do), behind an OAuth 2.0 access token from this host's authorization server (GitHub sign-in; RFC 9728 metadata at /.well-known/oauth-protected-resource/mcp/account, RFC 8414 at /.well-known/oauth-authorization-server). The swarm itself runs locally in the desktop app; see the Agent Skills at /.well-known/agent-skills/index.json.",
     websiteUrl: ORIGIN,
     repository: { source: "github", url: APP_REPO },
     remotes: [

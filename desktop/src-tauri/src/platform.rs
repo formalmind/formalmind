@@ -17,7 +17,8 @@ pub fn exe(name: &str) -> String {
 /// Where Lean (elan), Foundry, cargo and the package managers put their programs, most specific first.
 pub fn tool_dirs() -> Vec<PathBuf> {
     let home = home();
-    let mut dirs = vec![home.join(".elan/bin"), home.join(".foundry/bin"), home.join(".cargo/bin")];
+    // ~/.local/bin: Claude Code's installer puts `claude` there.
+    let mut dirs = vec![home.join(".elan/bin"), home.join(".foundry/bin"), home.join(".cargo/bin"), home.join(".local/bin")];
     if cfg!(target_os = "macos") {
         dirs.extend(["/opt/homebrew/bin", "/usr/local/bin"].map(PathBuf::from));
     } else if cfg!(windows) {
@@ -25,7 +26,7 @@ pub fn tool_dirs() -> Vec<PathBuf> {
         dirs.push(home.join("scoop/shims"));
         dirs.push(PathBuf::from(r"C:\ProgramData\chocolatey\bin"));
     } else {
-        dirs.extend([home.join(".local/bin"), PathBuf::from("/usr/local/bin")]);
+        dirs.push(PathBuf::from("/usr/local/bin"));
     }
     dirs
 }

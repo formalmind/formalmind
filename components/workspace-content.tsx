@@ -16,8 +16,9 @@ export function WorkspaceContent({ children }: { children: React.ReactNode }) {
 	// The landing page brings its own header and main.
 	if (pathname === "/welcome") return <div className="w-full">{children}</div>;
 	return (
-		<div className={isChat ? "flex h-dvh min-w-0 flex-1 overflow-hidden bg-background" : "flex-1 overflow-x-auto bg-background"}>
-			<SidebarInset className={isChat ? "min-h-0 min-w-0 flex-1 bg-background" : "flex-1 w-full overflow-x-auto"}>
+		// Account pages fill the window's height too (their side panel's line runs to the bottom) and scroll inside.
+		<div className={isChat || isPanel ? "flex h-dvh min-w-0 flex-1 overflow-hidden bg-background" : "flex-1 overflow-x-auto bg-background"}>
+			<SidebarInset className={isChat ? "min-h-0 min-w-0 flex-1 bg-background" : isPanel ? "min-h-0 min-w-0 flex-1 overflow-y-auto bg-background" : "flex-1 w-full overflow-x-auto"}>
 				<CreditsBanner />
 				<header className={isChat ? "hidden" : "flex h-16 shrink-0 items-center gap-2"}>
 					<div className="flex items-center gap-2 px-4">

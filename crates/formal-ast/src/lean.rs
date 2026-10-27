@@ -1031,12 +1031,8 @@ fn literal(e: &Value) -> R<String> {
                 // Lean reads hex literals natively.
                 return Ok(scale(format!("0x{hex}"), e));
             }
-            if let Some((m, x)) = raw.split_once(['e', 'E']) {
-                let x: u32 = x.parse().map_err(|_| "exponent")?;
-                return Ok(scale(format!("({m} * 10 ^ {x})"), e));
-            }
-            if raw.contains('.') {
-                return bail("fractional literal");
+            if raw.contains(['e', 'E', '.']) {
+                return decimal(&raw, e);
             }
             Ok(scale(raw, e))
         }
@@ -1045,9 +1041,36 @@ fn literal(e: &Value) -> R<String> {
     }
 }
 
-fn scale(n: String, e: &Value) -> String {
-    let unit: u64 = match e["subdenomination"].as_str().unwrap_or("") {
-        "seconds" | "wei" | "" => 1,
+/// A decimal or scientific literal (`0.25e18`, `1.5 ether`, `2e3`) as the exact `Nat` solc computes: the mantissa's
+/// digits times a power of ten, times the unit. Solidity rejects a literal whose value isn't an integer, so the only
+/// bail is for one too large to check in u128.
+fn decimal(raw: &str, e: &Value) -> R<String> {
+    let (m, x) = raw.split_once(['e', 'E']).unwrap_or((raw, "0"));
+    let x: i64 = x.parse().map_err(|_| "exponent")?;
+    let (int, frac) = m.split_once('.').unwrap_or((m, ""));
+    let mut digits = format!("{int}{frac}").trim_start_matches('0').to_string();
+    let mut k = x - frac.len() as i64;
+    while k < 0 && digits.ends_with('0') {
+        digits.pop();
+        k += 1;
+    }
+    if digits.is_empty() {
+        return Ok("0".into());
+    }
+    if k >= 0 {
+        return Ok(scale(if k == 0 { digits } else { format!("({digits} * 10 ^ {k})") }, e));
+    }
+    let d: u128 = digits.parse().map_err(|_| "literal too large")?;
+    let v = d.checked_mul(unit(e) as u128).ok_or("literal too large")?;
+    let p = 10u128.checked_pow((-k) as u32).ok_or("literal too large")?;
+    if v % p != 0 {
+        return bail("fractional literal");
+    }
+    Ok((v / p).to_string())
+}
+
+fn unit(e: &Value) -> u64 {
+    match e["subdenomination"].as_str().unwrap_or("") {
         "minutes" => 60,
         "hours" => 3600,
         "days" => 86400,
@@ -1055,7 +1078,11 @@ fn scale(n: String, e: &Value) -> String {
         "gwei" => 1_000_000_000,
         "ether" => 1_000_000_000_000_000_000,
         _ => 1,
-    };
+    }
+}
+
+fn scale(n: String, e: &Value) -> String {
+    let unit = unit(e);
     if unit == 1 { n } else { format!("({n} * {unit})") }
 }
 
@@ -2045,6 +2072,23 @@ impl<'g, 'a> Fx<'g, 'a> {
                 if c.len() == 1 { self.lpath(&c[0]) } else { bail("tuple path") }
             }
             "FunctionCall" => self.storage_return(e),
+            // `c ? book.bids : book.asks`: a location chosen once, here, as a getter and setter that pick the branch.
+            "Conditional" => {
+                let c = self.expr(&e["condition"])?;
+                let c = self.atom(c);
+                let a = self.lpath(&e["trueExpression"])?;
+                let b = self.lpath(&e["falseExpression"])?;
+                // An array index checks its bounds when the location is made, which only the chosen branch may do.
+                if [&a, &b].iter().any(|p| p.steps.iter().any(|st| matches!(st, Step::Arr(_)))) {
+                    return bail("conditional storage reference into an array");
+                }
+                let (ga, sa) = self.lens_args(&a)?;
+                let (gb, sb) = self.lens_args(&b)?;
+                let l = self.fresh("__ref");
+                self.line(format!("let {l}_get := if {c} then {ga} else {gb}"));
+                self.line(format!("let {l}_set := if {c} then {sa} else {sb}"));
+                Ok(Path { base: Base::Lens(l), steps: vec![] })
+            }
             other => bail(format!("can't write through {other}")),
         }
     }
@@ -2712,9 +2756,15 @@ impl<'g, 'a> Fx<'g, 'a> {
             if args[0]["nodeType"] == "Identifier" && args[0]["name"] == "this" {
                 return Ok("(← read).self".into());
             }
-            let a = self.expr(&args[0])?;
             let to = self.g.norm(&tstr(e));
             let from = self.g.norm(&tstr(&args[0]));
+            // Before 0.8, `uint(-1)` converts a negative literal: its two's complement, 2^bits - N.
+            if let (Some(n), Some(bits)) = (from.strip_prefix("int_const -").filter(|n| n.chars().all(|c| c.is_ascii_digit())), bits_of(&to)) {
+                if to.starts_with("uint") {
+                    return Ok(format!("(2 ^ {bits} - {n})"));
+                }
+            }
+            let a = self.expr(&args[0])?;
             let literal = from.starts_with("int_const") || from.starts_with("rational");
             if strip_location(&from) == "bytes" {
                 if let Some(n) = bytes_n(&to).or((to == "bytes32").then_some(32)) {
@@ -2785,6 +2835,25 @@ impl<'g, 'a> Fx<'g, 'a> {
             let t = self.fresh("__t");
             self.line(format!("let {t} ← ext.lowCall {addr} {value} {data}"));
             return Ok(t);
+        }
+        // `addr.transfer(v)` / `addr.send(v)`: the same low-level call with no data; transfer reverts when it fails,
+        // send returns whether it succeeded.
+        if callee["nodeType"] == "MemberAccess" && matches!(callee["memberName"].as_str(), Some("transfer" | "send")) && tstr(&callee["expression"]).starts_with("address") && args.len() == 1 {
+            let addr = self.expr(&callee["expression"])?;
+            let addr = self.atom(addr);
+            let value = self.expr(&args[0])?;
+            let value = self.atom(value);
+            self.g.ext.insert(
+                "lowCall : Nat → Nat → List Nat → M σ (Bool × List Nat)".into(),
+                "a low-level call (address, value, calldata) → (success, returndata); a failed call returns false and doesn't revert".into(),
+            );
+            let t = self.fresh("__t");
+            self.line(format!("let {t} ← ext.lowCall {addr} {value} []"));
+            if callee["memberName"] == "transfer" {
+                self.line(format!("if !{t}.1 then throw ⟨\"transfer\"⟩"));
+                return Ok("()".into());
+            }
+            return Ok(format!("{t}.1"));
         }
         if callee["nodeType"] == "MemberAccess" && matches!(callee["memberName"].as_str(), Some("wrap" | "unwrap")) && tstr(&callee["expression"]).starts_with("type(") {
             return self.expr(&args[0]);

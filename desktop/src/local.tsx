@@ -13,7 +13,7 @@ import { LocalHeading, TreeFolder } from "@/components/session-folder";
 import type { RepoSource } from "@/components/app-sidebar";
 import { FileTree, type Runnable } from "@/components/file-tree";
 import { SwarmPanel, type Bridge } from "./swarm-panel";
-import { DebugView } from "./debug";
+import { AgentDebugger, DebugView } from "./debug";
 
 /** Debug mode (the Debug tab, and run buttons on scripts and tests in the tree). Off for now: the audit comes first. */
 const DEBUG_ENABLED = false;
@@ -102,9 +102,25 @@ function runnablesIn(text: string, prefix: "run" | "test"): Runnable[] {
 	return out;
 }
 
+/** Whether a swarm session is running in the folder: asked once, then followed through its start and done events. */
+function useSwarmWorking(path: string): boolean {
+	const [runs, setRuns] = useState<string[]>([]);
+	useEffect(() => {
+		void invoke<string[]>("swarm_running", { folder: path }).then(setRuns, () => {});
+		const off = listen<{ folder: string; run: string; kind: string }>("swarm", ({ payload }) => {
+			if (payload.folder !== path) return;
+			if (payload.kind === "start") setRuns((r) => (r.includes(payload.run) ? r : [...r, payload.run]));
+			if (payload.kind === "done") setRuns((r) => r.filter((x) => x !== payload.run));
+		});
+		return () => void off.then((f) => f());
+	}, [path]);
+	return runs.length > 0;
+}
+
 /** A folder in the sidebar: selected, its file tree; a file opens in the canvas's file card. */
 function FolderItem({ path, current, file, archived, onArchive, onRemove }: { path: string; current: boolean; file: string | null; archived: boolean; onArchive: (on: boolean) => void; onRemove: () => void }) {
 	const tree = useTree(path, current);
+	const working = useSwarmWorking(path);
 	const navigate = useNavigate();
 	const results = useRunResults(path);
 	// A script asks where to run first (chain, Anvil fork); tests run straight away.
@@ -133,6 +149,7 @@ function FolderItem({ path, current, file, archived, onArchive, onRemove }: { pa
 			href={href(path)}
 			current={current}
 			dim={archived}
+			working={working}
 			menu={[
 				{ label: "Audit reports…", icon: FolderSearch, onSelect: () => setAudits(true) },
 				"separator",
@@ -239,5 +256,5 @@ export function LocalFolderPage() {
 		invoke<Scan>("folder_scan", { path }).then(setScan, (e) => setError(String(e)));
 	}, [path]);
 	if (error) return <p className="p-6 text-sm text-red-600">{error}</p>;
-	return path ? <SwarmPanel folder={path} name={name(path)} scan={scan} bridge={tauri} session={params.get("run")} file={params.get("file")} debug={DEBUG_ENABLED ? (file, test, onPick) => <DebugView folder={path} file={file} test={test} onPick={onPick} embedded /> : undefined} /> : null;
+	return path ? <SwarmPanel folder={path} name={name(path)} scan={scan} bridge={tauri} session={params.get("run")} file={params.get("file")} debug={DEBUG_ENABLED ? (file, test, onPick) => <DebugView folder={path} file={file} test={test} onPick={onPick} embedded /> : undefined} agentDebug={(p) => <AgentDebugger folder={path} {...p} />} /> : null;
 }

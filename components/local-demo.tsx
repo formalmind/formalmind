@@ -86,6 +86,11 @@ const EVENTS = [
 	ev("tool", "prover", "3", "read_file src/Lending.sol 380 460", 1.12),
 	ev("bug", "prover", "3", "Liquidation penalty can exceed the 10% cap when the oracle price moves mid-call — .formal/bugs/001-liquidation-penalty-can-exceed-cap.md", 1.61),
 	ev("status", "prover", "3", "prover is working", 1.84),
+	ev("ask", "assistant", "S-04", JSON.stringify({
+		statement: "S-04",
+		question: "**S-04**: is this what you meant?\n\n> Every function that writes `Lending.oracle` reverts unless the owner calls it.\n\nIt would be proved for 2 functions: `Lending.setOracle`, `Lending.initialize`.",
+		replies: ["Yes, that's what I meant.", "No: initialize may set it once, from the deployer.", "Also the guardian can swap it in an emergency."],
+	}), 1.86),
 ];
 
 /** A long made-up conversation, offered as its own session beside a real repository so the chat (and its scrubber) can be
@@ -104,8 +109,22 @@ const SAMPLE_EVENTS = (() => {
 })();
 
 const listeners = new Set<(e: { payload: unknown }) => void>();
+
+type DemoStatement = { id: string; mark: string; author: string; text: string; details: string[]; obligations: { mark: string; text: string }[] };
+/** The sample folder's statements (.formal/statements.md in the app): one proved, one partly done, one an agent proposed. */
+const STATEMENTS: DemoStatement[] = [
+	{ id: "S-01", mark: "x", author: "you", text: "Only the owner can change `Lending.penaltyCap`.", details: ["kind: access"], obligations: [{ mark: "x", text: "`Lending.setPenaltyCap` reverts unless the owner calls" }] },
+	{ id: "S-02", mark: "~", author: "you", text: "`Vault.totalSupply` always equals the sum of `balanceOf`.", details: ["kind: invariant"], obligations: [{ mark: "x", text: "`Vault.deposit` preserves it" }, { mark: "x", text: "`Vault.withdraw` preserves it" }, { mark: " ", text: "`Vault.transfer` preserves it" }] },
+	{ id: "S-03", mark: "?", author: "prover", text: "A liquidation never takes more than `penaltyCap` of the debt it repays.", details: ["why: the penalty bug in item 3 breaks it"], obligations: [] },
+	{ id: "S-04", mark: "?", author: "you", text: "Only the owner can swap the oracle.", details: ["kind: access · oracle · by the owner", "means: Every function that writes `Lending.oracle` reverts unless the owner calls it."], obligations: [{ mark: " ", text: "`Lending.setOracle` — Lending (src/Lending.sol): reverts unless the owner calls, before it writes oracle" }, { mark: " ", text: "`Lending.initialize` — Lending (src/Lending.sol): reverts unless the owner calls, before it writes oracle" }] },
+];
+
 /** The demo's bridge: a real repository's files and AST when `data` is there, the sample folder otherwise. */
-const makeDemo = (data: DemoData | null): Bridge => ({
+const makeDemo = (data: DemoData | null): Bridge => {
+	// Kept for the page's life, as the app keeps them in the folder.
+	const statements: DemoStatement[] = data ? [] : STATEMENTS.map((st) => ({ ...st }));
+	let next = statements.length + 1;
+	return {
 	apiBase: () => "",
 	listen: async (_event, cb) => {
 		listeners.add(cb as (e: { payload: unknown }) => void);
@@ -171,9 +190,34 @@ const makeDemo = (data: DemoData | null): Bridge => ({
 				for (const l of listeners) l({ payload: ev("say", "assistant", "you", `(demo) Noted: “${String(args?.text ?? "")}”. In the app the assistant answers before the next turn.`, 1.84) });
 			}, 900);
 		}
+		if (cmd === "swarm_add_statement") {
+			const text = String(args?.text ?? "").trim().replace(/\s+/g, " ");
+			if (!text) throw "the statement is empty";
+			const same = statements.find((st) => st.text.toLowerCase() === text.toLowerCase());
+			if (same) throw `already in the list as ${same.id}`;
+			const st = { id: `S-${String(next++).padStart(2, "0")}`, mark: " ", author: "you", text, details: [], obligations: [] };
+			statements.push(st);
+			return st as T;
+		}
+		if (["swarm_statement_mark", "swarm_remove_statement", "swarm_confirm_statement", "swarm_correct_statement"].includes(cmd)) {
+			const i = statements.findIndex((st) => st.id === args?.id);
+			if (i < 0) throw `no statement ${String(args?.id)}`;
+			const kept = (d: string) => d.startsWith("why: ") || d.startsWith("you said: ");
+			const said = String(args?.text ?? "").trim();
+			if (cmd === "swarm_remove_statement") statements.splice(i, 1);
+			else if (cmd === "swarm_confirm_statement") statements[i] = { ...statements[i], mark: " " };
+			// In the app the swarm formalizes it again; the demo leaves it open with your words under it.
+			else if (cmd === "swarm_correct_statement") statements[i] = { ...statements[i], mark: " ", details: [...statements[i].details.filter(kept), ...(said ? [`you said: ${said}`] : [])], obligations: [] };
+			else statements[i] = { ...statements[i], mark: String(args?.mark ?? " ") };
+			return statements.map((st) => ({ ...st })) as T;
+		}
+		if (cmd === "swarm_statements") return statements.map((st) => ({ ...st })) as T;
+		// Adding or confirming a statement starts a stopped swarm in the app; the demo's session is already there.
+		if (cmd === "swarm_start") return (sample ? RUN : SAMPLE_RUN) as T;
 		return answers[cmd] as T;
 	},
-});
+	};
+};
 
 const AST_UNITS = {
 	contract: "Vault",

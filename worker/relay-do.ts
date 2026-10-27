@@ -1,5 +1,5 @@
 import { DurableObject } from "cloudflare:workers";
-import type { RelayCommand, RelayCommandRow, RelayEvent, RelayPublish, RelayRead, RelayRow, RelayState } from "@/lib/relay";
+import type { RelayCommand, RelayCommandRow, RelayEvent, RelayPublish, RelayRead, RelayReply, RelayRow, RelayState } from "@/lib/relay";
 
 /** How long a read or the Mac's command poll waits for something new before answering empty. */
 const WAIT_MS = 25_000;
@@ -9,6 +9,10 @@ const KEEP_EVENTS = 4000;
 const FIRST_READ = 1500;
 /** A command the Mac hasn't picked up in this long is dropped: a Start shouldn't fire hours later. */
 const COMMAND_TTL_MS = 10 * 60_000;
+/** Replies to calls are kept this long, for a caller that comes back for one. */
+const REPLY_TTL_MS = 30 * 60_000;
+/** A reply's result is cut to this many characters of JSON. */
+const REPLY_MAX = 200_000;
 
 type Row = { seq: number; folder: string; run: string; kind: string; role: string; item: string; text: string; spent: number; at: number };
 
@@ -18,7 +22,7 @@ type Row = { seq: number; folder: string; run: string; kind: string; role: strin
  * answered as soon as something arrives.
  */
 export class RelayDO extends DurableObject {
-	private waiting = { client: new Set<() => void>(), mac: new Set<() => void>() };
+	private waiting = { client: new Set<() => void>(), mac: new Set<() => void>(), reply: new Set<() => void>() };
 
 	constructor(ctx: ConstructorParameters<typeof DurableObject>[0], env: unknown) {
 		super(ctx, env);
@@ -28,6 +32,7 @@ export class RelayDO extends DurableObject {
 		ctx.storage.sql.exec("CREATE INDEX IF NOT EXISTS events_session ON events (folder, run)");
 		ctx.storage.sql.exec("CREATE TABLE IF NOT EXISTS commands (seq INTEGER PRIMARY KEY AUTOINCREMENT, body TEXT NOT NULL, at INTEGER NOT NULL)");
 		ctx.storage.sql.exec("CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT NOT NULL)");
+		ctx.storage.sql.exec("CREATE TABLE IF NOT EXISTS replies (id TEXT PRIMARY KEY, body TEXT NOT NULL, at INTEGER NOT NULL)");
 	}
 
 	private meta(key: string): string | null {
@@ -38,7 +43,7 @@ export class RelayDO extends DurableObject {
 		this.ctx.storage.sql.exec("INSERT INTO meta (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value", key, value);
 	}
 
-	private wait(who: "client" | "mac") {
+	private wait(who: "client" | "mac" | "reply") {
 		return new Promise<void>((resolve) => {
 			const done = () => {
 				clearTimeout(timer);
@@ -50,7 +55,7 @@ export class RelayDO extends DurableObject {
 		});
 	}
 
-	private wake(who: "client" | "mac") {
+	private wake(who: "client" | "mac" | "reply") {
 		for (const done of [...this.waiting[who]]) done();
 	}
 
@@ -73,6 +78,15 @@ export class RelayDO extends DurableObject {
 			this.insert({ folder, run, kind: "history", role: "swarm", item: "", text: JSON.stringify(events.slice(-600)), spent: events.at(-1)?.spent ?? 0 }, now);
 		}
 		for (const e of body.events ?? []) this.insert(e, now);
+		for (const r of body.replies ?? []) {
+			let json = JSON.stringify({ id: String(r.id), ok: Boolean(r.ok), ...(r.ok ? { result: r.result } : { error: String(r.error ?? "") }) });
+			if (json.length > REPLY_MAX) json = JSON.stringify({ id: String(r.id), ok: r.ok, result: json.slice(0, REPLY_MAX), truncated: true });
+			this.ctx.storage.sql.exec("INSERT OR REPLACE INTO replies (id, body, at) VALUES (?, ?, ?)", String(r.id), json, now);
+		}
+		if (body.replies?.length) {
+			this.ctx.storage.sql.exec("DELETE FROM replies WHERE at < ?", now - REPLY_TTL_MS);
+			this.wake("reply");
+		}
 		this.ctx.storage.sql.exec("DELETE FROM events WHERE seq <= (SELECT MAX(seq) FROM events) - ?", KEEP_EVENTS);
 		this.wake("client");
 	}
@@ -103,6 +117,24 @@ export class RelayDO extends DurableObject {
 			state: state ? (JSON.parse(state) as RelayState) : null,
 			macSeenAt: Number(this.meta("mac_seen_at")) || null,
 		};
+	}
+
+	private findReply(id: string): RelayReply | null {
+		const row = this.ctx.storage.sql.exec<{ body: string }>("SELECT body FROM replies WHERE id = ?", id).toArray()[0];
+		return row ? (JSON.parse(row.body) as RelayReply) : null;
+	}
+
+	/** For a client: the Mac's reply to the call with this id, waiting for it when it hasn't come yet. */
+	async reply(id: string, wait: boolean): Promise<RelayReply | null> {
+		const found = this.findReply(id);
+		if (found || !wait) return found;
+		const until = Date.now() + WAIT_MS;
+		while (Date.now() < until) {
+			await this.wait("reply");
+			const r = this.findReply(id);
+			if (r) return r;
+		}
+		return null;
 	}
 
 	/** From a client: a command for the Mac. */

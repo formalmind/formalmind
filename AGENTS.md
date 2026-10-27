@@ -14,6 +14,12 @@ one-item-per-function loop working the same, and keep the skills (`worker/skills
 Proofs tab (`crates/formal-ast-wasm`, with solc-js in a Web Worker: `lib/ast/`). The wasm build is committed in
 `lib/formal-ast-wasm`: after changing either crate, run `bun run build:ast-wasm` and commit what it writes.
 
+## The docs
+
+The guide at docs.formal.team (and formal.team/docs) is Markdown in `content/docs/`, one file per page, in the order
+`content/docs/pages.ts` gives. The site renders it (`components/docs/`) and the Worker serves each page as Markdown to
+agents (`worker/docs.ts`). When a change alters what users see or do, update the page that describes it.
+
 ## Pushing to main ships
 
 `.githooks/pre-push` runs `scripts/release.sh` on every push to `main` (`bun install` turns the hook on). It:

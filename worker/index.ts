@@ -3,6 +3,7 @@ import { auth, handleAuth, type Principal } from "@/lib/auth";
 import { issuer, type Scope } from "@/lib/oauth";
 import { requestContext, type Env } from "./context";
 import { DISCOVERY_LINK_HEADER, handleDiscovery } from "./discovery";
+import { handleDocs } from "./docs";
 import { handleOAuth } from "./oauth";
 import { CONTENT_SIGNAL, isPagePath, markdownResponse, prefersMarkdown } from "./markdown";
 
@@ -139,6 +140,9 @@ app.use("/api/*", async (c, next) => {
 // servers at /mcp and /mcp/account must never fall through to the SPA's index.html. A page requested with Accept: text/markdown gets a
 // markdown rendering instead of the app shell (worker/markdown.ts). Both run before the API and the assets.
 app.use("*", async (c, next) => {
+	// The guide (docs.formal.team and formal.team/docs) as Markdown for agents, before the main site's discovery files.
+	const docs = handleDocs(c.req.raw, prefersMarkdown(c.req.header("accept") ?? null));
+	if (docs) return docs;
 	const discovery = await handleDiscovery(c.req.raw);
 	if (discovery) return discovery;
 	if (isPagePath(new URL(c.req.url).pathname) && prefersMarkdown(c.req.header("accept") ?? null)) {

@@ -37,6 +37,8 @@ contract Vault is Base, IVault {
     }
 
     uint256 public constant FEE = 3;
+    uint256 public constant MAX_FEE = 0.25e18;
+    uint256 public constant CAP = 1.5 ether;
     uint256 public override total;
     mapping(address => Account) internal accounts;
     uint256[] internal history;
@@ -57,6 +59,11 @@ contract Vault is Base, IVault {
         _credit(acc, shares);
         total += assets;
         history.push(assets);
+    }
+
+    function clearDebt(bool mine) external {
+        Account storage acc = mine ? accounts[msg.sender] : accounts[owner];
+        acc.debt = 0;
     }
 
     function _credit(Account storage acc, uint256 shares) internal {
@@ -85,5 +92,9 @@ contract Vault is Base, IVault {
 
     function setOwner(address next) external onlyOwner {
         owner = next;
+    }
+
+    function limits() external pure returns (uint256, uint256) {
+        return (MAX_FEE, CAP);
     }
 }

@@ -1,4 +1,4 @@
-![Formal Mind 0.1.41 on asyncswap/contracts: the Swarm canvas with the plan (158/192 items), the agents in their role colours, the ledger and context notebooks, and the main session's chat](docs/images/formal-mind-0.1.41-swarm.webp)
+![Formal Mind 0.1.41: Home, with local folders and imported GitHub repositories in the sidebar, and Add a project](docs/images/formal-mind-0.1.41-home.png)
 
 # Formal Mind
 
@@ -96,7 +96,7 @@ built yet is labelled planned.
 | `/.well-known/api-catalog` | RFC 9727 linkset: the two MCP servers, the open `POST /api/onboarding/plan`, and the token-capable account routes |
 | `/.well-known/agent-skills/index.json` | Four skills with sha256 digests: `run-the-local-swarm`, `onboard-a-repository`, `read-formal-mind-results` and `connect-formal-mind-as-mcp` |
 | `/.well-known/mcp/server-card.json`, `/mcp` | Read-only MCP server (Streamable HTTP, no auth): `get_audit_format`, `get_example_audit` (Formal Mind's audit of asyncswap/contracts), `get_app_release` |
-| `/mcp/account` | Account MCP server behind an OAuth access token (`worker/account-mcp.ts`): `my_projects`, `my_usage`, `my_credits`, `swarm_state` (swarm:read), `plan_repository`, `start_swarm` (swarm:write); 401 with `WWW-Authenticate: Bearer resource_metadata=…` without one |
+| `/mcp/account` | Account MCP server behind an OAuth access token or the desktop app's token (`worker/account-mcp.ts`, [docs/MCP.md](docs/MCP.md)): `my_projects`, `my_usage`, `my_credits`, `swarm_state`, `list_files`, `read_file`, `list_audits`, `list_findings`, `get_finding`, `proofs_coverage`, `report_quote`, `mac_swarm`, `mac_swarm_events` (swarm:read), `add_project`, `plan_repository`, `start_swarm`, `mac_swarm_send` (swarm:write); 401 with `WWW-Authenticate: Bearer resource_metadata=…` without one |
 | `/.well-known/oauth-authorization-server`, `/oauth/register`, `/oauth/authorize`, `/oauth/token`, `/oauth/revoke`, `/.well-known/jwks.json` | The OAuth 2.0 authorization server (`worker/oauth.ts`, `lib/oauth.ts`): RFC 8414 metadata, RFC 7591 registration of public clients, authorization code with PKCE after GitHub sign-in and a consent page, ES256 JWT access tokens (1 h) with rotated refresh tokens, RFC 7009 revocation |
 | `/.well-known/oauth-protected-resource`, `…/mcp/account` | RFC 9728 metadata for the API and for the account MCP server, both naming `https://formal.team` as the authorization server |
 | `/.well-known/poppy.json`, `/.well-known/ai-catalog.json` | Personal Agent Protocol (website-only) and the AI catalog of the artifacts above |

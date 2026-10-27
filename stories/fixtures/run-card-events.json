@@ -1,0 +1,200 @@
+[
+ {
+  "run": "swarm",
+  "kind": "tool",
+  "role": "prover",
+  "item": "1",
+  "text": "run lake env lean formal/Scratch.lean",
+  "spent": 19.8341924,
+  "at": 1793017252744
+ },
+ {
+  "run": "swarm",
+  "kind": "result",
+  "role": "prover",
+  "item": "1",
+  "text": "exit 1\n/Users/meek/developer/morpho-blue/formal/Scratch.lean:14:19: error: maximum recursion depth has been reached\nuse `set_option maxRecDepth <num>` to increase limit\nuse `set_option diagnostics true` to get diagnostic information\n/Users/meek/developer/morpho-blue/formal/Scratch.lean:9:8: error: (kernel) deterministic timeout\n/Users/meek/developer/morpho-blue/formal/Scratch.lean:21:19: error: maximum recursion depth has been reached\nuse `set_option maxRecDepth <num>` to increase limit\nuse `set",
+  "spent": 19.8341924,
+  "at": 1793017512806
+ },
+ {
+  "run": "swarm",
+  "kind": "say",
+  "role": "prover",
+  "item": "1",
+  "text": "Resuming: supply, withdraw, borrow, flashLoan, accrueInterest and setFee are already proven; I'm reading the generated `repay`/`liquidate` defs so I can finish those two.",
+  "spent": 19.929018799999998,
+  "at": 1793017548529
+ },
+ {
+  "run": "swarm",
+  "kind": "tool",
+  "role": "prover",
+  "item": "1",
+  "text": "write_file formal/Scratch.lean",
+  "spent": 19.929018799999998,
+  "at": 1793017549529
+ },
+ {
+  "run": "swarm",
+  "kind": "result",
+  "role": "prover",
+  "item": "1",
+  "text": "wrote formal/Scratch.lean\n```diff\n--- a/formal/Scratch.lean\n+++ b/formal/Scratch.lean\n@@ -0,0 +1,24 @@\n+import Refinement.ConservationM1\n+namespace MorphoProofs\n+open FormalAst Morpho\n+variable {\u03c3 : Type} {ext : Ext \u03c3} {L : Ledger \u03c3}\n+\n+def prog1 (ext : Ext \u03c3) (id : Nat) (assets : Nat) : M \u03c3 Unit := do\n+  let __t9 \u2190 UtilsLib.zeroFloorSub ext ((((ext.get (\u2190 get)).market id)).totalBorrowAssets) assets\n+  let __t10 \u2190 UtilsLib.toUint128 ext __t9\n+  modify fun w => ext.set w (let s := ext.get w; { s with market := upd (s.market) id ({ ((s.market id)) with totalBorrowAssets := __t10 }) })\n+\n+theorem p1 (H : Hyp ext L) (id assets : Nat) (w : \u03c3) e :\n+    wp (prog1 ext id assets) (fun _ w' => \u2200 t, L.J ext w t \u2264 L.J ext w' t \u2228 True) e w := by\n+  unfold prog1\n+  simp only [wp_zfs_eq, wp_bind, wp_get, wp_modify, wp_pure, wp_toUint128, H.get_set, upd_same]\n+  intro _ t\n+  exact Or.inr trivial\n+\n+theorem p2 (H : Hyp ext L) (id assets : Nat) (w : \u03c3) e :\n+    wp (prog1 ext id assets) (fun _ w' => \u2200 t, L.J ext w t \u2264 L.J ext w' t \u2228 True) e w := by\n+  unfold prog1\n+  simp only [wp_bind, wp_get, wp_modify, wp_pure, wp_toUint128, H.get_set, upd_same]\n+  intro _ t\n+  exact Or.inr trivial\n+\n```",
+  "spent": 19.929018799999998,
+  "at": 1793017549531
+ },
+ {
+  "run": "swarm",
+  "kind": "tool",
+  "role": "prover",
+  "item": "1",
+  "text": "run lake env lean formal/Scratch.lean",
+  "spent": 19.929018799999998,
+  "at": 1793017549531
+ },
+ {
+  "run": "swarm",
+  "kind": "result",
+  "role": "prover",
+  "item": "1",
+  "text": "exit 0\ndef Morpho.UtilsLib.zeroFloorSub : {\u03c3 : Type} \u2192 Morpho.Ext \u03c3 \u2192 \u2115 \u2192 \u2115 \u2192 M \u03c3 \u2115 :=\nfun {\u03c3} ext x y =>\n  have z := default;\n  have z := ymul (ygt x y) (ysub x y);\n  pure z\n",
+  "spent": 19.929018799999998,
+  "at": 1793017556192
+ },
+ {
+  "run": "swarm",
+  "kind": "say",
+  "role": "prover",
+  "item": "1",
+  "text": "Still on `repay`: checking the goals after the first steps (the kernel hit deep recursion).",
+  "spent": 20.015190399999998,
+  "at": 1793017567326
+ },
+ {
+  "run": "swarm",
+  "kind": "tool",
+  "role": "prover",
+  "item": "1",
+  "text": "write_file formal/Scratch.lean",
+  "spent": 20.015190399999998,
+  "at": 1793017568326
+ },
+ {
+  "run": "swarm",
+  "kind": "result",
+  "role": "prover",
+  "item": "1",
+  "text": "wrote formal/Scratch.lean",
+  "spent": 20.015190399999998,
+  "at": 1793017568328
+ },
+ {
+  "run": "swarm",
+  "kind": "tool",
+  "role": "prover",
+  "item": "1",
+  "text": "run lake env lean formal/Scratch.lean",
+  "spent": 20.015190399999998,
+  "at": 1793017568328
+ },
+ {
+  "run": "swarm",
+  "kind": "result",
+  "role": "prover",
+  "item": "1",
+  "text": "exit 1\n/Users/meek/developer/morpho-blue/formal/Scratch.lean:6:8: warning: declaration uses `sorry`\n/Users/meek/developer/morpho-blue/formal/Scratch.lean:6:8: error: (kernel) deterministic timeout\n/Users/meek/developer/morpho-blue/formal/Scratch.lean:14:8: warning: declaration uses `sorry`\n/Users/meek/developer/morpho-blue/formal/Scratch.lean:14:8: error: (kernel) deterministic timeout\n",
+  "spent": 20.015190399999998,
+  "at": 1793017828234
+ },
+ {
+  "run": "swarm",
+  "kind": "tool",
+  "role": "prover",
+  "item": "1",
+  "text": "write_file formal/Scratch.lean",
+  "spent": 20.1195724,
+  "at": 1793017855175
+ },
+ {
+  "run": "swarm",
+  "kind": "result",
+  "role": "prover",
+  "item": "1",
+  "text": "wrote formal/Scratch.lean",
+  "spent": 20.1195724,
+  "at": 1793017855178
+ },
+ {
+  "run": "swarm",
+  "kind": "tool",
+  "role": "prover",
+  "item": "1",
+  "text": "run lake env lean formal/Scratch.lean",
+  "spent": 20.1195724,
+  "at": 1793017855179
+ },
+ {
+  "run": "swarm",
+  "kind": "result",
+  "role": "prover",
+  "item": "1",
+  "text": "exit 1\n/Users/meek/developer/morpho-blue/formal/Scratch.lean:7:8: error: (kernel) deep recursion detected, use `set_option maxRecDepth <num>` to increase the limit\n/Users/meek/developer/morpho-blue/formal/Scratch.lean:26:8: error: (kernel) deep recursion detected, use `set_option maxRecDepth <num>` to increase the limit\n",
+  "spent": 20.1195724,
+  "at": 1793018200460
+ },
+ {
+  "run": "swarm",
+  "kind": "tool",
+  "role": "prover",
+  "item": "1",
+  "text": "write_file formal/Scratch.lean",
+  "spent": 21.5937004,
+  "at": 1793018215269
+ },
+ {
+  "run": "swarm",
+  "kind": "result",
+  "role": "prover",
+  "item": "1",
+  "text": "wrote formal/Scratch.lean",
+  "spent": 21.5937004,
+  "at": 1793018215270
+ },
+ {
+  "run": "swarm",
+  "kind": "tool",
+  "role": "prover",
+  "item": "1",
+  "text": "run lake env lean formal/Scratch.lean",
+  "spent": 21.5937004,
+  "at": 1793018215270
+ },
+ {
+  "run": "swarm",
+  "kind": "result",
+  "role": "prover",
+  "item": "1",
+  "text": "exit 0\n",
+  "spent": 21.5937004,
+  "at": 1793018340072
+ },
+ {
+  "run": "swarm",
+  "kind": "tool",
+  "role": "prover",
+  "item": "1",
+  "text": "write_file formal/Scratch.lean",
+  "spent": 21.6906986,
+  "at": 1793018364101
+ },
+ {
+  "run": "swarm",
+  "kind": "result",
+  "role": "prover",
+  "item": "1",
+  "text": "wrote formal/Scratch.lean",
+  "spent": 21.6906986,
+  "at": 1793018365152
+ }
+]

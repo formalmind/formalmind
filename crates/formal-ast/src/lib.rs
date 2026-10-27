@@ -4,6 +4,7 @@
 //! the entry contract can reach) → [`scope::Unit`]s and clusters (how to split the work) → [`slice::render`] (what an
 //! agent reads). See desktop/AUDIT-ENGINE.md.
 
+pub mod foundry;
 pub mod fs;
 pub mod graph;
 pub mod lean;

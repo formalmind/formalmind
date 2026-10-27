@@ -4,9 +4,12 @@
 //! mode over the sol-debug engine (debug.rs).
 
 mod anvil;
+mod analysis;
 mod ast;
+mod claude_code;
 mod debug;
 mod executor;
+mod file_search;
 mod swarm;
 mod swarm_ctx;
 mod local;
@@ -14,8 +17,10 @@ mod lsp;
 mod lean_lsp;
 mod openai;
 mod platform;
+mod reach;
 mod report;
 mod semantics;
+mod statements;
 mod term;
 
 use keyring::Entry;
@@ -144,6 +149,8 @@ pub fn run() {
                     model: env("FM_SWARM_MODEL"),
                     session: env("FM_SWARM_SESSION"),
                     only_queued: env("FM_SWARM_ONLY_QUEUED").map(|v| v == "1"),
+                    // A bug search (the hunter alone); set but empty means the whole codebase.
+                    hunt: std::env::var("FM_SWARM_HUNT").ok(),
                 };
                 if let Err(e) = swarm::swarm_start(app.handle().clone(), app.state::<swarm::Swarms>(), request) {
                     eprintln!("FM_SWARM_AUTOSTART: {e}");
@@ -160,11 +167,15 @@ pub fn run() {
             local::folder_add,
             local::folder_remove,
             local::folder_scan,
+            local::folder_git_graph,
             local::folder_tree,
             local::repo_local,
             local::folder_repo,
             local::machine_name,
             ast::ast_units,
+            reach::reach_map,
+            reach::reach_run,
+            reach::reach_tasks,
             ast::ast_slice,
             ast::ast_formal,
             ast::ast_scripts,
@@ -197,10 +208,18 @@ pub fn run() {
             swarm::swarm_stop,
             swarm::swarm_say,
             swarm::swarm_triage,
+            swarm::swarm_hunt,
+            claude_code::claude_code_status,
             swarm::swarm_running,
             swarm::swarm_suggest,
             swarm::swarm_plan,
             swarm::swarm_bugs,
+            statements::swarm_statements,
+            statements::swarm_add_statement,
+            statements::swarm_statement_mark,
+            statements::swarm_remove_statement,
+            statements::swarm_confirm_statement,
+            statements::swarm_correct_statement,
             swarm::anthropic_key_set,
             swarm::anthropic_key_status,
             swarm::openai_key_set,

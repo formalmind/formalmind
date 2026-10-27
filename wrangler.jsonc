@@ -17,7 +17,13 @@
 	},
 	// The production domain. workers.dev and preview URLs stay on as well (wrangler turns them off
 	// once a route exists unless they are set explicitly).
-	"routes": [{ "pattern": "formal.team", "custom_domain": true }],
+	"routes": [
+		{ "pattern": "formal.team", "custom_domain": true },
+		// The guide (content/docs/): the same Worker and build, the docs at the root (worker/docs.ts, components/docs/).
+		{ "pattern": "docs.formal.team", "custom_domain": true }
+	],
+	// The guide's pages are imported as text (worker/docs.ts).
+	"rules": [{ "type": "Text", "globs": ["**/*.md"], "fallthrough": true }],
 	"workers_dev": true,
 	"preview_urls": true,
 	// The "Formal Mind" OAuth App people sign in with (public); its secret is GITHUB_CLIENT_SECRET.

@@ -49,6 +49,7 @@ export function makeGitBridge(repo: string): Bridge {
 					return bugs as T;
 				}
 				case "swarm_plan":
+				case "swarm_statements":
 				case "swarm_running":
 				case "swarm_sessions":
 				case "swarm_history":
