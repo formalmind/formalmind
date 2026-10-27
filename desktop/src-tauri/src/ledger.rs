@@ -275,28 +275,28 @@ pub async fn build(root: &Path, check: bool, force: bool) -> Result<Value, Strin
                 })
             })
             .collect();
-        if rows.is_empty() {
-            reasons.push("no theorem names its def".into());
-        }
-        if rows.iter().any(|r| r["built"] == false) {
-            reasons.push("a theorem is in a module Lake doesn't build".into());
+        // Only theorems in modules Lake builds count, for and against: a scratch file outside the build neither proves
+        // a function nor blocks one.
+        let counted: Vec<&Value> = rows.iter().filter(|r| r["built"] == true).collect();
+        if counted.is_empty() {
+            reasons.push(if rows.is_empty() { "no theorem names its def".into() } else { "no theorem naming its def is in a module Lake builds".to_string() });
         }
         if !checked_now {
             reasons.push("not checked against the current sources yet".into());
-        } else if rows.iter().any(|r| r["checked"] != true) {
+        } else if counted.iter().any(|r| r["checked"] != true) {
             reasons.push("Lean doesn't check every theorem".into());
         }
-        if rows.iter().any(|r| r["sorry"] == true) {
+        if counted.iter().any(|r| r["sorry"] == true) {
             reasons.push("a theorem depends on sorry".into());
         }
-        if rows.iter().any(|r| r["extraAxioms"].as_array().is_some_and(|a| a.iter().any(|x| x != "sorryAx"))) {
+        if counted.iter().any(|r| r["extraAxioms"].as_array().is_some_and(|a| a.iter().any(|x| x != "sorryAx"))) {
             reasons.push("a theorem rests on an axiom beyond Lean's own".into());
         }
-        if checked_now && !rows.is_empty() && !rows.iter().any(|r| r["namesDef"] == true) {
+        if checked_now && !counted.is_empty() && !counted.iter().any(|r| r["namesDef"] == true) {
             reasons.push(format!("no checked theorem's statement mentions `{}`", f.lean));
         }
         // The reviewer's approval, for this def and these theorems as they are now.
-        let texts: BTreeMap<String, String> = theorems.iter().map(|(t, _)| (t.qualified.clone(), hash(&t.text))).collect();
+        let texts: BTreeMap<String, String> = theorems.iter().filter(|(_, m)| m.is_some()).map(|(t, _)| (t.qualified.clone(), hash(&t.text))).collect();
         let review = ledger["reviews"][&f.lean].clone();
         let approved_for_now = review["verdict"] == "approve" && review["defHash"] == json!(def_hash) && serde_json::from_value::<BTreeMap<String, String>>(review["theorems"].clone()).ok().as_ref() == Some(&texts);
         // Proved before the ledger: ticked in the plan with what proved it recorded.
@@ -345,6 +345,7 @@ pub fn approve(root: &Path, item_text: &str, notes: &str) {
     let ctx = crate::swarm_ctx::context_with(root, false);
     let Some(f) = ctx.contracts.iter().flat_map(|c| c.functions.iter()).find(|f| f.lean == def) else { return };
     let all = formal_ast::theorems(root);
+    let (src, libs) = (crate::swarm_ctx::lean_src(root), lean_libs(root));
     let theorems: BTreeMap<String, String> = f
         .theorems
         .iter()
@@ -354,6 +355,7 @@ pub fn approve(root: &Path, item_text: &str, notes: &str) {
             let line: usize = line.parse().ok()?;
             all.iter().find(|x| x.file == file && x.line == line)
         })
+        .filter(|t| src.as_deref().and_then(|s| module_of(s, root, &t.file, &libs)).is_some())
         .map(|t| (t.qualified.clone(), hash(&t.text)))
         .collect();
     let mut ledger = load(root);
@@ -409,7 +411,7 @@ mod probe {
         }
         let l = super::build(&root, true, std::env::var("FORCE").is_ok()).await.unwrap();
         println!("PROVED {} of {} | checked {}", l["proved"], l["functions"], l["checked"]);
-        for e in l["entries"].as_array().unwrap().iter().filter(|e| e["status"] != "unproved").take(12) {
+        for e in l["entries"].as_array().unwrap().iter().filter(|e| e["status"] != "unproved").take(40) {
             println!("ENTRY {} [{}] review={} notYet={}", e["lean"], e["status"], e["review"]["state"], e["notYet"]);
         }
     }

@@ -1,3 +1,4 @@
+import { invoke } from "@tauri-apps/api/core";
 import { useEffect } from "react";
 import { relaunch } from "@tauri-apps/plugin-process";
 import { check, type Update } from "@tauri-apps/plugin-updater";
@@ -36,8 +37,10 @@ export function UpdateNotice() {
 			try {
 				await found.downloadAndInstall();
 				await relaunch();
-			} catch {
-				addNotification({ id: ID, variant: "error", title: "The update didn't install", description: "Try again in a bit.", action: { label: "Retry", event: INSTALL } });
+			} catch (e) {
+				// Kept in the app's errors.log, and said in the notice, so a failed update says why.
+				void invoke("log_error", { source: "update", message: `${found.version}: ${String(e)}` }).catch(() => {});
+				addNotification({ id: ID, variant: "error", title: "The update didn't install", description: `${String(e).slice(0, 160)}. Try again, or download it from formal.team.`, action: { label: "Retry", event: INSTALL } });
 			}
 		};
 		look();
