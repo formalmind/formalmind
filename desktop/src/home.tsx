@@ -2,9 +2,10 @@ import { useNavigate } from "react-router";
 import { Folder } from "lucide-react";
 import { AddProjectCard } from "@/components/add-project";
 import { HomeEmpty } from "@/components/home-empty";
-import { useFolders } from "./local";
+import { recentFolders, useFolders } from "./local";
 
-/** The Mac app's home: add a project (a folder here or a GitHub repository), or reopen a folder already added. */
+/** The Mac app's home: add a project (a folder here or a GitHub repository), or reopen one of the three folders opened
+ * most recently (the sidebar lists them all). */
 export function DesktopHome() {
 	const { folders, add } = useFolders();
 	const navigate = useNavigate();
@@ -15,7 +16,7 @@ export function DesktopHome() {
 				<AddProjectCard onLocal={() => add().then((p) => p && open(p))} />
 				{folders.length ? (
 					<ul className="mt-4 space-y-1 text-left">
-						{folders.map((f) => (
+						{recentFolders(folders, 3).map((f) => (
 							<li key={f}>
 								<button type="button" onClick={() => open(f)} className="flex w-full items-center gap-2.5 rounded-lg border bg-card px-3 py-2 text-left hover:bg-muted">
 									<Folder className="size-4 shrink-0 text-muted-foreground" />

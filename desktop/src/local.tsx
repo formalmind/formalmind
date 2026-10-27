@@ -199,6 +199,25 @@ function FolderItem({ path, current, file, archived, onArchive, onRemove }: { pa
 	);
 }
 
+const RECENT = "fm:recent";
+
+/** The folders opened most recently, newest first (from this Mac's opens; folders never opened follow, newest added first). */
+export function recentFolders(folders: string[], n: number): string[] {
+	let seen: string[] = [];
+	try {
+		seen = JSON.parse(localStorage.getItem(RECENT) ?? "[]") as string[];
+	} catch {}
+	const opened = seen.filter((p) => folders.includes(p));
+	return [...opened, ...folders.slice().reverse().filter((p) => !opened.includes(p))].slice(0, n);
+}
+
+function touchRecent(path: string) {
+	try {
+		const seen = JSON.parse(localStorage.getItem(RECENT) ?? "[]") as string[];
+		localStorage.setItem(RECENT, JSON.stringify([path, ...seen.filter((p) => p !== path)].slice(0, 20)));
+	} catch {}
+}
+
 export function LocalFolders() {
 	const { folders, add, remove } = useFolders();
 	const { archived, setArchived } = useArchived();
@@ -207,6 +226,9 @@ export function LocalFolders() {
 	const location = useLocation();
 	const [params] = useSearchParams();
 	const current = location.pathname === "/local" ? params.get("path") : null;
+	useEffect(() => {
+		if (current) touchRecent(current);
+	}, [current]);
 	return (
 		<SidebarGroup>
 			<LocalHeading onAdd={() => void add()} />
