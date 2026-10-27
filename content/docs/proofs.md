@@ -26,6 +26,9 @@ The Lean model is generated from the compiler's syntax tree, one file per contra
 to another contract is an opaque step that returns whatever that contract returns, so a proof that relies on what a
 token or an oracle does says so in its assumptions.
 
+Code written for Solidity before 0.8, where arithmetic wraps instead of reverting on overflow, is modelled that way:
+the model's arithmetic follows the compiler the code was written for.
+
 Proofs are about those generated definitions, never a hand-written copy of the code. A function counts as proved
 only when a theorem names its definition, fully qualified.
 
