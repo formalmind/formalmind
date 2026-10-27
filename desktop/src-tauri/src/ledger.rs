@@ -521,6 +521,9 @@ mod probe {
         }
         let l = super::build(&root, true, std::env::var("FORCE").is_ok()).await.unwrap();
         println!("PROVED {} of {} | checked {}", l["proved"], l["functions"], l["checked"]);
+        for e in l["entries"].as_array().unwrap().iter().filter(|e| e["status"] == "not_modeled") {
+            println!("NOT_MODELED {}.{} | {}", e["contract"].as_str().unwrap_or(""), e["function"].as_str().unwrap_or(""), e["why"].as_str().unwrap_or(""));
+        }
         for e in l["entries"].as_array().unwrap().iter().filter(|e| e["status"] != "unproved").take(40) {
             println!("ENTRY {} [{}] review={} notYet={}", e["lean"], e["status"], e["review"]["state"], e["notYet"]);
         }
