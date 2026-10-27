@@ -38,6 +38,12 @@ pub fn hash(text: &str) -> String {
     format!("{h:016x}")
 }
 
+/// A statement's proof (`Proofs/Statements/S01/…`): it is the statement's record (`.formal/statements.md`), not one
+/// of the function's own theorems, so a new statement proof doesn't change, or lapse, a function's approval.
+fn statement_proof(file: &str) -> bool {
+    file.replace('\\', "/").split('/').any(|p| p == "Statements")
+}
+
 /// The libraries the Lake project builds (`[[lean_lib]] name = …` in lakefile.toml, `lean_lib X` in lakefile.lean).
 fn lean_libs(root: &Path) -> BTreeSet<String> {
     let Some(lake) = crate::swarm_ctx::lake_dir(root) else { return BTreeSet::new() };
@@ -282,6 +288,7 @@ pub async fn build(root: &Path, check: bool, force: bool) -> Result<Value, Strin
                     let (file, line) = place.rsplit_once(':')?;
                     by_place.get(&(file.to_string(), line.parse().ok()?)).copied()
                 })
+                .filter(|t| !statement_proof(&t.file))
                 .map(|t| (t, src.as_deref().and_then(|s| module_of(s, root, &t.file, &libs))))
                 .collect();
             for (t, m) in &theorems {
@@ -385,6 +392,17 @@ pub async fn build(root: &Path, check: bool, force: bool) -> Result<Value, Strin
         }
         // What the checked, built theorems cover together; fully proved needs reverts, writes and returns.
         let mut covered: Vec<String> = counted.iter().filter(|r| r["checked"] == true).flat_map(|r| r["covers"].as_array().cloned().unwrap_or_default()).filter_map(|c| c.as_str().map(String::from)).collect();
+        // A def with no way to revert (no `throw` in the model) or to write storage has nothing to show there: a proof of
+        // what it returns covers the function.
+        let def_text = f.def.as_deref().unwrap_or("");
+        if !def_text.is_empty() && covered.iter().any(|c| c == "returns") {
+            if !def_text.contains("throw") {
+                covered.push("reverts".into());
+            }
+            if !["set", "modify"].iter().any(|w| def_text.contains(w)) {
+                covered.push("writes".into());
+            }
+        }
         covered.sort();
         covered.dedup();
         let missing: Vec<&str> = FULL.iter().copied().filter(|c| !covered.iter().any(|x| x == c)).collect();
@@ -435,6 +453,7 @@ pub fn approve(root: &Path, item_text: &str, notes: &str) {
             let line: usize = line.parse().ok()?;
             all.iter().find(|x| x.file == file && x.line == line)
         })
+        .filter(|t| !statement_proof(&t.file))
         .filter(|t| src.as_deref().and_then(|s| module_of(s, root, &t.file, &libs)).is_some())
         .map(|t| (t.qualified.clone(), hash(&t.text)))
         .collect();
