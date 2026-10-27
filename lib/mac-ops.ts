@@ -46,6 +46,7 @@ export const MAC_OPS = {
 	remove_statement: { write: true, args: "id", about: "remove a statement" },
 	triage: { write: true, args: "path", about: "queue an audit report (a file in the folder) for the swarm's auditor" },
 	reach_run: { write: true, args: "tool, target?", about: "run one Bug Hunter tool (coverage, explore) from Reach" },
+	github: { write: true, args: "on", about: "turn the folder's Report to GitHub on or off: off (the default) keeps everything local; on lets Formal Mind's GitHub App comment on the repository's pull requests with what the ledger says changed" },
 	report: { write: true, args: "dirs?", about: "generate Formal Mind's report ($150 from credits, once per repository and commit)" },
 	refresh_model: { write: true, args: "", about: "rewrite each generated model formal-ast now translates more of, so a def a proof needs exists in the file Lake builds" },
 	check_proof: { write: true, args: "path, content?", about: "write a .lean proof under the Lake sources' Refinement/ (when content is given) and check it as the swarm does: no sorry/admit/axiom/native_decide, lake build, which functions it proves" },

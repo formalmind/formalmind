@@ -35,6 +35,10 @@ pub struct Settings {
     /// Each folder's spending cap in USD, by path.
     #[serde(default)]
     pub budgets: std::collections::BTreeMap<String, f64>,
+    /// Each folder's "Report to GitHub", by path: off (the default) keeps everything local; on lets Formal Mind's GitHub
+    /// App comment on that repository's pull requests with what the ledger says changed.
+    #[serde(default)]
+    pub github: std::collections::BTreeMap<String, bool>,
     /// Settings → Phone: the relay through formal.team (the phone and the MCP). On unless turned off.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub relay: Option<bool>,
@@ -59,6 +63,11 @@ impl Settings {
     /// The effort to pass to Claude Code, when one was picked.
     pub fn effort(&self) -> Option<String> {
         self.effort.clone().filter(|e| ["low", "medium", "high", "xhigh", "max"].contains(&e.as_str()))
+    }
+
+    /// Whether this folder reports to GitHub (off unless turned on).
+    pub fn github(&self, folder: &str) -> bool {
+        self.github.get(folder).copied().unwrap_or(false)
     }
 
     pub fn relay(&self) -> bool {
@@ -114,9 +123,9 @@ pub fn settings_set(patch: serde_json::Value) -> Result<Settings, String> {
     let mut config = read()?;
     let mut current = serde_json::to_value(&config.settings).map_err(|e| e.to_string())?;
     for (k, v) in patch.as_object().into_iter().flatten() {
-        if k == "budgets" {
-            for (folder, usd) in v.as_object().into_iter().flatten() {
-                current["budgets"][folder] = usd.clone();
+        if k == "budgets" || k == "github" {
+            for (folder, value) in v.as_object().into_iter().flatten() {
+                current[k.as_str()][folder] = value.clone();
             }
         } else if v.is_null() {
             current.as_object_mut().map(|o| o.remove(k));

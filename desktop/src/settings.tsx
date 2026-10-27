@@ -64,6 +64,7 @@ const SECTIONS = [
 	{ id: "models", title: "Models", icon: Sparkles, group: "This computer" },
 	{ id: "editor", title: "Editor", icon: SquareCode, group: "This computer" },
 	{ id: "phone", title: "Phone", icon: Smartphone, group: "This computer" },
+	{ id: "github", title: "GitHub", icon: ArrowUpRight, group: "This computer" },
 	{ id: "server", title: "Server", icon: Server, group: "This computer" },
 	{ id: "entry-points", title: "Entry points", icon: Crosshair, group: "Projects" },
 	{ id: "audit-reports", title: "Audit reports", icon: FolderSearch, group: "Projects" },
@@ -91,6 +92,9 @@ export function SettingsPage() {
 	const vim = useVimMode();
 	const [relay, setRelay] = useState(relayOn);
 	const { folders } = useFolders();
+	// Each folder's Report to GitHub, as the backend keeps it (off unless turned on).
+	const [github, setGithub] = useState<Record<string, boolean>>({});
+	useEffect(() => void invoke<{ github?: Record<string, boolean> }>("settings_get").then((s) => setGithub(s.github ?? {}), () => {}), []);
 	const [repos, setRepos] = useState<Record<string, string>>({});
 	useEffect(() => void invoke<{ repos?: Record<string, string> }>("config_get").then((c) => setRepos(c.repos ?? {}), () => {}), []);
 
@@ -217,6 +221,29 @@ export function SettingsPage() {
 								className="size-4"
 							/>
 						</label>
+					</Section> : null}
+					{section === "github" ? <Section title="GitHub">
+						<p className="text-xs text-muted-foreground">
+							Off, a folder's work stays on this Mac: nothing is committed, pushed or posted. On, Formal Mind's GitHub App comments
+							on that repository's pull requests with what the proof ledger says changed: proofs that broke, approvals that
+							lapsed, functions that lost coverage, new findings.
+						</p>
+						{folders.length === 0 ? <p className="text-xs text-muted-foreground">Add a folder in the sidebar first.</p> : null}
+						{folders.map((path) => (
+							<label key={path} className="flex items-center justify-between gap-4">
+								<span className="min-w-0 truncate font-mono text-xs" title={path}>{path.split("/").filter(Boolean).pop()}</span>
+								<input
+									type="checkbox"
+									checked={github[path] ?? false}
+									onChange={(e) => {
+										const on = e.target.checked;
+										setGithub((g) => ({ ...g, [path]: on }));
+										void invoke("control", { op: "github", folder: path, args: { on } }).catch(() => setGithub((g) => ({ ...g, [path]: !on })));
+									}}
+									className="size-4"
+								/>
+							</label>
+						))}
 					</Section> : null}
 					{section === "server" ? <Section title="Server">
 						<label className="flex items-center justify-between gap-4">

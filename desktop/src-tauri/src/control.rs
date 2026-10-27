@@ -51,6 +51,7 @@ pub const OPS: &[(&str, bool)] = &[
     ("triage", true),
     ("reach_run", true),
     ("report", true),
+    ("github", true),
     ("refresh_model", true),
     ("check_proof", true),
     ("submit_proof", true),
@@ -108,7 +109,8 @@ pub fn folders(app: &AppHandle) -> Result<Value, String> {
             }
         }
         let name = path.rsplit(['/', '\\']).find(|p| !p.is_empty()).unwrap_or(&path).to_string();
-        out.push(json!({ "path": path, "name": name, "repo": repo, "sessions": listed }));
+        let github = local::read().map(|c| c.settings.github(&path)).unwrap_or(false);
+        out.push(json!({ "path": path, "name": name, "repo": repo, "github": github, "sessions": listed }));
     }
     Ok(json!(out))
 }
@@ -219,6 +221,11 @@ pub async fn dispatch(app: &AppHandle, op: &str, folder: &str, a: &Value) -> Res
             Ok(json!({ "running": work_queued(app, &folder)? }))
         }
         "reach_run" => crate::reach::reach_run(app.clone(), folder, need("tool")?, opt("target")).await.map(|n| json!({ "started": n })),
+        "github" => {
+            let on = a["on"].as_bool().ok_or("github needs on: true or false")?;
+            local::settings_set(json!({ "github": { folder.clone(): on } }))?;
+            Ok(json!({ "folder": folder, "github": on }))
+        }
         "report" => {
             let dirs: Vec<String> = a["dirs"].as_array().map(|d| d.iter().filter_map(|x| x.as_str().map(String::from)).collect()).unwrap_or_else(|| vec!["audit".into(), "audits".into(), "reports".into()]);
             json_of(crate::report::report_generate(folder, dirs, local::read()?.settings.api_base()).await)

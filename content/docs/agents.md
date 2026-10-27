@@ -94,6 +94,12 @@ them. Ask it before trusting a long unattended run.
 If a function is `in_lean` in the work map but its def isn't in the model file yet (formal-ast learned to translate it
 after the file was written), **`mac_do` `refresh_model`** rewrites the model; `check_proof` does that first too.
 
+## Local or GitHub
+
+Every folder works locally unless you turn on **Report to GitHub** for it (Settings → GitHub, or `mac_do` `github`
+with `{"on": true}`). Off, nothing reaches GitHub: no commits, pushes, issues or comments. On, Formal Mind's GitHub App
+comments on that repository's pull requests with what the proof ledger says changed.
+
 ## The public server
 
 `https://formal.team/mcp` needs no sign-in. It has three read-only tools: `get_audit_format` (the

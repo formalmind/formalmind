@@ -112,6 +112,11 @@ fn covers(ty: &str, def: &str) -> Vec<&'static str> {
     if !ty.contains(def) {
         return out;
     }
+    // `wp (f …) Q e w ↔ Q v w`, for every Q: the call ends exactly in `v` with the world as it was, so it never
+    // reverts, writes nothing and returns `v`.
+    if ty.contains("wp (") && ty.contains("↔ Q ") && ty.trim_end().ends_with(" w") {
+        return vec!["reverts", "writes", "returns"];
+    }
     if ty.contains("Except.error") {
         out.push("reverts");
     }
@@ -424,6 +429,8 @@ mod tests {
         let conserve = "@C : … MorphoProofs.wp (Morpho.Morpho.supply ext p a s o d) (fun x w' => ∀ t, L.J ext w' t = L.J ext w t) e w";
         assert_eq!(super::covers(conserve, "Morpho.supply"), ["conservation"]);
         assert!(super::covers(conserve, "Morpho.borrow").is_empty());
+        let exact = "@Z : ∀ … , MorphoProofs.wp (Morpho.UtilsLib.zeroFloorSub ext x y) Q e w ↔ Q (MorphoProofs.zfsv x y) w";
+        assert_eq!(super::covers(exact, "UtilsLib.zeroFloorSub"), ["reverts", "writes", "returns"]);
     }
 
     #[test]
