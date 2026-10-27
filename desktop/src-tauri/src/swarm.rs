@@ -1497,6 +1497,21 @@ async fn sync_plan(turn: &Turn<'_>, root: &Path) -> usize {
     missing.len()
 }
 
+/// Where an item's proof belongs, folder-relative, when a file is there: a statement's obligation in
+/// `Proofs/Statements/<id>/`, a plan item in `Proofs/Swarm/`.
+fn expected_proof(root: &Path, statement: Option<&str>, text: &str) -> Option<String> {
+    let src = crate::swarm_ctx::lean_src(root)?;
+    let lean = crate::statements::def_of(text)?;
+    let path = match statement {
+        Some(id) => src.join(crate::statements::proof_file(id, lean, crate::swarm_ctx::layout(root).1)),
+        None => {
+            let (contract, function) = lean.split_once('.')?;
+            root.join(proof_file_for(root, contract, function))
+        }
+    };
+    path.is_file().then(|| path.strip_prefix(root).ok().map(|p| p.to_string_lossy().replace('\\', "/"))).flatten()
+}
+
 /// `lake build` of the modules these Lean files are (folder-relative paths under the Lake sources), or of the whole
 /// project when none of them is a module there.
 fn build_command(root: &Path, files: &[&String]) -> String {
@@ -1758,6 +1773,12 @@ async fn run_swarm(turn: &Turn<'_>) -> String {
             let files = with_queue(&turn.queue, |q| q.jobs.iter().find(|j| j.id == job.id).map(|j| j.files.clone()).unwrap_or_default());
             let mut all = files.clone();
             all.extend(out.files.iter().cloned());
+            // A proof already in place from an earlier try is checked where it is, though this turn didn't rewrite it.
+            if !all.iter().any(|f| f.ends_with(".lean")) {
+                if let Some(path) = expected_proof(&root, statement.as_ref().map(|s| s.id.as_str()), &job.text) {
+                    all.push(path);
+                }
+            }
             match check_proof(turn, &root, &id, &job.text, &all).await {
                 Ok(by) => proved_by = by,
                 Err(e) => gate = Some(e),
@@ -2698,6 +2719,11 @@ mod lifecycle {
         let (a, b, bad) = ("formal/Proofs/Swarm/WETH9Deposit.lean".to_string(), "formal/Proofs/Statements/S01/WETH9Fallback.lean".to_string(), "formal/Proofs/Statements/S01/WETH9«».lean".to_string());
         assert_eq!(super::build_command(&base, &[&a, &b]), "lake build Proofs.Swarm.WETH9Deposit Proofs.Statements.S01.WETH9Fallback");
         assert_eq!(super::build_command(&base, &[&bad]), "lake build");
+        let item = "`WETH9.«»` — WETH9 (src/WETH9.sol:31): if it holds before a successful call, it holds after";
+        assert_eq!(super::expected_proof(&base, Some("S-01"), item), None);
+        std::fs::create_dir_all(base.join("formal/Proofs/Statements/S01")).unwrap();
+        std::fs::write(base.join("formal/Proofs/Statements/S01/WETH9Fallback.lean"), "").unwrap();
+        assert_eq!(super::expected_proof(&base, Some("S-01"), item).as_deref(), Some("formal/Proofs/Statements/S01/WETH9Fallback.lean"));
         let _ = std::fs::remove_dir_all(&base);
     }
 }
