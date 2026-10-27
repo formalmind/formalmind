@@ -55,18 +55,22 @@ pub fn message(what: &str) -> String {
 
 /// Makes sure the `formalmind` remote exists: the origin itself when it's already formalmind's, else a fork of it,
 /// else (no GitHub origin) a new public repository.
+/// The remote that is formalmind's copy: the origin when it is formalmind's, else the `formalmind` remote.
+fn remote(root: &Path) -> &'static str {
+    let origin = cmd(root, "git", &["remote", "get-url", "origin"]).ok().and_then(|u| repo_of(&u));
+    if origin.is_some_and(|o| o.split('/').next() == Some(ORG)) { "origin" } else { REMOTE }
+}
+
 fn ensure_remote(root: &Path) -> Result<(), String> {
-    if cmd(root, "git", &["remote", "get-url", REMOTE]).is_ok() {
+    if remote(root) == "origin" || cmd(root, "git", &["remote", "get-url", REMOTE]).is_ok() {
         return Ok(());
     }
     let origin = cmd(root, "git", &["remote", "get-url", "origin"]).ok().and_then(|u| repo_of(&u));
     let name = copy_name(origin.as_deref(), root);
     let target = format!("{ORG}/{name}");
     match origin.as_deref() {
-        Some(o) if o.split('/').next() == Some(ORG) => {
-            cmd(root, "git", &["remote", "add", REMOTE, &format!("https://github.com/{o}.git")])?;
-            return Ok(());
-        }
+        // Already formalmind's: the origin is the copy.
+        Some(o) if o.split('/').next() == Some(ORG) => return Ok(()),
         Some(o) => {
             if cmd(root, "gh", &["repo", "view", &target, "--json", "name"]).is_err() {
                 cmd(root, "gh", &["repo", "fork", o, "--org", ORG, "--clone=false", "--fork-name", &name])?;
@@ -113,7 +117,7 @@ pub fn publish(root: &Path, what: &str) -> Result<Option<String>, String> {
     }
     ensure_remote(root)?;
     let branch = cmd(root, "git", &["branch", "--show-current"]).ok().filter(|b| !b.is_empty()).unwrap_or_else(|| "main".into());
-    cmd(root, "git", &["push", "-q", REMOTE, &format!("HEAD:refs/heads/{branch}")])?;
+    cmd(root, "git", &["push", "-q", remote(root), &format!("HEAD:refs/heads/{branch}")])?;
     Ok(commit)
 }
 
