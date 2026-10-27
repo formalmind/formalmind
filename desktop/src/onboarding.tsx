@@ -189,11 +189,11 @@ function FolderStep({ onNext }: { onNext: () => void }) {
 	);
 }
 
-/** Step 3: how agents reach Claude — formal.team credits (no key), or your own Anthropic key kept in the keychain. */
+/** Step 3: how agents reach Claude — your Claude plan through Claude Code (no key), or your own Anthropic key kept in the keychain. */
 function KeyStep({ onNext }: { onNext: () => void }) {
 	const [own, setOwn] = useState(false);
 	const [key, setKey] = useState("");
-	const choose = (provider: "formal" | "anthropic") => {
+	const choose = (provider: "claude-code" | "anthropic") => {
 		try {
 			localStorage.setItem("fm:provider", provider);
 		} catch {
@@ -223,13 +223,13 @@ function KeyStep({ onNext }: { onNext: () => void }) {
 							className="w-full rounded-xl border border-white/15 bg-white/5 px-4 py-3 text-sm text-white placeholder:text-white/35 focus:border-white/40 focus:outline-none"
 						/>
 						<button type="submit" disabled={!key.trim()} className={primary}>Save to keychain</button>
-						<button type="button" onClick={() => setOwn(false)} className={quiet}>Use formal.team credits instead</button>
+						<button type="button" onClick={() => setOwn(false)} className={quiet}>Use my Claude plan instead</button>
 					</form>
 				) : (
 					<>
-						<button type="button" onClick={() => { choose("formal"); onNext(); }} className={primary}>Use my formal.team credits</button>
+						<button type="button" onClick={() => { choose("claude-code"); onNext(); }} className={primary}>Use my Claude plan</button>
 						<p className="text-sm text-white/50">
-							No key needed: calls go through formal.team and show up in Billing.{" "}
+							No key needed: agents run through the Claude Code you're signed in to.{" "}
 							<button type="button" onClick={() => setOwn(true)} className={quiet}>Use my own Anthropic key</button>
 						</p>
 					</>

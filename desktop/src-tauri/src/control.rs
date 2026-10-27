@@ -64,7 +64,6 @@ pub const OPS: &[(&str, bool)] = &[
     ("coverage", false),
     ("slice", false),
     ("reach", false),
-    ("report_quote", false),
     ("work_map", false),
     ("health", false),
     ("brief", false),
@@ -89,7 +88,6 @@ pub const OPS: &[(&str, bool)] = &[
     ("remove_statement", true),
     ("triage", true),
     ("reach_run", true),
-    ("report", true),
     ("github", true),
     ("refresh_model", true),
     ("check_proof", true),
@@ -240,7 +238,6 @@ pub async fn dispatch<E: Engine + ?Sized>(app: &E, op: &str, folder: &str, a: &V
         "coverage" => crate::ast::ast_formal(folder, need("entry")?).await,
         "slice" => crate::ast::ast_slice(folder, need("entry")?, need("function")?).await.map(Value::String),
         "reach" => crate::reach::reach_map(folder, need("entry")?).await,
-        "report_quote" => crate::report::report_quote(folder, local::read()?.settings.api_base()).await,
         "work_map" => swarm::swarm_work_map(folder),
         "brief" => swarm::swarm_brief(folder, need("function")?).map(Value::String),
         "ledger" => crate::ledger::build(std::path::Path::new(&folder), a["check"].as_bool().unwrap_or(true), a["force"].as_bool().unwrap_or(false)).await,
@@ -303,10 +300,6 @@ pub async fn dispatch<E: Engine + ?Sized>(app: &E, op: &str, folder: &str, a: &V
             let on = a["on"].as_bool().ok_or("github needs on: true or false")?;
             local::settings_set(json!({ "github": { folder.clone(): on } }))?;
             Ok(json!({ "folder": folder, "github": on }))
-        }
-        "report" => {
-            let dirs: Vec<String> = a["dirs"].as_array().map(|d| d.iter().filter_map(|x| x.as_str().map(String::from)).collect()).unwrap_or_else(|| vec!["audit".into(), "audits".into(), "reports".into()]);
-            json_of(crate::report::report_generate(folder, dirs, local::read()?.settings.api_base()).await)
         }
         "refresh_model" => json_of(swarm::swarm_refresh_model(folder)).map(|r| json!({ "regenerated": r })),
         "check_proof" => swarm::swarm_check_proof(folder, need("path")?, opt("content")).await,
@@ -464,8 +457,6 @@ mod ops {
         std::fs::create_dir_all(Path::new(&f).join(".formal/runs")).unwrap();
         std::fs::write(Path::new(&f).join(".formal/runs/swarm.jsonl"), "{\"kind\":\"start\",\"text\":\"t\"}\n").unwrap();
         assert_eq!(ok(&e, "history", &f, json!({ "run": "swarm" })).await.as_array().unwrap().len(), 1);
-        // The report's price goes to formal.team: a closed port here, so it fails without spending.
-        err(&e, "report_quote", &f, json!({})).await;
     }
 
     #[tokio::test(flavor = "current_thread")]
@@ -506,8 +497,6 @@ mod ops {
         assert_eq!(ok(&e, "folders", "", json!({})).await[0]["github"], false);
         ok(&e, "github", &f, json!({ "on": true })).await;
         assert_eq!(ok(&e, "folders", "", json!({})).await[0]["github"], true);
-        // The report charges through formal.team: a closed port here, so it fails without spending.
-        err(&e, "report", &f, json!({})).await;
         // Folders.
         let other = std::env::temp_dir().join(format!("fm-control-other-{}", std::process::id()));
         std::fs::create_dir_all(&other).unwrap();

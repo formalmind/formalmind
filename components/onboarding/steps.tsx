@@ -3,7 +3,6 @@
 import { MarkGithubIcon } from "@primer/octicons-react";
 import { useEffect, useState } from "react";
 import { Check, CircleDollarSign, Loader2, Map as MapIcon, Rocket, ScanSearch, Users } from "lucide-react";
-import { DEPOSITS_USD } from "@/lib/billing-plans";
 import { SWARM_MODES, TEAM_PRESETS, type SwarmMode, type TeamPreset } from "@/lib/teams";
 
 /**
@@ -15,13 +14,12 @@ export const APP_INSTALL_URL = "https://github.com/apps/formalmind/installations
 /** What one run of each costs at most, from the swarm workflow's per-run caps. */
 export const RUN_CAPS = { prove: 3, review: 1 };
 
-export type StepKey = "plan" | "mode" | "team" | "budget" | "credits" | "github" | "start";
+export type StepKey = "plan" | "mode" | "team" | "budget" | "github" | "start";
 export const SETUP_STEPS: { key: StepKey; title: string; icon: React.ElementType }[] = [
 	{ key: "plan", title: "Your plan", icon: MapIcon },
 	{ key: "mode", title: "Mode", icon: ScanSearch },
 	{ key: "team", title: "Team", icon: Users },
 	{ key: "budget", title: "Daily budget", icon: CircleDollarSign },
-	{ key: "credits", title: "Credits", icon: CircleDollarSign },
 	{ key: "github", title: "GitHub", icon: MarkGithubIcon },
 	{ key: "start", title: "Start", icon: Rocket },
 ];
@@ -182,53 +180,6 @@ export function BudgetCard({ dailyUsd, onChange }: { dailyUsd: number; onChange:
 	);
 }
 
-export type CreditEntry = { at: string; cents: number; ref: string };
-
-export function CreditsCard({
-	cents,
-	dailyUsd,
-	configured,
-	entries = [],
-	onDeposit,
-}: {
-	cents: number | null;
-	dailyUsd: number;
-	configured: boolean;
-	entries?: CreditEntry[];
-	onDeposit: (usd: number) => void;
-}) {
-	return (
-		<div className="rounded-xl border p-5">
-			<p className="text-sm text-muted-foreground">Balance</p>
-			<p className="mt-1 text-sm font-semibold tabular-nums">{cents != null ? `$${(cents / 100).toFixed(2)}` : "…"}</p>
-			{cents != null && cents > 0 ? (
-				<p className="mt-1 text-sm text-muted-foreground">About {Math.floor(cents / 100 / dailyUsd)} days at ${dailyUsd} a day.</p>
-			) : null}
-			{!configured ? (
-				<p className="mt-4 text-sm text-muted-foreground">Payments aren&apos;t connected yet.</p>
-			) : (
-				<div className="mt-5 flex flex-wrap gap-2">
-					{DEPOSITS_USD.map((usd) => (
-						<button key={usd} type="button" onClick={() => onDeposit(usd)} className="inline-flex h-9 items-center rounded-full border px-4 text-sm font-medium transition-colors hover:bg-muted">
-							Add ${usd}
-						</button>
-					))}
-				</div>
-			)}
-			{entries.length ? (
-				<ul className="mt-5 divide-y border-t text-sm">
-					{entries.slice(0, 5).map((e) => (
-						<li key={e.ref} className="flex justify-between py-2 text-muted-foreground">
-							<span>Deposit · {new Date(e.at).toLocaleDateString()}</span>
-							<span className="tabular-nums text-foreground">+${(e.cents / 100).toFixed(2)}</span>
-						</li>
-					))}
-				</ul>
-			) : null}
-		</div>
-	);
-}
-
 export function GitHubCard({ repo, installed, checking, error, onCheck }: { repo: string | null; installed: boolean; checking: boolean; error?: string; onCheck: () => void }) {
 	return (
 		<div className="flex flex-wrap items-center gap-3 rounded-xl border p-5">
@@ -274,7 +225,6 @@ export const STEP_COPY: Record<StepKey, { title: string; lead: string }> = {
 	mode: { title: "Audit or specs?", lead: "Audit a commit and get one report, or have the swarm build and keep formal specs for your protocol. You can keep building specs after an audit." },
 	team: { title: "How many agents?", lead: "The protocol is the same for every team size. More agents work disjoint issues in parallel; the planner and the chief are on call in every team." },
 	budget: { title: "Daily budget", lead: "The swarm only starts a run when the run's whole cap fits in what is left today, and pauses until tomorrow when it is spent." },
-	credits: { title: "Credits", lead: "Model usage is paid from prepaid credits. Your daily budget decides how fast they are spent." },
 	github: { title: "Install the GitHub App", lead: "The formalmind App is how the swarm works in your repository: it opens issues and pull requests, labels them, and runs its workflows there." },
 	start: { title: "Start the swarm", lead: "Everything the swarm needs, in one place." },
 };

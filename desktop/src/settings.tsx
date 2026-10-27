@@ -1,8 +1,7 @@
 import { useEffect, useState } from "react";
 import { useSearchParams } from "react-router";
 import { invoke } from "@tauri-apps/api/core";
-import { ArrowUpRight, CreditCard, Crosshair, FolderSearch, Server, Smartphone, Sparkles, SquareCode, type LucideIcon } from "lucide-react";
-import { openOnWeb } from "@/lib/open-web";
+import { ArrowUpRight, Crosshair, FolderSearch, Server, Smartphone, Sparkles, SquareCode, type LucideIcon } from "lucide-react";
 import { apiBase, DEFAULT_API, setApiBase } from "./api";
 import { setVimMode, useVimMode } from "@/components/vim-mode";
 import { AuditFolders, EntryPoints } from "@/components/audit-folders";
@@ -76,7 +75,7 @@ type SectionId = (typeof SECTIONS)[number]["id"];
 export function SettingsPage() {
 	const [provider, setProvider] = useState<Provider>(() => {
 		const p = read("fm:provider");
-		// Claude Code (your Claude plan) unless you picked credits or a key; the web app uses credits.
+		// Claude Code (your Claude plan) unless you picked a key. ("formal", formal.team's metered route, is still accepted but no longer offered.)
 		return p === "anthropic" || p === "openai" || p === "formal" ? p : "claude-code";
 	});
 	// Claude Code on this computer: its version and plan, or why it can't run the agents on your own Claude plan.
@@ -117,7 +116,7 @@ export function SettingsPage() {
 
 	return (
 		<div className="flex w-full flex-1">
-			{/* The side panel: the subsections under their group labels, then Billing on formal.team. Its line runs the page's height. */}
+			{/* The side panel: the subsections under their group labels. Its line runs the page's height. */}
 			<nav aria-label="Settings sections" className="w-56 shrink-0 border-r">
 				<div className="sticky top-0 px-3 py-5">
 					{GROUPS.map((group) => (
@@ -137,12 +136,6 @@ export function SettingsPage() {
 							))}
 						</div>
 					))}
-					<p className="mb-1 px-2.5 text-[12px] text-muted-foreground">Account</p>
-					<button type="button" onClick={() => openOnWeb("/billing")} className="flex h-8 w-full items-center gap-2.5 rounded-lg px-2.5 text-left text-[13px] text-muted-foreground hover:bg-muted/60 hover:text-foreground">
-						<CreditCard className="size-4 shrink-0" />
-						Billing
-						<ArrowUpRight className="ml-auto size-3.5" />
-					</button>
 				</div>
 			</nav>
 			<div className="min-w-0 flex-1 p-6">
@@ -151,11 +144,10 @@ export function SettingsPage() {
 						<label className="flex items-center justify-between gap-4">
 							<span>
 								<span className="font-medium">Run agents via</span>
-								<span className="block text-xs text-muted-foreground">Claude Code runs every agent on your own Claude plan (Max or Pro), through the `claude` you're signed in to: nothing is charged to credits or a key, and your plan's usage limits apply. Credits run Claude, metered by formal.team and shown in Billing. Your own key goes straight to Anthropic (Claude) or OpenAI (GPT-5).</span>
+								<span className="block text-xs text-muted-foreground">Claude Code runs every agent on your own Claude plan (Max or Pro), through the `claude` you're signed in to: nothing is charged to a key, and your plan's usage limits apply. Your own key goes straight to Anthropic (Claude) or OpenAI (GPT-5).</span>
 							</span>
 							<select value={provider} onChange={(e) => pick(e.target.value as Provider)} className="h-8 rounded-lg border bg-background px-2 text-sm">
 								<option value="claude-code" disabled={claudeCode?.ok === false}>Claude Code (my Claude plan)</option>
-								<option value="formal">formal.team credits</option>
 								<option value="anthropic">My Anthropic key</option>
 								<option value="openai">My OpenAI key</option>
 							</select>

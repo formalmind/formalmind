@@ -1,9 +1,8 @@
 import { useState } from "react";
 import { Link } from "react-router";
 import { setVimMode, useVimMode } from "@/components/vim-mode";
-import { Archive, ArchiveRestore, FolderSearch, Gauge, Play, Settings, Square, Wallet } from "lucide-react";
+import { Archive, ArchiveRestore, FolderSearch, Gauge, Play, Settings, Square } from "lucide-react";
 import { AuditFoldersDialog } from "@/components/audit-folders";
-import { inDesktop, openOnWeb } from "@/lib/open-web";
 import { FolderMenu, type FolderMenuItem } from "@/components/folder-menu";
 import { DropdownMenu, DropdownMenuCheckboxItem, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 
@@ -134,13 +133,6 @@ export function SettingsMenu({ repos, className }: { repos: string[]; className?
 				<DropdownMenuItem asChild>
 					<Link to="/usage"><Gauge className="size-3.5" /> Usage</Link>
 				</DropdownMenuItem>
-				{inDesktop() ? (
-					<DropdownMenuItem onSelect={() => openOnWeb("/billing")}><Wallet className="size-3.5" /> Billing</DropdownMenuItem>
-				) : (
-					<DropdownMenuItem asChild>
-						<Link to="/billing"><Wallet className="size-3.5" /> Billing</Link>
-					</DropdownMenuItem>
-				)}
 				<DropdownMenuSeparator />
 				{/* Keeps the menu open so the change shows. */}
 				<DropdownMenuCheckboxItem checked={vim} onCheckedChange={(on) => setVimMode(on)} onSelect={(e) => e.preventDefault()}>

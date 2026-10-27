@@ -26,7 +26,6 @@ mod platform;
 mod publish;
 mod reach;
 mod relay;
-mod report;
 mod statements;
 mod term;
 
@@ -188,8 +187,6 @@ pub fn run() {
             ast::ast_slice,
             ast::ast_formal,
             ast::ast_scripts,
-            report::report_generate,
-            report::report_quote,
             lsp::lsp_definition,
             lsp::lsp_hover,
             local::log_error,

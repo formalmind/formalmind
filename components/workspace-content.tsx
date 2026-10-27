@@ -5,21 +5,19 @@ import { SidebarInset } from "@/components/ui/sidebar";
 import { Separator } from "@radix-ui/react-separator";
 import BreadCrumbs from "@/components/bread-crumbs";
 import { DesktopHint } from "@/components/desktop-hint";
-import { CreditsBanner } from "@/components/credits-banner";
 
 export function WorkspaceContent({ children }: { children: React.ReactNode }) {
 	const pathname = useLocation().pathname;
 	// App pages fill the window; anything else is a document page with a breadcrumb.
 	const isChat = ["/", "/chat", "/roadmap", "/onboarding"].includes(pathname) || pathname.startsWith("/projects/") || pathname === "/swarm/chat" || pathname === "/local" || pathname === "/local-demo";
 	// Account pages keep the breadcrumb header but lay themselves out (no document prose).
-	const isPanel = ["/usage", "/billing", "/settings"].includes(pathname);
+	const isPanel = ["/usage", "/settings"].includes(pathname);
 	// The landing page brings its own header and main.
 	if (pathname === "/welcome") return <div className="w-full">{children}</div>;
 	return (
 		// Account pages fill the window's height too (their side panel's line runs to the bottom) and scroll inside.
 		<div className={isChat || isPanel ? "flex h-dvh min-w-0 flex-1 overflow-hidden bg-background" : "flex-1 overflow-x-auto bg-background"}>
 			<SidebarInset className={isChat ? "min-h-0 min-w-0 flex-1 bg-background" : isPanel ? "min-h-0 min-w-0 flex-1 overflow-y-auto bg-background" : "flex-1 w-full overflow-x-auto"}>
-				<CreditsBanner />
 				<header className={isChat ? "hidden" : "flex h-16 shrink-0 items-center gap-2"}>
 					<div className="flex items-center gap-2 px-4">
 						<Separator orientation="vertical" className="mr-2 h-4" />

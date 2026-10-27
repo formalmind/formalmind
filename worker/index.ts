@@ -7,9 +7,6 @@ import { handleDocs } from "./docs";
 import { handleOAuth } from "./oauth";
 import { CONTENT_SIGNAL, isPagePath, markdownResponse, prefersMarkdown } from "./markdown";
 
-import * as billingBalance from "@/server/routes/billing/balance/route";
-import * as billingCheckout from "@/server/routes/billing/checkout/route";
-import * as billingWebhook from "@/server/routes/billing/webhook/route";
 import * as model from "@/server/routes/model/route";
 import * as swarmToken from "@/server/routes/swarm/token/route";
 import * as stats from "@/server/routes/stats/route";
@@ -36,7 +33,6 @@ import * as usage from "@/server/routes/usage/route";
 import * as desktopAuthorize from "@/server/routes/desktop/authorize/route";
 import * as desktopToken from "@/server/routes/desktop/token/route";
 import * as desktopModelSession from "@/server/routes/desktop/model-session/route";
-import * as desktopReport from "@/server/routes/desktop/report/route";
 import * as relayMac from "@/server/routes/relay/mac/route";
 import * as relayClient from "@/server/routes/relay/client/route";
 import * as githubItem from "@/server/routes/github/item/route";
@@ -55,15 +51,11 @@ type RouteModule = Partial<Record<"GET" | "POST" | "PUT" | "DELETE", Handler>>;
  */
 const ROUTES: Record<string, { module: RouteModule; open?: boolean; scope?: Scope }> = {
 	"/api/assistant": { module: assistant },
-	"/api/billing/balance": { module: billingBalance, scope: "swarm:read" },
-	"/api/billing/checkout": { module: billingCheckout },
-	"/api/billing/webhook": { module: billingWebhook, open: true },
 	"/api/chat": { module: chat },
 	// Desktop sign-in: authorize checks the session itself (it sends people to sign in first); token is the code exchange.
 	"/api/desktop/authorize": { module: desktopAuthorize, open: true },
 	"/api/desktop/token": { module: desktopToken, open: true },
 	"/api/desktop/model-session": { module: desktopModelSession },
-	"/api/desktop/report": { module: desktopReport },
 	// The swarm relay (lib/relay.ts): the Mac app publishes its swarm here and takes commands; the phone reads and steers.
 	"/api/relay/mac": { module: relayMac },
 	"/api/relay/client": { module: relayClient },

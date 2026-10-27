@@ -1,9 +1,0 @@
-These fonts are licensed under the SIL Open Font License 1.1, which allows use in
-logos and products and redistribution with this notice.
-https://openfontlicense.org
-- Inter
-
----
-
-Geist Mono: Copyright (c) 2023 Vercel, in collaboration with basement.studio (https://github.com/vercel/geist-font),
-also under the SIL Open Font License 1.1 (https://openfontlicense.org).

@@ -52,12 +52,11 @@ export const PlanStreaming: StoryObj<typeof PlanBoard> = {
 
 const saved = { repo: "Uniswap/v4-core", plan: v4, team: "trio", squadSize: 4, dailyUsd: 5, updatedAt: new Date().toISOString() };
 
-/** The setup wizard for a signed-in user, with their plan saved and $50 in credits. */
+/** The setup wizard for a signed-in user, with their plan saved. */
 export const Setup: StoryObj<typeof Onboarding> = {
 	render: () => <SidebarProvider><div className="flex h-screen w-full flex-col"><Onboarding /></div></SidebarProvider>,
 	decorators: [withMockFetch({
 		"/api/onboarding/state": (init) => json(init?.method === "PUT" ? JSON.parse(String(init.body)) : saved),
-		"/api/billing/balance": () => json({ configured: true, cents: 5000, entries: [{ at: new Date().toISOString(), cents: 5000, ref: "cs_test" }] }),
 		"/api/onboarding/install": () => json({ installed: false }),
 		"/api/onboarding/plan": () => planStream(),
 	})],

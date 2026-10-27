@@ -28,7 +28,7 @@ Any other MCP client that speaks Streamable HTTP and OAuth works the same way.
 
 | Tools | Scope |
 |---|---|
-| `my_projects`, `my_usage`, `my_credits`, `swarm_state`, `list_files`, `read_file`, `list_audits`, `list_findings`, `get_finding`, `proofs_coverage`, `report_quote`, `mac_swarm`, `mac_swarm_events`, `mac_get`, `mac_reply` | `swarm:read` |
+| `my_projects`, `my_usage`, `swarm_state`, `list_files`, `read_file`, `list_audits`, `list_findings`, `get_finding`, `proofs_coverage`, `mac_swarm`, `mac_swarm_events`, `mac_get`, `mac_reply` | `swarm:read` |
 | `add_project`, `plan_repository`, `start_swarm`, `mac_swarm_send`, `mac_do` | `swarm:write` |
 
 `mac_swarm` and `mac_swarm_events` show what the swarm on your Mac is doing, and `mac_swarm_send` sends it a message,

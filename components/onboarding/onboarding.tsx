@@ -11,7 +11,6 @@ import type { OnboardingState } from "@/server/routes/onboarding/state/route";
 import { SWARM_MODES, TEAM_PRESETS } from "@/lib/teams";
 import {
 	BudgetCard,
-	CreditsCard,
 	GitHubCard,
 	ModePicker,
 	Panel,
@@ -25,17 +24,13 @@ import {
 	type StepKey,
 } from "./steps";
 
-type Credits = { configured: boolean; cents: number; entries: { at: string; cents: number; ref: string }[]; error?: string };
-
 const EMPTY: OnboardingState = { repo: null, plan: null, mode: "specs", team: "pair", squadSize: 4, dailyUsd: 5, updatedAt: "" };
 
-/** From a repository to a running swarm: plan, team, budget, credits, GitHub App, start. */
+/** From a repository to a running swarm: plan, team, budget, GitHub App, start. */
 export function Onboarding() {
 	const [state, setState] = useState<OnboardingState>(EMPTY);
 	const [loaded, setLoaded] = useState(false);
 	const [step, setStep] = useState<StepKey>("plan");
-	const [credits, setCredits] = useState<Credits | null>(null);
-	const [notice, setNotice] = useState<string | null>(null);
 	const [install, setInstall] = useState<{ installed: boolean; checking: boolean; error?: string }>({ installed: false, checking: false });
 	const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -73,22 +68,6 @@ export function Onboarding() {
 		})();
 	}, [update]);
 
-	// Back from Stripe Checkout: confirm the payment and land on the credits step.
-	useEffect(() => {
-		const params = new URLSearchParams(window.location.search);
-		const outcome = params.get("checkout");
-		const sessionId = params.get("session_id");
-		void fetch(`/api/billing/balance${outcome === "success" && sessionId ? `?session_id=${encodeURIComponent(sessionId)}` : ""}`)
-			.then((r) => r.json())
-			.then((body: Credits) => setCredits(body))
-			.catch(() => setCredits({ configured: false, cents: 0, entries: [], error: "Couldn't load your credits." }));
-		if (outcome) {
-			setStep("credits");
-			setNotice(outcome === "success" ? "Payment received. Thanks!" : "Checkout was cancelled; nothing was charged.");
-			window.history.replaceState(null, "", "/onboarding");
-		}
-	}, []);
-
 	const checkInstall = useCallback(async (repo: string | null) => {
 		if (!repo) return;
 		setInstall((s) => ({ ...s, checking: true }));
@@ -125,14 +104,6 @@ export function Onboarding() {
 		} else setInit({ busy: false, error: body?.error ?? "Couldn't reach the server; try again." });
 	};
 
-	const deposit = async (usd: number) => {
-		setNotice(null);
-		const res = await fetch("/api/billing/checkout", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ usd }) });
-		const body = await res.json();
-		if (body.url) window.location.href = body.url;
-		else setNotice(body.error ?? "Checkout didn't start.");
-	};
-
 	// "+ New project" opens an empty box; a project's Setup link names its repository.
 	const [params] = useSearchParams();
 	const asked = params.get("repo");
@@ -144,7 +115,6 @@ export function Onboarding() {
 		mode: planned,
 		team: planned,
 		budget: planned,
-		credits: (credits?.cents ?? 0) > 0,
 		github: install.installed,
 		start: planned && Boolean(proofsRepo),
 	};
@@ -203,18 +173,6 @@ export function Onboarding() {
 							<BudgetCard dailyUsd={state.dailyUsd} onChange={(dailyUsd) => update({ dailyUsd })} />
 							<Nav onBack={() => go(-1)} onNext={() => go(1)} />
 						</Panel>
-					) : step === "credits" ? (
-						<Panel {...STEP_COPY.credits}>
-							{notice ? <p role="status" className="mb-4 rounded-lg border bg-muted/40 px-3 py-2 text-sm">{notice}</p> : null}
-							<CreditsCard
-								cents={credits ? credits.cents : null}
-								dailyUsd={state.dailyUsd}
-								configured={credits?.configured !== false}
-								entries={credits?.entries}
-								onDeposit={(usd) => void deposit(usd)}
-							/>
-							<Nav onBack={() => go(-1)} onNext={() => go(1)} />
-						</Panel>
 					) : step === "github" ? (
 						<Panel {...STEP_COPY.github}>
 							<GitHubCard repo={state.repo} installed={install.installed} checking={install.checking} onCheck={() => void checkInstall(state.repo)} />
@@ -229,7 +187,6 @@ export function Onboarding() {
 									{ label: "Mode", value: SWARM_MODES.find((m) => m.key === state.mode)?.name ?? "", ok: true },
 									{ label: "Team", value: `${TEAM_PRESETS.find((t) => t.key === state.team)?.name}${state.team === "squad" ? ` of ${state.squadSize}` : ""}`, ok: true },
 									{ label: "Daily budget", value: `$${state.dailyUsd} a day`, ok: true },
-									{ label: "Credits", value: credits ? `$${(credits.cents / 100).toFixed(2)}` : "…", ok: (credits?.cents ?? 0) > 0 },
 									{ label: "GitHub App", value: install.installed ? "installed" : "not installed", ok: install.installed },
 									{ label: "Proofs repository", value: proofsRepo ?? "not created", ok: Boolean(proofsRepo) },
 								]}

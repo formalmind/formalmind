@@ -11,7 +11,7 @@
  * gets a 403 with error="insufficient_scope".
  *
  * The tools act for the account the token was issued to, through the same
- * code as the signed-in app: lib/projects.ts, lib/spend.ts, lib/billing.ts,
+ * code as the signed-in app: lib/projects.ts, lib/spend.ts,
  * lib/swarm.ts, lib/relay.ts (the Mac app's swarm), lib/project-repo.ts and
  * lib/project-audits.ts (a project's files, audits and Proofs coverage, read
  * from GitHub), and the /api/projects, /api/onboarding/plan,
@@ -25,7 +25,6 @@ import { WebStandardStreamableHTTPServerTransport } from "@modelcontextprotocol/
 import { CallToolRequestSchema, ListToolsRequestSchema, type CallToolResult, type Tool } from "@modelcontextprotocol/sdk/types.js";
 import { z } from "zod/v4";
 import { auth } from "@/lib/auth";
-import { getCredits, hasSpend, isBillingConfigured, REPORT_USD } from "@/lib/billing";
 import { issuer, SCOPE_LIST, SCOPES, type Scope } from "@/lib/oauth";
 import { parseRepo, type RepoPlan } from "@/lib/plan";
 import { findingRow, planProgress, readAudits, reportSummary, REPORT_DIRS, where } from "@/lib/project-audits";
@@ -90,14 +89,6 @@ export const ACCOUNT_TOOLS: AccountTool[] = [
       type: "object",
       properties: { lines: { type: "integer", minimum: 1, maximum: 500, default: 50, description: "How many of the latest cost lines to return, default 50" } },
     },
-    annotations: READ,
-    scope: "swarm:read",
-  },
-  {
-    name: "my_credits",
-    title: "My credits",
-    description: "The account's prepaid credits: the balance in cents and USD and every entry, deposits (Stripe Checkout) and the metered spend of model calls made on credits. Needs swarm:read.",
-    inputSchema: { type: "object", properties: {} },
     annotations: READ,
     scope: "swarm:read",
   },
@@ -216,18 +207,6 @@ export const ACCOUNT_TOOLS: AccountTool[] = [
       type: "object",
       required: ["repo"],
       properties: { repo: REPO, ref: REF, dirs: DIRS, contract: { type: "string", description: "One contract's function rows" } },
-    },
-    annotations: READ,
-    scope: "swarm:read",
-  },
-  {
-    name: "report_quote",
-    title: "Report quote",
-    description: `What Formal Mind's audit report for a repository and commit costs ($${REPORT_USD}, once per repository and commit), whether that commit is already paid for, and the credit balance. Only a quote: the report is generated and paid for in the desktop app (Bugs → Generate report), on the Mac. Needs swarm:read.`,
-    inputSchema: {
-      type: "object",
-      required: ["repo", "commit"],
-      properties: { repo: { type: "string", description: "owner/name" }, commit: { type: "string", description: "The commit, 7 to 40 hex characters" } },
     },
     annotations: READ,
     scope: "swarm:read",
@@ -406,10 +385,6 @@ async function callTool(name: string, args: Record<string, unknown>, caller: Cal
       const sum = (prefix: string) => costs.filter((c) => c.createdAt.startsWith(prefix)).reduce((s, c) => s + c.usd, 0);
       return json({ spentTodayUsd: sum(today), spentThisMonthUsd: sum(month), spentTotalUsd: sum(""), lineCount: costs.length, syncedAt, lines: costs.slice(-lines) });
     }
-    case "my_credits": {
-      const credits = await getCredits(sub);
-      return json({ configured: isBillingConfigured(), cents: credits.cents, usd: credits.cents / 100, deposits: credits.entries });
-    }
     case "swarm_state": {
       const state = await getSwarmState(await listProjects(sub));
       return json({ ...state, costs: state.costs.slice(-20), merged: state.merged.slice(0, 10), runs: state.runs.slice(0, 10) });
@@ -552,15 +527,8 @@ async function callTool(name: string, args: Record<string, unknown>, caller: Cal
         commit: p.commit,
         reports,
         ...(plan !== null ? { plan: planProgress(plan) } : {}),
-        ...(!internal.length ? { note: "No internal (Formal Mind) audit report here yet: the desktop app writes audit/formal-mind.audit.json as the swarm proves and reviews, and Bugs → Generate report fills in the coverage." } : {}),
+        ...(!internal.length ? { note: "No internal (Formal Mind) audit report here yet: the desktop app writes audit/formal-mind.audit.json as the swarm proves and reviews." } : {}),
       });
-    }
-    case "report_quote": {
-      const repo = str(args.repo).replace(/[^\w./-]/g, "").slice(0, 100);
-      const commit = lower(args.commit);
-      if (!repo || !/^[0-9a-f]{7,40}$/.test(commit)) return failure("repo (owner/name) and commit (7 to 40 hex characters) are required.");
-      const [paid, credits] = await Promise.all([hasSpend(sub, `report:${repo}@${commit}`), getCredits(sub)]);
-      return json({ repo, commit, priceUsd: REPORT_USD, paid, balanceUsd: credits.cents / 100, enough: paid || credits.cents >= REPORT_USD * 100 });
     }
     case "mac_swarm": {
       const { state, macSeenAt } = await relay().read(Number.MAX_SAFE_INTEGER, false);

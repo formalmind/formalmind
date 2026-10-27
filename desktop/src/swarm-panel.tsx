@@ -4,7 +4,7 @@ import { createPortal } from "react-dom";
 import { NvimTerminal } from "./nvim-terminal";
 import { reportError } from "@/lib/report-error";
 import { JsonTree } from "./json-tree";
-import { ArrowDown, Bug, Check, ChevronDown, ChevronRight, CircleCheck, CircleX, LoaderCircle, MoreHorizontal, Pause, Code2, Copy, Crosshair, FileCode2, FileDown, Folder, Network, Play, Plus, ScanSearch, Square, SquareCheck, Terminal, ThumbsDown, ThumbsUp, WandSparkles, Waypoints } from "lucide-react";
+import { ArrowDown, Bug, Check, ChevronDown, ChevronRight, CircleCheck, CircleX, LoaderCircle, MoreHorizontal, Pause, Code2, Copy, Crosshair, FileCode2, Folder, Network, Play, Plus, ScanSearch, Square, SquareCheck, Terminal, ThumbsDown, ThumbsUp, WandSparkles, Waypoints } from "lucide-react";
 
 // The project roadmap (GitHub Projects-style), the same view the web app had on its own page.
 import { motion as vimMotion, search as vimSearch, setVimMode, useVimMode, type Cursor } from "@/components/vim-mode";
@@ -14,7 +14,6 @@ import { useReportDirs } from "@/lib/report-dirs";
 import { auditJsonPath, parseAuditDoc, type AuditDoc, type AuditFindingDoc } from "@/lib/audit-format";
 import { readEntryPoints, setMainEntryPoint } from "@/lib/entry-points";
 import { ReachView } from "./reach";
-import { openOnWeb } from "@/lib/open-web";
 import { ChatScrubber } from "./chat-scrubber";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuRadioGroup, DropdownMenuRadioItem, DropdownMenuSeparator, DropdownMenuSub, DropdownMenuSubContent, DropdownMenuSubTrigger, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { ChatMarkdown } from "@/components/chat-markdown";
@@ -906,46 +905,6 @@ function PocView({ folder, invoke, path, fns, onOpenFile }: { folder: string; in
 	);
 }
 
-/** What `report_generate` wrote: Formal Mind's audit file, its AsciiDoc, the PDF when asciidoctor-pdf made one, and why not otherwise. */
-type GeneratedReport = { json: string; adoc: string; pdf: string | null; note: string | null; findings: number; warnings: string[] };
-
-type ReportQuote = { price_cents: number; paid: boolean; balance_cents: number; repo: string; commit: string };
-
-/** Generate report's confirm step: what it's for, what it costs from credits, and the balance after. */
-function ReportConfirm({ quote, onGenerate, onCancel }: { quote: ReportQuote; onGenerate: () => void; onCancel: () => void }) {
-	const usd = (c: number) => `$${(c / 100).toFixed(2).replace(/\.00$/, "")}`;
-	const short = (c: number) => usd(Math.max(0, c));
-	const enough = quote.paid || quote.balance_cents >= quote.price_cents;
-	return (
-		<div className="mx-1 mb-1 flex flex-wrap items-center gap-x-3 gap-y-2 rounded-xl border bg-card px-3 py-2 text-[12px]">
-			<div className="min-w-0 flex-1">
-				<p>
-					Formal Mind's report for <span className="font-medium">{quote.repo}</span> at <span className="font-mono">{quote.commit.slice(0, 7)}</span>
-				</p>
-				<p className="text-muted-foreground">
-					{quote.paid
-						? "Already paid for this commit: generating it again is free."
-						: enough
-							? `${usd(quote.price_cents)} from your credits, once for this commit. Balance ${short(quote.balance_cents)} → ${short(quote.balance_cents - quote.price_cents)}.`
-							: `It costs ${usd(quote.price_cents)} and your balance is ${short(quote.balance_cents)}.`}
-				</p>
-			</div>
-			<button type="button" onClick={onCancel} className="h-7 rounded-lg px-2 text-muted-foreground hover:bg-muted hover:text-foreground">
-				Cancel
-			</button>
-			{enough ? (
-				<button type="button" onClick={onGenerate} className="h-7 rounded-lg bg-foreground px-2.5 font-medium text-background hover:opacity-90">
-					{quote.paid ? "Generate" : `Generate · ${usd(quote.price_cents)}`}
-				</button>
-			) : (
-				<button type="button" onClick={() => openOnWeb("/billing")} className="h-7 rounded-lg bg-foreground px-2.5 font-medium text-background hover:opacity-90">
-					Add credits
-				</button>
-			)}
-		</div>
-	);
-}
-
 /**
  * Bugs: the folder's audit reports (Markdown in its report folders, which the gear sets) and the swarm's findings,
  * each opened on the right.
@@ -1030,40 +989,9 @@ function useDragWidth(key: string, initial: number) {
 	return { width, handle };
 }
 
-export function BugsView({ folder, files, invoke, apiBase, bugs, openBug, setOpenBug, withPoc, onOpenFile, reload = 0, onTriage, onFilesChanged }: { folder: string; files: string[]; invoke: Bridge["invoke"]; apiBase: Bridge["apiBase"]; bugs: Bug[]; openBug: string | null; setOpenBug: (f: string | null) => void; withPoc: (body: string) => Promise<string>; onOpenFile: (path: string) => void; reload?: number; onTriage?: (path: string) => Promise<void>; onFilesChanged?: () => void }) {
+export function BugsView({ folder, files, invoke, bugs, openBug, setOpenBug, withPoc, onOpenFile, reload = 0, onTriage }: { folder: string; files: string[]; invoke: Bridge["invoke"]; bugs: Bug[]; openBug: string | null; setOpenBug: (f: string | null) => void; withPoc: (body: string) => Promise<string>; onOpenFile: (path: string) => void; reload?: number; onTriage?: (path: string) => Promise<void>}) {
 	const dirs = useReportDirs(folder);
 	const side = useDragWidth("fm:bugs-list-width", 320);
-	// Generate report: the findings, Proofs coverage and in-scope code as an AsciiDoc report (and its PDF) in the audit
-	// folder; `generated` ticks so a PDF already open is read again.
-	const [generating, setGenerating] = useState<{ busy: boolean; note?: string } | null>(null);
-	const [generated, setGenerated] = useState(0);
-	// The confirm step: the report costs credits once per repository and commit, so ask first with the numbers.
-	const [quote, setQuote] = useState<ReportQuote | "loading" | null>(null);
-	const ask = async () => {
-		setGenerating(null);
-		setQuote("loading");
-		try {
-			setQuote(await invoke<ReportQuote>("report_quote", { folder, apiBase: apiBase() }));
-		} catch (e) {
-			setQuote(null);
-			setGenerating({ busy: false, note: `Couldn't price the report: ${e}` });
-		}
-	};
-	const generate = async () => {
-		setQuote(null);
-		setGenerating({ busy: true });
-		try {
-			const g = await invoke<GeneratedReport>("report_generate", { folder, dirs, apiBase: apiBase() });
-			onFilesChanged?.();
-			setGenerated((n) => n + 1);
-			if (g.pdf) {
-				setOpenBug(`report:${g.pdf}`);
-				setGenerating(null);
-			} else setGenerating({ busy: false, note: `Wrote ${g.json} (${g.findings} findings). ${g.note ?? ""}` });
-		} catch (e) {
-			setGenerating({ busy: false, note: `Couldn't generate the report: ${e}` });
-		}
-	};
 	const { reports, indexes, findings } = useAuditFindings(folder, files, invoke, dirs, reload);
 	const findingKey = (f: AuditFinding) => `audit:${f.report}#${f.id}#${f.title}`;
 	// With nothing picked, the first finding opens.
@@ -1113,7 +1041,7 @@ export function BugsView({ folder, files, invoke, apiBase, bugs, openBug, setOpe
 			(e) => setReport({ path: showingPath, text: `Couldn't read ${showingPath}: ${e}` }),
 		);
 		// `reload` is Refresh (and the swarm's writes): a report open here is read again too.
-	}, [folder, showingPath, invoke, generated, reload]);
+	}, [folder, showingPath, invoke, reload]);
 	const facts = selected ? bugFacts(selected.body) : null;
 	const head = "px-2 pb-1 pt-2 font-mono text-[10px] uppercase tracking-wider text-muted-foreground";
 	const reportItem = (r: string) => (
@@ -1152,26 +1080,7 @@ export function BugsView({ folder, files, invoke, apiBase, bugs, openBug, setOpe
 			<div className="flex h-8 shrink-0 items-center gap-2 px-1.5">
 				<span className="pl-1 font-mono text-[11px] font-medium uppercase tracking-wider text-muted-foreground">Bugs</span>
 				<span className="ml-auto text-[11px] text-muted-foreground">{reports.length} report{reports.length === 1 ? "" : "s"} · {findings.length} finding{findings.length === 1 ? "" : "s"}</span>
-				<button
-					type="button"
-					disabled={generating?.busy}
-					onClick={() => void ask()}
-					title="Write Formal Mind's report of this folder (formal-mind.audit.json, and a PDF with asciidoctor-pdf) from the swarm's findings, the Proofs coverage and the reviewed proofs, into the audit folder"
-					className="inline-flex h-7 items-center gap-1.5 rounded-lg px-2 text-[12px] text-muted-foreground hover:bg-background hover:text-foreground disabled:opacity-60"
-				>
-					<FileDown className="size-3.5" />
-					{generating?.busy ? "Generating…" : quote === "loading" ? "Pricing…" : "Generate report"}
-				</button>
 			</div>
-			{quote && quote !== "loading" ? <ReportConfirm quote={quote} onGenerate={() => void generate()} onCancel={() => setQuote(null)} /> : null}
-			{generating?.note ? (
-				<div className="mx-1 mb-1 flex items-start gap-2 rounded-xl border bg-card px-3 py-2 text-[12px]">
-					<p className="min-w-0 flex-1 whitespace-pre-wrap">{generating.note}</p>
-					<button type="button" onClick={() => setGenerating(null)} className="shrink-0 rounded-md px-1.5 text-muted-foreground hover:bg-muted hover:text-foreground">
-						Dismiss
-					</button>
-				</div>
-			) : null}
 			{/* On a phone the list sits above the report it opens. */}
 			<div className="flex min-h-0 flex-1 gap-1 max-sm:flex-col">
 				<nav style={{ width: side.width }} className="flex shrink-0 flex-col overflow-y-auto rounded-xl border bg-card p-1.5 max-sm:max-h-[40%] max-sm:!w-full">
@@ -1209,7 +1118,7 @@ export function BugsView({ folder, files, invoke, apiBase, bugs, openBug, setOpe
 					<p className={head}>Formal Mind</p>
 					<ul className="space-y-1">
 						{fmReports.map(reportItem)}
-						{fmReports.length === 0 ? <li className="px-2 py-1 text-[12px] text-muted-foreground">No report yet. Generate report writes one from the swarm's findings and proofs.</li> : null}
+						{fmReports.length === 0 ? <li className="px-2 py-1 text-[12px] text-muted-foreground">No report yet. The swarm writes its findings and proofs here.</li> : null}
 					</ul>
 					{fmGroups.map(findingGroup)}
 					<p className="px-2 pb-0.5 pt-2 font-mono text-[10px] text-muted-foreground">Swarm agents · {bugs.length}</p>
@@ -1864,7 +1773,7 @@ export function SwarmPanel({ folder, name, scan, bridge, session, file: openPath
 	// Set in Settings (desktop/src/settings.tsx).
 	const [provider, setProvider] = useState<Provider>(() => {
 		const p = store.get("fm:provider");
-		// Claude Code (your Claude plan) unless you picked credits or a key in Settings.
+		// Claude Code (your Claude plan) unless you picked a key in Settings.
 		return p === "anthropic" || p === "openai" || p === "formal" ? p : "claude-code";
 	});
 	// The Claude plan Claude Code is signed in to ("Claude Max plan"), or null when it can't run the agents here.
@@ -2755,7 +2664,7 @@ export function SwarmPanel({ folder, name, scan, bridge, session, file: openPath
 	) : null;
 	// The run's spend against its cap, with the cap's menu; in the Mac app it sits in the title bar.
 	// Who pays for the agents, in the title bar: your Claude plan (no spend or cap; its usage limit applies), or the spend
-	// against its cap on credits or a key. A run keeps the route it started with; a change applies at the next start.
+	// against its cap on a key. A run keeps the route it started with; a change applies at the next start.
 	const costMenu = provider === "claude-code" ? (
 		<DropdownMenu>
 			<DropdownMenuTrigger className="inline-flex h-7 shrink-0 items-center gap-1 rounded-md border bg-background px-2 text-[11px] text-muted-foreground outline-none hover:text-foreground" title="The agents run on Claude Code with your Claude plan">
@@ -2770,7 +2679,7 @@ export function SwarmPanel({ folder, name, scan, bridge, session, file: openPath
 				</DropdownMenuItem>
 				<p className="px-2 pb-1.5 text-[11px] text-muted-foreground">Nothing is metered; the plan's usage limit pauses the swarm.</p>
 				<DropdownMenuSeparator />
-				<DropdownMenuItem onSelect={() => navigate("/settings?section=models")} className="text-[13px]">Credits or a key instead…</DropdownMenuItem>
+				<DropdownMenuItem onSelect={() => navigate("/settings?section=models")} className="text-[13px]">A key instead…</DropdownMenuItem>
 			</DropdownMenuContent>
 		</DropdownMenu>
 	) : (
@@ -3219,14 +3128,12 @@ export function SwarmPanel({ folder, name, scan, bridge, session, file: openPath
 				folder={folder}
 				files={tree}
 				invoke={invoke}
-				apiBase={apiBase}
 				bugs={bugs}
 				openBug={openBug}
 				setOpenBug={setOpenBug}
 				withPoc={withPoc}
 				onOpenFile={view}
 				reload={reload}
-				onFilesChanged={() => void invoke<{ files: string[] }>("folder_tree", { path: folder }).then((t) => setTree(t.files), () => {})}
 				// Queued for the swarm's auditor; the backend starts a stopped swarm just for it (and stops after).
 				onTriage={async (path) => {
 					await invoke("control", { op: "triage", folder, args: { path, run: viewing && viewing !== "new" ? viewing : "swarm" } });
