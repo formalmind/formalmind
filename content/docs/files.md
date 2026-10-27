@@ -22,6 +22,7 @@ Formal Mind keeps everything in your folder, as ordinary files you can read, edi
 | `.formal/jobs/` | each job's full agent conversation |
 | `.formal/runs/` | every session's event log, one JSON line per event |
 | `.formal/proofs.json`, `.formal/statements.json` | which files and theorems proved each item |
+| `.formal/ledger.json` | the proof ledger: what Lean checked for each theorem and the reviewer's approvals, by def ([Proofs](/proofs#the-ledger)) |
 | `.formal/bugs/` | findings, one Markdown file each |
 | `.formal/findings.sarif` | suspicions and notes on lines, which editors with SARIF support show inline |
 | `formal/` | the Lean project (or wherever `formalmind.toml` says): `Generated/` (the model of each contract, rewritten when formal-ast can translate more of it), `Refinement/Swarm/` (proofs of the plan's items), `Refinement/Statements/` (proofs of statements) |

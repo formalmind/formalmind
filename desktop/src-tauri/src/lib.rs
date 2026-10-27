@@ -12,6 +12,7 @@ mod debug;
 mod executor;
 mod file_search;
 mod health;
+mod ledger;
 mod swarm;
 mod swarm_ctx;
 mod local;
@@ -205,7 +206,7 @@ pub fn run() {
             swarm::swarm_work_map,
             swarm::swarm_brief,
             swarm::swarm_check_proof,
-            swarm::swarm_submit_proof, swarm::swarm_refresh_model, health::swarm_health,
+            swarm::swarm_submit_proof, swarm::swarm_refresh_model, health::swarm_health, ledger::swarm_ledger,
             swarm::swarm_suggest,
             swarm::swarm_plan,
             swarm::swarm_bugs,

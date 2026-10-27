@@ -32,6 +32,21 @@ the model's arithmetic follows the compiler the code was written for.
 Proofs are about those generated definitions, never a hand-written copy of the code. A function counts as proved
 only when a theorem names its definition, fully qualified.
 
+## The ledger
+
+The ledger (`.formal/ledger.json`) is the record of what's proved, kept by the app, never written by an agent. A
+function counts as proved only when all of these hold:
+
+- every theorem naming its generated def is in a module Lake builds, and that module has built since it last changed;
+- Lean checks each theorem (`#check`, `#print axioms`): no `sorry`, no axiom beyond Lean's own (`propext`,
+  `Classical.choice`, `Quot.sound`);
+- at least one checked theorem's statement is about the def itself;
+- the swarm's reviewer approved those theorems for that def. The approval holds a fingerprint of the def's generated
+  text and of each theorem, so if either changes it lapses, and the function is reviewed again.
+
+Each theorem's `/-- … -/` comment is kept with it as the proof's explanation in words. Functions proved before the
+ledger existed show as "approved before the ledger" until they're reviewed again.
+
 ## Checking proofs yourself
 
 The proofs are an ordinary Lake project in `formal/`:

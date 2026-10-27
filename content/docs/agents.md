@@ -67,6 +67,8 @@ checks and the same reviewer:
    (`proved`, `has_sorry`, `in_lean`, `not_modeled` and why), the Lean def a theorem has to name, the generated
    model, the file its proof goes in, the theorems that name it (file and line), its plan item, the open items to
    take next (the ones your scripts call first), and any model formal-ast could now translate more of.
+   **`mac_get` `ledger`** says, for each function, whether it's proved and what's missing, with each theorem's
+   statement as Lean prints it and its doc comment.
 2. **`mac_get` `brief`** for a function: exactly what the swarm's prover gets, its def, its slice, and where to write.
 3. **`mac_do` `check_proof`** with the file's path and content. It's written under the Lake sources' `Refinement/`
    and checked the way the swarm checks its own: no `sorry`, `admit`, new axioms or `native_decide`, `lake build`

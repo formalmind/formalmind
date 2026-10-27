@@ -33,6 +33,7 @@ pub const OPS: &[(&str, bool)] = &[
     ("work_map", false),
     ("health", false),
     ("brief", false),
+    ("ledger", false),
     ("add_folder", true),
     ("remove_folder", true),
     ("start", true),
@@ -170,6 +171,7 @@ pub async fn dispatch(app: &AppHandle, op: &str, folder: &str, a: &Value) -> Res
         "report_quote" => crate::report::report_quote(folder, local::read()?.settings.api_base()).await,
         "work_map" => swarm::swarm_work_map(folder),
         "brief" => swarm::swarm_brief(folder, need("function")?).map(Value::String),
+        "ledger" => crate::ledger::build(std::path::Path::new(&folder), a["check"].as_bool().unwrap_or(true), a["force"].as_bool().unwrap_or(false)).await,
         "start" => Ok(json!({ "run": start(app, &folder, opt("goal"), opt("run"), false, None, usd("budget"))? })),
         "hunt" => {
             let run = opt("run").unwrap_or_else(|| format!("hunt-{:x}", std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_millis()).unwrap_or(0)));

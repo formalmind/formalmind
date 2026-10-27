@@ -168,12 +168,31 @@ pub fn all_slices(a: &Analysis) -> std::collections::BTreeMap<String, String> {
 #[derive(Debug, Clone, serde::Serialize)]
 pub struct Theorem {
     pub name: String,
+    /// Its full name, with the namespaces it's declared in (`MorphoProofs.withdraw_spec`): what `#check` takes.
+    pub qualified: String,
+    /// Its `/-- … -/` doc comment, the proof's explanation in words, when it has one.
+    pub doc: Option<String>,
     pub file: String,
     pub line: usize,
     /// Its proof still has a `sorry`.
     pub sorry: bool,
     /// Its statement and proof, as written.
     pub text: String,
+}
+
+/// The `/-- … -/` comment right above line `at` (past its attributes), without the markers.
+fn doc_above(lines: &[&str], at: usize) -> Option<String> {
+    let mut end = at;
+    while end > 0 && lines[end - 1].trim_start().starts_with("@[") {
+        end -= 1;
+    }
+    if end == 0 || !lines[end - 1].trim_end().ends_with("-/") {
+        return None;
+    }
+    let start = (0..end).rev().find(|&k| lines[k].trim_start().starts_with("/--"))?;
+    let text = lines[start..end].join("\n");
+    let inner = text.trim().trim_start_matches("/--").trim_end_matches("-/").trim();
+    (!inner.is_empty()).then(|| inner.to_string())
 }
 
 /// Every theorem in the project's own `.lean` files (dependencies, build output and Lake's packages skipped).
@@ -209,19 +228,39 @@ pub fn theorems_in(files: &dyn fs::Files) -> Vec<Theorem> {
             let t = l.trim_start_matches("private ").trim_start_matches("protected ").trim_start_matches("noncomputable ");
             !l.starts_with(' ') && !l.starts_with('\t') && ["theorem ", "lemma ", "def ", "abbrev ", "structure ", "inductive ", "instance ", "namespace ", "end ", "section ", "open ", "example ", "@[", "/--", "/-!", "set_option ", "variable ", "include "].iter().any(|k| t.starts_with(k))
         };
+        // The namespaces and sections open at each line: (is a namespace, its name).
+        let mut open: Vec<(bool, String)> = vec![];
         let mut i = 0;
         while i < lines.len() {
             let l = lines[i];
             let t = l.trim_start_matches("private ").trim_start_matches("protected ");
+            if !l.starts_with(' ') {
+                let word = |k: &str| t.strip_prefix(k).map(|r| r.split_whitespace().next().unwrap_or("").to_string());
+                if let Some(ns) = word("namespace ") {
+                    open.push((true, ns));
+                } else if let Some(sec) = word("section ").or_else(|| (t.trim() == "section").then(String::new)) {
+                    open.push((false, sec));
+                } else if let Some(end) = word("end ").or_else(|| (t.trim() == "end").then(String::new)) {
+                    // `end A.B` closes what `namespace A.B` opened.
+                    if let Some(at) = open.iter().rposition(|(_, n)| *n == end) {
+                        open.truncate(at);
+                    }
+                }
+            }
             let kw = if t.starts_with("theorem ") { Some("theorem ") } else if t.starts_with("lemma ") { Some("lemma ") } else { None };
             if let (Some(kw), false) = (kw, l.starts_with(' ')) {
                 let name = t[kw.len()..].split_whitespace().next().unwrap_or("").to_string();
+                let qualified = match name.strip_prefix("_root_.") {
+                    Some(root) => root.to_string(),
+                    None => open.iter().filter(|(ns, _)| *ns).map(|(_, n)| n.as_str()).chain([name.as_str()]).collect::<Vec<_>>().join("."),
+                };
+                let doc = doc_above(&lines, i);
                 let mut j = i + 1;
                 while j < lines.len() && !starts_decl(lines[j]) {
                     j += 1;
                 }
                 let body = lines[i..j].join("\n").trim_end().to_string();
-                out.push(Theorem { name, file: rel.clone(), line: i + 1, sorry: body.split(|c: char| !c.is_alphanumeric() && c != '_').any(|w| w == "sorry"), text: body });
+                out.push(Theorem { name, qualified, doc, file: rel.clone(), line: i + 1, sorry: body.split(|c: char| !c.is_alphanumeric() && c != '_').any(|w| w == "sorry"), text: body });
                 i = j;
             } else {
                 i += 1;
@@ -449,4 +488,18 @@ pub fn script_entries_with<O: std::borrow::Borrow<serde_json::Value>>(project: &
         })
         .collect();
     Ok(json!({ "scripts": out, "entryPoints": entry_points, "contracts": contracts }))
+}
+
+#[cfg(test)]
+mod theorem_tests {
+    #[test]
+    fn theorems_are_qualified_and_keep_their_doc() {
+        let src = "namespace MorphoProofs\nopen Morpho\n\n/-- `withdraw` never pays out more than the shares are worth. -/\n@[simp]\ntheorem withdraw_spec : True := trivial\n\nsection Inner\ntheorem inner_one : True := trivial\nend Inner\n\nnamespace Deep.Er\ntheorem deep : True := trivial\nend Deep.Er\n\ntheorem _root_.Top.thing : True := trivial\nend MorphoProofs\n\ntheorem outside : True := trivial\n";
+        let files = crate::fs::Memory::new([], std::collections::BTreeMap::from([("P.lean".to_string(), src.to_string())]));
+        let t = super::theorems_in(&files);
+        let q: Vec<&str> = t.iter().map(|x| x.qualified.as_str()).collect();
+        assert_eq!(q, ["MorphoProofs.withdraw_spec", "MorphoProofs.inner_one", "MorphoProofs.Deep.Er.deep", "Top.thing", "outside"]);
+        assert_eq!(t[0].doc.as_deref(), Some("`withdraw` never pays out more than the shares are worth."));
+        assert_eq!(t[1].doc, None);
+    }
 }
