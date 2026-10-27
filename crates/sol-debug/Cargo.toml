@@ -20,10 +20,10 @@ ratatui = "0.30"
 revm = { version = "43", default-features = false, features = ["std"] }
 opaline = { version = "0.4.1", default-features = false, features = ["builtin-themes"] }
 serde_json = { version = "1", features = ["arbitrary_precision", "preserve_order"] }
-toml = "0.8"
+toml = "1.1"
 tree-sitter-highlight = "0.25"
 tree-sitter-solidity = "1.2.13"
-ureq = "2"
+ureq = "3"
 
 [[bin]]
 name = "sol-debug"
