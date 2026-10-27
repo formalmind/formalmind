@@ -9,7 +9,8 @@ use std::process::Command;
 use std::sync::Mutex;
 
 pub const ORG: &str = "formalmind";
-pub const BOT: &str = "Co-Authored-By: formalmind[bot] <213248595+formalmind[bot]@users.noreply.github.com>";
+pub const BOT_NAME: &str = "formalmind[bot]";
+pub const BOT_EMAIL: &str = "213248595+formalmind[bot]@users.noreply.github.com";
 /// The remote the app pushes to.
 const REMOTE: &str = "formalmind";
 
@@ -50,7 +51,7 @@ pub fn copy_name(origin: Option<&str>, folder: &Path) -> String {
 pub fn message(what: &str) -> String {
     let what = what.lines().next().unwrap_or("").trim();
     let what = if what.is_empty() { "verification progress" } else { what };
-    format!("Formal Mind: {}\n\n{BOT}\n", what.chars().take(120).collect::<String>())
+    format!("Formal Mind: {}\n", what.chars().take(120).collect::<String>())
 }
 
 /// Makes sure the `formalmind` remote exists: the origin itself when it's already formalmind's, else a fork of it,
@@ -107,7 +108,9 @@ pub fn publish(root: &Path, what: &str) -> Result<Option<String>, String> {
     }
     cmd(root, "git", &["add", "-A"])?;
     let commit = if cmd(root, "git", &["diff", "--cached", "--quiet"]).is_err() {
-        cmd(root, "git", &["commit", "-q", "-m", &message(what)])?;
+        // Authored and committed as the bot, so GitHub shows formalmind[bot] as the author; the push itself goes
+        // through this Mac's git sign-in.
+        cmd(root, "git", &["-c", &format!("user.name={BOT_NAME}"), "-c", &format!("user.email={BOT_EMAIL}"), "commit", "-q", "-m", &message(what)])?;
         Some(cmd(root, "git", &["rev-parse", "--short", "HEAD"])?)
     } else {
         None
@@ -269,7 +272,7 @@ mod tests {
         assert_eq!(branch_for("4e1f7c2a9b0d"), "verify-4e1f7c2");
         assert_eq!(branch_for("refs/heads/release/v2"), "release/v2");
         assert_eq!(branch_for("v1.0 rc"), "v1.0-rc");
-        assert!(m.starts_with("Formal Mind: - [ ] `WETH9.deposit`") && m.ends_with(&format!("{BOT}\n")));
+        assert!(m.starts_with("Formal Mind: - [ ] `WETH9.deposit`"));
     }
 
     #[test]
@@ -310,7 +313,8 @@ mod tests {
         let c = publish(&work, "`X.f` proved").unwrap();
         assert!(c.is_some());
         let log = cmd(&bare, "git", &["log", "-1", "--format=%B", "main"]).unwrap();
-        assert!(log.contains("`X.f` proved") && log.contains(BOT), "{log}");
+        assert!(log.contains("`X.f` proved"), "{log}");
+        assert_eq!(cmd(&bare, "git", &["log", "-1", "--format=%an <%ae>", "main"]).unwrap(), format!("{BOT_NAME} <{BOT_EMAIL}>"));
         let files = cmd(&bare, "git", &["ls-tree", "-r", "--name-only", "main"]).unwrap();
         assert!(files.contains("A.lean") && !files.contains("run.lock") && !files.contains(".formal/check"), "{files}");
         // Nothing new: no commit, nothing fails.

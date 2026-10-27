@@ -99,7 +99,7 @@ after the file was written), **`mac_do` `refresh_model`** rewrites the model; `c
 Every folder works locally unless you turn on **Report to GitHub** for it (Settings → GitHub, or `mac_do` `github`
 with `{"on": true}`). Off, nothing reaches GitHub: no commits, pushes, issues or comments. On, Formal Mind's GitHub App
 comments on that repository's pull requests with what the proof ledger says changed, and the app itself (never an
-agent) commits each approved proof, co-authored by `formalmind[bot]`, and pushes it to the project's copy in the
+agent) commits each approved proof as `formalmind[bot]` (its author on GitHub; the push uses this Mac's git sign-in) and pushes it to the project's copy in the
 `formalmind` organization on GitHub: the repository itself when it is formalmind's, otherwise a fork, created the first
 time (a folder with no GitHub origin gets a new public repository). It never pushes anywhere else.
 
