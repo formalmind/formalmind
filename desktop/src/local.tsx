@@ -1,5 +1,3 @@
-import { FORKS_ENABLED, ScriptRunDialog, type ScriptTarget } from "./script-run-dialog";
-import { fileResult, useRunResults } from "@/lib/run-results";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useLocation, useNavigate, useSearchParams } from "react-router";
 import { invoke } from "@tauri-apps/api/core";
@@ -11,12 +9,8 @@ import { listen } from "@tauri-apps/api/event";
 import { apiBase } from "./api";
 import { LocalHeading, TreeFolder } from "@/components/session-folder";
 import type { RepoSource } from "@/components/app-sidebar";
-import { FileTree, type Runnable } from "@/components/file-tree";
+import { FileTree } from "@/components/file-tree";
 import { SwarmPanel, type Bridge } from "./swarm-panel";
-import { AgentDebugger, DebugView } from "./debug";
-
-/** Debug mode (the Debug tab, and run buttons on scripts and tests in the tree). Off for now: the audit comes first. */
-const DEBUG_ENABLED = false;
 
 const tauri: Bridge = { invoke, listen, apiBase };
 import { SidebarGroup, SidebarMenu, SidebarMenuButton, SidebarMenuItem } from "@/components/ui/sidebar";
@@ -85,23 +79,6 @@ function useTree(folder: string, on: boolean) {
 	return tree;
 }
 
-/**
- * The functions a script or test file can run as it is: `run…()` or `test…()` without arguments, with the contract
- * each sits in (read from the text; the debugger compiles when one runs).
- */
-function runnablesIn(text: string, prefix: "run" | "test"): Runnable[] {
-	const clean = text.replace(/\/\*[\s\S]*?\*\//g, "").replace(/\/\/[^\n]*/g, "");
-	const out: Runnable[] = [];
-	// Abstract contracts can't be deployed to run; their functions run through the contracts that inherit them.
-	let contract = "";
-	const re = new RegExp(`\\b(abstract\\s+)?contract\\s+(\\w+)|\\bfunction\\s+(${prefix}\\w*)\\s*\\(\\s*\\)`, "g");
-	for (const m of clean.matchAll(re)) {
-		if (m[2]) contract = m[1] ? "" : m[2];
-		else if (m[3] && contract) out.push({ contract, fn: m[3] });
-	}
-	return out;
-}
-
 /** Whether a swarm session is running in the folder: asked once, then followed through its start and done events. */
 function useSwarmWorking(path: string): boolean {
 	const [runs, setRuns] = useState<string[]>([]);
@@ -122,24 +99,6 @@ function FolderItem({ path, current, file, archived, onArchive, onRemove }: { pa
 	const tree = useTree(path, current);
 	const working = useSwarmWorking(path);
 	const navigate = useNavigate();
-	const results = useRunResults(path);
-	// A script asks where to run first (chain, Anvil fork); tests run straight away.
-	const [asking, setAsking] = useState<{ file: string; r: Runnable } | null>(null);
-	const debugRun = (f: string, r: Runnable, target?: ScriptTarget) => {
-		const next = new URLSearchParams(params);
-		next.set("path", path);
-		next.set("file", f);
-		next.set("test", `${r.contract}::${r.fn}`);
-		next.set("mode", "debug");
-		next.delete("line");
-		next.delete("fork");
-		next.delete("chain");
-		if (target) {
-			next.set("chain", String(target.chainId));
-			if (target.fork) next.set("fork", target.fork);
-		}
-		navigate(`/local?${next.toString()}`);
-	};
 	const [params] = useSearchParams();
 	const [audits, setAudits] = useState(false);
 	return (
@@ -171,26 +130,6 @@ function FolderItem({ path, current, file, archived, onArchive, onRemove }: { pa
 						next.delete("line");
 						next.set("mode", "code");
 						navigate(`/local?${next.toString()}`);
-					}}
-					runnables={DEBUG_ENABLED ? {
-						has: (f) => /\.[ts]\.sol$/.test(f),
-						list: (f) => invoke<string>("folder_read", { folder: path, path: f }).then((text) => runnablesIn(text, f.endsWith(".s.sol") ? "run" : "test")),
-						onRun: (f, r) => (FORKS_ENABLED && f.endsWith(".s.sol") ? setAsking({ file: f, r }) : debugRun(f, r)),
-						current: params.get("mode") === "debug" && file && params.get("test") ? `${file}::${params.get("test")}` : null,
-						result: (f, r) => (r ? results[`${f}::${r.contract}::${r.fn}`] : fileResult(results, f)),
-					} : undefined}
-				/>
-			) : null}
-			{asking ? (
-				<ScriptRunDialog
-					folder={path}
-					file={asking.file}
-					fn={asking.r.fn}
-					onClose={() => setAsking(null)}
-					onRun={(t) => {
-						const a = asking;
-						setAsking(null);
-						debugRun(a.file, a.r, t);
 					}}
 				/>
 			) : null}
@@ -278,5 +217,5 @@ export function LocalFolderPage() {
 		invoke<Scan>("folder_scan", { path }).then(setScan, (e) => setError(String(e)));
 	}, [path]);
 	if (error) return <p className="p-6 text-sm text-red-600">{error}</p>;
-	return path ? <SwarmPanel folder={path} name={name(path)} scan={scan} bridge={tauri} session={params.get("run")} file={params.get("file")} debug={DEBUG_ENABLED ? (file, test, onPick) => <DebugView folder={path} file={file} test={test} onPick={onPick} embedded /> : undefined} agentDebug={(p) => <AgentDebugger folder={path} {...p} />} /> : null;
+	return path ? <SwarmPanel folder={path} name={name(path)} scan={scan} bridge={tauri} session={params.get("run")} file={params.get("file")} /> : null;
 }

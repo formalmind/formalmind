@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { useLocation, useNavigate } from "react-router";
 import { listen } from "@tauri-apps/api/event";
-import { Bug, Gauge, GanttChart, HardDrive, MessageSquare, Network, PanelLeft, Plus, RefreshCw, Settings, X, type LucideIcon } from "lucide-react";
+import { Gauge, HardDrive, Network, PanelLeft, Plus, RefreshCw, Settings, X, type LucideIcon } from "lucide-react";
 import { NotificationCenter } from "@/components/notification-center";
 import { useSidebar } from "@/components/ui/sidebar";
 
@@ -15,18 +15,11 @@ function describe(path: string): { title: string; icon: LucideIcon } {
 	const [pathname, search = ""] = path.split("?");
 	if (pathname === "/usage") return { title: "Usage", icon: Gauge };
 	if (pathname === "/settings") return { title: "Settings", icon: Settings };
-	if (pathname === "/swarm/chat") return { title: "Ask the swarm", icon: MessageSquare };
-	if (pathname === "/roadmap" || pathname.endsWith("/roadmap")) return { title: "Roadmap", icon: GanttChart };
 	if (pathname === "/local") {
 		const folder = new URLSearchParams(search).get("path") ?? "";
 		return { title: folder.split(/[\\/]/).filter(Boolean).pop() ?? "Folder", icon: HardDrive };
 	}
-	if (pathname === "/debug") {
-		const file = new URLSearchParams(search).get("file");
-		return { title: file ? `Debug ${file.split("/").pop()}` : "Debug", icon: Bug };
-	}
 	if (pathname.startsWith("/projects/")) return { title: pathname.split("/")[3] ?? "Project", icon: Network };
-	if (pathname === "/swarm") return { title: "Swarm", icon: Network };
 	return { title: "Home", icon: HardDrive };
 }
 

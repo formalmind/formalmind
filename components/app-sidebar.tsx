@@ -159,7 +159,7 @@ function ProjectFolder({ project, open, onOpenChange, pathname, collapsed, onExp
 	return (
 		<Collapsible open={open} onOpenChange={onOpenChange} asChild>
 			<li className={`list-none ${archived ? "opacity-60" : ""}`}>
-				<ProjectContextMenu repo={project.repo} swarm={Boolean(project.proofsRepo)} archived={archived} onArchive={onArchive} auditKey={source ? (path ?? undefined) : project.repo}>
+				<ProjectContextMenu repo={project.repo} archived={archived} onArchive={onArchive} auditKey={source ? (path ?? undefined) : project.repo}>
 				{(dots) => (
 				<div className="group/folder flex h-8 items-center rounded-md pr-1 hover:bg-sidebar-accent group-data-[collapsible=icon]:size-8 group-data-[collapsible=icon]:p-0">
 					{/* Collapsed, only the folder shows: a click widens the sidebar with this project open. */}

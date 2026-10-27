@@ -46,7 +46,7 @@ export function ProjectCodePage() {
 			onSwarm={() => navigate(projectPath(repo))}
 			actions={
 				<>
-					<SettingsMenu repos={[]} className="inline-flex size-8 items-center justify-center rounded-full border bg-background/90 text-muted-foreground shadow-sm backdrop-blur hover:text-foreground" />
+					<SettingsMenu className="inline-flex size-8 items-center justify-center rounded-full border bg-background/90 text-muted-foreground shadow-sm backdrop-blur hover:text-foreground" />
 					<NotificationCenter />
 				</>
 			}

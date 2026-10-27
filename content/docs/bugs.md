@@ -1,6 +1,6 @@
 # Bugs and reports
 
-The Bugs page gathers every finding about the folder: the swarm's, the Bug Hunter's, and the ones in audit reports
+The Bugs page gathers every finding about the folder: the swarm's and the ones in audit reports
 you already have.
 
 ## Findings from the swarm
@@ -34,13 +34,10 @@ added as audit folders in **Settings → Audit reports**.
 
 ## Formal Mind's report
 
-**Generate report** on the Bugs page writes Formal Mind's assessment of the folder at its current commit:
+As it works, the swarm writes its own report of the folder, `formal-mind.audit.json` in the audit folder:
 
 - the swarm's findings, with their PoCs, evidence and fixes;
-- the Proofs coverage of each contract in scope;
 - the properties the reviewer approved, including proved [statements](/statements), with the theorems that prove
   them.
 
-It costs $150 from formal.team credits, once per repository and commit. The app shows the price and your balance
-first, and generating again for a commit already paid for is free. The report is written as
-`formal-mind.audit.json` and, if asciidoctor-pdf is installed (`brew install asciidoctor`), as a PDF next to it.
+Bugs lists it, and its findings, apart from the other audit reports.

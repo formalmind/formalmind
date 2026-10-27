@@ -37,16 +37,17 @@
 	],
 	// Users (migrations/): `wrangler d1 migrations apply formalmind-users --remote`.
 	// One Durable Object per project (worker/project-do.ts): spend now; lease, queue and dispatcher later.
-	// One per person (worker/relay-do.ts): the swarm relay between the Mac app and the phone.
+	// One per person (worker/relay-do.ts): the swarm relay between the Mac app and the MCP.
 	"durable_objects": {
 		"bindings": [
-			{ "name": "PROJECT", "class_name": "ProjectDO" },
 			{ "name": "RELAY", "class_name": "RelayDO" }
 		]
 	},
 	"migrations": [
 		{ "tag": "v1", "new_sqlite_classes": ["ProjectDO"] },
-		{ "tag": "v2", "new_sqlite_classes": ["RelayDO"] }
+		{ "tag": "v2", "new_sqlite_classes": ["RelayDO"] },
+		// The old GitHub-issue swarm's spend ledger.
+		{ "tag": "v3", "deleted_classes": ["ProjectDO"] }
 	],
 	"d1_databases": [
 		{ "binding": "DB", "database_name": "formalmind-users", "database_id": "cf9ae3bf-c762-4aa3-bd81-b7b50273e689" }

@@ -28,8 +28,8 @@ Any other MCP client that speaks Streamable HTTP and OAuth works the same way.
 
 | Tools | Scope |
 |---|---|
-| `my_projects`, `my_usage`, `my_credits`, `swarm_state`, `list_files`, `read_file`, `list_audits`, `list_findings`, `get_finding`, `proofs_coverage`, `report_quote`, `mac_swarm`, `mac_swarm_events`, `mac_get`, `mac_reply` | `swarm:read` |
-| `add_project`, `plan_repository`, `start_swarm`, `mac_swarm_send`, `mac_do` | `swarm:write` |
+| `my_projects`, `list_files`, `read_file`, `list_audits`, `list_findings`, `get_finding`, `proofs_coverage`, `mac_swarm`, `mac_swarm_events`, `mac_get`, `mac_reply` | `swarm:read` |
+| `mac_swarm_send`, `mac_do` | `swarm:write` |
 
 `mac_swarm` and `mac_swarm_events` show what the swarm on your Mac is doing, and `mac_swarm_send` sends it a message,
 as if you'd typed it in the chat.
@@ -41,14 +41,13 @@ The app runs each one as if you'd clicked it there, with the model route and spe
 
 - **`mac_get`** reads: the added folders, Claude Code's sign-in, a folder's files and git graph, the plan,
   statements, bugs, proofs, queue and sessions, a session's history, the scope from your deploy scripts, a contract's
-  Lean coverage, a function's slice, Reach's map, what the report costs, the **work map**, and a function's **brief**.
-- **`mac_do`** acts: add or remove a folder, start, **pause** or **resume** the swarm, start the Bug Hunter, send a session a message,
-  set a cap, add, confirm, correct or mark statements, queue an audit report for triage, run a Reach tool, generate
-  Formal Mind's report, **refresh the model**, and **check** and **submit** a proof.
+  Lean coverage, a function's slice, the **work map**, and a function's **brief**.
+- **`mac_do`** acts: add or remove a folder, start, **pause** or **resume** the swarm, send a session a message,
+  set a cap, add, confirm, correct or mark statements, queue an audit report for triage, **refresh the model**, and **check** and **submit** a proof.
 
 Each tool's description lists its operations and their arguments. An answer that takes longer than about 50 seconds
-(a report, say) comes back with an id; `mac_reply` fetches it. Your Mac has to be on, with the app running and signed
-in and **Settings → Phone** on; no window needs to be open. Your tokens, keys, the terminal and the debugger stay out
+(a long build, say) comes back with an id; `mac_reply` fetches it. Your Mac has to be on, with the app running and signed
+in and **Settings → Remote control (MCP)** on; no window needs to be open. Your tokens, keys and the terminal stay out
 of reach.
 
 **`pause`** stops a session at once, including a long `lean` or `forge` run it's waiting on, and keeps its job;

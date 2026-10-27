@@ -219,7 +219,7 @@ export async function handleAuth(path: string): Promise<Response> {
 		try {
 			const tokens = await githubToken({ code, redirect_uri: `${AUTH_ORIGIN}${CALLBACK_PATH}` });
 			const profile = await github<{ id: number; login: string; name: string | null; email: string | null; avatar_url: string }>("/user", tokens.access_token);
-			// "github|<id>" is the sub Auth0 gave GitHub sign-ins, so projects, onboarding and credits saved under it carry over.
+			// "github|<id>" is the sub Auth0 gave GitHub sign-ins, so projects and credits saved under it carry over.
 			const user = { sub: `github|${profile.id}`, nickname: profile.login, name: profile.name ?? profile.login, email: profile.email ?? undefined, picture: profile.avatar_url };
 			await saveUser({ ...user, githubId: profile.id, login: profile.login });
 			const id = randomId();

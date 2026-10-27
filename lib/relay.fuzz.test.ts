@@ -3,7 +3,7 @@ import { MAC_OPS } from "./mac-ops";
 import { parseCommand } from "./relay";
 
 /**
- * parseCommand is the gate every command for the Mac passes through (the phone, the MCP's mac_* tools): whatever a
+ * parseCommand is the gate every command for the Mac passes through (the MCP's mac_* tools): whatever a
  * client sends, it must return null or a well-formed command. Fuzzed with seeded random bodies, so a failure repeats.
  */
 

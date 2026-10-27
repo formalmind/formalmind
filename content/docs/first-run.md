@@ -12,7 +12,7 @@ swarm says so. Write a script that deploys the contracts you want audited, even 
 ## Start the swarm
 
 Type a focus in the chat if you have one ("the liquidation path first", "check the fee math"), or leave it empty,
-then press **Start**. Set a spending cap if you run on credits or your own key.
+then press **Start**. Set a spending cap if you run on your own key.
 
 The first thing the swarm does is write the **plan**, `.formal/plan.md`: one line per function in scope, the
 functions your scripts call first. Then it works through the plan one function at a time. The Canvas shows each agent

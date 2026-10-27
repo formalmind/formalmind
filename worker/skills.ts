@@ -5,7 +5,7 @@
  * the code under desktop/, lib/ and server/routes/ in this repository, or
  * desktop/README.md and docs/audit-format.md. */
 
-import { GITHUB_APP, MAC_DOWNLOAD, ORIGIN, STATUS_LINE, WINDOWS_DOWNLOAD } from "./narrative";
+import { MAC_DOWNLOAD, ORIGIN, STATUS_LINE, WINDOWS_DOWNLOAD } from "./narrative";
 
 interface Skill {
   name: string;
@@ -16,7 +16,7 @@ interface Skill {
 const LOCAL_SWARM: Skill = {
   name: "run-the-local-swarm",
   description:
-    "Run the Formal Mind swarm on a Solidity repository on your own computer: download the app, add the folder, pick who pays for the model (formal.team credits, your Anthropic key or your OpenAI key), and Start. A planner, provers and a reviewer write and check Lean 4 proofs of each in-scope function and file bugs with Foundry PoCs, keeping everything in the folder (.formal/, formal/, audit/, test/) and nothing on GitHub. Use when a person wants formal proofs or an audit of their contracts, or asks how the swarm works, what it costs or how to stop and resume it.",
+    "Run the Formal Mind swarm on a Solidity repository on your own computer: download the app, add the folder, pick who runs the model (your Claude plan through Claude Code, your Anthropic key or your OpenAI key), and Start. A planner, provers and a reviewer write and check Lean 4 proofs of each in-scope function and file bugs with Foundry PoCs, keeping everything in the folder (.formal/, formal/, audit/, test/) and nothing on GitHub. Use when a person wants formal proofs or an audit of their contracts, or asks how the swarm works, what it costs or how to stop and resume it.",
   body: `# Run the local swarm
 
 > **${STATUS_LINE}**
@@ -35,7 +35,7 @@ The folder needs Solidity the swarm can compile with solc (it reads remappings f
 
 Settings → Models, one of:
 
-- **formal.team credits**: Claude, metered per call by formal.team and listed in Billing (${ORIGIN}/billing; deposits of $10 to $1,000 through Stripe). A call is refused when the balance is empty.
+- **Claude Code** (the default): your own Claude plan, through the \`claude\` you installed and signed in to; nothing is metered, and the plan's usage limits apply.
 - **Your Anthropic key** (Claude) or **your OpenAI key** (GPT-5, GPT-5 mini), kept in the system keychain; the calls go straight to that provider.
 
 ## 3. Start
@@ -58,7 +58,7 @@ Several sessions can run side by side, in one folder or several. Messages you se
 
 ## 5. The report
 
-Bugs → **Generate report** writes Formal Mind's audit of the folder at the current commit, \`audit/formal-mind.audit.json\` (\`kind: "internal"\`): the swarm's findings with PoC, evidence and fix, the Proofs coverage of each contract in scope, and the reviewed properties. It costs $150 from formal.team credits, once per repository and commit; the app shows the balance before and after and asks first. See the \`read-formal-mind-results\` skill for the format.
+As it works, the swarm writes Formal Mind's audit of the folder, \`audit/formal-mind.audit.json\` (\`kind: "internal"\`): its findings with PoC, evidence and fix, and the reviewed properties. See the \`read-formal-mind-results\` skill for the format.
 
 ## Edge cases
 
@@ -66,14 +66,14 @@ Bugs → **Generate report** writes Formal Mind's audit of the folder at the cur
 - Scope comes from the scripts under \`script/\`; a repository without deploy scripts gives the swarm little to plan.
 - The swarm reads only the code (the solc AST), not comments or commit history.
 
-Source: desktop/README.md ("Local swarm", "Formal Mind's report"), desktop/SWARM-STATES.md, desktop/src-tauri/src/swarm.rs, desktop/src/settings.tsx, server/routes/desktop/model-session/route.ts, lib/model-gateway.ts.
+Source: desktop/README.md ("Local swarm", "Formal Mind's report"), desktop/SWARM-STATES.md, desktop/src-tauri/src/swarm.rs, desktop/src/settings.tsx, desktop/src-tauri/src/claude_code.rs.
 `,
 };
 
 const ONBOARD: Skill = {
   name: "onboard-a-repository",
   description:
-    "Get a Solidity repository into Formal Mind: plan it without signing in (POST /api/onboarding/plan), then, signed in with GitHub, add it as a project (a local folder in the desktop app, or a remote GitHub repository on formal.team) to read its code, audits (Bugs) and theorem coverage (Proofs). Optionally set up specs: a <owner>/<name>-proofs repository where Formal Mind writes the Lean specs as commits land. Use when helping a person start with Formal Mind on their contracts.",
+    "Get a Solidity repository into Formal Mind: plan it without signing in (POST /api/onboarding/plan), then, signed in with GitHub, add it as a project (a local folder in the desktop app, or a remote GitHub repository on formal.team) to read its code, audits (Bugs) and theorem coverage (Proofs). Use when helping a person start with Formal Mind on their contracts.",
   body: `# Onboard a repository
 
 > **${STATUS_LINE}**
@@ -102,19 +102,12 @@ Source: server/routes/onboarding/plan/route.ts, lib/plan.ts.
 - **Local folder**, in the desktop app: the repository on disk. Everything is read locally, and the swarm runs here (the \`run-the-local-swarm\` skill).
 - **Remote repository**, on formal.team or in the app: a public GitHub repository, \`owner/name\`. Nothing else is set up: the browser keeps a shallow git copy, and the Code, Bugs and Proofs tabs read from it. Proofs compiles the Solidity in the browser (solc-js) and maps each function to its Lean coverage (formal-ast as WebAssembly). The same step is \`POST ${ORIGIN}/api/projects\` with \`{"repo":"owner/name"}\` and the person's session; 404 when the repository is private or missing.
 
-## 3. Set up specs (optional)
-
-A project whose specs are not being built shows **Set up specs** and **Open Proofs**. Set up specs is the hosted, commit-following part: the person chooses a daily budget, adds credits, installs the formalmind GitHub App (${GITHUB_APP}) on the owner for all repositories, and starts. That creates \`<owner>/<name>-proofs\` from the formalmind/lean-template repository under the same owner (an existing one is reused), where Formal Mind writes the Lean specification as the protocol's commits land (lib/proofs-repo.ts). Proving stays in the app, on the Proofs tab or in the desktop app.
-
-The start step is also \`POST ${ORIGIN}/api/projects/init\` with \`{"repo":"owner/name"}\` and a \`swarm:write\` OAuth token, or the \`start_swarm\` tool on ${ORIGIN}/mcp/account (the \`connect-formal-mind-as-mcp\` skill); both refuse a repository that is not yet one of the account's projects (plan it first with \`plan_repository\`), and fail with the step named when the GitHub App is not installed.
-
 ## Edge cases
 
 - Private repositories cannot be planned or added as remote projects; add the local folder in the desktop app instead.
-- Budget, credits and the GitHub App install need the person in the browser.
-- A remote project's tabs work without specs being set up.
+- The GitHub App install needs the person in the browser.
 
-Source: server/routes/onboarding/*, server/routes/projects/route.ts, server/routes/projects/init/route.ts, components/projects/project-pages.tsx, lib/proofs-repo.ts, lib/billing.ts, lib/ast/.
+Source: server/routes/onboarding/plan/route.ts, server/routes/projects/route.ts, components/add-project.tsx, lib/ast/.
 `,
 };
 
@@ -162,7 +155,7 @@ Source: docs/audit-format.md, lib/audit-format.ts, desktop/README.md ("Local swa
 const CONNECT: Skill = {
   name: "connect-formal-mind-as-mcp",
   description:
-    "Add Formal Mind to Claude, ChatGPT, Cursor or any remote-MCP client as a connector at formal.team/mcp/account, sign in with GitHub, and ask about or act on your own account: your projects, what the swarm spent today, your credits, the swarm's state, plan a repository, start the swarm on it. Also how an agent gets an OAuth token for the account by hand (RFC 8414 metadata, dynamic registration, PKCE, refresh, revoke). Use when a person wants their AI assistant to see or run their Formal Mind swarm.",
+    "Add Formal Mind to Claude, ChatGPT, Cursor or any remote-MCP client as a connector at formal.team/mcp/account, sign in with GitHub, and ask about or act on your own account: your projects, their audits, findings and Proofs coverage, and the swarm in your desktop app, read and steered. Also how an agent gets an OAuth token for the account by hand (RFC 8414 metadata, dynamic registration, PKCE, refresh, revoke). Use when a person wants their AI assistant to see or run their Formal Mind swarm.",
   body: `# Connect Formal Mind as an MCP connector
 
 > **${STATUS_LINE}**
@@ -178,9 +171,9 @@ Formal Mind runs an OAuth 2.0 authorization server at ${ORIGIN} and an account M
 
 ## 2. Ask
 
-With \`swarm:read\`: "what are my projects", "what did my swarm spend today", "how many credits do I have", "what is the swarm working on". With \`swarm:write\`: "plan owner/repo for me" (the planner reads the repository and drafts the first issues; the repository becomes one of your projects), then "set up specs for owner/repo" (\`start_swarm\` creates \`owner/repo-proofs\` from the Lean template, where Formal Mind writes the specs as commits land; it needs the formalmind GitHub App installed on the owner, ${GITHUB_APP}). The local swarm in the desktop app needs none of this (the \`run-the-local-swarm\` skill).
+With \`swarm:read\`: "what are my projects", "what findings does owner/repo have", "how much of Router is proved", "what is the swarm on my Mac working on". With \`swarm:write\`: "verify owner/repo at v1.2" or "pause the swarm" (\`mac_do\`, run by the desktop app on your Mac, signed in with Settings → Remote control (MCP) on).
 
-The tools: \`my_projects\`, \`my_usage\`, \`my_credits\`, \`swarm_state\` (swarm:read); \`plan_repository\`, \`start_swarm\` (swarm:write). Model calls on formal.team credits are metered, so \`my_credits\` reports the balance with every deposit and spend, and \`my_usage\` the cost lines.
+The tools: \`my_projects\`, \`list_files\`, \`read_file\`, \`list_audits\`, \`list_findings\`, \`get_finding\`, \`proofs_coverage\`, \`mac_swarm\`, \`mac_watch\`, \`mac_swarm_events\`, \`mac_get\`, \`mac_reply\` (swarm:read); \`mac_swarm_send\`, \`mac_do\` (swarm:write).
 
 ## 3. By hand (any agent)
 
@@ -192,9 +185,8 @@ The tools: \`my_projects\`, \`my_usage\`, \`my_credits\`, \`swarm_state\` (swarm
 
 ## Edge cases
 
-- The token is scoped: chat, billing checkout, the GitHub App install and onboarding settings answer 403 to it. They need the person's own sign-in in the browser.
-- A token without \`swarm:write\` gets 403 \`insufficient_scope\` from \`plan_repository\`, \`start_swarm\` and \`POST /api/projects/init\`.
-- \`start_swarm\` refuses a repository that is not yet one of the account's projects: plan it first.
+- The token is scoped: chat and the GitHub App install answer 403 to it. They need the person's own sign-in in the browser.
+- A token without \`swarm:write\` gets 403 \`insufficient_scope\` from \`mac_swarm_send\` and \`mac_do\`.
 - Revoking the refresh token ends the connector's access at the next renewal; revoking the access token ends it at once.
 
 Source: worker/oauth.ts, lib/oauth.ts, lib/auth.ts, worker/account-mcp.ts, worker/index.ts, ${ORIGIN}/auth.md.

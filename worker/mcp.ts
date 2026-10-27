@@ -47,7 +47,7 @@ export const TOOLS: Tool[] = [
   {
     name: "get_example_audit",
     title: "Example audit",
-    description: `Formal Mind's audit of Async Swap's contracts (${EXAMPLE_REPO}), audit/formal-mind.audit.json, as the swarm and Generate report left it: what a finished run looks like. section "summary" (default) gives the report's facts and counts per contract; "findings", "coverage" or "properties" gives that list; "full" the whole file.`,
+    description: `Formal Mind's audit of Async Swap's contracts (${EXAMPLE_REPO}), audit/formal-mind.audit.json, as the swarm left it: what a finished run looks like. section "summary" (default) gives the report's facts and counts per contract; "findings", "coverage" or "properties" gives that list; "full" the whole file.`,
     inputSchema: {
       type: "object",
       properties: { section: { type: "string", enum: [...AUDIT_SECTIONS], default: "summary", description: "Which part of the file" } },
@@ -173,7 +173,7 @@ export function serverCard(): Response {
     version: MCP_VERSION,
     title: "Formal Mind",
     description:
-      "Two remotes. /mcp: read-only tools, no authentication: the formalmind.audit/v1 format Formal Mind's Bugs tab reads, Formal Mind's audit of an example repository (Async Swap's contracts) in that format, and the desktop app's latest release. /mcp/account: the signed-in person's own projects (their files, formalmind.audit/v1 reports, findings and Proofs coverage, read from GitHub at a commit), usage, credits, the hosted swarm's state and the desktop app's swarm through the relay, plus adding and planning a repository, setting up its specs, and reading and driving everything the desktop app does on the person's Mac (mac_get, mac_do), behind an OAuth 2.0 access token from this host's authorization server (GitHub sign-in; RFC 9728 metadata at /.well-known/oauth-protected-resource/mcp/account, RFC 8414 at /.well-known/oauth-authorization-server). The swarm itself runs locally in the desktop app; see the Agent Skills at /.well-known/agent-skills/index.json.",
+      "Two remotes. /mcp: read-only tools, no authentication: the formalmind.audit/v1 format Formal Mind's Bugs tab reads, Formal Mind's audit of an example repository (Async Swap's contracts) in that format, and the desktop app's latest release. /mcp/account: the signed-in person's own projects (their files, formalmind.audit/v1 reports, findings and Proofs coverage, read from GitHub at a commit) and the desktop app's swarm through the relay, reading and driving everything the desktop app does on the person's Mac (mac_get, mac_do), behind an OAuth 2.0 access token from this host's authorization server (GitHub sign-in; RFC 9728 metadata at /.well-known/oauth-protected-resource/mcp/account, RFC 8414 at /.well-known/oauth-authorization-server). The swarm itself runs locally in the desktop app; see the Agent Skills at /.well-known/agent-skills/index.json.",
     websiteUrl: ORIGIN,
     repository: { source: "github", url: APP_REPO },
     remotes: [

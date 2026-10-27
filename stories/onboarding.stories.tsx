@@ -1,11 +1,9 @@
 import type { Meta, StoryObj } from "@storybook/react-vite";
 import { Landing } from "@/components/landing/landing";
 import { PlanBoard } from "@/components/landing/plan-board";
-import { Onboarding } from "@/components/onboarding/onboarding";
-import { SidebarProvider } from "@/components/ui/sidebar";
 import type { RepoPlan } from "@/lib/plan";
 import plan from "./fixtures/plan-v4-core.json";
-import { json, withMockFetch } from "./mock-fetch";
+import { withMockFetch } from "./mock-fetch";
 
 const v4 = plan as RepoPlan;
 
@@ -48,17 +46,4 @@ export const PlanDone: StoryObj<typeof PlanBoard> = {
 export const PlanStreaming: StoryObj<typeof PlanBoard> = {
 	...PlanDone,
 	args: { repo: "Uniswap/v4-core", plan: { summary: v4.summary, contracts: v4.contracts, invariants: v4.invariants.slice(0, 2) }, status: "planning" },
-};
-
-const saved = { repo: "Uniswap/v4-core", plan: v4, team: "trio", squadSize: 4, dailyUsd: 5, updatedAt: new Date().toISOString() };
-
-/** The setup wizard for a signed-in user, with their plan saved and $50 in credits. */
-export const Setup: StoryObj<typeof Onboarding> = {
-	render: () => <SidebarProvider><div className="flex h-screen w-full flex-col"><Onboarding /></div></SidebarProvider>,
-	decorators: [withMockFetch({
-		"/api/onboarding/state": (init) => json(init?.method === "PUT" ? JSON.parse(String(init.body)) : saved),
-		"/api/billing/balance": () => json({ configured: true, cents: 5000, entries: [{ at: new Date().toISOString(), cents: 5000, ref: "cs_test" }] }),
-		"/api/onboarding/install": () => json({ installed: false }),
-		"/api/onboarding/plan": () => planStream(),
-	})],
 };

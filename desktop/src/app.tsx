@@ -8,15 +8,12 @@ import { getCurrentWindow } from "@tauri-apps/api/window";
 import { AppSidebar } from "@/components/app-sidebar";
 import { AuthProvider } from "@/components/auth-context";
 import { ChatConversationsProvider } from "@/components/chat-conversations";
-import { SwarmWorkspace } from "@/components/swarm/swarm-workspace";
 import { ThemeProvider } from "@/components/theme-provider";
 import { SidebarProvider } from "@/components/ui/sidebar";
 import { WorkspaceContent } from "@/components/workspace-content";
-import { SWARM_REPO } from "@/lib/swarm-repo";
 import type { SessionData } from "@/lib/session";
 import { apiBase, clearToken, exchangeCode, loadToken, syncSettings } from "./api";
 
-import { DebugPage } from "./debug";
 import { LocalFolderPage, LocalFolders, useFolders, useRepoSource } from "./local";
 import { onboarded, SetupSteps, SignInStep } from "./onboarding";
 import { SettingsPage } from "./settings";
@@ -25,8 +22,6 @@ import { UpdateNotice } from "./update";
 
 const UsagePage = lazy(() => import("@/components/usage/usage-page").then((m) => ({ default: m.UsagePage })));
 const pages = () => import("@/components/projects/project-pages");
-const SwarmChatPage = lazy(() => pages().then((m) => ({ default: m.SwarmChatPage })));
-const FirstProject = lazy(() => pages().then((m) => ({ default: m.FirstProject })));
 const ProjectHomePage = lazy(() => pages().then((m) => ({ default: m.ProjectHomePage })));
 const ProjectFilePage = lazy(() => import("@/components/projects/project-file").then((m) => ({ default: m.ProjectFilePage })));
 
@@ -54,16 +49,12 @@ function Shell({ user }: { user: User }) {
 					<WorkspaceContent>
 						<Suspense fallback={null}>
 							<Routes>
-								{/* Home is an empty screen with the next step; the swarm canvas lives at /swarm. */}
+								{/* Home is an empty screen with the next step. */}
 								<Route path="/" element={<DesktopHome />} />
-								<Route path="/swarm" element={<SwarmWorkspace repo={SWARM_REPO} />} />
-								<Route path="/swarm/chat" element={<SwarmChatPage />} />
-								<Route path="/roadmap" element={<FirstProject page="roadmap" />} />
 								<Route path="/usage" element={<UsagePage />} />
 								<Route path="/projects/:owner/:name" element={<ProjectHomePage />} />
 								<Route path="/projects/:owner/:name/file" element={<ProjectFilePage />} />
 								<Route path="/local" element={<LocalFolderPage />} />
-								<Route path="/debug" element={<DebugPage />} />
 								<Route path="/settings" element={<SettingsPage />} />
 								{/* Other pages come over from the web app as the desktop app grows. */}
 								<Route path="*" element={<Navigate to="/" replace />} />

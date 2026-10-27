@@ -1,4 +1,3 @@
-import { GetTheApp } from "@/components/get-the-app";
 import { AddProjectHost } from "@/components/add-project";
 import { WebHome } from "@/components/web-home";
 import { lazy, Suspense, useEffect, useState } from "react";
@@ -8,8 +7,6 @@ import { AuthProvider } from "@/components/auth-context";
 import { ChatConversationsProvider } from "@/components/chat-conversations";
 import { Landing } from "@/components/landing/landing";
 import LoginPage from "@/components/login";
-import { SwarmWorkspace } from "@/components/swarm/swarm-workspace";
-import { SWARM_REPO } from "@/lib/swarm-repo";
 import { ThemeProvider } from "@/components/theme-provider";
 import { SidebarProvider } from "@/components/ui/sidebar";
 import { WorkspaceContent } from "@/components/workspace-content";
@@ -40,19 +37,13 @@ function page<T, P extends object>(load: () => Promise<T>, pick: (m: T) => React
 	);
 }
 const ChatPage = page(() => import("@/components/chat"), (m) => m.ChatPage);
-const GetStarted = page(() => import("@/components/get-started"), (m) => m.GetStarted);
-const Onboarding = page(() => import("@/components/onboarding/onboarding"), (m) => m.Onboarding);
 const ProjectHomePage = page(() => import("@/components/projects/project-pages"), (m) => m.ProjectHomePage);
-const SwarmChatPage = page(() => import("@/components/projects/project-pages"), (m) => m.SwarmChatPage);
-const ProjectRoadmapPage = page(() => import("@/components/projects/project-pages"), (m) => m.ProjectRoadmapPage);
 const ProjectChatPage = page(() => import("@/components/projects/project-pages"), (m) => m.ProjectChatPage);
 const ProjectFilePage = page(() => import("@/components/projects/project-file"), (m) => m.ProjectFilePage);
 const ProjectCodePage = page(() => import("@/components/projects/project-code"), (m) => m.ProjectCodePage);
 const LocalDemoPage = page(() => import("@/components/local-demo"), (m) => m.LocalDemoPage);
 const UsagePage = page(() => import("@/components/usage/usage-page"), (m) => m.UsagePage);
-const BillingPage = page(() => import("@/components/billing/billing-page"), (m) => m.BillingPage);
 const SettingsPage = page(() => import("@/components/settings-page"), (m) => m.SettingsPage);
-const FirstProject = page(() => import("@/components/projects/project-pages"), (m) => m.FirstProject);
 const DocsSite = page(() => import("@/components/docs/docs-site"), (m) => m.DocsSite);
 
 /** docs.formal.team serves the guide at its root; formal.team serves it at /docs. Null elsewhere. */
@@ -136,7 +127,6 @@ export function App() {
 
 	return (
 		<ThemeProvider>
-			<GetTheApp />
 			<Routes>
 				<Route path="/welcome" element={<Title text="Formal Mind · Prove your Solidity correct"><Landing signedIn={signedIn} /></Title>} />
 				<Route path="/login" element={signedIn ? <Navigate to="/" replace /> : <Title text="Log in · Formal Mind"><LoginPage /></Title>} />
@@ -144,31 +134,23 @@ export function App() {
 				<Route element={<RequireUser user={user} />}>
 					{user ? (
 						<Route element={<SignedInLayout user={user} />}>
-							{/* Home is an empty screen with the next step; the swarm canvas lives at /swarm. */}
+							{/* Home is an empty screen with the next step. */}
 							<Route path="/" element={<Title text="Formal Mind"><WebHome /></Title>} />
-							<Route path="/swarm" element={<Title text="Swarm · Formal Mind"><SwarmWorkspace repo={SWARM_REPO} /></Title>} />
-							<Route path="/swarm/chat" element={<Title text="Ask the swarm · Formal Mind"><SwarmChatPage /></Title>} />
-							<Route path="/roadmap" element={<Title text="Roadmap · Formal Mind"><FirstProject page="roadmap" /></Title>} />
-							<Route path="/billing" element={<Title text="Billing · Formal Mind"><BillingPage /></Title>} />
 							<Route path="/settings" element={<Title text="Settings · Formal Mind"><SettingsPage /></Title>} />
 							<Route path="/local-demo" element={<Title text="Local demo · Formal Mind"><LocalDemoPage /></Title>} />
 							<Route path="/usage" element={<Title text="Usage · Formal Mind"><UsagePage /></Title>} />
 							<Route path="/projects/:owner/:name" element={<ProjectHomePage />} />
 							<Route path="/projects/:owner/:name/file" element={<Title text="File · Formal Mind"><ProjectFilePage /></Title>} />
 								<Route path="/projects/:owner/:name/code" element={<ProjectCodePage />} />
-							<Route path="/projects/:owner/:name/roadmap" element={<Title text="Roadmap · Formal Mind"><ProjectRoadmapPage /></Title>} />
 							<Route path="/projects/:owner/:name/chat" element={<Title text="Chat · Formal Mind"><ProjectChatPage /></Title>} />
 							<Route path="/projects/:owner/:name/chat/:chatId" element={<Title text="Chat · Formal Mind"><ProjectChatPage /></Title>} />
 							<Route path="/chat" element={<Title text="Chat · Formal Mind"><ChatPage /></Title>} />
-							<Route path="/onboarding" element={<Title text="Onboarding · Formal Mind"><Onboarding /></Title>} />
-							<Route path="/github" element={<Title text="Get Started · Formal Mind"><GetStarted /></Title>} />
+							<Route path="/github" element={<Navigate to="/?add=1" replace />} />
 							<Route path="/github/:owner/:repo" element={<RepoChat />} />
-							<Route path="/documentation/get-started" element={<Title text="Get Started · Formal Mind"><GetStarted /></Title>} />
+							<Route path="/documentation/get-started" element={<Navigate to="/docs" replace />} />
 						</Route>
 					) : null}
 				</Route>
-				<Route path="/kanban" element={<Navigate to="/roadmap" replace />} />
-				<Route path="/project" element={<Navigate to="/roadmap" replace />} />
 				<Route path="*" element={<Navigate to="/" replace />} />
 			</Routes>
 		</ThemeProvider>

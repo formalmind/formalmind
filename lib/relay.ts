@@ -5,7 +5,7 @@ export { MAC_OPS, type MacOp };
 
 /**
  * The swarm relay: the Mac app publishes its swarm sessions' events through formal.team and takes messages back, so
- * the phone (or any signed-in client) can follow and steer a swarm that runs on the Mac. One Durable Object per
+ * the MCP's mac_* tools can follow and steer a swarm that runs on the Mac. One Durable Object per
  * person (worker/relay-do.ts) holds the recent events, the Mac's folders and sessions, and the commands waiting for
  * the Mac. The work itself stays on the Mac: nothing here runs an agent or reads a file.
  */

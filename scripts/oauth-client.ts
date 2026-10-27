@@ -153,7 +153,7 @@ async function main() {
 	const transport = new StreamableHTTPClientTransport(new URL(serverUrl), { requestInit: { headers: { authorization: `Bearer ${tokens.access_token}` } } });
 	await client.connect(transport);
 	const { tools } = await client.listTools();
-	check(tools.map((t) => t.name).join(",") === "my_projects,my_usage,my_credits,swarm_state,plan_repository,start_swarm", "tools/list on /mcp/account", tools.map((t) => `${t.name}${t.annotations?.readOnlyHint ? " (read-only)" : ""}`));
+	check(tools.map((t) => t.name).join(",") === "my_projects,list_files,read_file,list_audits,list_findings,get_finding,proofs_coverage,mac_swarm,mac_watch,mac_swarm_events,mac_swarm_send,mac_get,mac_do,mac_reply", "tools/list on /mcp/account", tools.map((t) => `${t.name}${t.annotations?.readOnlyHint ? " (read-only)" : ""}`));
 	const projects = await client.callTool({ name: "my_projects", arguments: {} });
 	const projectsText = (projects.content as { type: string; text?: string }[])[0]?.text ?? "";
 	check(!projects.isError && projectsText.includes("asyncswap/v2"), "my_projects answers for the signed-in account", JSON.parse(projectsText).projects.map((p: { repo: string }) => p.repo));
@@ -181,11 +181,9 @@ async function main() {
 	const denied = await fetch(serverUrl, {
 		method: "POST",
 		headers: { authorization: `Bearer ${readTokens.access_token}`, "content-type": "application/json", accept: "application/json, text/event-stream" },
-		body: JSON.stringify({ jsonrpc: "2.0", id: 2, method: "tools/call", params: { name: "start_swarm", arguments: { repo: "octocat/hello-world" } } }),
+		body: JSON.stringify({ jsonrpc: "2.0", id: 2, method: "tools/call", params: { name: "mac_do", arguments: { op: "folders" } } }),
 	});
-	check(denied.status === 403 && (denied.headers.get("www-authenticate") ?? "").includes('error="insufficient_scope", scope="swarm:write"'), "start_swarm with swarm:read is 403 insufficient_scope", denied.headers.get("www-authenticate"));
-	const deniedApi = await api("/api/projects/init", readTokens.access_token, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ repo: "octocat/hello-world" }) });
-	check(deniedApi.status === 403 && ((await deniedApi.json()) as { scope: string }).scope === "swarm:write", "POST /api/projects/init with swarm:read is 403 naming swarm:write", deniedApi.headers.get("www-authenticate"));
+	check(denied.status === 403 && (denied.headers.get("www-authenticate") ?? "").includes('error="insufficient_scope", scope="swarm:write"'), "mac_do with swarm:read is 403 insufficient_scope", denied.headers.get("www-authenticate"));
 	const stillReads = await api("/api/usage", readTokens.access_token);
 	check(stillReads.status === 200, "GET /api/usage with swarm:read is 200");
 
@@ -194,8 +192,8 @@ async function main() {
 	check(refreshed.access_token !== tokens.access_token && refreshed.refresh_token !== tokens.refresh_token, "refresh_token grant returns a new pair", { scope: refreshed.scope });
 	const replay = await fetch(m.token_endpoint, { method: "POST", headers: { "content-type": "application/x-www-form-urlencoded" }, body: new URLSearchParams({ grant_type: "refresh_token", refresh_token: tokens.refresh_token!, client_id: clientInformation.client_id }) });
 	check(replay.status === 400 && ((await replay.json()) as { error: string }).error === "invalid_grant", "the used refresh token no longer works (rotation)");
-	const refreshedWorks = await api("/api/swarm/state", refreshed.access_token);
-	check(refreshedWorks.status === 200, "the refreshed access token works on GET /api/swarm/state");
+	const refreshedWorks = await api("/api/projects", refreshed.access_token);
+	check(refreshedWorks.status === 200, "the refreshed access token works on GET /api/projects");
 
 	// 10. Revocation.
 	const revokeAccess = await fetch(m.revocation_endpoint!, { method: "POST", headers: { "content-type": "application/x-www-form-urlencoded" }, body: new URLSearchParams({ token: refreshed.access_token, token_type_hint: "access_token" }) });

@@ -11,13 +11,11 @@
  * gets a 403 with error="insufficient_scope".
  *
  * The tools act for the account the token was issued to, through the same
- * code as the signed-in app: lib/projects.ts, lib/spend.ts, lib/billing.ts,
- * lib/swarm.ts, lib/relay.ts (the Mac app's swarm), lib/project-repo.ts and
- * lib/project-audits.ts (a project's files, audits and Proofs coverage, read
- * from GitHub), and the /api/projects, /api/onboarding/plan,
- * /api/onboarding/state and /api/projects/init routes. What runs only on the
- * Mac (the debugger, concolity's coverage and explore, formal-ast on a working
- * tree) is not here; docs/MCP.md lists it. */
+ * code as the signed-in app: lib/projects.ts, lib/relay.ts (the Mac app's
+ * swarm), lib/project-repo.ts and lib/project-audits.ts (a project's files,
+ * audits and Proofs coverage, read from GitHub). What runs only on the
+ * Mac (formal-ast on a working tree, lake and forge) is not here; docs/MCP.md
+ * lists it. */
 
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { CfWorkerJsonSchemaValidator } from "@modelcontextprotocol/sdk/validation/cfworker-provider.js";
@@ -25,20 +23,12 @@ import { WebStandardStreamableHTTPServerTransport } from "@modelcontextprotocol/
 import { CallToolRequestSchema, ListToolsRequestSchema, type CallToolResult, type Tool } from "@modelcontextprotocol/sdk/types.js";
 import { z } from "zod/v4";
 import { auth } from "@/lib/auth";
-import { getCredits, hasSpend, isBillingConfigured, REPORT_USD } from "@/lib/billing";
 import { issuer, SCOPE_LIST, SCOPES, type Scope } from "@/lib/oauth";
-import { parseRepo, type RepoPlan } from "@/lib/plan";
 import { findingRow, planProgress, readAudits, reportSummary, REPORT_DIRS, where } from "@/lib/project-audits";
 import { openProject } from "@/lib/project-repo";
 import { listProjects } from "@/lib/projects";
 import { MAC_OPS, attention, parseCommand, relayObject, type MacOp, type RelayEvent, type RelayRow } from "@/lib/relay";
-import { projectObject } from "@/lib/spend";
-import { getSwarmState } from "@/lib/swarm";
 import { currentRequest } from "@/worker/context";
-import * as onboardingPlan from "@/server/routes/onboarding/plan/route";
-import * as onboardingState from "@/server/routes/onboarding/state/route";
-import * as projectsInit from "@/server/routes/projects/init/route";
-import * as projectsAdd from "@/server/routes/projects/route";
 import { MCP_VERSION } from "./mcp";
 import { ORIGIN, SHORT } from "./narrative";
 
@@ -49,14 +39,6 @@ export const ACCOUNT_MCP_PATH = "/mcp/account";
 export const accountResourceMetadataUrl = () => `${issuer()}/.well-known/oauth-protected-resource${ACCOUNT_MCP_PATH}`;
 
 const READ = { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true };
-/* Writes to the account, never destroys anything, and does the same thing when repeated. */
-const WRITE = { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: true };
-
-const REPO_INPUT: Tool["inputSchema"] = {
-  type: "object",
-  required: ["repo"],
-  properties: { repo: { type: "string", description: "The GitHub repository, owner/name or its github.com URL" } },
-};
 
 const REF = { type: "string", description: "A branch, tag or commit; the default branch when absent. Every read in the call is pinned to the commit it resolves to, which the result names." };
 const REPO = { type: "string", description: "One of your projects, owner/name or its github.com URL" };
@@ -77,61 +59,10 @@ export const ACCOUNT_TOOLS: AccountTool[] = [
   {
     name: "my_projects",
     title: "My projects",
-    description: "The account's projects: each protocol repository, the proofs repository its swarm works in (null until the swarm has been started on it), and when it was added. The live swarm's project (asyncswap/v2) is listed for every account. Needs swarm:read.",
+    description: "The account's projects: each GitHub repository added to it, the proofs repository published for it (null until there is one), and when it was added. Needs swarm:read.",
     inputSchema: { type: "object", properties: {} },
     annotations: READ,
     scope: "swarm:read",
-  },
-  {
-    name: "my_usage",
-    title: "My usage",
-    description: "What the swarm spent: the total today (UTC), this month and overall in USD, and the latest cost lines (repository, role, reference, amount, time) from the spend ledger. Needs swarm:read.",
-    inputSchema: {
-      type: "object",
-      properties: { lines: { type: "integer", minimum: 1, maximum: 500, default: 50, description: "How many of the latest cost lines to return, default 50" } },
-    },
-    annotations: READ,
-    scope: "swarm:read",
-  },
-  {
-    name: "my_credits",
-    title: "My credits",
-    description: "The account's prepaid credits: the balance in cents and USD and every entry, deposits (Stripe Checkout) and the metered spend of model calls made on credits. Needs swarm:read.",
-    inputSchema: { type: "object", properties: {} },
-    annotations: READ,
-    scope: "swarm:read",
-  },
-  {
-    name: "swarm_state",
-    title: "Swarm state",
-    description: "The hosted swarm on GitHub (the earlier, GitHub-based swarm; the desktop app's local swarm is mac_swarm), across the account's projects: open issues and pull requests with fm: labels, recently merged pull requests, spend today, the latest cost lines, the chief's and the assistant's latest notes, the rebuild cycle and recent runs. The same read as the swarm workspace. Needs swarm:read.",
-    inputSchema: { type: "object", properties: {} },
-    annotations: READ,
-    scope: "swarm:read",
-  },
-  {
-    name: "plan_repository",
-    title: "Plan a repository",
-    description: "Runs the planner on a public Solidity repository, the same way the landing page and POST /api/onboarding/plan do, waits for it to finish, and returns the plan: a summary, the core contracts, the invariants worth proving, the first issues for the swarm and a suggested team size. The repository becomes one of the account's projects and its onboarding starts from this plan. Limits: five fresh plans per hour per address; a plan is cached for a week. Needs swarm:write.",
-    inputSchema: REPO_INPUT,
-    annotations: WRITE,
-    scope: "swarm:write",
-  },
-  {
-    name: "start_swarm",
-    title: "Start the swarm on a repository",
-    description: "Hands a planned repository to the swarm: creates <owner>/<name>-proofs from the formalmind/lean-template repository under the same owner (an existing one is reused) and lists it in the swarm's projects.json, so the dispatcher sweeps it on its next pass. The same step as Start in onboarding and POST /api/projects/init. Refuses unless the repository is already one of the account's projects (plan it first), and fails with the step named when the formalmind GitHub App is not installed on the owner. Consequential: it creates a repository on GitHub. Needs swarm:write.",
-    inputSchema: REPO_INPUT,
-    annotations: { ...WRITE, idempotentHint: true },
-    scope: "swarm:write",
-  },
-  {
-    name: "add_project",
-    title: "Add a project",
-    description: "Adds a GitHub repository to the account's projects (Add a project → Remote repository; POST /api/projects), so the project tools can read it. Nothing is planned or started. A private repository is read through the formalmind GitHub App, which must be installed on its owner. Needs swarm:write.",
-    inputSchema: REPO_INPUT,
-    annotations: WRITE,
-    scope: "swarm:write",
   },
   {
     name: "list_files",
@@ -221,21 +152,9 @@ export const ACCOUNT_TOOLS: AccountTool[] = [
     scope: "swarm:read",
   },
   {
-    name: "report_quote",
-    title: "Report quote",
-    description: `What Formal Mind's audit report for a repository and commit costs ($${REPORT_USD}, once per repository and commit), whether that commit is already paid for, and the credit balance. Only a quote: the report is generated and paid for in the desktop app (Bugs → Generate report), on the Mac. Needs swarm:read.`,
-    inputSchema: {
-      type: "object",
-      required: ["repo", "commit"],
-      properties: { repo: { type: "string", description: "owner/name" }, commit: { type: "string", description: "The commit, 7 to 40 hex characters" } },
-    },
-    annotations: READ,
-    scope: "swarm:read",
-  },
-  {
     name: "mac_swarm",
     title: "The Mac's swarm",
-    description: "The swarm running in the account's desktop app, through the formal.team relay: whether the Mac is online and when it was last seen, its name, the app's version, and each added folder (path, name, GitHub origin) with its sessions (run id, title, outcome, spent in USD, running). The work and the files stay on the Mac; this is what it publishes. Empty until the app has signed in with the relay on (Settings → Phone). Needs swarm:read.",
+    description: "The swarm running in the account's desktop app, through the formal.team relay: whether the Mac is online and when it was last seen, its name, the app's version, and each added folder (path, name, GitHub origin) with its sessions (run id, title, outcome, spent in USD, running). The work and the files stay on the Mac; this is what it publishes. Empty until the app has signed in with the relay on (Settings → Remote control (MCP)). Needs swarm:read.",
     inputSchema: { type: "object", properties: {} },
     annotations: { ...READ, idempotentHint: false },
     scope: "swarm:read",
@@ -274,7 +193,7 @@ export const ACCOUNT_TOOLS: AccountTool[] = [
   {
     name: "mac_swarm_send",
     title: "Steer the Mac's swarm",
-    description: "Sends the desktop app a command through the relay, as the phone does: say (a message to a session's assistant, answered before the next turn: run and text), start (a session in a folder, optionally a goal, a budget in USD up to 1000, and the run to continue) or stop (run). The Mac runs it as if typed there; a command it doesn't pick up within 10 minutes is dropped. Consequential: start runs agents on the Mac with the model route its Settings use (the person's Claude plan, credits or key). Returns the command's seq; follow with mac_swarm_events. Needs swarm:write.",
+    description: "Sends the desktop app a command through the relay: say (a message to a session's assistant, answered before the next turn: run and text), start (a session in a folder, optionally a goal, a budget in USD up to 1000, and the run to continue) or stop (run). The Mac runs it as if typed there; a command it doesn't pick up within 10 minutes is dropped. Consequential: start runs agents on the Mac with the model route its Settings use (the person's Claude plan or key). Returns the command's seq; follow with mac_swarm_events. Needs swarm:write.",
     inputSchema: {
       type: "object",
       required: ["type", "folder"],
@@ -309,7 +228,7 @@ export const ACCOUNT_TOOLS: AccountTool[] = [
   {
     name: "mac_do",
     title: "Act in the Mac app",
-    description: `Does anything the desktop app's folder page does, on the person's Mac, through the relay: the Mac runs it as if clicked there, with the model route and caps its Settings use, and answers with the result (waits up to ~50 s; then mac_reply with the returned id). Operations: ${opsList(true)}. Consequential: start, hunt, statements and triage run agents that spend the person's Claude plan, credits or key; report spends $150 of credits; add_folder lets the app (and these tools) read that folder; verify_repo forks a repository into formalmind, starts the swarm on it and pushes each approved proof to the fork.`,
+    description: `Does anything the desktop app's folder page does, on the person's Mac, through the relay: the Mac runs it as if clicked there, with the model route and caps its Settings use, and answers with the result (waits up to ~50 s; then mac_reply with the returned id). Operations: ${opsList(true)}. Consequential: start, statements and triage run agents that spend the person's Claude plan or key; add_folder lets the app (and these tools) read that folder; verify_repo forks a repository into formalmind, starts the swarm on it and pushes each approved proof to the fork.`,
     inputSchema: {
       type: "object",
       required: ["op"],
@@ -336,19 +255,6 @@ const text = (value: string): CallToolResult => ({ content: [{ type: "text", tex
 /* Compact: an agent reads every byte of it. */
 const json = (value: unknown): CallToolResult => text(JSON.stringify(value));
 const failure = (message: string): CallToolResult => ({ ...text(message), isError: true });
-
-/* A request to one of this app's own routes, on behalf of the caller: the
- * route reads the session from the request in flight (the bearer token), and
- * the client's address so rate limits apply to it. */
-function internal(method: "POST" | "PUT", path: string, body: unknown): Request {
-  const original = currentRequest().request;
-  const headers = new Headers({ "content-type": "application/json" });
-  for (const name of ["cf-connecting-ip", "x-forwarded-for"]) {
-    const value = original.headers.get(name);
-    if (value) headers.set(name, value);
-  }
-  return new Request(`${new URL(original.url).origin}${path}`, { method, headers, body: JSON.stringify(body) });
-}
 
 /** Who the tools act for: an OAuth token within its scopes, or the desktop app's session with all of them. */
 type Caller = { sub: string; who: string; via: "token" | "desktop"; scopes: Scope[] };
@@ -396,67 +302,6 @@ async function callTool(name: string, args: Record<string, unknown>, caller: Cal
   switch (name) {
     case "my_projects":
       return json({ projects: await listProjects(sub) });
-    case "my_usage": {
-      const project = projectObject();
-      if (!project) return failure("The PROJECT Durable Object binding is missing; see wrangler.jsonc.");
-      const lines = Math.min(500, Math.max(1, Number(args.lines) || 50));
-      const { costs, syncedAt } = await project.costs();
-      const today = new Date().toISOString().slice(0, 10);
-      const month = today.slice(0, 7);
-      const sum = (prefix: string) => costs.filter((c) => c.createdAt.startsWith(prefix)).reduce((s, c) => s + c.usd, 0);
-      return json({ spentTodayUsd: sum(today), spentThisMonthUsd: sum(month), spentTotalUsd: sum(""), lineCount: costs.length, syncedAt, lines: costs.slice(-lines) });
-    }
-    case "my_credits": {
-      const credits = await getCredits(sub);
-      return json({ configured: isBillingConfigured(), cents: credits.cents, usd: credits.cents / 100, deposits: credits.entries });
-    }
-    case "swarm_state": {
-      const state = await getSwarmState(await listProjects(sub));
-      return json({ ...state, costs: state.costs.slice(-20), merged: state.merged.slice(0, 10), runs: state.runs.slice(0, 10) });
-    }
-    case "plan_repository": {
-      const repo = parseRepo(String(args.repo ?? ""));
-      if (!repo) return failure("repo must be owner/name or a github.com URL.");
-      const res = await onboardingPlan.POST(internal("POST", "/api/onboarding/plan", { repo }));
-      const body = await res.text();
-      if (!res.ok) {
-        const error = (() => {
-          try {
-            return (JSON.parse(body) as { error?: string }).error;
-          } catch {
-            return undefined;
-          }
-        })();
-        return failure(`${error ?? body} (HTTP ${res.status})`);
-      }
-      let plan: RepoPlan;
-      try {
-        plan = JSON.parse(body) as RepoPlan;
-      } catch {
-        return failure("The planner did not finish a plan; try again in a minute.");
-      }
-      const planned = res.headers.get("x-plan-repo") ?? repo;
-      // The same step the web app takes once a plan is in: it becomes the account's onboarding and one of its projects.
-      const saved = await onboardingState.PUT(internal("PUT", "/api/onboarding/state", { repo: planned, plan }));
-      if (!saved.ok) return failure(`The plan is ready but could not be saved to the account (HTTP ${saved.status}).`);
-      return json({ repo: planned, cached: res.headers.get("x-plan-cache") === "hit", plan });
-    }
-    case "start_swarm": {
-      const repo = parseRepo(String(args.repo ?? ""));
-      if (!repo) return failure("repo must be owner/name or a github.com URL.");
-      const res = await projectsInit.POST(internal("POST", "/api/projects/init", { repo }));
-      const body = (await res.json().catch(() => ({}))) as Record<string, unknown>;
-      if (!res.ok) return failure(`${typeof body.error === "string" ? body.error : "Starting the swarm failed."}${body.step ? ` (step: ${body.step})` : ""} (HTTP ${res.status})`);
-      return json({ repo, ...body });
-    }
-    case "add_project": {
-      const repo = parseRepo(str(args.repo));
-      if (!repo) return failure("repo must be owner/name or a github.com URL.");
-      const res = await projectsAdd.POST(internal("POST", "/api/projects", { repo }));
-      const body = (await res.json().catch(() => ({}))) as { repo?: string; error?: string };
-      if (!res.ok) return failure(`${body.error ?? "Adding the project failed."} (HTTP ${res.status})`);
-      return json({ repo: body.repo ?? repo, projects: (await listProjects(sub)).map((p) => p.repo) });
-    }
     case "list_files": {
       const p = await project();
       const prefix = str(args.prefix).replace(/^\.?\/+|\/+$/g, "");
@@ -552,15 +397,8 @@ async function callTool(name: string, args: Record<string, unknown>, caller: Cal
         commit: p.commit,
         reports,
         ...(plan !== null ? { plan: planProgress(plan) } : {}),
-        ...(!internal.length ? { note: "No internal (Formal Mind) audit report here yet: the desktop app writes audit/formal-mind.audit.json as the swarm proves and reviews, and Bugs → Generate report fills in the coverage." } : {}),
+        ...(!internal.length ? { note: "No internal (Formal Mind) audit report here yet: the desktop app writes audit/formal-mind.audit.json as the swarm proves and reviews." } : {}),
       });
-    }
-    case "report_quote": {
-      const repo = str(args.repo).replace(/[^\w./-]/g, "").slice(0, 100);
-      const commit = lower(args.commit);
-      if (!repo || !/^[0-9a-f]{7,40}$/.test(commit)) return failure("repo (owner/name) and commit (7 to 40 hex characters) are required.");
-      const [paid, credits] = await Promise.all([hasSpend(sub, `report:${repo}@${commit}`), getCredits(sub)]);
-      return json({ repo, commit, priceUsd: REPORT_USD, paid, balanceUsd: credits.cents / 100, enough: paid || credits.cents >= REPORT_USD * 100 });
     }
     case "mac_swarm": {
       const { state, macSeenAt } = await relay().read(Number.MAX_SAFE_INTEGER, false);
@@ -627,7 +465,7 @@ async function callTool(name: string, args: Record<string, unknown>, caller: Cal
       const { state } = await r.read(Number.MAX_SAFE_INTEGER, false);
       const folders = state?.folders ?? [];
       const match = folders.find((f) => [f.path, f.name, f.repo ?? ""].some((v) => v.toLowerCase() === wanted.toLowerCase()));
-      if (!match) return failure(`${wanted || "folder"} isn't one of the Mac's folders${folders.length ? `: ${folders.map((f) => f.path).join(", ")}` : " (it has published none; is the app signed in, with Settings → Phone on?)"}.`);
+      if (!match) return failure(`${wanted || "folder"} isn't one of the Mac's folders${folders.length ? `: ${folders.map((f) => f.path).join(", ")}` : " (it has published none; is the app signed in, with Settings → Remote control (MCP) on?)"}.`);
       const command = parseCommand({ ...args, folder: match.path });
       if (!command || command.type === "history") return failure("Not a command: say needs run and text, stop needs run, start takes an optional run, goal and budget (up to 1000).");
       const seq = await r.send(command);
@@ -646,7 +484,7 @@ async function callTool(name: string, args: Record<string, unknown>, caller: Cal
         const { state } = await r.read(Number.MAX_SAFE_INTEGER, false);
         const folders = state?.folders ?? [];
         const match = folders.find((f) => [f.path, f.name, f.repo ?? ""].some((v) => v.toLowerCase() === wanted.toLowerCase()));
-        if (!match) return failure(`${wanted || "folder"} isn't one of the Mac's folders${folders.length ? `: ${folders.map((f) => f.path).join(", ")}` : " (it has published none; is the app signed in, with Settings → Phone on?)"}.`);
+        if (!match) return failure(`${wanted || "folder"} isn't one of the Mac's folders${folders.length ? `: ${folders.map((f) => f.path).join(", ")}` : " (it has published none; is the app signed in, with Settings → Remote control (MCP) on?)"}.`);
         folder = match.path;
       }
       const command = parseCommand({ type: "call", folder, id: crypto.randomUUID(), op, args: args.args ?? {} });
@@ -690,7 +528,7 @@ function buildServer(caller: Caller): Server {
       capabilities: { tools: {} },
       jsonSchemaValidator: new CfWorkerJsonSchemaValidator(),
       instructions:
-        `${SHORT} These tools act for the Formal Mind account of ${who} (scopes: ${caller.scopes.join(", ")}): its projects and their files, audit reports, findings and Proofs coverage (read from GitHub at a commit), its usage and credits, the swarm running in its desktop app (through the relay), and with swarm:write, adding and planning a repository and steering the Mac's swarm. Start with my_projects, then list_audits or proofs_coverage on one. Results are compact JSON. The debugger and concolity run only on the Mac; public reads (the audit format, an example audit, the app's latest release) need no token at ${ORIGIN}/mcp.`,
+        `${SHORT} These tools act for the Formal Mind account of ${who} (scopes: ${caller.scopes.join(", ")}): its projects and their files, audit reports, findings and Proofs coverage (read from GitHub at a commit), the swarm running in its desktop app (through the relay), and with swarm:write, steering the Mac's swarm. Start with my_projects, then list_audits or proofs_coverage on one. Results are compact JSON. Public reads (the audit format, an example audit, the app's latest release) need no token at ${ORIGIN}/mcp.`,
     },
   );
   const handlers = server as unknown as ToolHandlers;

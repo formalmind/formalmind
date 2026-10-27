@@ -1,16 +1,14 @@
 //! The app's control API: every operation the app does, by name, in one place (lib/mac-ops.ts is its published list).
-//! The folder page, the relay (the phone and the MCP through formal.team) and anything else that drives the app call
+//! The folder page, the relay (the MCP through formal.team) and anything else that drives the app call
 //! [`dispatch`], so they all do the same thing the same way: the backend decides the model route, the caps and when
 //! a run starts; whoever asks only says what they want.
 
 use crate::local;
 use crate::swarm::{self, SwarmRequest, Swarms};
 use serde_json::{json, Value};
-use std::future::Future;
-use std::pin::Pin;
 use tauri::{AppHandle, Manager};
 
-/// What only the running app can do: run and steer sessions (they live in its process), and the Bug Hunter's tools.
+/// What only the running app can do: run and steer sessions (they live in its process).
 /// The app implements it; tests use a fake that records what was asked, so every operation can be tested without a
 /// window.
 pub trait Engine: Send + Sync {
@@ -19,7 +17,6 @@ pub trait Engine: Send + Sync {
     fn stop(&self, folder: &str, run: &str);
     fn say(&self, folder: &str, run: &str, text: &str) -> Result<(), String>;
     fn set_budget(&self, folder: &str, run: &str, usd: f64) -> Result<(), String>;
-    fn reach_run<'a>(&'a self, folder: &'a str, tool: &'a str, target: Option<String>) -> Pin<Box<dyn Future<Output = Result<usize, String>> + Send + 'a>>;
 }
 
 impl Engine for AppHandle {
@@ -37,9 +34,6 @@ impl Engine for AppHandle {
     }
     fn set_budget(&self, folder: &str, run: &str, usd: f64) -> Result<(), String> {
         swarm::swarm_set_budget(self.state::<Swarms>(), folder.to_string(), run.to_string(), usd)
-    }
-    fn reach_run<'a>(&'a self, folder: &'a str, tool: &'a str, target: Option<String>) -> Pin<Box<dyn Future<Output = Result<usize, String>> + Send + 'a>> {
-        Box::pin(crate::reach::reach_run(self.clone(), folder.to_string(), tool.to_string(), target))
     }
 }
 
@@ -63,8 +57,6 @@ pub const OPS: &[(&str, bool)] = &[
     ("units", false),
     ("coverage", false),
     ("slice", false),
-    ("reach", false),
-    ("report_quote", false),
     ("work_map", false),
     ("health", false),
     ("brief", false),
@@ -76,7 +68,6 @@ pub const OPS: &[(&str, bool)] = &[
     ("answers", true),
     ("remove_folder", true),
     ("start", true),
-    ("hunt", true),
     ("stop", true),
     ("pause", true),
     ("resume", true),
@@ -88,8 +79,6 @@ pub const OPS: &[(&str, bool)] = &[
     ("mark_statement", true),
     ("remove_statement", true),
     ("triage", true),
-    ("reach_run", true),
-    ("report", true),
     ("github", true),
     ("refresh_model", true),
     ("check_proof", true),
@@ -102,7 +91,7 @@ fn json_of<T: serde::Serialize>(r: Result<T, String>) -> Result<Value, String> {
 
 /// Starts (or resumes) a session the way the app does: the model route, model and the folder's cap from the backend's
 /// settings. Returns the session id.
-pub fn start<E: Engine + ?Sized>(app: &E, folder: &str, goal: Option<String>, session: Option<String>, only_queued: bool, hunt: Option<String>, budget: Option<f64>) -> Result<String, String> {
+pub fn start<E: Engine + ?Sized>(app: &E, folder: &str, goal: Option<String>, session: Option<String>, only_queued: bool, budget: Option<f64>) -> Result<String, String> {
     let settings = local::read()?.settings;
     let request = SwarmRequest {
         folder: folder.to_string(),
@@ -113,7 +102,6 @@ pub fn start<E: Engine + ?Sized>(app: &E, folder: &str, goal: Option<String>, se
         model: settings.model.clone(),
         session: session.or_else(|| Some("swarm".into())),
         only_queued: Some(only_queued),
-        hunt,
     };
     app.start(request)
 }
@@ -125,7 +113,7 @@ pub fn work_queued<E: Engine + ?Sized>(app: &E, folder: &str) -> Result<Vec<Stri
     if !running.is_empty() {
         return Ok(running);
     }
-    Ok(vec![start(app, folder, None, None, true, None, None)?])
+    Ok(vec![start(app, folder, None, None, true, None)?])
 }
 
 /// The added folders and their sessions, newest first, with the ones running now marked.
@@ -206,7 +194,7 @@ pub async fn dispatch<E: Engine + ?Sized>(app: &E, op: &str, folder: &str, a: &V
             let path = dir.to_string_lossy().into_owned();
             local::folder_add(path.clone())?;
             local::settings_set(json!({ "github": { path.clone(): true } }))?;
-            let run = start(app, &path, opt("goal"), None, false, None, usd("budget"))?;
+            let run = start(app, &path, opt("goal"), None, false, usd("budget"))?;
             return Ok(json!({ "folder": path, "branch": branch, "fork": format!("{}/{name}", crate::publish::ORG), "run": run }));
         }
         "remove_folder" => {
@@ -239,16 +227,10 @@ pub async fn dispatch<E: Engine + ?Sized>(app: &E, op: &str, folder: &str, a: &V
         "units" => crate::ast::ast_units(folder, need("entry")?).await,
         "coverage" => crate::ast::ast_formal(folder, need("entry")?).await,
         "slice" => crate::ast::ast_slice(folder, need("entry")?, need("function")?).await.map(Value::String),
-        "reach" => crate::reach::reach_map(folder, need("entry")?).await,
-        "report_quote" => crate::report::report_quote(folder, local::read()?.settings.api_base()).await,
         "work_map" => swarm::swarm_work_map(folder),
         "brief" => swarm::swarm_brief(folder, need("function")?).map(Value::String),
         "ledger" => crate::ledger::build(std::path::Path::new(&folder), a["check"].as_bool().unwrap_or(true), a["force"].as_bool().unwrap_or(false)).await,
-        "start" => Ok(json!({ "run": start(app, &folder, opt("goal"), opt("run"), false, None, usd("budget"))? })),
-        "hunt" => {
-            let run = opt("run").unwrap_or_else(|| format!("hunt-{:x}", std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_millis()).unwrap_or(0)));
-            Ok(json!({ "run": start(app, &folder, None, Some(run), true, Some(s("focus")), usd("budget"))? }))
-        }
+        "start" => Ok(json!({ "run": start(app, &folder, opt("goal"), opt("run"), false, usd("budget"))? })),
         "stop" => {
             app.stop(&folder, &need("run")?);
             Ok(Value::Null)
@@ -263,7 +245,7 @@ pub async fn dispatch<E: Engine + ?Sized>(app: &E, op: &str, folder: &str, a: &V
             }
             Ok(json!({ "paused": runs }))
         }
-        "resume" => Ok(json!({ "run": start(app, &folder, None, opt("run"), false, None, None)? })),
+        "resume" => Ok(json!({ "run": start(app, &folder, None, opt("run"), false, None)? })),
         "say" => app.say(&folder, &need("run")?, &need("text")?).map(|_| Value::Null),
         "set_budget" => {
             let amount = usd("usd").ok_or("set_budget needs usd")?;
@@ -295,18 +277,10 @@ pub async fn dispatch<E: Engine + ?Sized>(app: &E, op: &str, folder: &str, a: &V
             swarm::swarm_triage(folder.clone(), need("path")?, opt("run"))?;
             Ok(json!({ "running": work_queued(app, &folder)? }))
         }
-        "reach_run" => {
-            let tool = need("tool")?;
-            app.reach_run(&folder, &tool, opt("target")).await.map(|n| json!({ "started": n }))
-        }
         "github" => {
             let on = a["on"].as_bool().ok_or("github needs on: true or false")?;
             local::settings_set(json!({ "github": { folder.clone(): on } }))?;
             Ok(json!({ "folder": folder, "github": on }))
-        }
-        "report" => {
-            let dirs: Vec<String> = a["dirs"].as_array().map(|d| d.iter().filter_map(|x| x.as_str().map(String::from)).collect()).unwrap_or_else(|| vec!["audit".into(), "audits".into(), "reports".into()]);
-            json_of(crate::report::report_generate(folder, dirs, local::read()?.settings.api_base()).await)
         }
         "refresh_model" => json_of(swarm::swarm_refresh_model(folder)).map(|r| json!({ "regenerated": r })),
         "check_proof" => swarm::swarm_check_proof(folder, need("path")?, opt("content")).await,
@@ -352,9 +326,7 @@ mod ops {
     use super::{dispatch, Engine, OPS};
     use crate::swarm::SwarmRequest;
     use serde_json::{json, Value};
-    use std::future::Future;
     use std::path::{Path, PathBuf};
-    use std::pin::Pin;
     use std::sync::Mutex;
 
     #[derive(Default)]
@@ -370,7 +342,7 @@ mod ops {
         }
         fn start(&self, r: SwarmRequest) -> Result<String, String> {
             let run = r.session.clone().unwrap_or_else(|| "swarm".into());
-            self.started.lock().unwrap().push(json!({ "folder": r.folder, "goal": r.goal, "budget": r.budget_usd, "provider": r.provider, "model": r.model, "session": r.session, "onlyQueued": r.only_queued, "hunt": r.hunt, "api": r.api_base }));
+            self.started.lock().unwrap().push(json!({ "folder": r.folder, "goal": r.goal, "budget": r.budget_usd, "provider": r.provider, "model": r.model, "session": r.session, "onlyQueued": r.only_queued, "api": r.api_base }));
             self.running.lock().unwrap().push(run.clone());
             Ok(run)
         }
@@ -385,10 +357,6 @@ mod ops {
         fn set_budget(&self, _folder: &str, run: &str, usd: f64) -> Result<(), String> {
             self.calls.lock().unwrap().push(format!("budget {run} {usd}"));
             Ok(())
-        }
-        fn reach_run<'a>(&'a self, _folder: &'a str, tool: &'a str, _target: Option<String>) -> Pin<Box<dyn Future<Output = Result<usize, String>> + Send + 'a>> {
-            self.calls.lock().unwrap().push(format!("reach {tool}"));
-            Box::pin(async { Ok(1) })
         }
     }
 
@@ -450,7 +418,6 @@ mod ops {
         assert!(ok(&e, "units", &f, json!({ "entry": "src/Box.sol" })).await.to_string().contains("Box.set"));
         assert!(ok(&e, "coverage", &f, json!({ "entry": "src/Box.sol" })).await.to_string().contains("Box.set"));
         assert!(ok(&e, "slice", &f, json!({ "entry": "src/Box.sol", "function": "set" })).await.as_str().unwrap().contains("set"));
-        assert!(ok(&e, "reach", &f, json!({ "entry": "src/Box.sol" })).await.is_object());
         let map = ok(&e, "work_map", &f, json!({})).await;
         assert!(map["contracts"][0]["functions"].as_array().unwrap().iter().any(|x| x["lean"] == "Box.set"), "{map}");
         assert!(ok(&e, "brief", &f, json!({ "function": "Box.set" })).await.as_str().unwrap().contains("Box.set"));
@@ -464,15 +431,13 @@ mod ops {
         std::fs::create_dir_all(Path::new(&f).join(".formal/runs")).unwrap();
         std::fs::write(Path::new(&f).join(".formal/runs/swarm.jsonl"), "{\"kind\":\"start\",\"text\":\"t\"}\n").unwrap();
         assert_eq!(ok(&e, "history", &f, json!({ "run": "swarm" })).await.as_array().unwrap().len(), 1);
-        // The report's price goes to formal.team: a closed port here, so it fails without spending.
-        err(&e, "report_quote", &f, json!({})).await;
     }
 
     #[tokio::test(flavor = "current_thread")]
     async fn every_action() {
         let (_base, f) = setup("actions");
         let e = Fake::default();
-        // Start, resume and hunt ask the app with the backend's settings: the Claude plan by default.
+        // Start and resume ask the app with the backend's settings: the Claude plan by default.
         let run = ok(&e, "start", &f, json!({ "goal": "the owner check", "budget": 7.5 })).await;
         assert_eq!(run["run"], "swarm");
         let s = e.started.lock().unwrap()[0].clone();
@@ -484,10 +449,6 @@ mod ops {
         assert_eq!(ok(&e, "running", &f, json!({})).await, json!([]));
         ok(&e, "resume", &f, json!({ "run": "reviews" })).await;
         ok(&e, "stop", &f, json!({ "run": "reviews" })).await;
-        let hunt = ok(&e, "hunt", &f, json!({ "focus": "set" })).await;
-        assert!(hunt["run"].as_str().unwrap().starts_with("hunt-"));
-        ok(&e, "stop", &f, json!({ "run": hunt["run"].as_str().unwrap() })).await;
-        assert_eq!(ok(&e, "reach_run", &f, json!({ "tool": "coverage" })).await["started"], 1);
         let calls = e.calls.lock().unwrap().clone();
         assert!(calls.contains(&"say swarm check set".into()) && calls.contains(&"budget swarm 12".into()) && calls.contains(&"stop swarm".into()), "{calls:?}");
         // Queued work starts a run for queued work when nothing runs.
@@ -506,8 +467,6 @@ mod ops {
         assert_eq!(ok(&e, "folders", "", json!({})).await[0]["github"], false);
         ok(&e, "github", &f, json!({ "on": true })).await;
         assert_eq!(ok(&e, "folders", "", json!({})).await[0]["github"], true);
-        // The report charges through formal.team: a closed port here, so it fails without spending.
-        err(&e, "report", &f, json!({})).await;
         // Folders.
         let other = std::env::temp_dir().join(format!("fm-control-other-{}", std::process::id()));
         std::fs::create_dir_all(&other).unwrap();

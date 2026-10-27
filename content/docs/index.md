@@ -12,9 +12,7 @@ writes a Foundry test that shows the bug. Nothing leaves your folder except the 
   out what it means in the code, asks you to confirm, then proves or disproves it.
 - **Bugs.** A property that fails becomes a finding with a passing proof-of-concept test, filed in your audit
   folder. Audit reports you already have are listed and checked against the current code.
-- **The Bug Hunter.** An agent that hunts on the compiled bytecode with coverage, concolic exploration and a
-  debugger, and backs every bug with a test.
-- **A report.** Formal Mind's assessment of the folder, in a standard JSON format and as a PDF.
+- **A report.** Formal Mind's assessment of the folder, in a standard JSON format, written as the swarm works.
 
 ## How it fits together
 

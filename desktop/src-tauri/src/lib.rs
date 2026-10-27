@@ -1,15 +1,12 @@
 //! The Formal Mind desktop shell: a webview over the shared React app, plus the bits only a native app can do.
 //! Today that's the sign-in token in the OS keychain, the formalmind:// deep link, and local folders
-//! with settings in ~/.formalmind (local.rs), the local executor that runs agent turns here (executor.rs), and debug
-//! mode over the sol-debug engine (debug.rs).
+//! with settings in ~/.formalmind (local.rs), and the local executor that runs agent turns here (executor.rs).
 
-mod anvil;
 mod analysis;
 mod answerer;
 mod ast;
 mod claude_code;
 mod control;
-mod debug;
 mod diagnose;
 mod executor;
 mod file_search;
@@ -24,9 +21,7 @@ mod lsp;
 mod openai;
 mod platform;
 mod publish;
-mod reach;
 mod relay;
-mod report;
 mod statements;
 mod term;
 
@@ -136,9 +131,8 @@ pub fn run() {
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_process::init())
         .manage(swarm::Swarms::default())
-        .manage(debug::Debuggers::default())
         .setup(|app| {
-            // The relay (the phone and agents through the MCP) runs in the backend, whatever the window is doing.
+            // The relay (agents through the MCP) runs in the backend, whatever the window is doing.
             relay::start(app.handle());
             // Installed builds register formalmind:// from tauri.conf.json; this covers `tauri dev` on Windows/Linux.
             #[cfg(any(windows, target_os = "linux"))]
@@ -158,8 +152,6 @@ pub fn run() {
                     model: env("FM_SWARM_MODEL"),
                     session: env("FM_SWARM_SESSION"),
                     only_queued: env("FM_SWARM_ONLY_QUEUED").map(|v| v == "1"),
-                    // A bug search (the hunter alone); set but empty means the whole codebase.
-                    hunt: std::env::var("FM_SWARM_HUNT").ok(),
                 };
                 if let Err(e) = swarm::swarm_start(app.handle().clone(), app.state::<swarm::Swarms>(), request) {
                     eprintln!("FM_SWARM_AUTOSTART: {e}");
@@ -182,21 +174,12 @@ pub fn run() {
             local::folder_repo,
             local::machine_name,
             ast::ast_units,
-            reach::reach_map,
-            reach::reach_run,
-            reach::reach_tasks,
             ast::ast_slice,
             ast::ast_formal,
             ast::ast_scripts,
-            report::report_generate,
-            report::report_quote,
             lsp::lsp_definition,
             lsp::lsp_hover,
             local::log_error,
-            anvil::anvil_list,
-            anvil::anvil_rpc_known,
-            anvil::anvil_start,
-            anvil::anvil_stop,
             term::term_start,
             term::term_write,
             term::term_resize,
@@ -205,7 +188,6 @@ pub fn run() {
             swarm::swarm_stop,
             swarm::swarm_say,
             swarm::swarm_triage,
-            swarm::swarm_hunt,
             claude_code::claude_code_status,
             swarm::swarm_running,
             swarm::swarm_work_map,
@@ -233,15 +215,6 @@ pub fn run() {
             swarm::swarm_set_budget,
             swarm::swarm_compact,
             swarm::swarm_queue,
-            debug::debug_open,
-            debug::debug_close,
-            debug::debug_run,
-            debug::debug_nav,
-            debug::debug_break,
-            debug::debug_watch,
-            debug::debug_file,
-            debug::debug_compare,
-            debug::debug_sync
         ])
         // Closing the window hides it: a running swarm keeps working, and the Dock icon brings the window back.
         .on_window_event(|window, event| {

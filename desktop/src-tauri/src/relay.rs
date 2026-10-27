@@ -1,7 +1,7 @@
 //! This Mac's side of the relay through formal.team (lib/relay.ts, worker/relay-do.ts), run by the backend for as long
 //! as the app runs, with or without a window: every swarm event goes up as it happens, with the added folders and
-//! their sessions; commands from the phone and from agents through the MCP come down and run through the control API
-//! ([`crate::control::dispatch`]), as if done in the app, and calls get their answer back. Off when Settings → Phone
+//! their sessions; commands from agents through the MCP come down and run through the control API
+//! ([`crate::control::dispatch`]), as if done in the app, and calls get their answer back. Off when Settings → Remote control (MCP)
 //! is turned off, or while the app isn't signed in.
 
 use crate::control::Engine;
@@ -81,7 +81,7 @@ impl Relay {
     }
 }
 
-/// What a command produced: a call's reply, a session's history, or an error said in its session (so the phone sees
+/// What a command produced: a call's reply, a session's history, or an error said in its session (so the MCP sees
 /// why nothing happened).
 #[derive(Default)]
 pub struct Handled {

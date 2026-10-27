@@ -18,7 +18,7 @@ read. Nothing is uploaded. `src-tauri/src/local.rs` has it, with a test (`cargo 
 
 `src/swarm-panel.tsx` (the Mac app's layout; the website keeps its tabs and the floating chat):
 
-- **The view fills the middle**: Canvas, Proofs, Bugs or Code (and Debug where it's on).
+- **The view fills the middle**: Canvas, Proofs, Bugs or Code.
 - **The chat is the right pane**: talk to the agents, start or resume the swarm. Drag the line between them to resize it
   (double-click for the default); its width and whether it's open are kept. While the swarm runs, the send button is
   Stop until you type. A working agent's current task shimmers.
@@ -52,7 +52,7 @@ bun run desktop:dev
 That starts Vite on :1420 and opens the app. It talks to https://formal.team by default. For a local Worker, run
 `bun run dev:api` (port 8787) and either start the app with `VITE_FORMALMIND_API=http://localhost:8787` or set
 **Server** on the sign-in screen. A local Worker without `APP_BASE_URL` signs everyone in as "Dev Preview".
-Chat needs `OPENAI_API_KEY` in `.dev.vars`, and the swarm state needs `GITHUB_TOKEN` there too (unauthenticated
+Chat needs `OPENAI_API_KEY` in `.dev.vars`, and reading projects from GitHub needs `GITHUB_TOKEN` there too (unauthenticated
 GitHub requests hit the rate limit fast); `gh auth token` gives you one.
 
 ## Test the lifecycle
@@ -171,8 +171,7 @@ nowhere and pushes nothing; its tools can't run git. Activity shows in the app (
 Proofs and Bugs pages), and the canvas links nowhere outside it.
 
 **Who pays for the model.** Files, `lake` and `forge` run here; only the model calls leave, by exactly one route,
-picked in Settings → Models (`fm:provider`; Claude Code unless you pick another): **formal.team credits** (`/api/desktop/model-session` mints a
-session per agent turn with the desktop sign-in, charged as `local/<folder>` with the agent and item), **your own
+picked in Settings → Models (`fm:provider`; Claude Code unless you pick another): **your own
 Anthropic key** from the keychain (`team.formal.desktop` / `anthropic`), straight to `api.anthropic.com`, or
 **Claude Code on your Claude plan** (`claude-code`). Every event is logged to `.formal/runs/<run>.jsonl`.
 
@@ -199,11 +198,11 @@ or a finding filed. In dev builds `FM_SWARM_AUTOSTART=<added folder>` starts tha
 `FM_SWARM_BUDGET`, `FM_SWARM_PROVIDER=anthropic`, `FM_SWARM_MODEL`, `FM_SWARM_GOAL`, `FM_SWARM_SESSION`), for driving a run without clicking.
 
 
-## The phone
+## Remote control (MCP)
 
-Signed in, the app relays its swarm through formal.team so Formal Mind for iPhone (`mobile/`) can follow and steer it
-(`src/relay.ts`; Settings → Phone turns it off). Every `swarm` event is posted to `/api/relay/mac` as it happens,
-with the added folders and their sessions; the app long-polls the same route for commands from the phone (a message,
+Signed in, the app relays its swarm through formal.team so the MCP's `mac_*` tools can follow and steer it
+(`src/relay.ts`; Settings → Remote control (MCP) turns it off). Every `swarm` event is posted to `/api/relay/mac` as it happens,
+with the added folders and their sessions; the app long-polls the same route for commands from the MCP (a message,
 Start, Stop, a session's history) and runs them as if typed here. The relay is one Durable Object per person
 (`worker/relay-do.ts`, `lib/relay.ts`) holding the recent events and the commands waiting for the Mac (dropped after
 10 minutes). Nothing runs there: the swarm, the files and the tools stay on this Mac. A message sent with `swarm_say`
@@ -211,27 +210,11 @@ is a `you` event in the session and its log, so the chat shows it wherever it wa
 
 ## Formal Mind's report
 
-Bugs → **Generate report** costs $150 from formal.team credits, once per repository and commit: the app first asks
-(`report_quote`, showing the balance before and after), and `report_generate` takes the charge
-(`/api/desktop/report`, ref `report:<repo>@<commit>`) before building. Generating again for a commit already paid for is
-free. It (`src-tauri/src/report.rs`) writes Formal Mind's assessment of the folder
-as `<audit folder>/formal-mind.audit.json` in the standard format (`formalmind.audit/v1`, docs/audit-format.md, with
-`kind: "internal"`): the swarm's findings (its `formal-mind-swarm.md` rows in the index, and `.formal/bugs/`) with
-locations, PoC, evidence and the fix (the commit that added the covering test, and the PR its message names), the
-Proofs coverage of each contract the scripts deploy or call, and the properties the reviewer approved
-(`.formal/proofs.json`) with the theorems that prove them. The swarm writes its findings and approved properties into that file as it works, in the
-report's words; Generate report keeps what is there (the swarm's text and any hand edits), takes each finding's
-status, evidence and fix from the index, adds the coverage, and derives only what's missing (from older runs'
-`.formal/proofs.json` and index rows). Other audit reports are not part of it; Bugs lists Formal Mind's report and findings apart from them.
-
-The JSON is rendered in Formal Mind's own style (learned from Spearbit and Certora: a black cover with the logo, a
-project scope table linking the repository and commit, colour-coded findings summary and severity matrix, a strip
-per finding, Context links at the audited commit, the fix's PR, and a Formal Verification chapter with assumptions, a
-notation legend, coverage and properties) to `.formal/report/formal-mind.adoc` with the theme and logos from
-`report-template/`, and to `<audit folder>/formal-mind.pdf` when asciidoctor-pdf is installed
-(`brew install asciidoctor`; Solidity highlighting uses Pygments, which needs python3). Without it, the JSON is still
-written and Bugs says how to install it. Try it with
-`FM_FOLDER=… cargo test -- --ignored report_of_a_folder --nocapture`.
+The swarm writes Formal Mind's assessment of the folder as it works, in `<audit folder>/formal-mind.audit.json`, in the
+standard format (`formalmind.audit/v1`, docs/audit-format.md, with `kind: "internal"`): its findings with locations,
+PoC, evidence and fix, and the properties the reviewer approved with the theorems that prove them
+(`record_finding_json`, `record_report` in `src-tauri/src/swarm_ctx.rs`). Bugs lists Formal Mind's report and findings
+apart from the other audit reports.
 
 
 ## Platforms

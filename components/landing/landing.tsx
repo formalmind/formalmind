@@ -23,7 +23,7 @@ const FOOTER = [
 		title: "Product",
 		links: [
 			{ label: "Get started", href: "/auth/login?returnTo=%2F%3Fadd%3D1" },
-			{ label: "Documentation", href: "/documentation/get-started" },
+			{ label: "Documentation", href: "/docs" },
 			{ label: "GitHub App", href: "https://github.com/apps/formalmind" },
 		],
 	},

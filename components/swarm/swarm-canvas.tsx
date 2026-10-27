@@ -156,7 +156,6 @@ const HOME_X: Record<SwarmRole, number> = {
 	merger: 740,
 	assistant: 860,
 	chief: 980,
-	hunter: 1110,
 };
 
 /**
@@ -321,7 +320,7 @@ function buildScript(start: Scene): Step[] {
 	];
 }
 
-const COST_ROLES: Record<string, SwarmRole> = { plan: "planner", prove: "prover", rebuild: "rebuilder", review: "reviewer", merge: "merger", editor: "editor", chief: "chief", assistant: "assistant", hunt: "hunter" };
+const COST_ROLES: Record<string, SwarmRole> = { plan: "planner", prove: "prover", rebuild: "rebuilder", review: "reviewer", merge: "merger", editor: "editor", chief: "chief", assistant: "assistant" };
 
 /** Lane an open item sits in, from its fm: labels. */
 /** The role an open question on this item is waiting for, from its fm:ask-<role> label. */
@@ -635,11 +634,9 @@ function cloneScene(scene: Scene): Scene {
  * `fill` makes the board fill its parent, scaled to fit both ways and centred, below a strip kept clear
  * for the pinned controls; otherwise it scales to the width. `title` and `actions` are pinned top-left and top-right.
  */
-export function SwarmCanvas({ state, fill = false, contain = false, title, actions, repo, onTalk, local = false, below, beside, side, pace = 1, roles }: {
+export function SwarmCanvas({ state, fill = false, contain = false, title, actions, repo, onTalk, local = false, below, beside, side, pace = 1 }: {
 	state: SwarmState | null;
-	/** Only these agents are on the board (the app's Concolic tab: the hunter alone); all of them when unset. */
-	roles?: SwarmRole[];
-	/** How fast the replay plays: 2 is twice as lively (the phone's introduction); 1 is the landing page's pace. */
+	/** How fast the replay plays: 2 is twice as lively; 1 is the landing page's pace. */
 	pace?: number;
 	/** A swarm running on this computer (the desktop app): no dispatcher schedule to show. */
 	local?: boolean;
@@ -1257,7 +1254,7 @@ export function SwarmCanvas({ state, fill = false, contain = false, title, actio
 						</Panel>
 					) : null}
 
-					{ROLES.filter((r) => !roles || roles.includes(r)).map((role, i) => (
+					{ROLES.map((role, i) => (
 						<SwarmCursor
 							key={role}
 							role={role}

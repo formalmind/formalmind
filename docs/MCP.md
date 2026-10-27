@@ -5,7 +5,7 @@ formal.team runs two remote MCP servers on the Worker (Streamable HTTP, stateles
 | Endpoint | Auth | What |
 | --- | --- | --- |
 | `https://formal.team/mcp` | none | Public reads: the `formalmind.audit/v1` format, Formal Mind's audit of an example repository, the desktop app's latest release (`worker/mcp.ts`) |
-| `https://formal.team/mcp/account` | OAuth 2.0 or the desktop token | Your account: projects and their files, audit reports, findings, Proofs coverage, usage and credits, the swarm in your desktop app (`worker/account-mcp.ts`) |
+| `https://formal.team/mcp/account` | OAuth 2.0 or the desktop token | Your account: projects and their files, audit reports, findings, Proofs coverage, the swarm in your desktop app (`worker/account-mcp.ts`) |
 
 Every tool returns one text block of compact JSON. Project reads are pinned to one commit, and each result names it.
 
@@ -48,24 +48,17 @@ read through GitHub's public API, with the Worker's `GITHUB_TOKEN` when it has o
 | Tool | Scope | Returns |
 | --- | --- | --- |
 | `my_projects` | read | The account's projects (repository, proofs repository, added at) |
-| `my_usage` | read | Spend today / this month / overall and the latest cost lines |
-| `my_credits` | read | Credit balance and entries |
-| `swarm_state` | read | The hosted swarm on GitHub (the earlier, GitHub-based swarm): open fm: work, merges, runs |
 | `list_files` | read | A project's paths at a commit; `prefix`, `ext`, `limit`, `ref` |
 | `read_file` | read | One file's text, optionally `from`/`to` lines (2000-line cut otherwise) |
 | `list_audits` | read | Each `*.audit.json` in the report folders (`audit`, `audits`, `reports`, or `dirs`): kind, auditor, date, audited commit, findings by severity and status, coverage totals; also reports not yet converted, unparseable files, `.formal/bugs/`, Formal Mind's PDF |
 | `list_findings` | read | Findings as `{report, id, title, severity, status, at}` rows, most severe first; filter by `report`, `severity`, `status` |
 | `get_finding` | read | One finding in full (description, impact, recommendation, response, evidence, tests, PoC, fix) |
 | `proofs_coverage` | read | From the internal (Formal Mind) report: per contract functions / in Lean / proved / sorry / not modeled / theorems, the function rows for one `contract`, the properties proved, and `.formal/plan.md` progress when committed |
-| `report_quote` | read | Formal Mind's report price for a repository and commit, whether it is paid for, the balance (the report itself is generated on the Mac) |
 | `mac_swarm` | read | The desktop app's swarm through the relay: online or not, last seen, folders and their sessions |
 | `mac_swarm_events` | read | The relay's recent swarm events, filtered by `folder`, `run`, `kind`, `after` (a seq) |
-| `add_project` | write | Adds a GitHub repository to the account's projects |
-| `plan_repository` | write | Runs the planner on a repository and saves the plan to the account |
-| `start_swarm` | write | Sets up `<repo>-proofs` for the hosted swarm |
-| `mac_swarm_send` | write | `say` / `start` / `stop` to the Mac, as the phone does; `start` runs on the route the app's Settings use |
+| `mac_swarm_send` | write | `say` / `start` / `stop` to the Mac; `start` runs on the route the app's Settings use |
 | `mac_get` | read | One of the app's reads on the Mac (`lib/mac-ops.ts`): folders, status, plan, statements, bugs, proofs, scope, coverage, … The Mac answers through the relay |
-| `mac_do` | write | One of the app's actions on the Mac (`lib/mac-ops.ts`): add a folder, verify any GitHub repository at a branch or commit (`verify_repo`), start, hunt, stop, say, statements, triage, Reach, the report |
+| `mac_do` | write | One of the app's actions on the Mac (`lib/mac-ops.ts`): add a folder, verify any GitHub repository at a branch or commit (`verify_repo`), start, stop, say, statements, triage, Reach |
 | `mac_get` `work_map` / `brief`, `mac_do` `refresh_model` / `check_proof` / `submit_proof` | read / write | A remote prover: what's covered and left, a function's brief, checking and submitting a proof as the swarm's own |
 | `mac_reply` | read | A `mac_get` / `mac_do` answer that came after the call stopped waiting, by its id |
 | `mac_watch` | read | Waits up to ~50 s for the next event that needs attention (a question, a bug, a blocked item, a proof, an error, a session ending) and returns it with its `seq`; call again with `after` to keep watching |
@@ -108,17 +101,12 @@ flow by hand. The relay can be fed as the Mac by POSTing `{state, events}` to `/
 ## Not here yet: a local MCP
 
 Some of the tools run only on the Mac, against the working tree, so the Worker can't serve them. They belong in a
-local (stdio) MCP server, from the desktop app or from concolity itself:
+local (stdio) MCP server from the desktop app:
 
-- **sol-debug**: the desktop app's Solidity debugger (`desktop/src-tauri/src/debug.rs`, on anvil): step a test or
-  script, read the stack, memory and storage at a step, set breakpoints.
-- **concolity**: coverage of a test run, concolic explore of a function for inputs that reach new branches or revert,
-  and its SARIF findings (`.formal/findings.sarif`).
 - **formal-ast on the working tree**: units, slices and Lean coverage of uncommitted code
   (`desktop/src-tauri/src/ast.rs`). The website runs the same crate as wasm in the browser, but the Worker doesn't:
   solc-js is too big for it. Server-side coverage comes from the committed `audit/formal-mind.audit.json`.
-- **lake build / forge test**, Formal Mind's report generation (`report.rs`, paid for through `report_quote`'s
-  route), and the swarm's own `.formal/` state beyond what the relay carries. Those stay on the Mac.
+- **lake build / forge test** and the swarm's own `.formal/` state beyond what the relay carries. Those stay on the Mac.
 
 Until then, `mac_swarm_send` is how a remote agent asks the Mac's swarm to do this work. The results come back
 through `mac_swarm_events`, and as committed files the project tools can read.

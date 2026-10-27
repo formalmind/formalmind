@@ -14,7 +14,7 @@ pub struct Config {
     #[serde(default)]
     pub repos: std::collections::BTreeMap<String, String>,
     /// What the agents run with, kept here so the backend decides it whatever started the work (the folder page, the
-    /// phone, an agent through the MCP, a schedule). The Settings page and the folder page write it.
+    /// an agent through the MCP, a schedule). The Settings page and the folder page write it.
     #[serde(default)]
     pub settings: Settings,
 }
@@ -43,7 +43,7 @@ pub struct Settings {
     /// acting for you; "agent": the answerer agent (answerer.rs).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub answers: Option<String>,
-    /// Settings → Phone: the relay through formal.team (the phone and the MCP). On unless turned off.
+    /// Settings → Remote control (MCP): the relay through formal.team. On unless turned off.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub relay: Option<bool>,
 }
@@ -410,7 +410,7 @@ pub fn folder_repo(path: String) -> Result<Option<String>, String> {
     Ok(git(&["remote", "get-url", "origin"], Some(Path::new(&path))).ok().and_then(|url| github_repo(&url)))
 }
 
-/// This computer's name as its owner set it (macOS: Sharing → Computer Name), else its host name; the phone shows it.
+/// This computer's name as its owner set it (macOS: Sharing → Computer Name), else its host name; mac_swarm shows it.
 #[tauri::command(async)]
 pub fn machine_name() -> Option<String> {
     let run = |cmd: &str, args: &[&str]| {

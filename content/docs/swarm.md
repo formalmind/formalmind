@@ -46,7 +46,7 @@ Each folder has one continuous session. Its work is a queue on disk (`.formal/qu
 conversation is saved as it goes. Quit at any point: the next start resumes the interrupted job where it stopped,
 your unanswered messages are still waiting, and finished work is never redone.
 
-On credits or your own key, the swarm stops when it reaches the spending cap shown in the chat's header. Raise it and
+On your own key, the swarm stops when it reaches the spending cap shown in the chat's header. Raise it and
 resume to carry on. On your Claude plan nothing is charged, and your plan's usage limits apply instead (see
 [Models and costs](/models)).
 

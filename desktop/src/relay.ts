@@ -1,5 +1,5 @@
 /**
- * Settings → Phone: the relay through formal.team, which the phone and agents through the MCP use to follow and drive
+ * Settings → Remote control (MCP): the relay through formal.team, which agents through the MCP use to follow and drive
  * this Mac. The relay itself runs in the backend (src-tauri/src/relay.rs) for as long as the app runs; this is the
  * switch's value as the page keeps it, synced to the backend's settings (api.ts `syncSettings`).
  */

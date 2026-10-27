@@ -7,7 +7,7 @@ Formal Mind keeps everything in your folder, as ordinary files you can read, edi
 - **Your Solidity**, through the compiler: solc's syntax tree for the contracts your scripts under `script/` deploy
   or call, and their bases. Agents never list or grep the sources; they read the functions through the tree.
 - **`foundry.toml`**: your compiler settings and remappings, so the bytecode it tests is the bytecode that ships.
-- **Your tests** under `test/`: the Bug Hunter's coverage and exploration run them, and PoCs reuse their setup.
+- **Your tests** under `test/`: PoCs reuse their setup.
 - **Your audit folder**: `audit/`, `audits/` or `reports/`, plus any folder you add in **Settings → Audit reports**.
 
 ## What it writes
