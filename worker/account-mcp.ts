@@ -228,7 +228,7 @@ export const ACCOUNT_TOOLS: AccountTool[] = [
   {
     name: "mac_do",
     title: "Act in the Mac app",
-    description: `Does anything the desktop app's folder page does, on the person's Mac, through the relay: the Mac runs it as if clicked there, with the model route and caps its Settings use, and answers with the result (waits up to ~50 s; then mac_reply with the returned id). Operations: ${opsList(true)}. Consequential: start, statements and triage run agents that spend the person's Claude plan, credits or key; report spends $150 of credits; add_folder lets the app (and these tools) read that folder; verify_repo forks a repository into formalmind, starts the swarm on it and pushes each approved proof to the fork.`,
+    description: `Does anything the desktop app's folder page does, on the person's Mac, through the relay: the Mac runs it as if clicked there, with the model route and caps its Settings use, and answers with the result (waits up to ~50 s; then mac_reply with the returned id). Operations: ${opsList(true)}. Consequential: start, statements and triage run agents that spend the person's Claude plan or key; add_folder lets the app (and these tools) read that folder; verify_repo forks a repository into formalmind, starts the swarm on it and pushes each approved proof to the fork.`,
     inputSchema: {
       type: "object",
       required: ["op"],

@@ -12,8 +12,8 @@ import { currentRequest } from "@/worker/context";
 
 /** What a token may do, named in the consent page and in RFC 8414 `scopes_supported`. */
 export const SCOPES = {
-	"swarm:read": "Read your projects (their files, audit reports, findings and Proofs coverage), your usage and credits, and the swarm's state, your Mac's included",
-	"swarm:write": "Add and plan a repository for your account, start the swarm on it, and send your Mac's swarm messages, Start and Stop",
+	"swarm:read": "Read your projects (their files, audit reports, findings and Proofs coverage) and the swarm on your Mac",
+	"swarm:write": "Drive your Mac's swarm: messages, Start, Stop and anything its folder page does",
 } as const;
 export type Scope = keyof typeof SCOPES;
 export const SCOPE_LIST = Object.keys(SCOPES) as Scope[];

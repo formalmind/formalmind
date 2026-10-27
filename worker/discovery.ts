@@ -96,7 +96,7 @@ function sitemapXml(): Response {
 export const AGENT_LINKS_MARKDOWN = `## For agents
 
 - [llms.txt](${ORIGIN}/llms.txt) and [llms-full.txt](${ORIGIN}/llms-full.txt): orientation and the full account of the swarm
-- [MCP server card](${ORIGIN}/.well-known/mcp/server-card.json): read-only MCP server at ${ORIGIN}/mcp (the audit format, an example audit, the desktop app's latest release) and the account server at ${ORIGIN}/mcp/account (your projects' files, audits, findings and Proofs coverage, usage, credits, plan and start, and the desktop app on your Mac: everything it does, read and driven remotely; OAuth 2.0)
+- [MCP server card](${ORIGIN}/.well-known/mcp/server-card.json): read-only MCP server at ${ORIGIN}/mcp (the audit format, an example audit, the desktop app's latest release) and the account server at ${ORIGIN}/mcp/account (your projects' files, audits, findings and Proofs coverage, and the desktop app on your Mac: everything it does, read and driven remotely; OAuth 2.0)
 - [Agent Skills](${ORIGIN}/.well-known/agent-skills/index.json): how to run the local swarm, how to onboard a repository, how to read Formal Mind's results in a repository, and how to connect Formal Mind as an MCP connector
 - [API catalog](${ORIGIN}/.well-known/api-catalog): the open plan endpoint, the two MCP servers and the token-capable account routes
 - [auth.md](${ORIGIN}/auth.md): GitHub sign-in for people; the OAuth 2.0 authorization server, scopes and tokens for agents`;
@@ -113,7 +113,7 @@ ${SHORT} The full account, how the swarm works and where it keeps its files incl
 
 ## Agents
 
-- [MCP server card](${ORIGIN}/.well-known/mcp/server-card.json): read-only tools at ${ORIGIN}/mcp (Streamable HTTP, no auth): get_audit_format, get_example_audit, get_app_release; and the account server at ${ORIGIN}/mcp/account (OAuth 2.0, GitHub sign-in): my_projects, my_usage, my_credits, swarm_state, list_files, read_file, list_audits, list_findings, get_finding, proofs_coverage, report_quote, mac_swarm, mac_swarm_events, mac_get, mac_reply, add_project, plan_repository, start_swarm, mac_swarm_send, mac_do (mac_get and mac_do read and drive everything the desktop app does on the person's Mac)
+- [MCP server card](${ORIGIN}/.well-known/mcp/server-card.json): read-only tools at ${ORIGIN}/mcp (Streamable HTTP, no auth): get_audit_format, get_example_audit, get_app_release; and the account server at ${ORIGIN}/mcp/account (OAuth 2.0, GitHub sign-in): my_projects, list_files, read_file, list_audits, list_findings, get_finding, proofs_coverage, mac_swarm, mac_watch, mac_swarm_events, mac_get, mac_reply, mac_swarm_send, mac_do (mac_get and mac_do read and drive everything the desktop app does on the person's Mac)
 - [Skill: connect-formal-mind-as-mcp](${ORIGIN}/.well-known/agent-skills/connect-formal-mind-as-mcp/SKILL.md): add ${ORIGIN}/mcp/account to Claude, ChatGPT or Cursor and act on your own account
 - [Skill: run-the-local-swarm](${ORIGIN}/.well-known/agent-skills/run-the-local-swarm/SKILL.md): run the swarm on a folder in the desktop app; proofs, bugs and state stay in the folder
 - [Skill: onboard-a-repository](${ORIGIN}/.well-known/agent-skills/onboard-a-repository/SKILL.md): plan a repository, add it as a project, optionally set up specs from its commits
@@ -128,13 +128,13 @@ ${SHORT} The full account, how the swarm works and where it keeps its files incl
 
 ## App
 
-- [Docs](https://docs.formal.team): the guide to the app (install, the swarm, Statements, Proofs, Bugs, the Bug Hunter, files, MCP); every page as Markdown, listed in [its llms.txt](https://docs.formal.team/llms.txt)
+- [Docs](https://docs.formal.team): the guide to the app (install, the swarm, Statements, Proofs, Bugs, files, MCP); every page as Markdown, listed in [its llms.txt](https://docs.formal.team/llms.txt)
 - [Download for Mac](${MAC_DOWNLOAD}): the desktop app, one universal build; the local swarm runs here
 - [Download for Windows](${WINDOWS_DOWNLOAD}): the same app for Windows
 - [Releases](${RELEASES}): every version of the desktop app
 - [Landing page](${ORIGIN}/welcome): paste a public repository and watch the planner plan it
-- [Sign in](${ORIGIN}/login): GitHub sign-in; projects, billing and usage are behind it
-- [GitHub App](${GITHUB_APP}): installed on a repository's owner to set up specs from its commits
+- [Sign in](${ORIGIN}/login): GitHub sign-in; projects and usage are behind it
+- [GitHub App](${GITHUB_APP}): installed on a repository's owner so formal.team can read a private repository
 - [Source](${APP_REPO}): the website and the desktop app
 
 ## Optional
@@ -162,8 +162,8 @@ ${HOW_IT_WORKS}
 - **Read Formal Mind's files in a repository.** In a checkout where Formal Mind ran, \`.formal/plan.md\` is the plan and its progress, \`formal/\` the Lean proofs, and \`audit/*.audit.json\` the reports and findings; the skill at ${ORIGIN}/.well-known/agent-skills/read-formal-mind-results/SKILL.md says what each holds.
 - **Plan a repository.** \`POST ${ORIGIN}/api/onboarding/plan\` with body \`{"repo":"owner/name"}\` and no credentials. The response is \`text/plain\`: a JSON object streamed a few characters at a time, with the protocol summary, the contracts found, and the work the planner would hand out. Limits: public repositories with Solidity contracts outside tests and libraries; five plans per hour per address (429 after that); a plan is cached for a week and replayed (header \`X-Plan-Cache: hit\`).
 - **Help a person run the swarm.** The desktop app runs the swarm on a folder on the person's computer, with nothing on GitHub; it is started and steered in the app. The skill at ${ORIGIN}/.well-known/agent-skills/run-the-local-swarm/SKILL.md says how.
-- **Act on a person's account.** With an OAuth access token from ${ORIGIN} (the person signs in with GitHub and allows the client on a consent page), the account MCP server at ${ORIGIN}/mcp/account and the API routes listed in ${ORIGIN}/auth.md give the account's projects, usage, credits and swarm state (\`swarm:read\`), and plan a repository or set up its specs (\`swarm:write\`). The section below says how.
-- **Onboard a repository for a person.** Planning and setting up specs can be done with a \`swarm:write\` token (\`plan_repository\`, \`start_swarm\`, or \`POST /api/projects/init\`); adding a project, setting a budget, buying credits and installing the GitHub App are browser flows behind GitHub sign-in. The skill at ${ORIGIN}/.well-known/agent-skills/onboard-a-repository/SKILL.md walks a person through them.
+- **Act on a person's account.** With an OAuth access token from ${ORIGIN} (the person signs in with GitHub and allows the client on a consent page), the account MCP server at ${ORIGIN}/mcp/account and the API routes listed in ${ORIGIN}/auth.md give the account's projects and what they hold (\`swarm:read\`), and the desktop app's swarm on the person's Mac, read and driven (\`swarm:read\`, \`swarm:write\`). The section below says how.
+- **Onboard a repository for a person.** Planning is open (\`POST ${ORIGIN}/api/onboarding/plan\`); adding a project and installing the GitHub App are browser flows behind GitHub sign-in, and verifying it runs in the desktop app (\`mac_do\` \`verify_repo\`). The skill at ${ORIGIN}/.well-known/agent-skills/onboard-a-repository/SKILL.md walks a person through them.
 
 ${AGENT_ACCESS}
 
@@ -235,14 +235,14 @@ MCP clients (Claude, ChatGPT, Cursor and any other remote-MCP connector), AI age
 
 ${scopes}
 
-Everything else on the account (chat, billing checkout, the GitHub App, onboarding settings) stays behind the person's own sign-in; no scope reaches it.
+Everything else on the account (chat and the GitHub App) stays behind the person's own sign-in; no scope reaches it.
 
 ## What accepts a token
 
 Send \`Authorization: Bearer <access_token>\`.
 
 - The account MCP server, ${ORIGIN}${ACCOUNT_MCP_PATH} (Streamable HTTP, JSON responses): ${tools("swarm:read")} need \`swarm:read\`; ${tools("swarm:write")} need \`swarm:write\`.
-- API routes: \`GET /api/projects\`, \`GET /api/usage\`, \`GET /api/billing/balance\` and \`GET /api/swarm/state\` with \`swarm:read\`; \`POST /api/projects/init\` (body \`{"repo":"owner/name"}\`) with \`swarm:write\`.
+- API routes: \`GET /api/projects\`, \`GET /api/projects/tree\`, \`GET /api/projects/file\` and \`GET /api/usage\` with \`swarm:read\`.
 
 Without a credential these answer 401 with \`WWW-Authenticate: Bearer resource_metadata="…/.well-known/oauth-protected-resource[${ACCOUNT_MCP_PATH}]"\`, which is how an MCP client finds this authorization server. A token that does not verify gets 401 with \`error="invalid_token"\`; a valid token without the scope gets 403 with \`error="insufficient_scope"\` and the scope it needs. Every other /api/ route needs the person's own session and answers 403 to an OAuth token.
 
@@ -271,7 +271,7 @@ curl -s ${ORIGIN}/oauth/token -d grant_type=authorization_code -d code=… -d co
 curl -s ${ORIGIN}/api/projects -H "authorization: Bearer $ACCESS_TOKEN"
 curl -s ${ORIGIN}${ACCOUNT_MCP_PATH} -H "authorization: Bearer $ACCESS_TOKEN" -H 'content-type: application/json' \\
   -H 'accept: application/json, text/event-stream' \\
-  -d '{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"my_usage","arguments":{}}}'
+  -d '{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"my_projects","arguments":{}}}'
 
 # 6. Renew (the old refresh token stops working) and revoke.
 curl -s ${ORIGIN}/oauth/token -d grant_type=refresh_token -d refresh_token=fmr_… -d client_id=fmc_…
@@ -325,7 +325,7 @@ function apiCatalog(): Response {
       },
       {
         anchor: `${ORIGIN}/api/projects`,
-        "service-doc": [{ href: `${ORIGIN}/auth.md`, type: "text/markdown", title: "GET with a swarm:read token: the account's projects; also GET /api/usage, /api/billing/balance, /api/swarm/state (swarm:read) and POST /api/projects/init (swarm:write)" }],
+        "service-doc": [{ href: `${ORIGIN}/auth.md`, type: "text/markdown", title: "GET with a swarm:read token: the account's projects; also GET /api/projects/tree, /api/projects/file and /api/usage (swarm:read)" }],
         "service-meta": [{ href: `${ORIGIN}/.well-known/oauth-protected-resource`, type: "application/json", title: "RFC 9728 protected resource metadata" }],
       },
       {

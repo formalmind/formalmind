@@ -54,21 +54,15 @@ const ROUTES: Record<string, { title: string; body: string }> = {
   "/terms": { title: "Terms of Service · Formal Mind", body: "Terms of service for the Formal Mind app." },
   "/privacy": { title: "Privacy Policy · Formal Mind", body: "Privacy policy for the Formal Mind app." },
   "/brand": { title: "Formal Mind brand kit", body: "Logos and brand files for Formal Mind, with a downloadable kit." },
-  "/swarm/chat": { title: "Ask the swarm · Formal Mind", body: "Signed in: a chat that posts on the swarm's public notebook issues as you, so the roles answer on GitHub. The local swarm in the desktop app takes messages in its own chat; see the `run-the-local-swarm` skill." },
-  "/roadmap": { title: "Roadmap · Formal Mind", body: "Signed in: the project's roadmap items and the issues and pull requests under each." },
-  "/billing": { title: "Billing · Formal Mind", body: "Signed in: prepaid credits, deposits through Stripe Checkout ($10 to $1,000)." },
-  "/usage": { title: "Usage · Formal Mind", body: "Signed in: every metered cost line, local swarm runs on formal.team credits included." },
+  "/usage": { title: "Usage · Formal Mind", body: "Signed in: every metered cost line formal.team's model route charged." },
   "/chat": { title: "Chat · Formal Mind", body: "Signed in: a private chat with your assistant, kept under your account and never posted to GitHub." },
-  "/onboarding": { title: "Onboarding · Formal Mind", body: "Signed in: Set up specs for a GitHub repository: a daily budget, credits, the GitHub App install, and Start, which creates the proofs repository where Formal Mind writes the specs as commits land. The `onboard-a-repository` skill describes it." },
-  "/github": { title: "Get Started · Formal Mind", body: "Signed in: your repositories and the GitHub App's installation status." },
-  "/documentation/get-started": { title: "Get Started · Formal Mind", body: "Signed in: your repositories and the GitHub App's installation status." },
 };
 
 function routeFor(pathname: string): { title: string; body: string; signedIn: boolean } | null {
   const known = ROUTES[pathname];
   if (known) return { ...known, signedIn: !PUBLIC_PATHS.includes(pathname) };
-  if (/^\/projects\/[^/]+\/[^/]+(\/roadmap|\/chat(\/[^/]+)?)?$/.test(pathname)) {
-    return { title: "Project · Formal Mind", body: "Signed in: one project's home, roadmap or chat.", signedIn: true };
+  if (/^\/projects\/[^/]+\/[^/]+(\/code|\/file|\/chat(\/[^/]+)?)?$/.test(pathname)) {
+    return { title: "Project · Formal Mind", body: "Signed in: one project's code, Proofs and Bugs, or a chat about it.", signedIn: true };
   }
   if (/^\/github\/[^/]+\/[^/]+$/.test(pathname)) {
     return { title: "Repository · Formal Mind", body: "Signed in: chat about one repository.", signedIn: true };
