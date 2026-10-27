@@ -26,6 +26,7 @@ export const MAC_OPS = {
 	reach: { write: false, args: "entry", about: "the Bug Hunter's call graph by what's known of each branch" },
 	report_quote: { write: false, args: "", about: "what Formal Mind's report costs for this folder and commit" },
 	work_map: { write: false, args: "", about: "what's covered and what's left, as JSON: every in-scope function's status (proved, has_sorry, in_lean, not_modeled), the Lean def a theorem must name, the model and where its proof goes, theorems with file and line, its plan item, the open items to take next, and models formal-ast could now translate more of" },
+	health: { write: false, args: "limit?", about: "the swarm's health: its newest agent turns (role, item, tool calls, lake builds, how each ended) with anything that looked wrong, such as tools that didn't connect, tool calls written as text, loops or repeated build failures; folder optional" },
 	brief: { write: false, args: "function", about: "what the swarm's prover gets for a function (its Lean def, slice, and where to write the proof), by Lean def" },
 	// Actions
 	add_folder: { write: true, args: "path", about: "add a folder on the Mac (an absolute path; folder not needed)" },

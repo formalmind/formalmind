@@ -677,6 +677,8 @@ struct Turn<'a> {
     ctx: Mutex<Option<Arc<crate::swarm_ctx::Context>>>,
     /// Each agent's debugger: a session in the app's `Debuggers` (the Debug view follows it), by role.
     debug: Mutex<HashMap<String, u32>>,
+    /// The current agent turn's health record (crate::health), written when the turn ends.
+    health: Mutex<Option<crate::health::Turn>>,
 }
 
 impl Turn<'_> {
@@ -879,7 +881,16 @@ impl Turn<'_> {
 
     /// One tool call of an agent's turn, on the API or over Claude Code's MCP: the result the agent reads, with what it
     /// recorded (files written, notes, a verdict, a bug) kept in `out`.
+    /// A tool call from the agent, run and counted in the turn's health record.
     async fn tool(&self, role: &str, item: &str, name: &str, input: &Value, out: &mut Outcome) -> String {
+        let answer = self.run_tool(role, item, name, input, out).await;
+        if let Some(h) = self.health.lock().unwrap().as_mut() {
+            h.tool(name, input, &answer);
+        }
+        answer
+    }
+
+    async fn run_tool(&self, role: &str, item: &str, name: &str, input: &Value, out: &mut Outcome) -> String {
         let root = PathBuf::from(&self.req.folder);
         let shown = input.as_object().map(|o| o.values().filter_map(Value::as_str).map(|v| v.chars().take(90).collect::<String>()).collect::<Vec<_>>().join(" ")).unwrap_or_default();
         match name {
@@ -1068,6 +1079,9 @@ impl Turn<'_> {
                             // Without its tools the agent can only write tool calls out as text that nothing runs (a
                             // reviewer did that 321 times, then asked for changes it never checked). Stop the turn instead.
                             let tools = v["mcp_servers"].as_array().and_then(|a| a.iter().find(|m| m["name"] == "formalmind")).and_then(|m| m["status"].as_str()).unwrap_or("missing");
+                            if let Some(h) = self.health.lock().unwrap().as_mut() {
+                                h.tools = Some(tools.to_string());
+                            }
                             if tools != "connected" {
                                 let _ = cc.child.kill().await;
                                 return Err(format!("{NO_TOOLS} (Claude Code reported them {tools})"));
@@ -1081,6 +1095,9 @@ impl Turn<'_> {
                             cc.started(job);
                             for (kind, text) in events_of(&v) {
                                 if kind == "say" {
+                                    if let Some(h) = self.health.lock().unwrap().as_mut() {
+                                        h.said(&text);
+                                    }
                                     out.summary = text.clone();
                                     self.emit("say", role, item, text);
                                 }
@@ -1089,6 +1106,9 @@ impl Turn<'_> {
                             let used = context_used(&v["message"]["usage"]);
                             if used > 0 && used != last_used {
                                 last_used = used;
+                                if let Some(h) = self.health.lock().unwrap().as_mut() {
+                                    h.tokens = h.tokens.max(used);
+                                }
                                 self.emit("context", role, item, json!({ "used": used, "window": window, "compact_at": compact_at, "system": 0, "tools": 0, "task": 0 }).to_string());
                             }
                         }
@@ -1112,23 +1132,41 @@ impl Turn<'_> {
         }
     }
 
-    /// One agent turn: a tool loop against Claude until it stops calling tools.
+    /// One agent turn, on Claude Code or the API, with its health record (crate::health): written when the turn ends,
+    /// and anything that looks wrong said in the session. A Claude Code turn whose tools didn't connect is stopped
+    /// before the agent works, then tried twice more before the swarm pauses.
     async fn agent(&self, role: &str, item: &str, task: impl Into<Value>) -> Result<Outcome, String> {
         let task: Value = task.into();
-        if self.req.provider.as_deref() == Some("claude-code") {
-            // A turn whose tools didn't connect is stopped before the agent works; try twice more, then pause.
-            let mut tries = 0;
-            loop {
-                match self.agent_on_claude_code(role, item, task.clone()).await {
-                    Err(e) if e.starts_with(NO_TOOLS) && tries < 2 => {
-                        tries += 1;
-                        self.emit("status", role, item, format!("{e}; starting the turn again"));
-                        tokio::time::sleep(Duration::from_secs(3 * tries)).await;
-                    }
-                    other => return other,
+        let on_claude_code = self.req.provider.as_deref() == Some("claude-code");
+        let mut tries = 0;
+        loop {
+            let job = self.job.lock().unwrap().unwrap_or(0);
+            *self.health.lock().unwrap() = Some(crate::health::Turn::new(&self.req.folder, self.run, job, role, item, self.req.provider.as_deref().unwrap_or("formal"), model_of(self.req)));
+            let result = if on_claude_code { self.agent_on_claude_code(role, item, task.clone()).await } else { self.agent_api(role, item, task.clone()).await };
+            let paused = self.swarm.stop.load(Ordering::SeqCst);
+            if let Some(h) = self.health.lock().unwrap().take() {
+                let (ended, error) = match &result {
+                    Ok(_) if paused => ("paused", None),
+                    Ok(_) => ("done", None),
+                    Err(e) => ("error", Some(e.as_str())),
+                };
+                for a in h.finish(ended, error) {
+                    self.emit("error", role, item, format!("health: the {role}'s turn on item {item}: {a}"));
                 }
             }
+            match result {
+                Err(e) if on_claude_code && e.starts_with(NO_TOOLS) && tries < 2 => {
+                    tries += 1;
+                    self.emit("status", role, item, format!("{e}; starting the turn again"));
+                    tokio::time::sleep(Duration::from_secs(3 * tries)).await;
+                }
+                other => return other,
+            }
         }
+    }
+
+    /// One agent turn on the API: a tool loop against the model until it stops calling tools.
+    async fn agent_api(&self, role: &str, item: &str, task: Value) -> Result<Outcome, String> {
         let root = PathBuf::from(&self.req.folder);
         let (key, base) = self.session(role, item).await?;
         let goal = self.req.goal.clone().unwrap_or_default();
@@ -1861,7 +1899,7 @@ pub fn swarm_start(app: AppHandle, swarms: State<'_, Swarms>, request: SwarmRequ
     let id = run.clone();
     tauri::async_runtime::spawn(async move {
         let client = reqwest::Client::builder().timeout(Duration::from_secs(600)).build().unwrap_or_default();
-        let turn = Turn { app: &app, run: &id, req: &request, swarm: &swarm, client, job: Mutex::new(None), queue: swarm.queue.clone(), ctx: Mutex::new(None), debug: Mutex::new(HashMap::new()) };
+        let turn = Turn { app: &app, run: &id, req: &request, swarm: &swarm, client, job: Mutex::new(None), queue: swarm.queue.clone(), ctx: Mutex::new(None), debug: Mutex::new(HashMap::new()), health: Mutex::new(None) };
         // The session's title: the focus it was given (the latest start's focus wins).
         let title = match request.hunt.as_deref().map(str::trim) {
             Some("") => "Bug search".to_string(),

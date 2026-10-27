@@ -600,7 +600,9 @@ async function callTool(name: string, args: Record<string, unknown>, caller: Cal
       if (!Object.hasOwn(MAC_OPS, op) || MAC_OPS[op].write !== (name === "mac_do")) return failure(`${op || "op"} isn't a ${name} operation.`);
       const r = relay();
       let folder = "";
-      if (!["folders", "status", "add_folder", "remove_folder"].includes(op)) {
+      // Ops about the Mac rather than one folder; health is for every folder when none is named.
+      const macWide = ["folders", "status", "add_folder", "remove_folder"].includes(op) || (op === "health" && !str(args.folder));
+      if (!macWide) {
         const wanted = str(args.folder);
         const { state } = await r.read(Number.MAX_SAFE_INTEGER, false);
         const folders = state?.folders ?? [];

@@ -66,6 +66,21 @@ checks and the same reviewer:
 4. **`mac_do` `submit_proof`** sends it to the swarm's reviewer, like its own prover's work. Approved, the item is
    proved and goes into your audit file; otherwise the reviewer's notes come back in the session.
 
+## Check the swarm is working
+
+The app keeps a health line for every agent turn, in `turns.jsonl` in its log folder (`~/Library/Logs/Formal Mind`
+on a Mac): the role and item, whether the agent's tools connected, how many tools it ran and how many `lake build`s
+passed or failed, the context it used, how long it took and how it ended. Counts only: no code, prompts or agent
+words, and it stays on your machine.
+
+When a turn looks wrong, the session says so as it happens (**health:** in the chat): its tools didn't connect, it
+wrote tool calls out as text instead of running them, it finished without running any tool, it called the same tool
+with the same arguments again and again, or `lake build` kept failing. A turn whose tools didn't connect is stopped
+and started again, twice, before the swarm pauses.
+
+**`mac_get` `health`** reads it back: the newest turns, how they ended, and every anomaly, for one folder or all of
+them. Ask it before trusting a long unattended run.
+
 If a function is `in_lean` in the work map but its def isn't in the model file yet (formal-ast learned to translate it
 after the file was written), **`mac_do` `refresh_model`** rewrites the model; `check_proof` does that first too.
 

@@ -82,6 +82,7 @@ async function call(op: MacOp, folder: string, a: Record<string, unknown>): Prom
 	const run = () => need("run");
 	const usd = (k: string) => (typeof a[k] === "number" && (a[k] as number) > 0 ? (a[k] as number) : undefined);
 	if (op === "folders") return readState();
+	if (op === "health") return invoke("swarm_health", { folder: folder || null, limit: typeof a.limit === "number" ? a.limit : null });
 	if (op === "status") {
 		const [claudeCode, anthropicKey, openaiKey] = await Promise.all([
 			invoke<string>("claude_code_status").catch((e) => `unavailable: ${e}`),
