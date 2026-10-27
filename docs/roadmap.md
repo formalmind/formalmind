@@ -52,7 +52,11 @@ What Formal Mind is, the problem it solves and its focus: [README.md](../README.
 7. **Bring your own skills and agents.** Auditors already run their own agents (Nethermind's AuditAgent, Pashov's
    skills, 33Labs). Formal Mind supplies the loop around them: the AST slices, the plan, the checks (`lake build`,
    `forge test`), the review step and one merged report. Their skills plug in; ours stay as they are.
-8. **A branch viewer.** Every branch of the repository's history in one diagram, each commit marked with what was
+8. **Verify the bytecode, not only the source: EquiVM.** Build on [argotorg/EquiVM](https://github.com/argotorg/EquiVM)
+   (MIT): agents prove the deployed bytecode refines a Stele spec, so the compiler leaves the trusted base, and our
+   statements are proved on the Stele spec. WETH9 and Morpho Blue are already EquiVM benchmarks. Plan:
+   [bytecode-refinement.md](bytecode-refinement.md).
+9. **A branch viewer.** Every branch of the repository's history in one diagram, each commit marked with what was
    verified at it (spec built, functions proved), and the branch the specs chase highlighted.
 
 ## Decisions to make
@@ -63,6 +67,7 @@ What Formal Mind is, the problem it solves and its focus: [README.md](../README.
 | 2 | Where do Async Swap's proofs live again? | In a proofs repository beside asyncswap/contracts that follows its commits, so contracts stay free to change. |
 | 3 | Concolic skill for the formal agents in 0.1.x, or only in 0.2? | Add it as an extra skill once 0.2 ships; the four published skills don't change. |
 | 4 | Bring back PR review comments? | Yes, opt-in. It's what outside teams see first. |
+| 5 | EquiVM's Stele spec as the semantics of record, beside or instead of SolidCore? | Start beside: link WETH9's statements to EquiVM's WETH9 benchmark first, then decide with SolidCore's spike. |
 
 ## Milestones
 
