@@ -9,7 +9,9 @@ set -euo pipefail
 cd "$(git rev-parse --show-toplevel)"
 
 TARGET=${1:-all}
-REPO=formalmind/formalmind
+REPO=formalmind/releases
+# Apps before 0.2.24 check formalmind/formalmind for updates: publish there too while that repository is public.
+OLD=formalmind/formalmind
 KEY=~/.tauri/formalmind.key
 
 if [ -n "$(git status --porcelain)" ]; then
@@ -74,8 +76,16 @@ if ! git branch -r --contains HEAD 2>/dev/null | grep -q "origin/main"; then
   SKIP_RELEASE=1 git push -q origin HEAD:main
   echo "release: pushed $(git rev-parse --short HEAD) to main; if git then says 'failed to push some refs', that's this push already being there"
 fi
-gh release create "$TAG" -R "$REPO" --title "Formal Mind $VERSION" --notes "Formal Mind $VERSION" \
-  --target "$(git rev-parse HEAD)" \
+# formalmind/releases holds only the builds, so its release points at its own main; the app's commit is in the notes.
+gh release create "$TAG" -R "$REPO" --title "Formal Mind $VERSION" --notes "Formal Mind $VERSION (app commit $(git rev-parse --short HEAD))" \
   "$OUT/Formal-Mind-mac.dmg" "$OUT/Formal-Mind-mac.app.tar.gz" "$OUT/latest.json"
+if [ "$(gh api "repos/$OLD" --jq .visibility 2>/dev/null)" = public ]; then
+  gh release create "$TAG" -R "$OLD" --title "Formal Mind $VERSION" --notes "Formal Mind $VERSION" \
+    --target "$(git rev-parse HEAD)" \
+    "$OUT/Formal-Mind-mac.dmg" "$OUT/Formal-Mind-mac.app.tar.gz" "$OUT/latest.json"
+fi
 rm -rf "$OUT"
+# The Windows installer is built here from the tag (.github/workflows/desktop-windows.yml).
+git tag -f "$TAG" HEAD >/dev/null && git push -q -f origin "refs/tags/$TAG"
+gh workflow run desktop-windows.yml -R "$OLD" -f tag="$TAG" || echo "release: start the Windows build by hand: gh workflow run desktop-windows.yml -f tag=$TAG"
 echo "release: $TAG published"

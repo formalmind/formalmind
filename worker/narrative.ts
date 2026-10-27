@@ -11,11 +11,10 @@ export { MAC_DOWNLOAD, WINDOWS_DOWNLOAD };
 
 export const SITE_NAME = "Formal Mind";
 export const ORIGIN = "https://formal.team";
-export const APP_REPO = "https://github.com/formalmind/formalmind";
+export const APP_REPO = "https://github.com/formalmind/releases";
 export const GITHUB_APP = "https://github.com/apps/formalmind";
 export const RELEASES = `${APP_REPO}/releases`;
 export const AUDIT_FORMAT_DOC = `${APP_REPO}/blob/main/docs/audit-format.md`;
-export const AUDIT_FORMAT_RAW = "https://raw.githubusercontent.com/formalmind/formalmind/main/docs/audit-format.md";
 export const PROTOCOL_DOC = `${APP_REPO}/blob/main/docs/protocol.md`;
 /* A public repository Formal Mind works on: Async Swap's contracts, with its Lean proofs in formal/ and Formal
  * Mind's audit in audit/formal-mind.audit.json. */

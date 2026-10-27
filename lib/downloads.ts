@@ -1,5 +1,5 @@
 /** The desktop app's downloads: the latest release's installer for each platform. */
-const LATEST = "https://github.com/formalmind/formalmind/releases/latest/download";
+const LATEST = "https://github.com/formalmind/releases/releases/latest/download";
 export const MAC_DOWNLOAD = `${LATEST}/Formal-Mind-mac.dmg`;
 export const WINDOWS_DOWNLOAD = `${LATEST}/Formal-Mind-windows-setup.exe`;
 

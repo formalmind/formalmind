@@ -7,7 +7,7 @@ a Lean 4 specification of it, prove it, and keep the proofs up to date as the co
 machine-checked by `lake build`, with no `sorry` and no new axioms.
 
 - **Web:** [formal.team](https://formal.team). Paste a repository, watch the plan, start the swarm.
-- **Mac:** [Download for Mac](https://github.com/formalmind/formalmind/releases/latest/download/Formal-Mind-mac.dmg).
+- **Mac:** [Download for Mac](https://github.com/formalmind/releases/releases/latest/download/Formal-Mind-mac.dmg).
   Also runs agent turns on folders on your machine, so the code never leaves it ([desktop/](desktop/README.md)).
 
 ## The problem

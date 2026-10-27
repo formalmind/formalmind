@@ -1,15 +1,15 @@
 # The Windows build of the desktop app. scripts/release.sh publishes desktop-v<version> from a Mac (the universal Mac
-# app); this then builds the Windows installer from the same tag, attaches it to that release as
-# Formal-Mind-windows-setup.exe, and adds windows-x86_64 to its latest.json so installed Windows apps update too.
+# app) on formalmind/releases, pushes the tag here and starts this workflow, which builds the Windows installer from
+# that tag, attaches it to the release as Formal-Mind-windows-setup.exe, and adds windows-x86_64 to its latest.json so
+# installed Windows apps update too.
 #
 # Secrets: TAURI_SIGNING_PRIVATE_KEY (the contents of ~/.tauri/formalmind.key, the same update key the Mac release
 # signs with). Without it the installer is still built and attached, but latest.json isn't touched.
+# RELEASES_TOKEN: a token that can write releases on formalmind/releases (this repository's own token can't).
 # Code signing (SmartScreen) isn't set up yet: see desktop/README.md.
 name: desktop-windows
 
 on:
-  release:
-    types: [published]
   workflow_dispatch:
     inputs:
       tag:
@@ -21,18 +21,19 @@ permissions:
 
 jobs:
   windows:
-    if: github.event_name == 'workflow_dispatch' || startsWith(github.event.release.tag_name, 'desktop-v')
+    if: startsWith(inputs.tag, 'desktop-v')
     runs-on: windows-latest
     defaults:
       run:
         shell: bash
     env:
-      TAG: ${{ github.event.release.tag_name || inputs.tag }}
-      GH_TOKEN: ${{ github.token }}
+      TAG: ${{ inputs.tag }}
+      RELEASES: formalmind/releases
+      GH_TOKEN: ${{ secrets.RELEASES_TOKEN }}
     steps:
       - uses: actions/checkout@v7
         with:
-          ref: ${{ github.event.release.tag_name || inputs.tag }}
+          ref: ${{ inputs.tag }}
 
       - uses: oven-sh/setup-bun@v2
 
@@ -63,13 +64,13 @@ jobs:
           exe=$(ls "$dir"/*-setup.exe | head -1)
           mkdir -p out
           cp "$exe" out/Formal-Mind-windows-setup.exe
-          gh release upload "$TAG" out/Formal-Mind-windows-setup.exe --clobber
+          gh release upload "$TAG" -R "$RELEASES" out/Formal-Mind-windows-setup.exe --clobber
           if [ -f "$exe.sig" ]; then
             # The updater installs the signed setup.exe itself; latest.json gets its URL and signature.
-            gh release download "$TAG" -p latest.json -D out --clobber
+            gh release download "$TAG" -R "$RELEASES" -p latest.json -D out --clobber
             jq --arg signature "$(cat "$exe.sig")" \
-               --arg url "https://github.com/${{ github.repository }}/releases/download/$TAG/Formal-Mind-windows-setup.exe" \
+               --arg url "https://github.com/$RELEASES/releases/download/$TAG/Formal-Mind-windows-setup.exe" \
                '.platforms["windows-x86_64"] = {signature: $signature, url: $url}' out/latest.json > out/latest.next.json
             mv out/latest.next.json out/latest.json
-            gh release upload "$TAG" out/latest.json --clobber
+            gh release upload "$TAG" -R "$RELEASES" out/latest.json --clobber
           fi

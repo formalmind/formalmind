@@ -4,13 +4,13 @@ Formal Mind runs as a desktop app on macOS and Windows. The swarm, your files an
 
 ## Download
 
-- **Mac:** [Formal-Mind-mac.dmg](https://github.com/formalmind/formalmind/releases/latest/download/Formal-Mind-mac.dmg).
+- **Mac:** [Formal-Mind-mac.dmg](https://github.com/formalmind/releases/releases/latest/download/Formal-Mind-mac.dmg).
   One build for Apple Silicon and Intel, signed and notarized. Open the disk image and drag Formal Mind to
   Applications.
-- **Windows:** [Formal-Mind-windows-setup.exe](https://github.com/formalmind/formalmind/releases/latest/download/Formal-Mind-windows-setup.exe).
+- **Windows:** [Formal-Mind-windows-setup.exe](https://github.com/formalmind/releases/releases/latest/download/Formal-Mind-windows-setup.exe).
   The installer isn't code-signed yet, so Windows SmartScreen asks before the first run.
 
-Every version is on the [releases page](https://github.com/formalmind/formalmind/releases).
+Every version is on the [releases page](https://github.com/formalmind/releases/releases).
 
 ## What else you need
 

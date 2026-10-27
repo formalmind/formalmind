@@ -40,7 +40,7 @@
     "updater": {
       "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDA4Q0Q3NzU1QjgzQ0Q2RTkKUldUcDFqeTRWWGZOQ1BFSFFBTWRVZzJYVXpVc0lQMVpOZUZycEhYSkZJUDJ4cWxlc1QvNFRWV2oK",
       "endpoints": [
-        "https://github.com/formalmind/formalmind/releases/latest/download/latest.json"
+        "https://github.com/formalmind/releases/releases/latest/download/latest.json"
       ]
     }
   },

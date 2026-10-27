@@ -17,7 +17,8 @@ import { WebStandardStreamableHTTPServerTransport } from "@modelcontextprotocol/
 import { CallToolRequestSchema, ListToolsRequestSchema, type CallToolResult, type Tool } from "@modelcontextprotocol/sdk/types.js";
 import { z } from "zod/v4";
 import type { AuditDoc } from "@/lib/audit-format";
-import { APP_REPO, AUDIT_FORMAT_RAW, EXAMPLE_AUDIT_RAW, EXAMPLE_REPO, ORIGIN, SHORT, STATUS_LINE } from "./narrative";
+import auditFormat from "@/content/docs/audit-format.md";
+import { APP_REPO, EXAMPLE_AUDIT_RAW, EXAMPLE_REPO, ORIGIN, SHORT, STATUS_LINE } from "./narrative";
 
 /* zod 4 compiles object parsers with `new Function` when it believes the
  * runtime allows it; workerd lets the empty probe through and then rejects
@@ -77,7 +78,7 @@ const json = (value: unknown): CallToolResult => text(JSON.stringify(value, null
 async function callTool(name: string, args: Record<string, unknown>): Promise<CallToolResult> {
   switch (name) {
     case "get_audit_format":
-      return text(await (await get(AUDIT_FORMAT_RAW)).text());
+      return text(auditFormat);
     case "get_example_audit": {
       const section = typeof args.section === "string" && args.section ? args.section : "summary";
       if (!(AUDIT_SECTIONS as readonly string[]).includes(section)) throw new Error(`section must be one of ${AUDIT_SECTIONS.join(", ")}`);
@@ -93,7 +94,7 @@ async function callTool(name: string, args: Record<string, unknown>): Promise<Ca
       });
     }
     case "get_app_release": {
-      const release = (await (await get("https://api.github.com/repos/formalmind/formalmind/releases/latest", "application/vnd.github+json")).json()) as {
+      const release = (await (await get("https://api.github.com/repos/formalmind/releases/releases/latest", "application/vnd.github+json")).json()) as {
         tag_name: string;
         published_at: string;
         html_url: string;
