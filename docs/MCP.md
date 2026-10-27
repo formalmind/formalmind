@@ -5,7 +5,7 @@ formal.team runs two remote MCP servers on the Worker (Streamable HTTP, stateles
 | Endpoint | Auth | What |
 | --- | --- | --- |
 | `https://formal.team/mcp` | none | Public reads: the `formalmind.audit/v1` format, Formal Mind's audit of an example repository, the desktop app's latest release (`worker/mcp.ts`) |
-| `https://formal.team/mcp/account` | OAuth 2.0 or the desktop token | Your account: projects and their files, audit reports, findings, Proofs coverage, usage, the swarm in your desktop app (`worker/account-mcp.ts`) |
+| `https://formal.team/mcp/account` | OAuth 2.0 or the desktop token | Your account: projects and their files, audit reports, findings, Proofs coverage, the swarm in your desktop app (`worker/account-mcp.ts`) |
 
 Every tool returns one text block of compact JSON. Project reads are pinned to one commit, and each result names it.
 
@@ -48,8 +48,6 @@ read through GitHub's public API, with the Worker's `GITHUB_TOKEN` when it has o
 | Tool | Scope | Returns |
 | --- | --- | --- |
 | `my_projects` | read | The account's projects (repository, proofs repository, added at) |
-| `my_usage` | read | Spend today / this month / overall and the latest cost lines |
-| `swarm_state` | read | The hosted swarm on GitHub (the earlier, GitHub-based swarm): open fm: work, merges, runs |
 | `list_files` | read | A project's paths at a commit; `prefix`, `ext`, `limit`, `ref` |
 | `read_file` | read | One file's text, optionally `from`/`to` lines (2000-line cut otherwise) |
 | `list_audits` | read | Each `*.audit.json` in the report folders (`audit`, `audits`, `reports`, or `dirs`): kind, auditor, date, audited commit, findings by severity and status, coverage totals; also reports not yet converted, unparseable files, `.formal/bugs/`, Formal Mind's PDF |
@@ -58,9 +56,6 @@ read through GitHub's public API, with the Worker's `GITHUB_TOKEN` when it has o
 | `proofs_coverage` | read | From the internal (Formal Mind) report: per contract functions / in Lean / proved / sorry / not modeled / theorems, the function rows for one `contract`, the properties proved, and `.formal/plan.md` progress when committed |
 | `mac_swarm` | read | The desktop app's swarm through the relay: online or not, last seen, folders and their sessions |
 | `mac_swarm_events` | read | The relay's recent swarm events, filtered by `folder`, `run`, `kind`, `after` (a seq) |
-| `add_project` | write | Adds a GitHub repository to the account's projects |
-| `plan_repository` | write | Runs the planner on a repository and saves the plan to the account |
-| `start_swarm` | write | Sets up `<repo>-proofs` for the hosted swarm |
 | `mac_swarm_send` | write | `say` / `start` / `stop` to the Mac; `start` runs on the route the app's Settings use |
 | `mac_get` | read | One of the app's reads on the Mac (`lib/mac-ops.ts`): folders, status, plan, statements, bugs, proofs, scope, coverage, … The Mac answers through the relay |
 | `mac_do` | write | One of the app's actions on the Mac (`lib/mac-ops.ts`): add a folder, verify any GitHub repository at a branch or commit (`verify_repo`), start, stop, say, statements, triage, Reach |

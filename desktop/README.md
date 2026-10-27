@@ -52,7 +52,7 @@ bun run desktop:dev
 That starts Vite on :1420 and opens the app. It talks to https://formal.team by default. For a local Worker, run
 `bun run dev:api` (port 8787) and either start the app with `VITE_FORMALMIND_API=http://localhost:8787` or set
 **Server** on the sign-in screen. A local Worker without `APP_BASE_URL` signs everyone in as "Dev Preview".
-Chat needs `OPENAI_API_KEY` in `.dev.vars`, and the swarm state needs `GITHUB_TOKEN` there too (unauthenticated
+Chat needs `OPENAI_API_KEY` in `.dev.vars`, and reading projects from GitHub needs `GITHUB_TOKEN` there too (unauthenticated
 GitHub requests hit the rate limit fast); `gh auth token` gives you one.
 
 ## Test the lifecycle
