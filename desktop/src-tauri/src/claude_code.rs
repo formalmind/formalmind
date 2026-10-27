@@ -442,6 +442,9 @@ pub async fn hunt(app: &AppHandle, folder: &str, run: &str, job: u64, resumed: b
     if let Some(m) = model.filter(|m| m.starts_with("claude-")) {
         cmd.arg("--model").arg(m);
     }
+    if let Some(e) = crate::local::read().ok().and_then(|c| c.settings.effort()) {
+        cmd.arg("--effort").arg(e);
+    }
     emit("status", "starting Claude Code".into());
     let mut child = cmd.spawn().map_err(|e| format!("couldn't start Claude Code ({}): {e}", claude().display()))?;
     let mut lines = tokio::io::BufReader::new(child.stdout.take().ok_or("no stdout")?).lines();
@@ -561,6 +564,8 @@ pub fn start_role(folder: &str, run: &str, job: u64, system: &str, task: &Value,
         .args(["--setting-sources", ""])
         .arg("--disable-slash-commands")
         .args(["--model", model])
+        // Thinking effort from Settings (the chat's picker), read at each turn so a change applies to the next one.
+        .args(crate::local::read().ok().and_then(|c| c.settings.effort()).map(|e| vec!["--effort".to_string(), e]).unwrap_or_default())
         .args(if resumed { ["--resume", session.as_str()] } else { ["--session-id", session.as_str()] })
         .env("PATH", crate::platform::tool_path(None))
         .env("PWD", &root)

@@ -47,6 +47,8 @@ export interface ChatComposerProps {
 	context?: React.ReactNode;
 	/** A model pill for other providers' models (the local swarm's Claude models), in place of `model`. */
 	modelPicker?: { value: string; options: { value: string; label: string }[]; onChange: (value: string) => void; disabled?: boolean };
+	/** How hard the model thinks (Claude Code's effort), beside the model. */
+	effortPicker?: { value: string; options: { value: string; label: string }[]; onChange: (value: string) => void; disabled?: boolean };
 	placeholder?: string;
 	/** Extra controls in the bottom row, after the model picker. */
 	extra?: React.ReactNode;
@@ -79,6 +81,7 @@ export function ChatComposer({
 	extra,
 	compact,
 	modelPicker,
+	effortPicker,
 	placeholder = "Ask about this repo…",
 	textareaRef,
 	rounded = "rounded-[28px]",
@@ -212,6 +215,27 @@ export function ChatComposer({
 							<DropdownMenuContent align="start">
 								<DropdownMenuRadioGroup value={modelPicker.value} onValueChange={modelPicker.onChange}>
 									{modelPicker.options.map((o) => (
+										<DropdownMenuRadioItem key={o.value} value={o.value}>
+											{o.label}
+										</DropdownMenuRadioItem>
+									))}
+								</DropdownMenuRadioGroup>
+							</DropdownMenuContent>
+						</DropdownMenu>
+					) : null}
+					{effortPicker ? (
+						<DropdownMenu>
+							<DropdownMenuTrigger
+								disabled={effortPicker.disabled}
+								className={cn(CHIP, compact && "h-7 px-2.5 text-[12px]", "bg-secondary text-secondary-foreground outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:opacity-60")}
+								aria-label="Thinking"
+							>
+								{effortPicker.options.find((o) => o.value === effortPicker.value)?.label ?? effortPicker.value}
+								<ChevronDown className="h-3 w-3 text-muted-foreground" />
+							</DropdownMenuTrigger>
+							<DropdownMenuContent align="start">
+								<DropdownMenuRadioGroup value={effortPicker.value} onValueChange={effortPicker.onChange}>
+									{effortPicker.options.map((o) => (
 										<DropdownMenuRadioItem key={o.value} value={o.value}>
 											{o.label}
 										</DropdownMenuRadioItem>

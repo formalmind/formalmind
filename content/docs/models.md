@@ -17,6 +17,9 @@ clears `ANTHROPIC_API_KEY` for the run so your plan pays, not a key you happen t
 Claude Code setup (settings, hooks, `CLAUDE.md`, skills, other MCP servers) reaches the agents. Settings shows what
 `claude auth status` reports, and Start waits until Claude Code is signed in.
 
+The chat's **Thinking** menu, beside the model, sets how hard the agents think (Claude Code's effort: low, medium or
+high; Default leaves it to Claude Code). Lower is faster and uses less of your plan; it applies from the next agent turn.
+
 Plan limits assume ordinary individual use, so a swarm left running for long will reach them. When it does, the
 swarm pauses with its job saved. Start again after the limit resets.
 

@@ -76,6 +76,13 @@ const MODELS = [
 	{ value: "claude-haiku-5-5", label: "Claude Haiku 5.5" },
 ];
 /** With your OpenAI key (Settings → Models), these instead. */
+/** Claude Code's thinking effort for the agents (`--effort`); "" leaves it to Claude Code. */
+const EFFORTS = [
+	{ value: "", label: "Thinking: default" },
+	{ value: "low", label: "Thinking: low" },
+	{ value: "medium", label: "Thinking: medium" },
+	{ value: "high", label: "Thinking: high" },
+];
 const OPENAI_MODELS = [
 	{ value: "gpt-5", label: "GPT-5" },
 	{ value: "gpt-5-mini", label: "GPT-5 mini" },
@@ -1845,6 +1852,7 @@ export function SwarmPanel({ folder, name, scan, bridge, session, file: openPath
 	const [openBug, setOpenBug] = useState<string | null>(null);
 	// One floating card open at a time, like an accordion; a bug report opens the bugs card.
 	const [model, setModel] = useState(() => store.get("fm:model") ?? MODELS[0].value);
+	const [effort, setEffort] = useState(() => store.get("fm:effort") ?? "");
 	
 	// Set in Settings (desktop/src/settings.tsx).
 	const [provider, setProvider] = useState<Provider>(() => {
@@ -2924,6 +2932,16 @@ export function SwarmPanel({ folder, name, scan, bridge, session, file: openPath
 								store.set("fm:model", m);
 							},
 						}}
+						// Claude Code's thinking effort for the agents' turns; Default leaves it to Claude Code. Takes effect at the
+						// next turn, so it can change while the swarm runs.
+						effortPicker={provider === "claude-code" ? {
+							value: effort,
+							options: EFFORTS,
+							onChange: (v) => {
+								setEffort(v);
+								store.set("fm:effort", v);
+							},
+						} : undefined}
 						placeholder={run ? (concolic ? "Talk to the hunter: a question, a lead, where to look next…" : "Talk to the agents: a question, a new focus, an idea to check…") : concolic ? "What should the hunter look at? Router.swap, the fee path, settlement…" : "What should the swarm focus on? (optional) ↑ starts it"}
 						context={
 							<span className="inline-flex items-center gap-1.5">

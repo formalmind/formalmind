@@ -29,6 +29,9 @@ pub struct Settings {
     pub provider: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub model: Option<String>,
+    /// Claude Code's thinking effort for the agents' turns (`--effort`: low, medium, high); unset leaves its default.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub effort: Option<String>,
     /// Each folder's spending cap in USD, by path.
     #[serde(default)]
     pub budgets: std::collections::BTreeMap<String, f64>,
@@ -51,6 +54,11 @@ impl Settings {
 
     pub fn budget(&self, folder: &str) -> f64 {
         self.budgets.get(folder).copied().filter(|b| *b > 0.0).unwrap_or(5.0)
+    }
+
+    /// The effort to pass to Claude Code, when one was picked.
+    pub fn effort(&self) -> Option<String> {
+        self.effort.clone().filter(|e| ["low", "medium", "high", "xhigh", "max"].contains(&e.as_str()))
     }
 
     pub fn relay(&self) -> bool {

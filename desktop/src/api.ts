@@ -109,7 +109,7 @@ export async function syncSettings() {
 		// No storage (a private window): the backend keeps what it had.
 	}
 	await invoke("settings_set", {
-		patch: { api_base: apiBase(), provider: get("fm:provider"), model: get("fm:model"), relay: get("fm:relay") !== "0", budgets },
+		patch: { api_base: apiBase(), provider: get("fm:provider"), model: get("fm:model"), effort: get("fm:effort") || null, relay: get("fm:relay") !== "0", budgets },
 	}).catch(() => {});
 }
 
