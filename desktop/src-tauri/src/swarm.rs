@@ -1497,6 +1497,19 @@ async fn sync_plan(turn: &Turn<'_>, root: &Path) -> usize {
     missing.len()
 }
 
+/// `lake build` of the modules these Lean files are (folder-relative paths under the Lake sources), or of the whole
+/// project when none of them is a module there.
+fn build_command(root: &Path, files: &[&String]) -> String {
+    let Some(src) = crate::swarm_ctx::lean_src(root) else { return "lake build".into() };
+    let modules: Vec<String> = files
+        .iter()
+        .filter_map(|f| root.join(f.as_str()).strip_prefix(&src).ok().map(|p| p.to_string_lossy().replace('\\', "/")))
+        .filter_map(|p| p.strip_suffix(".lean").map(|m| m.replace('/', ".")))
+        .filter(|m| !m.is_empty() && m.split('.').all(|part| !part.is_empty() && part.chars().all(|c| c.is_alphanumeric() || c == '_')))
+        .collect();
+    if modules.is_empty() { "lake build".into() } else { format!("lake build {}", modules.join(" ")) }
+}
+
 /// The swarm's own check of a prover's work: the Lean files it wrote don't cheat, `lake build` passes, and (when the
 /// item names a def of the model) the Proofs page's coverage counts that def as proved. Returns the theorems that prove it.
 async fn check_proof(turn: &Turn<'_>, root: &Path, id: &str, text: &str, files: &[String]) -> Result<Vec<String>, String> {
@@ -1513,8 +1526,11 @@ async fn check_proof(turn: &Turn<'_>, root: &Path, id: &str, text: &str, files: 
     if crate::swarm_ctx::lake_dir(root).is_none() {
         return Ok(vec![]);
     }
-    turn.emit("status", "prover", id, "checking: lake build".into());
-    let build = call_tool(root, "run", &json!({ "command": "lake build" })).await;
+    // Only the modules this item wrote (and what they import): another agent's unfinished proof elsewhere in the project
+    // doesn't fail this one.
+    let command = build_command(root, &lean);
+    turn.emit("status", "prover", id, format!("checking: {command}"));
+    let build = call_tool(root, "run", &json!({ "command": command })).await;
     turn.emit("result", "prover", id, build.lines().filter(|l| l.starts_with("exit") || l.contains("error")).take(12).collect::<Vec<_>>().join("\n"));
     if !build.starts_with("exit 0") {
         let errors: Vec<&str> = build.lines().filter(|l| l.contains("error")).take(40).collect();
@@ -2325,7 +2341,7 @@ pub async fn swarm_check_proof(folder: String, path: String, content: Option<Str
     }
     // The model first: a def formal-ast can now translate has to be in the file Lake builds before a proof can name it.
     let regenerated = crate::swarm_ctx::context(&root).regenerated;
-    let build = call_tool(&root, "run", &json!({ "command": "lake build" })).await;
+    let build = call_tool(&root, "run", &json!({ "command": build_command(&root, &[&path]) })).await;
     if !build.starts_with("exit 0") {
         let errors: Vec<&str> = build.lines().filter(|l| l.contains("error")).take(40).collect();
         return Ok(json!({ "ok": false, "path": path, "regenerated": regenerated, "check": "lake build failed", "errors": if errors.is_empty() { vec![clip(build.clone())] } else { errors.iter().map(|e| e.to_string()).collect() } }));
@@ -2672,5 +2688,16 @@ mod lifecycle {
         // health: reads the log back for the folder.
         let h = crate::health::swarm_health(Some(f.clone()), Some(10)).unwrap();
         assert!(h["turns"].is_number() && h["healthy"].is_boolean(), "{h}");
+    }
+
+    #[test]
+    fn a_proof_is_checked_by_building_its_own_modules() {
+        let base = std::env::temp_dir().join(format!("fm-build-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&base);
+        crate::swarm_ctx::scaffold(&base).unwrap();
+        let (a, b, bad) = ("formal/Proofs/Swarm/WETH9Deposit.lean".to_string(), "formal/Proofs/Statements/S01/WETH9Fallback.lean".to_string(), "formal/Proofs/Statements/S01/WETH9«».lean".to_string());
+        assert_eq!(super::build_command(&base, &[&a, &b]), "lake build Proofs.Swarm.WETH9Deposit Proofs.Statements.S01.WETH9Fallback");
+        assert_eq!(super::build_command(&base, &[&bad]), "lake build");
+        let _ = std::fs::remove_dir_all(&base);
     }
 }
