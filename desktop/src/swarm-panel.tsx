@@ -2677,7 +2677,6 @@ export function SwarmPanel({ folder, name, scan, bridge, session, file: openPath
 				<ChevronDown className="size-3" />
 			</DropdownMenuTrigger>
 			<DropdownMenuContent align="end" sideOffset={6} className="w-60 rounded-2xl p-1.5 shadow-lg [&_[role=menuitem]]:rounded-lg [&_[role=menuitem]]:px-2.5 [&_[role=menuitem]]:py-2">
-				<DropdownMenuLabel className="text-xs font-normal text-muted-foreground">The agents run on</DropdownMenuLabel>
 				<DropdownMenuItem onSelect={() => choosePlan("claude-code")} disabled={!claudePlan} className="text-[13px]">
 					{claudePlan ?? "Claude plan"}
 					{provider === "claude-code" ? <Check className="ml-auto size-3.5" /> : null}
