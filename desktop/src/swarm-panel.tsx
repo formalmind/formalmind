@@ -4,7 +4,7 @@ import { createPortal } from "react-dom";
 import { NvimTerminal } from "./nvim-terminal";
 import { reportError } from "@/lib/report-error";
 import { JsonTree } from "./json-tree";
-import { ArrowDown, Bug, Check, ChevronDown, ChevronRight, CircleCheck, CircleX, LoaderCircle, MoreHorizontal, Pause, Code2, Copy, FileCode2, Folder, Network, Plus, ScanSearch, Square, SquareCheck, ThumbsDown, ThumbsUp, WandSparkles } from "lucide-react";
+import { ArrowDown, Bug, Check, ChevronDown, ChevronRight, CircleCheck, CircleX, LoaderCircle, MoreHorizontal, Pause, Code2, Copy, FileCode2, Folder, Network, Plus, ScanSearch, ThumbsDown, ThumbsUp, WandSparkles } from "lucide-react";
 
 // The project roadmap (GitHub Projects-style), the same view the web app had on its own page.
 import { motion as vimMotion, search as vimSearch, setVimMode, useVimMode, type Cursor } from "@/components/vim-mode";
@@ -519,7 +519,10 @@ export function QuestionStack({ asks, onSend, onSkip, onWrite }: { asks: Ev[]; /
 			<div className="flex flex-col p-1" role="radiogroup" aria-label="Your answer">
 				{ask.replies.map((r) => (
 					<button key={r} type="button" role="radio" aria-checked={picked === r} onClick={() => setPicks({ ...picks, [askKey(e)]: r })} className={`flex items-start gap-2 rounded-lg px-2.5 py-1 text-left text-[13px] ${picked === r ? "bg-muted" : "hover:bg-muted/60"}`}>
-						{picked === r ? <SquareCheck className="mt-0.5 size-3.5 shrink-0 text-primary" aria-hidden /> : <Square className="mt-0.5 size-3.5 shrink-0 text-muted-foreground" aria-hidden />}
+						{/* A round mark: filled with a check when picked, an empty ring otherwise. */}
+						<span aria-hidden className={`mt-0.5 grid size-4 shrink-0 place-items-center rounded-full border transition-colors ${picked === r ? "border-foreground bg-foreground text-background" : "border-muted-foreground/50"}`}>
+							{picked === r ? <Check className="size-2.5" strokeWidth={3} /> : null}
+						</span>
 						<span>{r}</span>
 					</button>
 				))}
