@@ -3,6 +3,7 @@ import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import react from "@vitejs/plugin-react";
 import { defineConfig } from "vite";
+import { uiPackage } from "../lib/ui-package";
 
 const repo = fileURLToPath(new URL("..", import.meta.url));
 
@@ -10,7 +11,7 @@ const repo = fileURLToPath(new URL("..", import.meta.url));
 export default defineConfig({
 	root: fileURLToPath(new URL(".", import.meta.url)),
 	plugins: [react()],
-	resolve: { alias: { "@": repo } },
+	resolve: { alias: [uiPackage, { find: "@", replacement: repo }] },
 	define: {
 		"process.env": "{}",
 		__APP_VERSION__: JSON.stringify(JSON.parse(readFileSync(new URL("src-tauri/tauri.conf.json", import.meta.url), "utf8")).version),
