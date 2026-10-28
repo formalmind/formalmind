@@ -1,10 +1,14 @@
 import { MarkGithubIcon } from "@primer/octicons-react";
+import { isTauri } from "@tauri-apps/api/core";
+import { SemanticsPanel } from "./semantics-panel";
+import { ProofWorkspace } from "./proof-workspace";
+import { ProofRail, fnKey, proofGutter, useFileProofs } from "./code-proof-panel";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { NvimTerminal } from "./nvim-terminal";
 import { reportError } from "@/lib/report-error";
 import { JsonTree } from "./json-tree";
-import { ArrowDown, Bug, Check, Pencil, ChevronDown, ChevronRight, CircleCheck, CircleX, LoaderCircle, MoreHorizontal, Pause, Code2, Copy, FileCode2, Folder, Network, Plus, ScanSearch, ThumbsDown, ThumbsUp, WandSparkles } from "lucide-react";
+import { ArrowDown, Bug, Check, Pencil, ChevronDown, ChevronRight, CircleCheck, CircleX, LoaderCircle, MoreHorizontal, Pause, Code2, Copy, FileCode2, Folder, Network, Plus, ScanSearch, ThumbsDown, ThumbsUp, WandSparkles, ArrowLeft, ArrowRight, History } from "lucide-react";
 
 // The project roadmap (GitHub Projects-style), the same view the web app had on its own page.
 import { motion as vimMotion, search as vimSearch, setVimMode, useVimMode, type Cursor } from "@/components/vim-mode";
@@ -622,7 +626,25 @@ export function AgentMessage({ e, onBug, onReply, turn }: { e: Ev; onBug: () => 
  * and steer the swarm, the plan, and what each agent says as it works).
  */
 /** A whole file, highlighted by its extension, with a line-number gutter. */
-export function FileView({ path, text, big, start = 1, mark, cursor, diagnostics }: { path: string; text: string; big?: boolean; start?: number; mark?: number | null; cursor?: Cursor | null; /** solc's errors and warnings in this file: a wavy underline, the message under the line. */ diagnostics?: Diagnostic[] }) {
+/** A line number marked in the code's gutter (a function's proof status, in its colour), on a 0-based line. */
+export type GutterMark = { text: string; title: string; onClick: () => void };
+
+/** Where a text caret sits in a FileView: its 0-based line and column (characters of code before it). */
+function caretIn(pre: HTMLElement): { line: number; col: number } | null {
+	const sel = window.getSelection();
+	const node = sel?.focusNode;
+	if (!sel || !node || !pre.contains(node)) return null;
+	const row = (node.nodeType === Node.ELEMENT_NODE ? (node as Element) : node.parentElement)?.closest<HTMLElement>("[data-line]");
+	const code = row?.querySelector("[data-code]");
+	if (!row || !code) return null;
+	if (!code.contains(node)) return { line: Number(row.dataset.line), col: 0 };
+	let col = 0;
+	const walk = document.createTreeWalker(code, NodeFilter.SHOW_TEXT);
+	for (let t = walk.nextNode(); t && t !== node; t = walk.nextNode()) col += t.textContent?.length ?? 0;
+	return { line: Number(row.dataset.line), col: col + (node.nodeType === Node.TEXT_NODE ? sel.focusOffset : 0) };
+}
+
+export function FileView({ path, text, big, start = 1, mark, cursor, diagnostics, gutter, band, onCaret }: { path: string; text: string; big?: boolean; start?: number; mark?: number | null; cursor?: Cursor | null; /** A text caret you can place and move but nothing can be typed: reports where it is (and the line is lit). */ onCaret?: (at: { line: number; col: number } | null) => void; /** solc's errors and warnings in this file: a wavy underline, the message under the line. */ diagnostics?: Diagnostic[]; gutter?: Map<number, GutterMark>; /** 0-based lines tinted as one block (the function the Proofs rail has picked), its numbers in `text`'s colour. */ band?: { from: number; to: number; text?: string } | null }) {
 	const lines = useHighlightedCode(text, EXT[path.split(".").pop() ?? ""] ?? "text");
 	const marked = useRef<HTMLSpanElement | null>(null);
 	useEffect(() => {
@@ -632,11 +654,66 @@ export function FileView({ path, text, big, start = 1, mark, cursor, diagnostics
 	useEffect(() => {
 		caret.current?.scrollIntoView({ block: "nearest", inline: "nearest" });
 	}, [cursor?.line, cursor?.col]);
+	// The read-only caret: the browser's own (click, arrows, ⌥/⌘-arrows, shift to select), with every edit refused.
+	const pre = useRef<HTMLPreElement | null>(null);
+	const [lit, setLit] = useState<number | null>(null);
+	useEffect(() => {
+		if (!onCaret) return;
+		const moved = () => {
+			if (!pre.current || document.activeElement !== pre.current) return;
+			const at = caretIn(pre.current);
+			setLit(at?.line ?? null);
+			onCaret(at);
+		};
+		document.addEventListener("selectionchange", moved);
+		return () => document.removeEventListener("selectionchange", moved);
+	}, [onCaret]);
+	const readOnly = onCaret
+		? {
+				contentEditable: true,
+				suppressContentEditableWarning: true,
+				spellCheck: false,
+				role: "textbox",
+				"aria-readonly": true,
+				"aria-multiline": true,
+				onBeforeInput: (e: React.FormEvent) => e.preventDefault(),
+				onPaste: (e: React.ClipboardEvent) => e.preventDefault(),
+				onCut: (e: React.ClipboardEvent) => e.preventDefault(),
+				onDrop: (e: React.DragEvent) => e.preventDefault(),
+				// An input method would write into the page before anything can refuse it.
+				onCompositionStart: (e: React.CompositionEvent<HTMLPreElement>) => e.currentTarget.blur(),
+				onKeyDown: (e: React.KeyboardEvent) => {
+					if (e.key === "Enter" || e.key === "Backspace" || e.key === "Delete" || e.key === "Tab") e.preventDefault();
+				},
+				onBlur: () => {
+					setLit(null);
+					onCaret(null);
+				},
+			}
+		: {};
 	return (
-		<pre className={`overflow-x-auto py-2 font-mono ${big ? "text-[12.5px] leading-6" : "text-[11px] leading-5"}`}>
+		<pre ref={pre} {...readOnly} className={`overflow-x-auto py-2 font-mono outline-none ${onCaret ? "caret-foreground" : ""} ${big ? "text-[12.5px] leading-6" : "text-[11px] leading-5"}`}>
 			{lines.map((line, i) => (
-				<span key={i} ref={i === mark ? marked : undefined} data-line={i} className={`relative block whitespace-pre pr-3 ${i === mark ? "bg-amber-300/25" : cursor?.line === i ? "bg-muted/60" : ""}`}>
-					<span className="mr-3 inline-block w-9 select-none text-right text-muted-foreground/60">{i + start}</span>
+				<span key={i} ref={i === mark ? marked : undefined} data-line={i} className={`relative block whitespace-pre pr-3 ${i === mark ? "bg-amber-300/25" : cursor?.line === i || lit === i ? "bg-muted/60" : band && i >= band.from && i <= band.to ? "bg-foreground/[0.035]" : ""}`}>
+					{band && i >= band.from && i <= band.to ? <span aria-hidden contentEditable={false} className={`absolute inset-y-0 left-0 w-0.5 bg-current opacity-70 ${band.text ?? "text-foreground/25"}`} /> : null}
+					{/* A marked line's number takes its status colour and picks it; the others stay muted. */}
+					{gutter?.get(i) ? (
+						<button
+							type="button"
+							contentEditable={false}
+							title={gutter.get(i)!.title}
+							aria-label={gutter.get(i)!.title}
+							onClick={(e) => {
+								e.stopPropagation();
+								gutter.get(i)!.onClick();
+							}}
+							className={`mr-3 inline-block w-9 select-none rounded-sm text-right font-medium hover:underline ${gutter.get(i)!.text}`}
+						>
+							{i + start}
+						</button>
+					) : (
+						<span contentEditable={false} className={`mr-3 inline-block w-9 select-none text-right ${band?.text && i >= band.from && i <= band.to ? `font-medium ${band.text}` : "text-muted-foreground/60"}`}>{i + start}</span>
+					)}
 					<span data-code>{line}</span>
 					{cursor?.line === i ? <span ref={caret} data-vim-cursor className="pointer-events-none absolute top-0 h-full w-[1ch] bg-foreground/35" style={{ left: `calc(3rem + ${cursor.col}ch)` }} /> : null}
 					{diagnostics
@@ -1522,7 +1599,7 @@ const COVERAGE_FILTERS = [
  * Solidity beside its Lean, and the theorems in the folder that name it. Opaque functions say why they couldn't be
  * translated (the model then holds for every behaviour of them).
  */
-function CoverageView({ data, scripts, onOpenFile }: { data: Formal; scripts: Scripts | null; onOpenFile: (path: string) => void }) {
+function CoverageView({ data, scripts, onOpenFile }: { data: Formal; scripts: Scripts | null; onOpenFile: (path: string, line?: number) => void }) {
 	const side = useDragWidth("fm:coverage-list-width", 288);
 	// The scripts that call a function, matched by its contract (or the contract it is inherited into) and name.
 	const contractOf = (f: FormalFn) => f.name.split(".").slice(0, -1).join(".");
@@ -1617,7 +1694,7 @@ function CoverageView({ data, scripts, onOpenFile }: { data: Formal; scripts: Sc
 								{status.label}
 							</span>
 							{current.file ? (
-								<button type="button" onClick={() => onOpenFile(current.file!)} className="ml-auto inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 font-mono text-[11px] text-muted-foreground hover:bg-muted hover:text-foreground" title="Open in Code">
+								<button type="button" onClick={() => onOpenFile(current.file!, current.line)} className="ml-auto inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 font-mono text-[11px] text-muted-foreground hover:bg-muted hover:text-foreground" title="Open in Code">
 									<FileCode2 className="size-3" />
 									{current.file}:{current.line}
 								</button>
@@ -1657,7 +1734,7 @@ function CoverageView({ data, scripts, onOpenFile }: { data: Formal; scripts: Sc
 													<span className={`size-1.5 rounded-full ${t.sorry ? "bg-sky-500" : "bg-emerald-500"}`} />
 													<span className="font-mono font-medium">{t.name}</span>
 													{t.sorry ? <span className="text-sky-700 dark:text-sky-400">sorry</span> : null}
-													<button type="button" onClick={() => onOpenFile(t.file)} className="ml-auto font-mono text-muted-foreground hover:text-foreground">
+													<button type="button" onClick={() => onOpenFile(t.file, t.line)} className="ml-auto font-mono text-muted-foreground hover:text-foreground">
 														{t.file}:{t.line}
 													</button>
 												</div>
@@ -1675,8 +1752,31 @@ function CoverageView({ data, scripts, onOpenFile }: { data: Formal; scripts: Sc
 	);
 }
 
-/** Audit mode: what's been established for the contract picked here, as Lean coverage. */
-export function AuditView({ folder, scan, invoke, onOpenFile, reload = 0 }: { folder: string; scan: Scan | null; invoke: Bridge["invoke"]; onOpenFile: (path: string) => void; reload?: number }) {
+/** Audit mode: what's been established for the contract picked here, as Lean coverage; on the Mac, also the SolidCore experiment. */
+export function AuditView(props: { folder: string; scan: Scan | null; invoke: Bridge["invoke"]; onOpenFile: (path: string, line?: number) => void; reload?: number }) {
+	const [view, setView] = useState<"coverage" | "semantics">("coverage");
+	const views = isTauri() ? (["coverage", "semantics"] as const) : (["coverage"] as const);
+	const switcher =
+		views.length > 1 ? (
+			<span role="tablist" aria-label="Proofs view" className="inline-flex h-6 items-center rounded-md border bg-muted/60 p-0.5">
+				{views.map((v) => (
+					<button key={v} type="button" role="tab" aria-selected={view === v} onClick={() => setView(v)} className={`h-5 rounded px-2 text-[11px] ${view === v ? "bg-background font-medium text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"}`}>
+						{v === "coverage" ? "Coverage" : "Semantics"}
+					</button>
+				))}
+			</span>
+		) : null;
+	return view === "semantics" ? (
+		<>
+			<div className="flex h-8 shrink-0 items-center gap-2 px-1.5">{switcher}</div>
+			<SemanticsPanel invoke={props.invoke} />
+		</>
+	) : (
+		<CoverageAuditView {...props} switcher={switcher} />
+	);
+}
+
+function CoverageAuditView({ folder, scan, invoke, onOpenFile, reload = 0, switcher }: { folder: string; scan: Scan | null; invoke: Bridge["invoke"]; onOpenFile: (path: string, line?: number) => void; reload?: number; switcher?: React.ReactNode }) {
 	// Files found to hold no deployable contract (libraries, interfaces, types): left out of the picker once seen.
 	const [noModel, setNoModel] = useState<string[]>([]);
 	const sources = (scan?.solidity ?? []).filter((f) => !f.endsWith(".t.sol") && !f.endsWith(".s.sol") && !noModel.includes(f));
@@ -1726,6 +1826,7 @@ export function AuditView({ folder, scan, invoke, onOpenFile, reload = 0 }: { fo
 	return (
 		<>
 			<div className="flex h-8 shrink-0 items-center gap-2 px-1.5 text-[12px]">
+				{switcher}
 				<span className="pl-1 font-mono text-[11px] font-medium uppercase tracking-wider text-muted-foreground">Lean coverage</span>
 				<DropdownMenu>
 					<DropdownMenuTrigger className="inline-flex h-6 min-w-0 items-center gap-1 rounded-md border bg-background px-2 font-mono text-[11px] outline-none hover:bg-muted" title="The contract to read">
@@ -1838,6 +1939,9 @@ export function SwarmPanel({ folder, name, scan, bridge, session, file: openPath
 	const [openItem, setOpenItem] = useState<number | null>(null);
 	// `url`: a PDF, shown in the browser's own viewer instead of as text.
 	const [file, setFile] = useState<{ path: string; text: string; url?: string } | null>(null);
+	// The Proofs rail beside Solidity (and, on the Mac, the Lean editor for .lean files): on unless turned off.
+	const [proofsOn, setProofsOn] = useState(() => store.get("fm:proofs") !== "0");
+	const [proofFn, setProofFn] = useState<string | null>(null);
 	const [planOpen, setPlanOpen] = useState(false);
 	const [chatOpen, setChatOpen] = useState(() => store.get("fm:chat-open") !== "0");
 	// How many agent messages you had seen when the chat was folded; the button counts the ones since.
@@ -1985,6 +2089,91 @@ export function SwarmPanel({ folder, name, scan, bridge, session, file: openPath
 		setParams(next);
 	};
 	const markLine = Number(params.get("line")) || null;
+	// The open Solidity file's Lean coverage (gutter dots and the Proofs rail); the Lean editor keeps the last one, to
+	// say which Solidity the theorem at its cursor is about.
+	const solProofs = useFileProofs(folder, proofsOn && file && !file.url && file.path.endsWith(".sol") ? file.path : null, invoke);
+	const [lastFormal, setLastFormal] = useState<Formal | null>(null);
+	useEffect(() => {
+		if (solProofs.data) setLastFormal(solProofs.data);
+	}, [solProofs.data]);
+	useEffect(() => setProofFn(null), [file?.path]);
+	// Arriving at a function's first line (Back, the history, a theorem's Proves link) picks that function.
+	useEffect(() => {
+		const f = markLine ? solProofs.functions.find((g) => g.line === markLine) : undefined;
+		if (f) setProofFn(fnKey(f));
+		// eslint-disable-next-line react-hooks/exhaustive-deps
+	}, [markLine, solProofs.data]);
+	const pickedFn = solProofs.functions.find((f) => fnKey(f) === proofFn) ?? null;
+	/** Picks a function in the rail (or by its line number) and brings its code into view. */
+	const pickProof = (f: FormalFn) => {
+		setProofFn(fnKey(f));
+		if (openPath) remember({ path: openPath, line: f.line, label: f.name.split(".").pop() ?? f.name });
+		codeBox.current?.querySelector(`[data-line="${f.line - 1}"]`)?.scrollIntoView({ block: "center", behavior: "smooth" });
+	};
+	const leanEditor = isTauri() && proofsOn && !!file && file.path.endsWith(".lean");
+	/** Opens a function's generated Lean definition: its `def Contract.function` line, in formal/Generated/ first. */
+	const leanTexts = useRef(new Map<string, string>());
+	useEffect(() => leanTexts.current.clear(), [folder]);
+	const openLeanDef = async (f: FormalFn) => {
+		const at = new RegExp(`^(?:[a-z]+ )*def ${f.lean.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?:\\s|$)`, "m");
+		const files = tree.filter((p) => p.endsWith(".lean")).sort((a, b) => Number(!/(^|\/)Generated\//.test(a)) - Number(!/(^|\/)Generated\//.test(b)));
+		for (const path of files) {
+			let text = leanTexts.current.get(path);
+			if (text === undefined) {
+				text = await invoke<string>("folder_read", { folder, path }).catch(() => "");
+				leanTexts.current.set(path, text);
+			}
+			const m = at.exec(text);
+			if (m) return view(path, text.slice(0, m.index).split("\n").length);
+		}
+	};
+
+	// Where you've been in Code, as a browser's history: a list of places with a cursor in it. Opening a file, a line
+	// or a function adds a place after the cursor (dropping the ones ahead of it); Back and Forward move the cursor.
+	type Place = { path: string; line: number | null; label: string };
+	const [trail, setTrail] = useState<{ places: Place[]; at: number }>({ places: [], at: -1 });
+	const travelling = useRef(false);
+	const remember = (p: Place) =>
+		setTrail(({ places, at }) => {
+			const here = places[at];
+			if (here && here.path === p.path && here.line === p.line) return { places, at };
+			const next = [...places.slice(0, at + 1), p].slice(-50);
+			return { places: next, at: next.length - 1 };
+		});
+	useEffect(() => setTrail({ places: [], at: -1 }), [folder]);
+	useEffect(() => {
+		if (mode !== "code" || !openPath) return;
+		if (travelling.current) {
+			travelling.current = false;
+			return;
+		}
+		const base = openPath.split("/").pop() ?? openPath;
+		remember({ path: openPath, line: markLine, label: markLine ? `${base}:${markLine}` : base });
+		// eslint-disable-next-line react-hooks/exhaustive-deps
+	}, [mode, openPath, markLine]);
+	const travel = (to: number) => {
+		const p = trail.places[to];
+		if (!p) return;
+		setTrail((t) => ({ ...t, at: to }));
+		if (p.path !== openPath || p.line !== markLine) {
+			travelling.current = true;
+			view(p.path, p.line ?? undefined);
+		} else codeBox.current?.querySelector(`[data-line="${(p.line ?? 1) - 1}"]`)?.scrollIntoView({ block: "center", behavior: "smooth" });
+	};
+	const canBack = trail.at > 0;
+	const canForward = trail.at < trail.places.length - 1;
+	// ⌘[ and ⌘] (as in Xcode and Safari) go back and forward in Code.
+	const travelKeys = useRef<(e: KeyboardEvent) => void>(() => {});
+	travelKeys.current = (e) => {
+		if (mode !== "code" || !(e.metaKey || e.ctrlKey) || (e.key !== "[" && e.key !== "]")) return;
+		e.preventDefault();
+		travel(trail.at + (e.key === "[" ? -1 : 1));
+	};
+	useEffect(() => {
+		const on = (e: KeyboardEvent) => travelKeys.current(e);
+		window.addEventListener("keydown", on);
+		return () => window.removeEventListener("keydown", on);
+	}, []);
 	// Code navigation (solidity-language-server in the app): ⌘/Ctrl-click goes to the definition; resting on a
 	// symbol shows its hover.
 	const [hover, setHover] = useState<{ x: number; y: number; text: string } | null>(null);
@@ -1994,6 +2183,9 @@ export function SwarmPanel({ folder, name, scan, bridge, session, file: openPath
 	// Vim keys (a setting): a cursor over the read-only file.
 	const vim = useVimMode();
 	const [cursor, setCursor] = useState<Cursor>({ line: 0, col: 0 });
+	// Where the read-only caret is in the open file (Vim off), for the file bar.
+	const [caretAt, setCaretAt] = useState<{ line: number; col: number } | null>(null);
+	useEffect(() => setCaretAt(null), [file?.path]);
 	const [vimSearchText, setVimSearchText] = useState<string | null>(null);
 	const lastSearch = useRef("");
 	const pending = useRef("");
@@ -3120,7 +3312,34 @@ export function SwarmPanel({ folder, name, scan, bridge, session, file: openPath
 				{file ? (
 					<>
 						<div className="flex h-8 shrink-0 items-center gap-2 border-y px-4">
-							<FileCode2 className="size-3.5 shrink-0 text-muted-foreground" />
+							<span className="-ml-1.5 flex shrink-0 items-center">
+								<button type="button" onClick={() => travel(trail.at - 1)} disabled={!canBack} title={canBack ? `Back to ${trail.places[trail.at - 1].label} (⌘[)` : "Back (⌘[)"} aria-label="Back" className="grid size-6 place-items-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground disabled:pointer-events-none disabled:opacity-30">
+									<ArrowLeft className="size-3.5" />
+								</button>
+								<button type="button" onClick={() => travel(trail.at + 1)} disabled={!canForward} title={canForward ? `Forward to ${trail.places[trail.at + 1].label} (⌘])` : "Forward (⌘])"} aria-label="Forward" className="grid size-6 place-items-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground disabled:pointer-events-none disabled:opacity-30">
+									<ArrowRight className="size-3.5" />
+								</button>
+								<DropdownMenu>
+									<DropdownMenuTrigger disabled={trail.places.length < 2} title="Where you've been" aria-label="History" className="grid size-6 place-items-center rounded-md text-muted-foreground outline-none hover:bg-muted hover:text-foreground disabled:pointer-events-none disabled:opacity-30">
+										<History className="size-3.5" />
+									</DropdownMenuTrigger>
+									<DropdownMenuContent align="start" className="max-h-96 w-72 overflow-y-auto [&_[role=menuitem]]:py-1 [&_[role=menuitem]]:text-[12px]">
+										<DropdownMenuLabel className="text-xs font-normal text-muted-foreground">History</DropdownMenuLabel>
+										{trail.places
+											.map((p, i) => ({ p, i }))
+											.reverse()
+											.map(({ p, i }) => (
+												<DropdownMenuItem key={i} onSelect={() => travel(i)} className={`gap-2 ${i > trail.at ? "text-muted-foreground" : ""}`}>
+													<span className="w-3 shrink-0">{i === trail.at ? <Check className="size-3" /> : null}</span>
+													<span className="truncate font-mono">{p.label}</span>
+													<span className="ml-auto max-w-[45%] shrink-0 truncate text-[10px] text-muted-foreground" title={p.path}>
+														{p.path.split("/").slice(0, -1).pop() ?? ""}
+													</span>
+												</DropdownMenuItem>
+											))}
+									</DropdownMenuContent>
+								</DropdownMenu>
+							</span>
 							<Breadcrumbs root={name} path={file.path} files={tree} onOpen={view} />
 							<span className="ml-auto flex items-center gap-1">
 								{/\.(md|markdown)$/i.test(file.path) ? (
@@ -3167,20 +3386,45 @@ export function SwarmPanel({ folder, name, scan, bridge, session, file: openPath
 										})}
 									</span>
 								) : null}
+								{caretAt && !vim ? (
+									<span className="mr-1 font-mono text-[11px] text-muted-foreground/70">
+										Ln {caretAt.line + 1}, Col {caretAt.col + 1}
+									</span>
+								) : null}
 								<button
 									type="button"
-									onClick={() => setVimMode(!vim)}
+									onClick={() => {
+										setVimMode(!vim);
+										// Vim edits Lean in Neovim, so the Lean editor steps aside.
+										if (!vim && leanEditor) setProofsOn(false);
+									}}
 									aria-pressed={vim}
 									title={vim ? (slot ? "Vim mode is on: Neovim runs here. Turn it off" : "Vim keys are on. Turn them off") : slot ? "Open in Neovim (Vim mode)" : "Vim keys"}
 									className={`inline-flex h-6 items-center rounded-md px-1.5 font-mono text-[11px] font-medium ${vim ? "bg-emerald-500/15 text-emerald-700 dark:text-emerald-400" : "text-muted-foreground hover:bg-muted hover:text-foreground"}`}
 								>
 									vim
 								</button>
+								{!file.url && (file.path.endsWith(".sol") || (isTauri() && file.path.endsWith(".lean"))) ? (
+									<button
+										type="button"
+										onClick={() => {
+											store.set("fm:proofs", proofsOn ? "0" : "1");
+											setProofsOn(!proofsOn);
+										}}
+										aria-pressed={proofsOn}
+										title={file.path.endsWith(".lean") ? (proofsOn ? "Lean editor with live goals is on. Show the plain file" : "Edit with Lean: live goals and messages") : proofsOn ? "Hide the Proofs rail" : "Show which functions are proved"}
+										className={`inline-flex h-6 items-center gap-1 rounded-md px-1.5 text-[11px] font-medium ${proofsOn ? "bg-emerald-500/15 text-emerald-700 dark:text-emerald-400" : "text-muted-foreground hover:bg-muted hover:text-foreground"}`}
+									>
+										<ScanSearch className="size-3" />
+										Proofs
+									</button>
+								) : null}
 								<CopyButton text={file.text} label="Copy the file" />
 							</span>
 						</div>
+						{leanEditor ? <ProofWorkspace key={`${folder}:${file.path}:${markLine ?? ""}`} folder={folder} path={file.path} invoke={invoke} initialLine={markLine ?? 1} onOpenFile={view} formal={lastFormal} /> : <div className="flex min-h-0 flex-1">
 						<div
-							className={`min-h-0 flex-1 overflow-auto ${navigable(file.path) ? "[&_[data-code]]:cursor-text" : ""}`}
+							className={`min-w-0 min-h-0 flex-1 overflow-auto ${navigable(file.path) ? "[&_[data-code]]:cursor-text" : ""}`}
 							ref={codeBox}
 							tabIndex={vim && !slot ? 0 : undefined}
 							onKeyDown={vimKey}
@@ -3210,7 +3454,16 @@ export function SwarmPanel({ folder, name, scan, bridge, session, file: openPath
 							) : /\.(md|markdown)$/i.test(file.path) && !mdSource ? (
 								<ChatMarkdown className="mx-auto max-w-3xl px-6 py-6 text-[14px]" image={(src) => { const p = imagePath(src, file.path); return p === null ? src : images[p]; }}>{file.text}</ChatMarkdown>
 							) : (
-								<FileView path={file.path} text={file.text} big mark={markLine ? markLine - 1 : null} cursor={vim ? cursor : null} />
+								<FileView
+									path={file.path}
+									text={file.text}
+									big
+									mark={markLine ? markLine - 1 : null}
+									cursor={vim ? cursor : null}
+									onCaret={vim ? undefined : setCaretAt}
+									gutter={solProofs.data ? proofGutter(solProofs.data, solProofs.functions, pickProof) : undefined}
+									band={pickedFn && solProofs.data ? { from: pickedFn.line - 1, to: pickedFn.endLine - 1, text: fnStatus(pickedFn, solProofs.data.theorems).text } : null}
+								/>
 							)}
 							{hover ? (
 								<div className="pointer-events-none fixed z-50 max-h-72 max-w-xl overflow-hidden rounded-lg border bg-popover p-2 shadow-pop" style={{ left: Math.min(hover.x + 8, window.innerWidth - 580), top: hover.y + 16 }}>
@@ -3253,6 +3506,8 @@ export function SwarmPanel({ folder, name, scan, bridge, session, file: openPath
 								</div>
 							) : null}
 						</div>
+						{proofsOn && !file.url && file.path.endsWith(".sol") ? <ProofRail key={file.path} proofs={solProofs} selected={proofFn} onSelect={pickProof} onOpenFile={view} onOpenDef={(f) => void openLeanDef(f)} /> : null}
+						</div>}
 					</>
 				) : (
 					<p className="m-auto text-sm text-muted-foreground">Pick a file in the sidebar.</p>

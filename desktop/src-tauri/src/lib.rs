@@ -20,11 +20,13 @@ mod swarm;
 mod swarm_ctx;
 mod local;
 mod lsp;
+mod lean_lsp;
 mod openai;
 mod platform;
 mod publish;
 mod relay;
 mod statements;
+mod semantics;
 mod term;
 
 use keyring::Entry;
@@ -179,8 +181,20 @@ pub fn run() {
             ast::ast_slice,
             ast::ast_formal,
             ast::ast_scripts,
+            semantics::semantics_run,
+            semantics::semantics_status,
             lsp::lsp_definition,
             lsp::lsp_hover,
+            lean_lsp::lean_open,
+            lean_lsp::lean_sync,
+            lean_lsp::lean_state,
+            lean_lsp::lean_goal,
+            lean_lsp::lean_symbols,
+            lean_lsp::proof_specs,
+            lean_lsp::proof_relevant_code,
+            lean_lsp::lean_save,
+            lean_lsp::lean_close,
+            lean_lsp::lean_restart,
             local::log_error,
             term::term_start,
             term::term_write,
@@ -237,6 +251,7 @@ pub fn run() {
             tauri::RunEvent::Reopen { .. } => show(app),
             // Quitting (⌘Q) pauses any swarm cleanly; its plan and session stay in the folder for Resume.
             tauri::RunEvent::ExitRequested { .. } => swarm::pause_all(app),
+            tauri::RunEvent::Exit => lean_lsp::shutdown_all(),
             _ => {}
         });
 }
