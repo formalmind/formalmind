@@ -2776,7 +2776,7 @@ export function SwarmPanel({ folder, name, scan, bridge, session, file: openPath
 							<span className="truncate">{title}</span>
 							<ChevronDown className="size-3 shrink-0 text-muted-foreground" />
 						</DropdownMenuTrigger>
-						<DropdownMenuContent align="start" className="w-64">
+						<DropdownMenuContent align="start" sideOffset={6} className="w-72 rounded-2xl p-1.5 shadow-lg [&_[role=menuitem]]:rounded-lg [&_[role=menuitem]]:px-2.5 [&_[role=menuitem]]:py-2">
 							<DropdownMenuItem onSelect={() => pickSession("new")} className="text-[13px]">
 								<Plus className="size-3.5" /> Start new chat
 							</DropdownMenuItem>
@@ -2788,6 +2788,8 @@ export function SwarmPanel({ folder, name, scan, bridge, session, file: openPath
 							<DropdownMenuSeparator />
 							<DropdownMenuLabel className="text-xs font-normal text-muted-foreground">Sessions in {name}</DropdownMenuLabel>
 							{/* The session you're reading stays highlighted, with a check on the right. */}
+							{/* The sessions scroll inside the card and fade out at its top and bottom edges. */}
+							<div className="max-h-72 overflow-y-auto py-1 [mask-image:linear-gradient(to_bottom,transparent,black_0.75rem,black_calc(100%-0.75rem),transparent)]">
 							{sessions.map((x, i) => (
 								<DropdownMenuItem key={x.run} onSelect={() => pickSession(x.run)} aria-current={x.run === viewing} className={`text-[13px] ${x.run === viewing ? "bg-accent text-accent-foreground" : ""}`}>
 									<span className="truncate">{x.title || (x.run === "swarm" ? "Main session" : `Session ${sessions.length - i}`)}</span>
@@ -2795,6 +2797,7 @@ export function SwarmPanel({ folder, name, scan, bridge, session, file: openPath
 									{x.run === viewing ? <Check className={`size-3.5 shrink-0 ${runs.includes(x.run) ? "" : "ml-auto"}`} /> : null}
 								</DropdownMenuItem>
 							))}
+							</div>
 						</DropdownMenuContent>
 					</DropdownMenu>
 					)}
