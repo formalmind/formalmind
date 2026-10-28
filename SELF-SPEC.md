@@ -19,7 +19,7 @@ bun test --coverage lib
 - [x] Every published op (`lib/mac-ops.ts`) is the Mac's own list: `control::tests` keeps them equal.
 - [x] Every op runs against a mock app (`Fake` engine, fixture `desktop/src-tauri/tests/fixtures/control`):
   `control::ops::every_read`, `every_action`, and `refusals`, which fails if any op in `OPS` goes untested.
-- [x] Proofs from outside: `check_proof` builds a sound proof, refuses `sorry` and paths outside `Refinement/`;
+- [x] Proofs from outside: `check_proof` builds a sound proof, refuses `sorry` and paths outside the proofs folder (`Proofs/`, or `Refinement/` in an older layout);
   `submit_proof` queues a review (`control::ops::proofs_from_outside`, needs `lake`).
 - [x] Refusals: unknown ops, folders not added, paths outside the folder, missing arguments (`control::ops::refusals`).
 - [x] Tests never touch `~/.formalmind` or the network: a per-test home and `api_base` `http://127.0.0.1:9`.
