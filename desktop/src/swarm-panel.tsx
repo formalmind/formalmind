@@ -2762,11 +2762,11 @@ export function SwarmPanel({ folder, name, scan, bridge, session, file: openPath
 							}}
 							onBlur={() => rename(renaming)}
 							aria-label="Chat name"
-							className={`h-7 min-w-0 rounded-md border bg-background px-2 text-foreground outline-none ${chatPage ? "w-[calc(50%-10rem)]" : "flex-1"}`}
+							className={`h-7 min-w-0 rounded-md border bg-background px-2 text-foreground outline-none ${chatPage ? (slot ? "w-[60%]" : "w-[max(9rem,calc(50%-9rem))]") : "flex-1"}`}
 						/>
 					) : (
 					<DropdownMenu modal={false}>
-						<DropdownMenuTrigger className={`flex min-w-0 items-center gap-1 rounded-md text-left text-[14px] text-muted-foreground outline-none hover:text-foreground ${chatPage ? "max-w-[calc(50%-10rem)]" : "flex-1"}`} title={`${title} — switch sessions (double-click to rename)`} onDoubleClick={() => viewing && setRenaming(title)}>
+						<DropdownMenuTrigger className={`flex min-w-0 items-center gap-1 rounded-md text-left text-[14px] text-muted-foreground outline-none hover:text-foreground ${chatPage ? (slot ? "max-w-[60%]" : "max-w-[max(9rem,calc(50%-9rem))]") : "flex-1"}`} title={`${title} — switch sessions (double-click to rename)`} onDoubleClick={() => viewing && setRenaming(title)}>
 							<span className="truncate">{title}</span>
 							<ChevronDown className="size-3 shrink-0 text-muted-foreground" />
 						</DropdownMenuTrigger>
@@ -2821,7 +2821,7 @@ export function SwarmPanel({ folder, name, scan, bridge, session, file: openPath
 						setAway(!atBottom.current);
 					}}
 					// The history fades out at its top and bottom edges as it scrolls under the header and into the composer.
-					className={`min-h-0 flex-1 space-y-3.5 overflow-y-auto pb-8 pl-6 pr-3 text-[13px] ${chatPage ? "pt-16 [mask-image:linear-gradient(to_bottom,transparent_1.5rem,black_4.5rem,black_calc(100%-2rem),transparent)]" : "pt-8 [mask-image:linear-gradient(to_bottom,transparent,black_2rem,black_calc(100%-2rem),transparent)]"}`}
+					className={`min-h-0 flex-1 space-y-3.5 overflow-y-auto pb-8 pl-6 pr-3 text-[13px] ${chatPage ? "pt-20 [mask-image:linear-gradient(to_bottom,transparent_3rem,black_5.5rem,black_calc(100%-2rem),transparent)]" : "pt-8 [mask-image:linear-gradient(to_bottom,transparent,black_2rem,black_calc(100%-2rem),transparent)]"}`}
 				>
 					{shown.length === 0 && !run && !loadingHistory ? <p className="text-muted-foreground">Talk to the agents here. Before a run, what you write is the swarm's focus and ↑ starts it; while it runs, they read your messages before their next turn.</p> : null}
 					{firstDrawn > 0 ? (
