@@ -234,7 +234,14 @@ pub async fn dispatch<E: Engine + ?Sized>(app: &E, op: &str, folder: &str, a: &V
         "work_map" => swarm::swarm_work_map(folder),
         "brief" => swarm::swarm_brief(folder, need("function")?).map(Value::String),
         "ledger" => crate::ledger::build(std::path::Path::new(&folder), a["check"].as_bool().unwrap_or(true), a["force"].as_bool().unwrap_or(false)).await,
-        "start" => Ok(json!({ "run": start(app, &folder, opt("goal"), opt("run"), false, usd("budget"))? })),
+        "start" => {
+            let run = start(app, &folder, opt("goal"), opt("run"), false, usd("budget"))?;
+            // A name for the chat, as Rename gives one: sessions started with the same goal stay apart in the list.
+            if let Some(title) = opt("title") {
+                swarm::swarm_rename(folder.clone(), run.clone(), title)?;
+            }
+            Ok(json!({ "run": run }))
+        }
         "stop" => {
             app.stop(&folder, &need("run")?);
             Ok(Value::Null)

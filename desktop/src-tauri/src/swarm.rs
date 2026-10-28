@@ -2168,6 +2168,8 @@ pub struct Session {
     pub outcome: String,
     pub spent: f64,
     pub events: usize,
+    /// When it last changed (ms since the epoch): the list runs newest first.
+    pub at: u64,
 }
 
 fn runs_dir(folder: &str) -> PathBuf {
@@ -2194,12 +2196,14 @@ pub fn swarm_sessions(folder: String) -> Result<Vec<Session>, String> {
                     let first = |kind: &str| text.lines().filter_map(|l| serde_json::from_str::<Value>(l).ok()).find(|e| e["kind"] == kind && e["text"].as_str().is_some_and(|t| !t.trim().is_empty())).and_then(|e| e["text"].as_str().map(String::from));
                     let title = named.or_else(|| first("start")).or_else(|| first("you").map(|t| short_name(&t))).unwrap_or_default();
                     let outcome = if last["kind"] == "done" { last["text"].as_str().unwrap_or("").to_string() } else { String::new() };
-                    Some(Session { run, title, outcome, spent: last["spent"].as_f64().unwrap_or(0.0), events: text.lines().count() })
+                    let at = e.metadata().and_then(|m| m.modified()).ok().and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok()).map_or(0, |d| d.as_millis() as u64);
+                    Some(Session { run, title, outcome, spent: last["spent"].as_f64().unwrap_or(0.0), events: text.lines().count(), at })
                 })
                 .collect()
         })
         .unwrap_or_default();
-    out.sort_by(|a, b| b.run.cmp(&a.run));
+    // Newest first, so the latest chat is the one that opens (by id, "swarm" would sort above every `s-…`).
+    out.sort_by(|a, b| b.at.cmp(&a.at).then_with(|| b.run.cmp(&a.run)));
     Ok(out)
 }
 

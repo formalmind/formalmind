@@ -70,7 +70,7 @@ function CopyButton({ text, get, label = "Copy" }: { text?: string; get?: () => 
 	);
 }
 
-type Session = { run: string; title: string; outcome: string; spent: number; events: number };
+type Session = { run: string; title: string; outcome: string; spent: number; events: number; at: number };
 
 const BUDGETS = [2, 5, 10, 20, 50, 100];
 /** Claude models the local swarm can run on; the choice applies when the swarm starts. */
