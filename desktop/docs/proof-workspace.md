@@ -57,7 +57,7 @@ A hand-written map from specifications to code, for proofs that aren't named aft
       "signature": "AsyncSwap.setExecutor(bytes32,address,bool)",
       "title": "Successful calls update the selected permission",
       "solidity": { "path": "src/AsyncSwap.sol", "line": 526 },
-      "lean": { "path": "formal/Refinement/AsyncSwap.lean", "line": 57 },
+      "lean": { "path": "formal/Proofs/AsyncSwap.lean", "line": 57 },
       "assumptions": ["Record the theorem's assumptions here"],
       "relevantCode": [
         { "path": "src/AsyncSwap.sol", "startLine": 527, "endLine": 527, "reason": "The write", "expectedText": "        asyncOrders[poolId].isExecutor[msg.sender][executor] = allow;" }
