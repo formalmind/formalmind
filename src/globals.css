@@ -515,16 +515,3 @@ button:is(:hover, :focus-visible) > .fm-bell, .fm-bell-ring { animation: fm-bell
 	-webkit-mask-image: linear-gradient(to right, #000 calc(100% - 1.75rem), transparent);
 	mask-image: linear-gradient(to right, #000 calc(100% - 1.75rem), transparent);
 }
-/* A loading blob: a strong light band sweeping across it. */
-.fm-shimmer {
-	background: linear-gradient(100deg, hsl(var(--muted)) 20%, hsl(var(--muted-foreground) / 0.18) 50%, hsl(var(--muted)) 80%);
-	background-size: 200% 100%;
-	animation: fm-shimmer 1.1s linear infinite;
-}
-@keyframes fm-shimmer {
-	from { background-position: 150% 0; }
-	to { background-position: -50% 0; }
-}
-@media (prefers-reduced-motion: reduce) {
-	.fm-shimmer { animation: none; }
-}

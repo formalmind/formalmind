@@ -1404,10 +1404,6 @@ export function NavGroup({ name, git, mode, onMode, inBar, compact }: { name: st
 	);
 }
 
-/** The chat while a session's history loads: one large blob with a strong shimmer. */
-function ChatSkeleton() {
-	return <div aria-label="Loading the chat" className="fm-shimmer h-48 w-full rounded-3xl" />;
-}
 
 /** A filled speech bubble with two lines cut out of it: the "Talk to the swarm" mark. */
 export function TalkIcon({ className }: { className?: string }) {
@@ -2773,7 +2769,6 @@ export function SwarmPanel({ folder, name, scan, bridge, session, file: openPath
 					// The history fades out at its top and bottom edges as it scrolls under the header and into the composer.
 					className="min-h-0 flex-1 space-y-3.5 overflow-y-auto py-8 pl-6 pr-3 text-[13px] [mask-image:linear-gradient(to_bottom,transparent,black_2rem,black_calc(100%-2rem),transparent)]"
 				>
-					{loadingHistory && shown.length === 0 ? <ChatSkeleton /> : null}
 					{shown.length === 0 && !run && !loadingHistory ? <p className="text-muted-foreground">Talk to the agents here. Before a run, what you write is the swarm's focus and ↑ starts it; while it runs, they read your messages before their next turn.</p> : null}
 					{chatList}
 					{/* The agents' open questions, in the history after the latest message (not pinned over it). */}
