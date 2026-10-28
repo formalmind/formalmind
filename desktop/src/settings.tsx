@@ -8,7 +8,7 @@ import { AuditFolders, EntryPoints } from "@/components/audit-folders";
 import { useFolders } from "./local";
 import { relayOn } from "./relay";
 
-type Provider = "formal" | "anthropic" | "openai" | "claude-code";
+type Provider = "formal" | "anthropic" | "openai" | "claude-code" | "codex";
 const read = (k: string) => {
 	try {
 		return localStorage.getItem(k);
@@ -76,12 +76,15 @@ export function SettingsPage() {
 	const [provider, setProvider] = useState<Provider>(() => {
 		const p = read("fm:provider");
 		// Claude Code (your Claude plan) unless you picked a key. ("formal", formal.team's metered route, is still accepted but no longer offered.)
-		return p === "anthropic" || p === "openai" || p === "formal" ? p : "claude-code";
+		return p === "anthropic" || p === "openai" || p === "codex" || p === "formal" ? p : "claude-code";
 	});
 	// Claude Code on this computer: its version and plan, or why it can't run the agents on your own Claude plan.
 	const [claudeCode, setClaudeCode] = useState<{ ok: boolean; text: string } | null>(null);
+	// Codex on this computer, the same for your ChatGPT plan.
+	const [codex, setCodex] = useState<{ ok: boolean; text: string } | null>(null);
 	useEffect(() => {
 		void invoke<string>("claude_code_status").then((v) => setClaudeCode({ ok: true, text: v }), (e) => setClaudeCode({ ok: false, text: String(e) }));
+		void invoke<string>("codex_status").then((v) => setCodex({ ok: true, text: v }), (e) => setCodex({ ok: false, text: String(e) }));
 	}, []);
 	const [base, setBase] = useState(apiBase());
 	const [saved, setSaved] = useState<string | null>(null);
@@ -144,10 +147,11 @@ export function SettingsPage() {
 						<label className="flex items-center justify-between gap-4">
 							<span>
 								<span className="font-medium">Run agents via</span>
-								<span className="block text-xs text-muted-foreground">Claude Code runs every agent on your own Claude plan (Max or Pro), through the `claude` you're signed in to: nothing is charged to a key, and your plan's usage limits apply. Your own key goes straight to Anthropic (Claude) or OpenAI (GPT-5).</span>
+								<span className="block text-xs text-muted-foreground">Claude Code runs every agent on your own Claude plan (Max or Pro), through the `claude` you're signed in to; Codex does the same on your ChatGPT plan (Pro or Plus), through the `codex` you're signed in to. Nothing is charged to a key, and your plan's usage limits apply. Your own key goes straight to Anthropic (Claude) or OpenAI (GPT-5).</span>
 							</span>
 							<select value={provider} onChange={(e) => pick(e.target.value as Provider)} className="h-8 rounded-lg border bg-background px-2 text-sm">
 								<option value="claude-code" disabled={claudeCode?.ok === false}>Claude Code (my Claude plan)</option>
+								<option value="codex" disabled={codex?.ok === false}>Codex (my ChatGPT plan)</option>
 								<option value="anthropic">My Anthropic key</option>
 								<option value="openai">My OpenAI key</option>
 							</select>
@@ -155,6 +159,11 @@ export function SettingsPage() {
 						{claudeCode ? (
 							<p className={`text-xs ${claudeCode.ok ? "text-muted-foreground" : "text-amber-600"}`}>
 								{claudeCode.ok ? `${claudeCode.text}. With it picked, the swarm runs on it.` : claudeCode.text}
+							</p>
+						) : null}
+						{codex ? (
+							<p className={`text-xs ${codex.ok ? "text-muted-foreground" : "text-amber-600"}`}>
+								{codex.ok ? `${codex.text}. With it picked, the swarm runs on it.` : codex.text}
 							</p>
 						) : null}
 						<ApiKey vendor="anthropic" name="Anthropic" placeholder="sk-ant-…" onSaved={() => flash("Key saved")} />

@@ -195,7 +195,7 @@ fn rand64() -> u64 {
 // ---- The run ---------------------------------------------------------------------------------------------------------
 
 /// FNV-1a: a short name for a folder that stays the same across Rust versions (DefaultHasher doesn't promise that).
-fn fnv(bytes: &[u8]) -> u32 {
+pub fn fnv(bytes: &[u8]) -> u32 {
     bytes.iter().fold(0x811c_9dc5u32, |h, b| (h ^ *b as u32).wrapping_mul(0x0100_0193))
 }
 

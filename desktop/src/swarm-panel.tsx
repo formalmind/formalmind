@@ -43,7 +43,7 @@ type Item = { index: number; mark: string; text: string };
 /** A claim in .formal/statements.md (desktop/src-tauri/src/statements.rs), for the swarm to prove or disprove. */
 type Statement = { id: string; mark: string; author: string; text: string; details: string[]; obligations: { mark: string; text: string }[] };
 export type Bug = { file: string; title: string; body: string };
-type Provider = "formal" | "anthropic" | "openai" | "claude-code";
+type Provider = "formal" | "anthropic" | "openai" | "claude-code" | "codex";
 type Proof = { item: string; files: string[]; summary: string; at: string };
 
 /** Copies text (or what `get` resolves to), showing a tick for a moment. */
@@ -87,6 +87,13 @@ const EFFORTS = [
 const OPENAI_MODELS = [
 	{ value: "gpt-5", label: "GPT-5" },
 	{ value: "gpt-5-mini", label: "GPT-5 mini" },
+];
+/** On Codex with your ChatGPT plan (Settings → Models), these. */
+const CODEX_MODELS = [
+	{ value: "gpt-6-astra", label: "GPT-6 Astra" },
+	{ value: "gpt-5.6-sol", label: "GPT-5.6 Sol" },
+	{ value: "gpt-5.6-terra", label: "GPT-5.6 Terra" },
+	{ value: "gpt-5.6-luna", label: "GPT-5.6 Luna" },
 ];
 const colorOf = (role: string) => (ROLE_COLORS as Record<string, string>)[role] ?? "hsl(var(--muted-foreground))";
 
@@ -1752,7 +1759,7 @@ export function SwarmPanel({ folder, name, scan, bridge, session, file: openPath
 	const [provider, setProvider] = useState<Provider>(() => {
 		const p = store.get("fm:provider");
 		// Claude Code (your Claude plan) unless you picked a key in Settings.
-		return p === "anthropic" || p === "openai" || p === "formal" ? p : "claude-code";
+		return p === "anthropic" || p === "openai" || p === "codex" || p === "formal" ? p : "claude-code";
 	});
 	// The Claude plan Claude Code is signed in to ("Claude Max plan"), or null when it can't run the agents here.
 	const [claudePlan, setClaudePlan] = useState<string | null>(null);
@@ -1762,9 +1769,23 @@ export function SwarmPanel({ folder, name, scan, bridge, session, file: openPath
 			() => setClaudePlan(null),
 		);
 	}, [invoke]);
+	// Whether Codex is signed in with ChatGPT here, so the agents can run on that plan instead.
+	const [codexReady, setCodexReady] = useState(false);
+	useEffect(() => {
+		void invoke<string>("codex_status").then(() => setCodexReady(true), () => setCodexReady(false));
+	}, [invoke]);
+	const choosePlan = (p: "claude-code" | "codex") => {
+		setProvider(p);
+		store.set("fm:provider", p);
+	};
 	const navigate = useNavigate();
-	// The models for how the agents are run: GPT on your OpenAI key, Claude otherwise.
-	const models = provider === "openai" ? OPENAI_MODELS : MODELS;
+	// The models for how the agents are run: GPT on your OpenAI key or ChatGPT plan, Claude otherwise.
+	const models = provider === "openai" ? OPENAI_MODELS : provider === "codex" ? CODEX_MODELS : MODELS;
+	// The plan that pays when the agents run on Claude Code or Codex (no spend or cap), else null.
+	const payingPlan = provider === "claude-code" ? (claudePlan ?? "Claude plan") : provider === "codex" ? "ChatGPT plan" : null;
+	// On a plan, the picker offers both plans' models: Claude, and GPT when Codex is signed in with ChatGPT.
+	const both = [...(claudePlan ? MODELS : []), ...(codexReady ? CODEX_MODELS : [])];
+	const pickable = payingPlan && both.length ? both : models;
 	const pickedModel = models.some((m) => m.value === model) ? model : models[0].value;
 	const ownKey = provider === "anthropic" ? "Anthropic" : provider === "openai" ? "OpenAI" : null;
 	const [hasKey, setHasKey] = useState(false);
@@ -2601,19 +2622,23 @@ export function SwarmPanel({ folder, name, scan, bridge, session, file: openPath
 	// The run's spend against its cap, with the cap's menu; in the Mac app it sits in the title bar.
 	// Who pays for the agents, in the title bar: your Claude plan (no spend or cap; its usage limit applies), or the spend
 	// against its cap on a key. A run keeps the route it started with; a change applies at the next start.
-	const costMenu = provider === "claude-code" ? (
+	const costMenu = payingPlan ? (
 		<DropdownMenu>
-			<DropdownMenuTrigger className="inline-flex h-7 shrink-0 items-center gap-1 rounded-md border bg-background px-2 text-[11px] text-muted-foreground outline-none hover:text-foreground" title="The agents run on Claude Code with your Claude plan">
-				{claudePlan ?? "Claude plan"}
+			<DropdownMenuTrigger className="inline-flex h-7 shrink-0 items-center gap-1 rounded-md border bg-background px-2 text-[11px] text-muted-foreground outline-none hover:text-foreground" title={`The agents run on ${provider === "codex" ? "Codex" : "Claude Code"} with your ${payingPlan}`}>
+				{payingPlan}
 				<ChevronDown className="size-3" />
 			</DropdownMenuTrigger>
 			<DropdownMenuContent align="end" className="w-56">
 				<DropdownMenuLabel className="text-xs font-normal text-muted-foreground">The agents run on</DropdownMenuLabel>
-				<DropdownMenuItem className="text-[13px]">
+				<DropdownMenuItem onSelect={() => choosePlan("claude-code")} disabled={!claudePlan} className="text-[13px]">
 					{claudePlan ?? "Claude plan"}
-					<Check className="ml-auto size-3.5" />
+					{provider === "claude-code" ? <Check className="ml-auto size-3.5" /> : null}
 				</DropdownMenuItem>
-				<p className="px-2 pb-1.5 text-[11px] text-muted-foreground">Nothing is metered; the plan's usage limit pauses the swarm.</p>
+				<DropdownMenuItem onSelect={() => choosePlan("codex")} disabled={!codexReady} title={codexReady ? "Codex, signed in with ChatGPT" : "Sign in to Codex with ChatGPT first (`codex login`)"} className="text-[13px]">
+					ChatGPT plan
+					{provider === "codex" ? <Check className="ml-auto size-3.5" /> : null}
+				</DropdownMenuItem>
+				<p className="px-2 pb-1.5 text-[11px] text-muted-foreground">Nothing is metered; the plan's usage limit pauses the swarm.{run ? " This run keeps its plan; Stop and Resume to switch." : ""}</p>
 				<DropdownMenuSeparator />
 				<DropdownMenuItem onSelect={() => navigate("/settings?section=models")} className="text-[13px]">A key instead…</DropdownMenuItem>
 			</DropdownMenuContent>
@@ -2641,18 +2666,11 @@ export function SwarmPanel({ folder, name, scan, bridge, session, file: openPath
 						{b === budget ? <Check className="ml-auto size-3.5" /> : null}
 					</DropdownMenuItem>
 				))}
-				{claudePlan ? (
+				{claudePlan || codexReady ? (
 					<>
 						<DropdownMenuSeparator />
-						<DropdownMenuItem
-							onSelect={() => {
-								setProvider("claude-code");
-								store.set("fm:provider", "claude-code");
-							}}
-							className="text-[13px]"
-						>
-							Use my {claudePlan}
-						</DropdownMenuItem>
+						{claudePlan ? <DropdownMenuItem onSelect={() => choosePlan("claude-code")} className="text-[13px]">Use my {claudePlan}</DropdownMenuItem> : null}
+						{codexReady ? <DropdownMenuItem onSelect={() => choosePlan("codex")} className="text-[13px]">Use my ChatGPT plan</DropdownMenuItem> : null}
 						{run ? <p className="px-2 pb-1.5 text-[11px] text-muted-foreground">This run keeps its key; Stop and Resume to switch.</p> : null}
 					</>
 				) : null}
@@ -2800,16 +2818,18 @@ export function SwarmPanel({ folder, name, scan, bridge, session, file: openPath
 						sendTitle={run ? (say.trim() ? "Send" : "Stop the session") : ownKey && !hasKey ? `Add your ${ownKey} key in Settings first` : "Start the swarm"}
 						modelPicker={{
 							value: pickedModel,
-							options: models,
+							options: pickable,
 							disabled: Boolean(run),
 							onChange: (m) => {
+								// On a plan, a GPT model moves the agents to your ChatGPT plan and a Claude one back to your Claude plan.
+								if (payingPlan) choosePlan(CODEX_MODELS.some((c) => c.value === m) ? "codex" : "claude-code");
 								setModel(m);
 								store.set("fm:model", m);
 							},
 						}}
 						// Claude Code's thinking effort for the agents' turns; Default leaves it to Claude Code. Takes effect at the
 						// next turn, so it can change while the swarm runs.
-						effortPicker={provider === "claude-code" ? {
+						effortPicker={provider === "claude-code" || provider === "codex" ? {
 							value: effort,
 							options: EFFORTS,
 							onChange: (v) => {

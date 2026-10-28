@@ -21,6 +21,7 @@ The agents run the same tools you would. Install them once:
 | [Foundry](https://getfoundry.sh) | `forge build` and `forge test` for PoCs and coverage; it also installs the solc versions your project uses | `curl -L https://foundry.paradigm.xyz \| bash`, then `foundryup` |
 | [elan](https://github.com/leanprover/elan) | Lean and Lake, for the proofs | `curl https://elan.lean-lang.org/elan-init.sh -sSf \| sh` |
 | [Claude Code](https://code.claude.com) | Runs the agents on your Claude plan (the default; see [Models and costs](/models)) | `npm install -g @anthropic-ai/claude-code`, then `claude` to sign in |
+| [Codex](https://developers.openai.com/codex) | Optional: runs the agents on your ChatGPT plan instead (see [Models and costs](/models)) | `npm install -g @openai/codex`, then `codex login` |
 
 Formal Mind finds solc where Foundry puts it, so run `forge build` in your project once before you start.
 
