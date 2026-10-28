@@ -554,10 +554,13 @@ export function AgentMessage({ e, onBug, onReply }: { e: Ev; onBug: () => void; 
 		<Message>
 			<MessageContent className="gap-1">
 				{/* The name in its colour says who it is. */}
-				<MessageHeader className="gap-1.5 px-0 capitalize" style={{ color }}>
-					{e.kind === "bug" ? "bug reported" : roleName(e.role)}
-					{/^\d+$/.test(e.item) ? <span className="font-normal normal-case text-muted-foreground">· item {e.item}</span> : null}
-				</MessageHeader>
+				{/* The chat reads as one conversation: no agent name over each message, only a bug's own label. */}
+				{e.kind === "bug" ? (
+					<MessageHeader className="gap-1.5 px-0 capitalize" style={{ color }}>
+						bug reported
+						{/^\d+$/.test(e.item) ? <span className="font-normal normal-case text-muted-foreground">· item {e.item}</span> : null}
+					</MessageHeader>
+				) : null}
 				{e.kind === "bug" ? (
 					<button type="button" onClick={onBug} className="w-fit whitespace-pre-wrap rounded-2xl rounded-tl-md bg-red-500/10 px-3 py-2 text-left hover:bg-red-500/15">
 						{e.text.split(" — ")[0]}
@@ -2786,7 +2789,6 @@ export function SwarmPanel({ folder, name, scan, bridge, session, file: openPath
 					{/* While an agent works: its name, and its current task shimmering until its next words. */}
 					{run && working ? (
 						<p className="flex items-center gap-2 text-[14px] text-muted-foreground">
-							<span className="font-medium" style={{ color: colorOf(working.role) }}>{roleName(working.role)}</span>
 							<span className="fm-text-shimmer truncate">{working.text}</span>
 						</p>
 					) : null}
