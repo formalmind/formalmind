@@ -4,8 +4,7 @@ import { createPortal } from "react-dom";
 import { NvimTerminal } from "./nvim-terminal";
 import { reportError } from "@/lib/report-error";
 import { JsonTree } from "./json-tree";
-import { inDesktop } from "@/lib/open-web";
-import { ArrowDown, Bug, Check, ChevronDown, ChevronRight, CircleCheck, CircleX, LoaderCircle, MoreHorizontal, Pause, Code2, Copy, FileCode2, Folder, Network, Play, Plus, ScanSearch, Square, SquareCheck, ThumbsDown, ThumbsUp, WandSparkles } from "lucide-react";
+import { ArrowDown, Bug, Check, ChevronDown, ChevronRight, CircleCheck, CircleX, LoaderCircle, MoreHorizontal, Pause, Code2, Copy, FileCode2, Folder, Network, Plus, ScanSearch, ThumbsDown, ThumbsUp, WandSparkles } from "lucide-react";
 
 // The project roadmap (GitHub Projects-style), the same view the web app had on its own page.
 import { motion as vimMotion, search as vimSearch, setVimMode, useVimMode, type Cursor } from "@/components/vim-mode";
@@ -25,6 +24,9 @@ import { SwarmCanvas } from "@/components/swarm/swarm-canvas";
 import { ROLE_COLORS, roleName } from "@/lib/swarm-roles";
 // AffectUI's run card from the private UI package when it is checked out; `null` otherwise (desktop/src/ui-fallback).
 import { RunCard } from "@formalmind/ui/run-card";
+import { Composer } from "@formalmind/ui/composer";
+import { ContextCard } from "@formalmind/ui/context";
+import { ReplyActions as AuiReplyActions } from "@formalmind/ui/reply-actions";
 import { localBoard } from "./local-board";
 import { ContextBody, ContextPanel, parseContext } from "./context-panel";
 import type { Scan } from "./local";
@@ -81,10 +83,10 @@ const MODELS = [
 /** With your OpenAI key (Settings → Models), these instead. */
 /** Claude Code's thinking effort for the agents (`--effort`); "" leaves it to Claude Code. */
 const EFFORTS = [
-	{ value: "", label: "Thinking: default" },
-	{ value: "low", label: "Thinking: low" },
-	{ value: "medium", label: "Thinking: medium" },
-	{ value: "high", label: "Thinking: high" },
+	{ value: "", label: "Default" },
+	{ value: "low", label: "Low" },
+	{ value: "medium", label: "Medium" },
+	{ value: "high", label: "High" },
 ];
 const OPENAI_MODELS = [
 	{ value: "gpt-5", label: "GPT-5" },
@@ -414,6 +416,12 @@ function ToolOutput({ call, text }: { call: string; text: string }) {
 /** One agent's message: who said it (and on which item), then the text flat as Markdown; a bug opens its report. */
 /** Under an agent's reply, as Mike's chat draws it: copy (a tick for a moment) and a thumbs up or down. */
 function ReplyActions({ text }: { text: string }) {
+	// AffectUI's message actions from the private UI package when it is checked out.
+	if (AuiReplyActions) return <AuiReplyActions text={text} />;
+	return <OwnReplyActions text={text} />;
+}
+
+function OwnReplyActions({ text }: { text: string }) {
 	const [copied, setCopied] = useState(false);
 	const [vote, setVote] = useState<"up" | "down" | null>(null);
 	return (
@@ -500,26 +508,29 @@ export function QuestionStack({ asks, onSend, onSkip, onWrite }: { asks: Ev[]; /
 	};
 	return (
 		<div className="rounded-2xl border bg-card shadow-sm">
-			<div className="flex items-center gap-2 border-b px-3 py-2 text-[12px]">
+			<div className="flex items-center gap-2 border-b px-3 py-1.5 text-[12px]">
 				<span className="font-medium capitalize" style={{ color: colorOf(e.role) }}>{roleName(e.role)}</span>
 				<span className="text-muted-foreground">asks</span>
 				<span className="ml-auto tabular-nums text-muted-foreground">{asks.length > 1 ? `Question ${i + 1} of ${asks.length}` : "Question"}</span>
 			</div>
-			<div className="max-h-56 overflow-y-auto border-b px-3 py-2">
+			<div className="max-h-56 overflow-y-auto border-b px-3 py-1.5 [&_.chat-markdown]:leading-5 [&_.chat-markdown_blockquote]:my-1.5 [&_.chat-markdown_p]:my-1">
 				<ChatMarkdown>{ask.question}</ChatMarkdown>
 			</div>
-			<div className="flex flex-col gap-0.5 p-1.5" role="radiogroup" aria-label="Your answer">
+			<div className="flex flex-col p-1" role="radiogroup" aria-label="Your answer">
 				{ask.replies.map((r) => (
-					<button key={r} type="button" role="radio" aria-checked={picked === r} onClick={() => setPicks({ ...picks, [askKey(e)]: r })} className={`flex items-start gap-2 rounded-xl px-2.5 py-1.5 text-left text-[13px] ${picked === r ? "bg-muted" : "hover:bg-muted/60"}`}>
-						{picked === r ? <SquareCheck className="mt-0.5 size-3.5 shrink-0 text-primary" aria-hidden /> : <Square className="mt-0.5 size-3.5 shrink-0 text-muted-foreground" aria-hidden />}
+					<button key={r} type="button" role="radio" aria-checked={picked === r} onClick={() => setPicks({ ...picks, [askKey(e)]: r })} className={`flex items-start gap-2 rounded-lg px-2.5 py-1 text-left text-[13px] ${picked === r ? "bg-muted" : "hover:bg-muted/60"}`}>
+						{/* A round mark: filled with a check when picked, an empty ring otherwise. */}
+						<span aria-hidden className={`mt-0.5 grid size-4 shrink-0 place-items-center rounded-full border transition-colors ${picked === r ? "border-foreground bg-foreground text-background" : "border-muted-foreground/50"}`}>
+							{picked === r ? <Check className="size-2.5" strokeWidth={3} /> : null}
+						</span>
 						<span>{r}</span>
 					</button>
 				))}
-				<button type="button" onClick={() => onWrite(e)} className="rounded-xl px-2.5 py-1.5 pl-8 text-left text-[13px] text-muted-foreground hover:bg-muted/60 hover:text-foreground">
+				<button type="button" onClick={() => onWrite(e)} className="rounded-lg px-2.5 py-1 pl-8 text-left text-[13px] text-muted-foreground hover:bg-muted/60 hover:text-foreground">
 					Something else…
 				</button>
 			</div>
-			<div className="flex items-center gap-1 border-t px-2 py-1.5">
+			<div className="flex items-center gap-1 border-t px-2 py-1">
 				<button type="button" onClick={() => setAt(i - 1)} disabled={i === 0} className="h-7 rounded-full px-2.5 text-[12px] text-muted-foreground hover:bg-muted hover:text-foreground disabled:opacity-40">Back</button>
 				<button type="button" onClick={() => (last ? (chosen.length ? send() : onSkip(asks)) : setAt(i + 1))} className="h-7 rounded-full px-2.5 text-[12px] text-muted-foreground hover:bg-muted hover:text-foreground">
 					{last && !chosen.length ? (asks.length > 1 ? "Skip all" : "Skip") : "Skip"}
@@ -537,16 +548,19 @@ export function QuestionStack({ asks, onSend, onSkip, onWrite }: { asks: Ev[]; /
 	);
 }
 
-export function AgentMessage({ e, onBug, onReply }: { e: Ev; onBug: () => void; /** A drafted reply picked: it goes to the composer to edit or send. */ onReply?: (text: string) => void }) {
+export function AgentMessage({ e, onBug, onReply, turn }: { e: Ev; onBug: () => void; /** A drafted reply picked: it goes to the composer to edit or send. */ onReply?: (text: string) => void; /** The whole turn's text when this is its last message (Copy and the thumbs show once per turn); otherwise none. */ turn?: string }) {
 	const color = e.kind === "bug" ? "#dc2626" : colorOf(e.role);
 	return (
 		<Message>
 			<MessageContent className="gap-1">
 				{/* The name in its colour says who it is. */}
-				<MessageHeader className="gap-1.5 px-0 capitalize" style={{ color }}>
-					{e.kind === "bug" ? "bug reported" : roleName(e.role)}
-					{/^\d+$/.test(e.item) ? <span className="font-normal normal-case text-muted-foreground">· item {e.item}</span> : null}
-				</MessageHeader>
+				{/* The chat reads as one conversation: no agent name over each message, only a bug's own label. */}
+				{e.kind === "bug" ? (
+					<MessageHeader className="gap-1.5 px-0 capitalize" style={{ color }}>
+						bug reported
+						{/^\d+$/.test(e.item) ? <span className="font-normal normal-case text-muted-foreground">· item {e.item}</span> : null}
+					</MessageHeader>
+				) : null}
 				{e.kind === "bug" ? (
 					<button type="button" onClick={onBug} className="w-fit whitespace-pre-wrap rounded-2xl rounded-tl-md bg-red-500/10 px-3 py-2 text-left hover:bg-red-500/15">
 						{e.text.split(" — ")[0]}
@@ -575,7 +589,7 @@ export function AgentMessage({ e, onBug, onReply }: { e: Ev; onBug: () => void; 
 				) : (
 					<div className="group/reply">
 						<ChatMarkdown>{e.text}</ChatMarkdown>
-						<ReplyActions text={e.text} />
+						{turn !== undefined ? <ReplyActions text={turn} /> : null}
 					</div>
 				)}
 			</MessageContent>
@@ -1330,8 +1344,9 @@ const PANE_VIEWS: { id: Mode; label: string; icon: React.ComponentType<{ classNa
 	{ id: "code", label: "Code", icon: Code2 },
 ];
 
-const MODES: { id: Mode; label: string; icon: typeof Code2 }[] = [
+const MODES: { id: Mode; label: string; icon: React.ComponentType<{ className?: string }> }[] = [
 	{ id: "code", label: "Code", icon: Code2 },
+	{ id: "chat", label: "Chat", icon: TalkIcon },
 	{ id: "swarm", label: "Swarm", icon: Network },
 	{ id: "audit", label: "Proofs", icon: ScanSearch },
 	{ id: "bugs", label: "Bugs", icon: Bug },
@@ -1371,7 +1386,8 @@ export function NavGroup({ name, git, mode, onMode, inBar, compact }: { name: st
 					style={{ left: pill.left, width: pill.width }}
 				/>
 			) : null}
-			{MODES.map(({ id, label, icon: Icon }) =>
+			{/* No tab for the folder itself: its files open from the file tree, in the Code view. */}
+			{MODES.filter((m) => m.id !== "code").map(({ id, label, icon: Icon }) =>
 				// The Code tab is the folder itself: its name, with the GitHub mark when it is a git repository.
 				id === "code" ? (
 					<button key={id} type="button" role="tab" aria-selected={mode === id} aria-label={`Code · ${name}`} title={`Code · ${name}`} onClick={() => onMode(id)} className={`${tab(mode === id)} min-w-0`}>
@@ -1921,8 +1937,8 @@ export function SwarmPanel({ folder, name, scan, bridge, session, file: openPath
 	// The page's mode (Code, Swarm, Audit) and the open file live in the URL, so they survive reloads.
 	const [params, setParams] = useSearchParams();
 	// The roadmap lives on the Swarm canvas now and Chat has no tab; old links to either open Swarm.
-	// In the Mac app the chat is the page: it opens first; the website keeps the canvas.
-	const mode = resolveMode(params.get("mode") ?? defaultMode ?? (inDesktop() ? "chat" : "swarm"));
+	// The chat is the page: it opens first, in the Mac app and on the website.
+	const mode = resolveMode(params.get("mode") ?? defaultMode ?? "chat");
 	const canvas = mode === "swarm";
 	// The main contract's entry points, read from the AST, so the plan can name the ones each item covers.
 	const [entryUnits, setEntryUnits] = useState<AstUnit[]>([]);
@@ -2306,9 +2322,32 @@ export function SwarmPanel({ folder, name, scan, bridge, session, file: openPath
 		const text = plan.find((p) => String(p.index) === item)?.text;
 		return text ? text.replace(/\*\*|`/g, "").split(" — ")[0].trim() : undefined;
 	};
+	// A turn: everything the agents say between two of your messages. Its last message carries Copy and the thumbs,
+	// for the whole turn's text.
+	const turnEnds = useMemo(() => {
+		const ends = new Map<number, string>();
+		let texts: string[] = [];
+		let last = -1;
+		const close = () => {
+			if (last >= 0) ends.set(last, texts.join("\n\n"));
+			texts = [];
+			last = -1;
+		};
+		chatBlocks.forEach((b, i) => {
+			if ("e" in b && b.e.kind === "you") return close();
+			if ("e" in b && b.e.kind === "say") {
+				texts.push(b.e.text);
+				last = i;
+			}
+		});
+		close();
+		return ends;
+	}, [chatBlocks]);
 	const chatList = useMemo(
 		() =>
-			chatBlocks.map((block, i) => (
+			chatBlocks.map((block, i) =>
+				// An open question shows once, as its question card after the history; its plain message is left out.
+				"e" in block && block.e.kind === "ask" && run && questions.open.includes(block.e) ? null : (
 				// Off screen, a message skips layout and paint (`content-visibility`), so scrolling costs what's in view, not
 				// the length of the chat; its last measured height holds its place.
 				<div key={i} data-msg={i} className="fm-settle [contain-intrinsic-size:auto_96px] [content-visibility:auto]">
@@ -2335,6 +2374,7 @@ export function SwarmPanel({ folder, name, scan, bridge, session, file: openPath
 					) : (
 						<AgentMessage
 							e={block.e}
+							turn={turnEnds.get(i)}
 							onReply={(text) => {
 								setSay(text);
 								toggleChat(true);
@@ -2350,7 +2390,7 @@ export function SwarmPanel({ folder, name, scan, bridge, session, file: openPath
 				</div>
 			)),
 		// eslint-disable-next-line react-hooks/exhaustive-deps
-		[chatBlocks, run, bugs, plan],
+		[chatBlocks, run, bugs, plan, questions.open, turnEnds],
 	);
 	// How full the working agent's context window is and what fills it, from its last reply; past 75% its older steps
 	// are summarized.
@@ -2619,7 +2659,11 @@ export function SwarmPanel({ folder, name, scan, bridge, session, file: openPath
 				{ctxPct}%
 			</DropdownMenuTrigger>
 			<DropdownMenuContent align="end" className="w-auto rounded-2xl border-0 bg-transparent p-0 shadow-lg">
-				<ContextPanel role={working.role} color={colorOf(working.role)} use={ctx} onCompact={run ? () => invoke("swarm_compact", { folder, run }) : undefined} />
+				{(() => {
+					// AffectUI's context window from the private UI package when it is checked out; the app's own otherwise.
+					const Card = ContextCard ?? ContextPanel;
+					return <Card role={working.role} color={colorOf(working.role)} use={ctx} onCompact={run ? () => invoke("swarm_compact", { folder, run }) : undefined} />;
+				})()}
 			</DropdownMenuContent>
 		</DropdownMenu>
 	) : null;
@@ -2628,12 +2672,11 @@ export function SwarmPanel({ folder, name, scan, bridge, session, file: openPath
 	// against its cap on a key. A run keeps the route it started with; a change applies at the next start.
 	const costMenu = payingPlan ? (
 		<DropdownMenu>
-			<DropdownMenuTrigger className="inline-flex h-7 shrink-0 items-center gap-1 rounded-md border bg-background px-2 text-[11px] text-muted-foreground outline-none hover:text-foreground" title={`The agents run on ${provider === "codex" ? "Codex" : "Claude Code"} with your ${payingPlan}`}>
+			<DropdownMenuTrigger className="inline-flex h-7 shrink-0 items-center gap-1 rounded-full border bg-background px-2.5 text-[11px] text-muted-foreground outline-none hover:text-foreground" title={`The agents run on ${provider === "codex" ? "Codex" : "Claude Code"} with your ${payingPlan}`}>
 				{payingPlan}
 				<ChevronDown className="size-3" />
 			</DropdownMenuTrigger>
-			<DropdownMenuContent align="end" className="w-56">
-				<DropdownMenuLabel className="text-xs font-normal text-muted-foreground">The agents run on</DropdownMenuLabel>
+			<DropdownMenuContent align="end" sideOffset={6} className="w-60 rounded-2xl p-1.5 shadow-lg [&_[role=menuitem]]:rounded-lg [&_[role=menuitem]]:px-2.5 [&_[role=menuitem]]:py-2">
 				<DropdownMenuItem onSelect={() => choosePlan("claude-code")} disabled={!claudePlan} className="text-[13px]">
 					{claudePlan ?? "Claude plan"}
 					{provider === "claude-code" ? <Check className="ml-auto size-3.5" /> : null}
@@ -2642,18 +2685,17 @@ export function SwarmPanel({ folder, name, scan, bridge, session, file: openPath
 					ChatGPT plan
 					{provider === "codex" ? <Check className="ml-auto size-3.5" /> : null}
 				</DropdownMenuItem>
-				<p className="px-2 pb-1.5 text-[11px] text-muted-foreground">Nothing is metered; the plan's usage limit pauses the swarm.{run ? " This run keeps its plan; Stop and Resume to switch." : ""}</p>
 				<DropdownMenuSeparator />
 				<DropdownMenuItem onSelect={() => navigate("/settings?section=models")} className="text-[13px]">A key instead…</DropdownMenuItem>
 			</DropdownMenuContent>
 		</DropdownMenu>
 	) : (
 		<DropdownMenu>
-			<DropdownMenuTrigger className="inline-flex h-7 shrink-0 items-center gap-1 rounded-md border bg-background px-2 text-[11px] tabular-nums text-muted-foreground outline-none hover:text-foreground" title="Spending cap">
+			<DropdownMenuTrigger className="inline-flex h-7 shrink-0 items-center gap-1 rounded-full border bg-background px-2.5 text-[11px] tabular-nums text-muted-foreground outline-none hover:text-foreground" title="Spending cap">
 				{run || viewing ? `$${spent.toFixed(2)} / $${budget}` : `Budget $${budget}`}
 				<ChevronDown className="size-3" />
 			</DropdownMenuTrigger>
-			<DropdownMenuContent align="end" className="w-56">
+			<DropdownMenuContent align="end" sideOffset={6} className="w-60 rounded-2xl p-1.5 shadow-lg [&_[role=menuitem]]:rounded-lg [&_[role=menuitem]]:px-2.5 [&_[role=menuitem]]:py-2">
 				<DropdownMenuLabel className="text-xs font-normal text-muted-foreground">Stop the swarm at</DropdownMenuLabel>
 				{BUDGETS.map((b) => (
 					<DropdownMenuItem
@@ -2707,7 +2749,7 @@ export function SwarmPanel({ folder, name, scan, bridge, session, file: openPath
 						<Plus className="size-3.5" />
 					</button>
 					<DropdownMenu>
-						<DropdownMenuTrigger className="flex min-w-0 flex-1 items-center gap-1 rounded-md text-left text-[12px] text-muted-foreground outline-none hover:text-foreground" title={`${title} — switch sessions`}>
+						<DropdownMenuTrigger className="flex min-w-0 flex-1 items-center gap-1 rounded-md text-left text-[14px] text-muted-foreground outline-none hover:text-foreground" title={`${title} — switch sessions`}>
 							<span className="truncate">{title}</span>
 							<ChevronDown className="size-3 shrink-0 text-muted-foreground" />
 						</DropdownMenuTrigger>
@@ -2724,15 +2766,18 @@ export function SwarmPanel({ folder, name, scan, bridge, session, file: openPath
 						</DropdownMenuContent>
 					</DropdownMenu>
 					{actionsSlot ? null : ctxMenu}
-					{actionsSlot ? null : costMenu}
-					{slot ? null : (
+					{/* On a plan the model picks it (a GPT model the ChatGPT plan, a Claude one the Claude plan); a key shows its spending cap. */}
+					{actionsSlot || payingPlan ? null : costMenu}
+					{/* Hiding the chat only applies to it floating over the canvas, not to the chat page. */}
+					{slot || mode === "chat" ? null : (
 						<button type="button" onClick={() => toggleChat(false)} title="Hide the chat" aria-label="Hide the chat" className="inline-flex size-7 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-background hover:text-foreground">
 							<ChevronDown className="size-3.5" />
 						</button>
 					)}
 				</div>
 				{/* Corners nest: the panel 28px, inset 4px; this card 24px; the composer 16px, inset 8px. */}
-				<div className={`mt-1 flex min-h-0 flex-1 flex-col overflow-hidden ${slot ? "" : "rounded-[24px] border bg-card"}`}>
+				{/* On the chat page it has no card around it; floating over the canvas it does. */}
+				<div className={`mt-1 flex min-h-0 flex-1 flex-col overflow-hidden ${slot || mode === "chat" ? "" : "rounded-[24px] border bg-card"}`}>
 				<div className="relative flex min-h-0 flex-1 flex-col">
 				<div
 					ref={chat}
@@ -2741,15 +2786,32 @@ export function SwarmPanel({ folder, name, scan, bridge, session, file: openPath
 						atBottom.current = el.scrollHeight - el.scrollTop - el.clientHeight < 80;
 						setAway(!atBottom.current);
 					}}
-					className="min-h-0 flex-1 space-y-3.5 overflow-y-auto py-3 pl-6 pr-3 text-[13px]"
+					// The history fades out at its top and bottom edges as it scrolls under the header and into the composer.
+					className="min-h-0 flex-1 space-y-3.5 overflow-y-auto py-8 pl-6 pr-3 text-[13px] [mask-image:linear-gradient(to_bottom,transparent,black_2rem,black_calc(100%-2rem),transparent)]"
 				>
 					{loadingHistory && shown.length === 0 ? <ChatSkeleton /> : null}
 					{shown.length === 0 && !run && !loadingHistory ? <p className="text-muted-foreground">Talk to the agents here. Before a run, what you write is the swarm's focus and ↑ starts it; while it runs, they read your messages before their next turn.</p> : null}
 					{chatList}
+					{/* The agents' open questions, in the history after the latest message (not pinned over it). */}
+					{run ? (
+						<QuestionStack
+							asks={questions.open}
+							onSend={(answers) => {
+								questions.markAnswered(answers.map((a) => a.ask));
+								void (async () => {
+									for (const a of answers) await invoke("swarm_say", { folder, run, text: a.text }).catch((e) => setError(String(e)));
+								})();
+							}}
+							onSkip={questions.markAnswered}
+							onWrite={(ask) => {
+								questions.markAnswered([ask]);
+								setSay(`About ${parseAsk(ask.text).question.match(/\*\*([^*]+)\*\*/)?.[1] ?? "your question"}: `);
+							}}
+						/>
+					) : null}
 					{/* While an agent works: its name, and its current task shimmering until its next words. */}
 					{run && working ? (
-						<p className="flex items-center gap-2 text-[12px] text-muted-foreground">
-							<span className="font-medium" style={{ color: colorOf(working.role) }}>{roleName(working.role)}</span>
+						<p className="flex items-center gap-2 text-[14px] text-muted-foreground">
 							<span className="fm-text-shimmer truncate">{working.text}</span>
 						</p>
 					) : null}
@@ -2771,24 +2833,12 @@ export function SwarmPanel({ folder, name, scan, bridge, session, file: openPath
 
 				<div className="shrink-0 space-y-2 p-2">
 					{error ? <p className="text-xs text-red-600">{error}</p> : null}
-					{run ? (
-						<QuestionStack
-							asks={questions.open}
-							onSend={(answers) => {
-								questions.markAnswered(answers.map((a) => a.ask));
-								void (async () => {
-									for (const a of answers) await invoke("swarm_say", { folder, run, text: a.text }).catch((e) => setError(String(e)));
-								})();
-							}}
-							onSkip={questions.markAnswered}
-							onWrite={(ask) => {
-								questions.markAnswered([ask]);
-								setSay(`About ${parseAsk(ask.text).question.match(/\*\*([^*]+)\*\*/)?.[1] ?? "your question"}: `);
-							}}
-						/>
-					) : null}
 					{/* The Swarm page's composer: steer while it runs; before that, what you type is its focus and ↑ starts it. */}
-					<ChatComposer
+					{(() => {
+						// AffectUI's composer from the private UI package when it is checked out; the app's own otherwise.
+						const Box = (Composer ?? ChatComposer) as typeof ChatComposer;
+						return (
+					<Box
 						compact
 						rounded="rounded-2xl"
 						value={run ? say : goal}
@@ -2801,7 +2851,7 @@ export function SwarmPanel({ folder, name, scan, bridge, session, file: openPath
 						allowEmpty={!run}
 						sendClassName="btn-dark !px-0"
 						sendDisabled={!run && Boolean(ownKey) && !hasKey}
-						sendTitle={run ? (say.trim() ? "Send" : "Stop the session") : ownKey && !hasKey ? `Add your ${ownKey} key in Settings first` : "Start the swarm"}
+						sendTitle={run ? (say.trim() ? "Send" : "Stop the session") : ownKey && !hasKey ? `Add your ${ownKey} key in Settings first` : plan.some((i) => i.mark === " ") ? "Resume the swarm" : "Start the swarm"}
 						modelPicker={{
 							value: pickedModel,
 							options: pickable,
@@ -2826,11 +2876,6 @@ export function SwarmPanel({ folder, name, scan, bridge, session, file: openPath
 						placeholder={run ? "Talk to the agents: a question, a new focus, an idea to check…" : "What should the swarm focus on? (optional) ↑ starts it"}
 						context={
 							<span className="inline-flex items-center gap-1.5">
-								{run ? null : (
-									<button type="button" onClick={() => void start()} disabled={Boolean(ownKey) && !hasKey} title={ownKey && !hasKey ? `Add your ${ownKey} key in Settings first` : "Start the swarm"} className="btn-dark inline-flex h-7 items-center gap-1.5 px-2.5 text-[12px] disabled:opacity-50">
-										<Play className="size-3" />{plan.some((i) => i.mark === " ") ? "Resume" : "Start"}
-									</button>
-								)}
 								<span className="inline-flex h-7 items-center gap-1.5 rounded-full bg-secondary px-2.5 text-[12px] font-medium text-secondary-foreground" title={folder}><Folder className="size-3 shrink-0" />{name}</span>
 							</span>
 						}
@@ -2842,6 +2887,8 @@ export function SwarmPanel({ folder, name, scan, bridge, session, file: openPath
 							</button>
 						) : null}
 					/>
+						);
+					})()}
 				</div>
 				</div>
 		</>
@@ -3039,7 +3086,7 @@ export function SwarmPanel({ folder, name, scan, bridge, session, file: openPath
 										</label>
 									) : (
 										<>
-											<span className="font-medium text-foreground">NORMAL</span>
+											<span className="text-foreground">Normal</span>
 											<span>{lastSearch.current ? `/${lastSearch.current}` : ""}</span>
 											<span className="ml-auto">{cursor.line + 1}:{cursor.col + 1}</span>
 										</>
@@ -3082,7 +3129,7 @@ export function SwarmPanel({ folder, name, scan, bridge, session, file: openPath
 		return (
 			<div ref={root} className="relative flex h-full min-h-0 flex-1">
 				{/* The folder's tab names it, in its own place among the tabs; only the page's actions go to the title bar. */}
-				{actionsSlot ? createPortal(<>{ctxMenu}{costMenu}{paneTools}</>, actionsSlot) : null}
+				{actionsSlot ? createPortal(<>{ctxMenu}{payingPlan ? null : costMenu}{paneTools}</>, actionsSlot) : null}
 				{mode === "chat" ? (
 					// The chat as the page: one centred column, as wide as reads well.
 					<div className="relative flex min-h-0 min-w-0 flex-1 justify-center px-4 pb-3 pt-2">
@@ -3103,7 +3150,14 @@ export function SwarmPanel({ folder, name, scan, bridge, session, file: openPath
 		<div ref={root} className="relative flex h-full min-h-0 flex-1" style={{ "--fm-top": slot ? "0px" : "3.5rem" } as React.CSSProperties}>
 			{/* The canvas, as on the Swarm page, with the plan, files and bugs floating over it as one accordion. */}
 			<div className="absolute inset-0 flex flex-col overflow-hidden">
-				{modeViews}
+				{mode === "chat" ? (
+					// The chat as the page: one centred column under the tabs, as wide as reads well.
+					<div className="flex min-h-0 flex-1 justify-center px-4 pb-3" style={{ paddingTop: "calc(var(--fm-top) + 0.75rem)" }}>
+						<div className="flex min-h-0 w-full max-w-3xl flex-col">{chatPanel}</div>
+					</div>
+				) : (
+					modeViews
+				)}
 				{nav}
 			</div>
 
@@ -3155,7 +3209,7 @@ export function SwarmPanel({ folder, name, scan, bridge, session, file: openPath
 						</button>
 					</aside>
 					{/* New agent messages since you folded the chat, counted like the bell's (outside the shape, so it isn't clipped). */}
-					{!chatOpen && unread ? <span className="pointer-events-none absolute bottom-[3.25rem] right-3 z-30 grid h-5 min-w-5 translate-x-1 place-items-center rounded-full border-2 border-background bg-red-500 px-1 text-[10px] font-semibold tabular-nums text-white">{unread > 99 ? "99+" : unread}</span> : null}
+					{!chatOpen && unread ? <span className="pointer-events-none absolute bottom-[3.25rem] right-3 z-30 grid h-5 min-w-5 translate-x-1 place-items-center fm-badge rounded-full border-2 border-background bg-red-500 px-1 text-[10px] font-semibold tabular-nums text-white">{unread > 99 ? "99+" : unread}</span> : null}
 				</>
 			) : null}
 		</div>

@@ -42,7 +42,7 @@ function Shell({ user }: { user: User }) {
 	return (
 		<AuthProvider value={{ user, tokenSet: { accessToken: "", expiresAt: 0 } }}>
 			<ChatConversationsProvider>
-				<SidebarProvider defaultOpen>
+				<SidebarProvider defaultOpen className="fm-app">
 					<TabBar />
 					<AppSidebar extra={<LocalFolders />} repoSource={repoSource} />
 					<AddLocalHost />

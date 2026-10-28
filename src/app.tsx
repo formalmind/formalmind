@@ -89,7 +89,7 @@ function SignedInLayout({ user }: { user: User }) {
 	return (
 		<AuthProvider value={{ user, tokenSet: { accessToken: "", expiresAt: 0 } }}>
 			<ChatConversationsProvider>
-				<SidebarProvider defaultOpen={open}>
+				<SidebarProvider defaultOpen={open} className="fm-app">
 					<AppSidebar />
 					<AddProjectHost />
 					<WorkspaceContent>

@@ -104,7 +104,7 @@ export function NotificationCenter() {
         {/* Swings on hover; rings once when a new notification arrives (keyed on the count, so it replays). */}
         <Bell key={unread.length} aria-hidden="true" className={`fm-bell size-3.5 ${unread.length ? "fm-bell-ring" : ""}`} />
         {unread.length > 0 && (
-          <span className="absolute -right-0.5 -top-0.5 flex min-h-4 min-w-4 items-center justify-center rounded-full bg-red-600 px-1 text-[10px] font-semibold leading-none text-white">
+          <span className="fm-badge absolute -right-0.5 -top-0.5 flex min-h-4 min-w-4 items-center justify-center rounded-full bg-red-600 px-1 text-[10px] font-semibold leading-none text-white">
             {unread.length > 99 ? "99" : unread.length}
           </span>
         )}
