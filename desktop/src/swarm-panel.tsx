@@ -5,7 +5,7 @@ import { NvimTerminal } from "./nvim-terminal";
 import { reportError } from "@/lib/report-error";
 import { JsonTree } from "./json-tree";
 import { inDesktop } from "@/lib/open-web";
-import { ArrowDown, Bug, Check, ChevronDown, ChevronRight, CircleCheck, CircleX, LoaderCircle, MoreHorizontal, Pause, Code2, Copy, FileCode2, Folder, Network, Play, Plus, ScanSearch, Square, SquareCheck, ThumbsDown, ThumbsUp, WandSparkles } from "lucide-react";
+import { ArrowDown, Bug, Check, ChevronDown, ChevronRight, CircleCheck, CircleX, LoaderCircle, MoreHorizontal, Pause, Code2, Copy, FileCode2, Folder, Network, Plus, ScanSearch, Square, SquareCheck, ThumbsDown, ThumbsUp, WandSparkles } from "lucide-react";
 
 // The project roadmap (GitHub Projects-style), the same view the web app had on its own page.
 import { motion as vimMotion, search as vimSearch, setVimMode, useVimMode, type Cursor } from "@/components/vim-mode";
@@ -25,6 +25,9 @@ import { SwarmCanvas } from "@/components/swarm/swarm-canvas";
 import { ROLE_COLORS, roleName } from "@/lib/swarm-roles";
 // AffectUI's run card from the private UI package when it is checked out; `null` otherwise (desktop/src/ui-fallback).
 import { RunCard } from "@formalmind/ui/run-card";
+import { Composer } from "@formalmind/ui/composer";
+import { ContextCard } from "@formalmind/ui/context";
+import { ReplyActions as AuiReplyActions } from "@formalmind/ui/reply-actions";
 import { localBoard } from "./local-board";
 import { ContextBody, ContextPanel, parseContext } from "./context-panel";
 import type { Scan } from "./local";
@@ -414,6 +417,12 @@ function ToolOutput({ call, text }: { call: string; text: string }) {
 /** One agent's message: who said it (and on which item), then the text flat as Markdown; a bug opens its report. */
 /** Under an agent's reply, as Mike's chat draws it: copy (a tick for a moment) and a thumbs up or down. */
 function ReplyActions({ text }: { text: string }) {
+	// AffectUI's message actions from the private UI package when it is checked out.
+	if (AuiReplyActions) return <AuiReplyActions text={text} />;
+	return <OwnReplyActions text={text} />;
+}
+
+function OwnReplyActions({ text }: { text: string }) {
 	const [copied, setCopied] = useState(false);
 	const [vote, setVote] = useState<"up" | "down" | null>(null);
 	return (
@@ -2619,7 +2628,11 @@ export function SwarmPanel({ folder, name, scan, bridge, session, file: openPath
 				{ctxPct}%
 			</DropdownMenuTrigger>
 			<DropdownMenuContent align="end" className="w-auto rounded-2xl border-0 bg-transparent p-0 shadow-lg">
-				<ContextPanel role={working.role} color={colorOf(working.role)} use={ctx} onCompact={run ? () => invoke("swarm_compact", { folder, run }) : undefined} />
+				{(() => {
+					// AffectUI's context window from the private UI package when it is checked out; the app's own otherwise.
+					const Card = ContextCard ?? ContextPanel;
+					return <Card role={working.role} color={colorOf(working.role)} use={ctx} onCompact={run ? () => invoke("swarm_compact", { folder, run }) : undefined} />;
+				})()}
 			</DropdownMenuContent>
 		</DropdownMenu>
 	) : null;
@@ -2788,7 +2801,11 @@ export function SwarmPanel({ folder, name, scan, bridge, session, file: openPath
 						/>
 					) : null}
 					{/* The Swarm page's composer: steer while it runs; before that, what you type is its focus and ↑ starts it. */}
-					<ChatComposer
+					{(() => {
+						// AffectUI's composer from the private UI package when it is checked out; the app's own otherwise.
+						const Box = (Composer ?? ChatComposer) as typeof ChatComposer;
+						return (
+					<Box
 						compact
 						rounded="rounded-2xl"
 						value={run ? say : goal}
@@ -2801,7 +2818,7 @@ export function SwarmPanel({ folder, name, scan, bridge, session, file: openPath
 						allowEmpty={!run}
 						sendClassName="btn-dark !px-0"
 						sendDisabled={!run && Boolean(ownKey) && !hasKey}
-						sendTitle={run ? (say.trim() ? "Send" : "Stop the session") : ownKey && !hasKey ? `Add your ${ownKey} key in Settings first` : "Start the swarm"}
+						sendTitle={run ? (say.trim() ? "Send" : "Stop the session") : ownKey && !hasKey ? `Add your ${ownKey} key in Settings first` : plan.some((i) => i.mark === " ") ? "Resume the swarm" : "Start the swarm"}
 						modelPicker={{
 							value: pickedModel,
 							options: pickable,
@@ -2826,11 +2843,6 @@ export function SwarmPanel({ folder, name, scan, bridge, session, file: openPath
 						placeholder={run ? "Talk to the agents: a question, a new focus, an idea to check…" : "What should the swarm focus on? (optional) ↑ starts it"}
 						context={
 							<span className="inline-flex items-center gap-1.5">
-								{run ? null : (
-									<button type="button" onClick={() => void start()} disabled={Boolean(ownKey) && !hasKey} title={ownKey && !hasKey ? `Add your ${ownKey} key in Settings first` : "Start the swarm"} className="btn-dark inline-flex h-7 items-center gap-1.5 px-2.5 text-[12px] disabled:opacity-50">
-										<Play className="size-3" />{plan.some((i) => i.mark === " ") ? "Resume" : "Start"}
-									</button>
-								)}
 								<span className="inline-flex h-7 items-center gap-1.5 rounded-full bg-secondary px-2.5 text-[12px] font-medium text-secondary-foreground" title={folder}><Folder className="size-3 shrink-0" />{name}</span>
 							</span>
 						}
@@ -2842,6 +2854,8 @@ export function SwarmPanel({ folder, name, scan, bridge, session, file: openPath
 							</button>
 						) : null}
 					/>
+						);
+					})()}
 				</div>
 				</div>
 		</>
