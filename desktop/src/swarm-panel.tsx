@@ -27,6 +27,7 @@ import { SwarmCanvas } from "@/components/swarm/swarm-canvas";
 import { ROLE_COLORS, roleName } from "@/lib/swarm-roles";
 // AffectUI's run card from the private UI package when it is checked out; `null` otherwise (desktop/src/ui-fallback).
 import { RunCard, type Steer } from "@formalmind/ui/run-card";
+import { PANE_VIEWS, TalkIcon } from "./pane-views";
 import { Composer } from "@formalmind/ui/composer";
 import { ContextCard } from "@formalmind/ui/context";
 import { ReplyActions as AuiReplyActions } from "@formalmind/ui/reply-actions";
@@ -1436,13 +1437,6 @@ export type Mode = "code" | "chat" | "swarm" | "roadmap" | "audit" | "bugs";
 /** How many of a session's latest messages the chat draws at first (and adds per "Show earlier messages"). */
 const CHAT_WINDOW = 150;
 
-const PANE_VIEWS: { id: Mode; label: string; icon: React.ComponentType<{ className?: string }> }[] = [
-	{ id: "chat", label: "Chat", icon: TalkIcon },
-	{ id: "swarm", label: "Canvas", icon: Network },
-	{ id: "audit", label: "Proofs", icon: ScanSearch },
-	{ id: "bugs", label: "Bugs", icon: Bug },
-	{ id: "code", label: "Code", icon: Code2 },
-];
 
 const MODES: { id: Mode; label: string; icon: React.ComponentType<{ className?: string }> }[] = [
 	{ id: "code", label: "Code", icon: Code2 },
@@ -1506,18 +1500,6 @@ export function NavGroup({ name, git, mode, onMode, inBar, compact }: { name: st
 }
 
 
-/** A filled speech bubble with two lines cut out of it: the "Talk to the swarm" mark. */
-export function TalkIcon({ className }: { className?: string }) {
-	return (
-		<svg viewBox="0 0 16 16" className={className} aria-hidden>
-			<path
-				fillRule="evenodd"
-				fill="currentColor"
-				d="M4 1h8a3.5 3.5 0 0 1 3.5 3.5v4A3.5 3.5 0 0 1 12 12H8.2l-3.9 2.6A.8.8 0 0 1 3 13.9V12h0A3.5 3.5 0 0 1 .5 8.5v-4A3.5 3.5 0 0 1 4 1Zm.6 4a.7.7 0 0 0 0 1.4h6.8a.7.7 0 0 0 0-1.4H4.6Zm1.4 2.8a.7.7 0 0 0 0 1.4h4a.7.7 0 0 0 0-1.4H6Z"
-			/>
-		</svg>
-	);
-}
 
 /**
  * The mode a link asks for, as the page has it: Roadmap and Chat have no tab now (the roadmap is on the Swarm canvas),
@@ -2450,6 +2432,22 @@ export function SwarmPanel({ folder, name, scan, bridge, session, file: openPath
 		// Braces matter: scrollTo returns a Promise in newer browsers, and an effect must return nothing or a cleanup.
 		chat.current?.scrollTo({ top: chat.current.scrollHeight });
 	}, [events]);
+	// A session that just loaded opens at its latest messages: the scroll above ran while the skeleton showed. And while
+	// you're at the bottom it stays there as messages settle (off screen they hold a placeholder height, then their own).
+	useEffect(() => {
+		if (loadingHistory) return;
+		atBottom.current = true;
+		setAway(false);
+		const el = chat.current;
+		if (!el) return;
+		const pin = () => {
+			if (atBottom.current) el.scrollTop = el.scrollHeight;
+		};
+		pin();
+		const ro = new ResizeObserver(pin);
+		for (const child of Array.from(el.children)) ro.observe(child);
+		return () => ro.disconnect();
+	}, [loadingHistory, viewing]);
 
 	// `onlyQueued`: a run for the work already queued (reading a report), which stops when that's done.
 	// The page says what to start; the backend (its control API, as the MCP uses it) picks the model
