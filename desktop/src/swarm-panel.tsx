@@ -3061,7 +3061,7 @@ export function SwarmPanel({ folder, name, scan, bridge, session, file: openPath
 										</label>
 									) : (
 										<>
-											<span className="font-medium text-foreground">NORMAL</span>
+											<span className="text-foreground">Normal</span>
 											<span>{lastSearch.current ? `/${lastSearch.current}` : ""}</span>
 											<span className="ml-auto">{cursor.line + 1}:{cursor.col + 1}</span>
 										</>
