@@ -7,6 +7,9 @@ import "highlight.js/styles/atom-one-light.css";
 import "./globals.css";
 import { App } from "./app";
 import { registerWebMcpTools } from "./webmcp";
+import { fadeTruncation } from "@/lib/fade-truncate";
+
+fadeTruncation();
 
 // A tab opened before a deploy asks for chunks that no longer exist: reload once to pick up the new build.
 window.addEventListener("vite:preloadError", (event) => {
