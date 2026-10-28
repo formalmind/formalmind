@@ -494,3 +494,11 @@ button:is(:hover, :focus-visible) > .fm-bell, .fm-bell-ring { animation: fm-bell
 	/* Regular weight throughout: nothing bold or medium. */
 	font-weight: 400 !important;
 }
+/* Depth by colour, not weight or size: body text a step softer, what a message stresses (**bold**) in the full
+   foreground colour, secondary text muted (text-muted-foreground) as before. */
+.fm-app .chat-markdown {
+	color: hsl(var(--foreground) / 0.78);
+}
+.fm-app :is(strong, b, th) {
+	color: hsl(var(--foreground));
+}
