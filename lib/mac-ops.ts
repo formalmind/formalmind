@@ -30,6 +30,7 @@ export const MAC_OPS = {
 	// Actions
 	diagnose: { write: false, args: "item", about: "why an item is blocked (a plan item's number, or a statement's obligation such as S-01.2), from its sessions' logs: the cause (proof, other file, app or unknown) and why, the last build's errors, the files it wrote, whether its own module built, and what the prover last said" },
 	questions: { write: false, args: "", about: "the swarm's questions waiting for an answer: each statement's claim, what the swarm formalized it to mean, its assumptions and functions; answer with confirm_statement or correct_statement" },
+	skills: { write: false, args: "", about: "the free auditing skills the folder can add (Pashov Audit Group's hacking lenses and x-ray threats), each with what it checks, its licence, its source and whether the folder has it" },
 	answers: { write: true, args: "who", about: "who answers the swarm's questions: mcp (the default: you, or an MCP client acting for you) or agent (an answerer agent confirms or corrects each formalization once, and leaves doubts for you)" },
 	verify_repo: { write: true, args: "repo, ref?, goal?, budget?, path?", about: "verify any GitHub repository at a branch, tag or commit: the Mac forks it into formalmind, clones it (into ~/formal-targets unless path is given), checks out ref on its own branch, adds the folder with Report to GitHub on, and starts the swarm; each approved proof is committed (co-authored by formalmind[bot]) and pushed to the fork" },
 	add_folder: { write: true, args: "path", about: "add a folder on the Mac (an absolute path; folder not needed)" },
@@ -45,6 +46,8 @@ export const MAC_OPS = {
 	correct_statement: { write: true, args: "id, text", about: "what a formalized statement should mean instead" },
 	mark_statement: { write: true, args: "id, mark", about: "set a statement's mark ([ ] [?] [~] [x] [!] [-])" },
 	remove_statement: { write: true, args: "id", about: "remove a statement" },
+	skill_add: { write: true, args: "id", about: "add a free auditing skill (an id from skills) to the folder: its checklists are copied into .formal/skills/ from a pinned commit, and the agents whose role it fits read them; ask the assistant to audit with say" },
+	skill_remove: { write: true, args: "id", about: "remove a skill from the folder" },
 	triage: { write: true, args: "path", about: "queue an audit report (a file in the folder) for the swarm's auditor" },
 	github: { write: true, args: "on", about: "turn the folder's Report to GitHub on or off: off (the default) keeps everything local; on lets Formal Mind's GitHub App comment on the repository's pull requests with what the ledger says changed" },
 	refresh_model: { write: true, args: "", about: "rewrite each generated model formal-ast now translates more of, so a def a proof needs exists in the file Lake builds" },

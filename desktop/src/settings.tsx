@@ -1,7 +1,8 @@
 import { useEffect, useState } from "react";
 import { useSearchParams } from "react-router";
 import { invoke } from "@tauri-apps/api/core";
-import { ArrowUpRight, Cable, Crosshair, FolderSearch, Server, Sparkles, SquareCode, type LucideIcon } from "lucide-react";
+import { ArrowUpRight, Cable, Crosshair, FolderSearch, Puzzle, Server, Sparkles, SquareCode, type LucideIcon } from "lucide-react";
+import { FolderSkills } from "./skills-section";
 import { apiBase, DEFAULT_API, setApiBase } from "./api";
 import { setVimMode, useVimMode } from "@/components/vim-mode";
 import { AuditFolders, EntryPoints } from "@/components/audit-folders";
@@ -67,6 +68,7 @@ const SECTIONS = [
 	{ id: "server", title: "Server", icon: Server, group: "This computer" },
 	{ id: "entry-points", title: "Entry points", icon: Crosshair, group: "Projects" },
 	{ id: "audit-reports", title: "Audit reports", icon: FolderSearch, group: "Projects" },
+	{ id: "skills", title: "Skills", icon: Puzzle, group: "Projects" },
 ] as const satisfies readonly { id: string; title: string; icon: LucideIcon; group: string }[];
 const GROUPS = [...new Set(SECTIONS.map((s) => s.group))];
 type SectionId = (typeof SECTIONS)[number]["id"];
@@ -200,6 +202,18 @@ export function SettingsPage() {
 							.filter(([, path]) => !folders.includes(path))
 							.map(([repo, path]) => (
 								<AuditFolders key={path} folder={path} label={repo} />
+							))}
+					</Section> : null}
+					{section === "skills" ? <Section title="Skills">
+						<p className="text-xs text-muted-foreground">Free auditing checklists by other authors. Add one to a project and the agents whose work it fits read it while they prove and review; Formal Mind's own skills and checks (lake build, forge test, a PoC for every bug) stay as they are.</p>
+						{folders.length + Object.keys(repos).length === 0 ? <p className="text-xs text-muted-foreground">Add a folder or import a repository in the sidebar first.</p> : null}
+						{folders.map((f) => (
+							<FolderSkills key={f} folder={f} />
+						))}
+						{Object.entries(repos)
+							.filter(([, path]) => !folders.includes(path))
+							.map(([repo, path]) => (
+								<FolderSkills key={path} folder={path} label={repo} />
 							))}
 					</Section> : null}
 					{section === "remote" ? <Section title="Remote control (MCP)">

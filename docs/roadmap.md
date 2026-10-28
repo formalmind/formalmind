@@ -51,7 +51,9 @@ What Formal Mind is, the problem it solves and its focus: [README.md](../README.
    still writes nothing to GitHub by default.
 7. **Bring your own skills and agents.** Auditors already run their own agents (Nethermind's AuditAgent, Pashov's
    skills, 33Labs). Formal Mind supplies the loop around them: the AST slices, the plan, the checks (`lake build`,
-   `forge test`), the review step and one merged report. Their skills plug in; ours stay as they are.
+   `forge test`), the review step and one merged report. Their skills plug in; ours stay as they are. Plan: [skills.md](skills.md):
+   a Skills page of free third-party skills added to a folder's swarm, and a prior-findings search over the public
+   audit corpus as an agent tool.
 8. **Verify the bytecode, not only the source: EquiVM.** Build on [argotorg/EquiVM](https://github.com/argotorg/EquiVM)
    (MIT): agents prove the deployed bytecode refines a Stele spec, so the compiler leaves the trusted base, and our
    statements are proved on the Stele spec. WETH9 and Morpho Blue are already EquiVM benchmarks. Huff contracts
