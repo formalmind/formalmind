@@ -54,8 +54,9 @@ What Formal Mind is, the problem it solves and its focus: [README.md](../README.
    `forge test`), the review step and one merged report. Their skills plug in; ours stay as they are.
 8. **Verify the bytecode, not only the source: EquiVM.** Build on [argotorg/EquiVM](https://github.com/argotorg/EquiVM)
    (MIT): agents prove the deployed bytecode refines a Stele spec, so the compiler leaves the trusted base, and our
-   statements are proved on the Stele spec. WETH9 and Morpho Blue are already EquiVM benchmarks. Plan:
-   [bytecode-refinement.md](bytecode-refinement.md).
+   statements are proved on the Stele spec. WETH9 and Morpho Blue are already EquiVM benchmarks. Huff contracts
+   (asyncswap/v2-raff, built with `hnc`) go through the same layer: their bytecode is proved to refine the Stele spec
+   of the Solidity they were ported from. Plan: [bytecode-refinement.md](bytecode-refinement.md).
 9. **A branch viewer.** Every branch of the repository's history in one diagram, each commit marked with what was
    verified at it (spec built, functions proved), and the branch the specs chase highlighted.
 
@@ -68,6 +69,7 @@ What Formal Mind is, the problem it solves and its focus: [README.md](../README.
 | 3 | Concolic skill for the formal agents in 0.1.x, or only in 0.2? | Add it as an extra skill once 0.2 ships; the four published skills don't change. |
 | 4 | Bring back PR review comments? | Yes, opt-in. It's what outside teams see first. |
 | 5 | EquiVM's Stele spec as the semantics of record, beside or instead of SolidCore? | Start beside: link WETH9's statements to EquiVM's WETH9 benchmark first, then decide with SolidCore's spike. |
+| 6 | Prove Huff (v2-raff) with EquiVM, or build our own EVM layer on EVMYulLean? | EquiVM: it proves any bytecode refines a spec, so the Huff port is proved against its Solidity original's spec. Spike on FeeVault first. |
 
 ## Milestones
 

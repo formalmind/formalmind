@@ -64,6 +64,43 @@ may rest on `native_decide` facts; every audit that cites them lists "Lean's com
 facts in the bytecode proofs" in its trusted base, with the count. Proofs about the source model and about Stele specs
 keep the strict rule: no `native_decide`.
 
+## Huff contracts: v2-raff (planned 2026-10-28)
+
+asyncswap/v2-raff ports asyncswap/contracts to Huff, compiled with Huff Neo (`hnc`). Huff has no AST that formal-ast
+can read, and today the swarm stops on it ("formal-ast found no function in scope"). EquiVM never reads source,
+only bytecode, so a Huff contract fits the same pipeline. Its spec comes from the Solidity it was ported from:
+
+```mermaid
+flowchart LR
+    Sol["contracts/src/FeeVault.sol (the original)"] -->|sol2stele.py| Spec["Stele spec"]
+    Huff["v2-raff/src/FeeVault.huff"] -->|hnc -b| Bytes["Huff bytecode"]
+    Bytes -->|refines, proved with EquiVM| Spec
+    SolBytes["solc bytecode of the original"] -->|refines| Spec
+```
+
+When both bytecodes refine the same spec, the Huff port does what the original does, and every statement proved
+on that spec holds for both. This is the equivalence v2-raff needs, and it uses no Huff-specific prover.
+
+1. **The folder knows it's Huff.** `formalmind.toml` gets `[bytecode] compiler = "hnc"` and `original =` the path of
+   the Solidity repository. The plan takes its functions from the original's ABI, matched to the Huff dispatcher by
+   selector, instead of from formal-ast. Until this lands, the swarm says "a Huff project: add a `[bytecode]`
+   section" instead of "no script under script/".
+2. **Differential tests first.** Run the Huff and the solc bytecode on the same random calls and states (EquiVM's
+   tests, our anvil runner, the Bug Hunter) and compare return data, storage, logs and reverts. Each disagreement is
+   a finding with a Foundry PoC. The original's Foundry suite already runs against v2-raff, so this extends what
+   exists.
+3. **Refinement per function, smallest first.** FeeVault (the hook's vault, deployed from `src/generated/`), then the
+   claims contracts, then Router and AsyncSwap. Hand-written Huff skips solc's checks and reuses stack slots, so
+   proofs may take longer than for solc output. FeeVault shows how much longer before the larger contracts start.
+4. **Statements carry over.** Statements proved on the Stele spec hold for the Huff bytecode as soon as its
+   refinement is proved.
+
+**Why EquiVM and not EVMYulLean directly.** paradigmxyz/EVMYulLean (Apache-2.0) is an EVM model too, and solidus
+builds a verified Yul → bytecode compiler on it. Using it means building our own refinement framework, spec
+language and proof scaffolding, which EquiVM already has, MIT, with 35 contracts proved. EVMYulLean, solidus and
+solidity-lean stay references. solidus and solidity-lean depend on danrobinson/evm-interaction, which has no
+licence, so neither can be vendored as it is. NethermindEth/Clear is non-commercial only and is not used.
+
 ## Open questions
 
 - Keep the formal-ast model as the fast first pass, and refinement as the stronger layer? Or move statements to Stele
