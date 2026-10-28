@@ -1380,7 +1380,8 @@ export function NavGroup({ name, git, mode, onMode, inBar, compact }: { name: st
 					style={{ left: pill.left, width: pill.width }}
 				/>
 			) : null}
-			{MODES.map(({ id, label, icon: Icon }) =>
+			{/* No tab for the folder itself: its files open from the file tree, in the Code view. */}
+			{MODES.filter((m) => m.id !== "code").map(({ id, label, icon: Icon }) =>
 				// The Code tab is the folder itself: its name, with the GitHub mark when it is a git repository.
 				id === "code" ? (
 					<button key={id} type="button" role="tab" aria-selected={mode === id} aria-label={`Code · ${name}`} title={`Code · ${name}`} onClick={() => onMode(id)} className={`${tab(mode === id)} min-w-0`}>
