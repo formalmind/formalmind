@@ -2745,7 +2745,8 @@ export function SwarmPanel({ folder, name, scan, bridge, session, file: openPath
 					)}
 				</div>
 				{/* Corners nest: the panel 28px, inset 4px; this card 24px; the composer 16px, inset 8px. */}
-				<div className={`mt-1 flex min-h-0 flex-1 flex-col overflow-hidden ${slot ? "" : "rounded-[24px] border bg-card"}`}>
+				{/* On the chat page it has no card around it; floating over the canvas it does. */}
+				<div className={`mt-1 flex min-h-0 flex-1 flex-col overflow-hidden ${slot || mode === "chat" ? "" : "rounded-[24px] border bg-card"}`}>
 				<div className="relative flex min-h-0 flex-1 flex-col">
 				<div
 					ref={chat}
