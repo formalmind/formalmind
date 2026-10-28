@@ -1967,7 +1967,8 @@ export function SwarmPanel({ folder, name, scan, bridge, session, file: openPath
 		}
 		void invoke<string>("folder_read", { folder, path }).then(
 			(text) => setFile({ path, text }),
-			(e) => setError(String(e)),
+			// A path from an older message can point at a file that moved since (validation/lean/ is formal/ now).
+			(e) => setError(/os error 2|No such file/i.test(String(e)) ? `${path} isn't in this folder any more; it may have moved.` : String(e)),
 		);
 	};
 	/** Opens a file in the Code tab. */
