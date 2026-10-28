@@ -79,6 +79,21 @@ pub const PREFIX: &str = "@skills/";
 /// A `@skills/<id>/<file>` path as the file on disk, or None (not a skills path, or one that leaves the folder).
 pub fn resolve(path: &str) -> Option<PathBuf> {
     let rest = path.strip_prefix(PREFIX)?;
+    skills_file(rest)
+}
+
+/// `skills/<id>/<file>` (the prefix without its `@`, as models often write it) when the folder has no such file and
+/// `<id>` is an added skill: the same file as `@skills/<id>/<file>`.
+pub fn resolve_bare(root: &Path, path: &str) -> Option<PathBuf> {
+    let rest = path.strip_prefix("skills/")?;
+    let id = rest.split('/').next()?;
+    if root.join(path).exists() || !CATALOG.iter().any(|s| s.id == id) || !installed(id) {
+        return None;
+    }
+    skills_file(rest)
+}
+
+fn skills_file(rest: &str) -> Option<PathBuf> {
     if rest.is_empty() || rest.split('/').any(|p| p.is_empty() || p == "." || p == "..") {
         return None;
     }
@@ -225,5 +240,7 @@ mod tests {
         assert!(resolve("@skills/../config.json").is_none());
         assert!(resolve("@skills/a/../../x").is_none());
         assert!(resolve("src/A.sol").is_none());
+        assert!(resolve_bare(Path::new("/nowhere"), "skills/not-a-skill/x.md").is_none(), "only catalogue ids");
+        assert!(resolve_bare(Path::new("/nowhere"), "skills/pashov-lenses/../../x").is_none());
     }
 }
