@@ -2651,7 +2651,7 @@ export function SwarmPanel({ folder, name, scan, bridge, session, file: openPath
 				{payingPlan}
 				<ChevronDown className="size-3" />
 			</DropdownMenuTrigger>
-			<DropdownMenuContent align="end" className="w-56">
+			<DropdownMenuContent align="end" sideOffset={6} className="w-60 rounded-2xl p-1.5 shadow-lg [&_[role=menuitem]]:rounded-lg [&_[role=menuitem]]:px-2.5 [&_[role=menuitem]]:py-2">
 				<DropdownMenuLabel className="text-xs font-normal text-muted-foreground">The agents run on</DropdownMenuLabel>
 				<DropdownMenuItem onSelect={() => choosePlan("claude-code")} disabled={!claudePlan} className="text-[13px]">
 					{claudePlan ?? "Claude plan"}
@@ -2671,7 +2671,7 @@ export function SwarmPanel({ folder, name, scan, bridge, session, file: openPath
 				{run || viewing ? `$${spent.toFixed(2)} / $${budget}` : `Budget $${budget}`}
 				<ChevronDown className="size-3" />
 			</DropdownMenuTrigger>
-			<DropdownMenuContent align="end" className="w-56">
+			<DropdownMenuContent align="end" sideOffset={6} className="w-60 rounded-2xl p-1.5 shadow-lg [&_[role=menuitem]]:rounded-lg [&_[role=menuitem]]:px-2.5 [&_[role=menuitem]]:py-2">
 				<DropdownMenuLabel className="text-xs font-normal text-muted-foreground">Stop the swarm at</DropdownMenuLabel>
 				{BUDGETS.map((b) => (
 					<DropdownMenuItem
