@@ -71,3 +71,7 @@ for what could break, and the assistant in the chat. Nothing in a skill runs, an
 
 To audit from the chat, ask the assistant: "audit `Lending.liquidate` with the lenses". Each real issue it finds comes
 with a Foundry PoC and lands on the Bugs page, naming the lens that led to it.
+
+In the chat, skills work as they do in Claude Code: `/skills` lists them, `/skills add <id>` and `/skills remove <id>`
+add or remove one for every project, and `/<id> <request>` asks the agents to use it, as in
+`/pashov-lenses audit Lending.liquidate`.

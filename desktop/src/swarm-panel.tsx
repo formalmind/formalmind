@@ -2241,13 +2241,13 @@ export function SwarmPanel({ folder, name, scan, bridge, session, file: openPath
 	// `onlyQueued`: a run for the work already queued (reading a report), which stops when that's done.
 	// The page says what to start; the backend (its control API, as the MCP uses it) picks the model
 	// route, the model and the cap from the settings.
-	const start = async () => {
+	const start = async (focus?: string) => {
 		setError(null);
 		// A new session starts empty; Resume carries on below the chat you're reading.
 		const fresh = session === "new" && !viewing;
 		if (fresh) setEvents([]);
 		try {
-			const started = await invoke<{ run: string } | undefined>("control", { op: "start", folder, args: { goal: goal.trim(), run: fresh ? `s-${Date.now().toString(16)}` : viewing ?? "swarm" } });
+			const started = await invoke<{ run: string } | undefined>("control", { op: "start", folder, args: { goal: (focus ?? goal).trim(), run: fresh ? `s-${Date.now().toString(16)}` : viewing ?? "swarm" } });
 			if (!started?.run) throw new Error("The swarm didn't start: no session came back.");
 			const id = started.run;
 			setRuns((r) => (r.includes(id) ? r : [...r, id]));
@@ -2276,6 +2276,47 @@ export function SwarmPanel({ folder, name, scan, bridge, session, file: openPath
 		setSay("");
 		// The app sends it back as a `you` event (desktop/src-tauri/src/swarm.rs), logged with the session.
 		await invoke("swarm_say", { folder, run, text }).catch((e) => setError(String(e)));
+	};
+
+	// Skill commands in the composer, as Claude Code writes them: `/skills`, `/skills add <id>`, `/skills remove <id>`
+	// are handled here and answered in the chat; `/<id> <request>` asks the agents to use that skill. Returns the text to
+	// send on (rewritten for `/<id>`), or null when the command was handled.
+	const note = (text: string) => setEvents((all) => [...all, { run: viewing ?? "", kind: "say", role: "swarm", item: "", text, spent: all.at(-1)?.spent ?? 0, at: Date.now() }]);
+	const skillCommand = async (text: string): Promise<string | null> => {
+		const m = text.match(/^\/([\w-]+)(?:\s+([\s\S]*))?$/);
+		if (!m) return text;
+		type S = { id: string; name: string; author: string; added: boolean };
+		const list = (await invoke<S[] | undefined>("skills_catalog").catch(() => undefined)) ?? [];
+		const [, cmd, rest = ""] = m;
+		if (cmd === "skills") {
+			const [verb, id] = rest.trim().split(/\s+/);
+			if (verb === "add" || verb === "remove") {
+				const s = list.find((x) => x.id === id);
+				if (!s) return note(`No skill \`${id ?? ""}\`. \`/skills\` lists them.`), null;
+				await invoke(verb === "add" ? "skills_add" : "skills_remove", { id: s.id }).then(
+					() => note(`${verb === "add" ? "Added" : "Removed"} ${s.name} (${s.author}) for every project.`),
+					(e) => note(`Couldn't ${verb} ${s.name}: ${String(e)}`),
+				);
+				return null;
+			}
+			note(list.map((x) => `- \`${x.id}\` ${x.name} · ${x.author}${x.added ? " · added" : ""}`).join("\n") + "\n\n`/skills add <id>` · `/skills remove <id>` · `/<id> <request>` to use one");
+			return null;
+		}
+		const s = list.find((x) => x.id === cmd);
+		if (!s) return text;
+		if (!s.added) return note(`${s.name} isn't added yet: \`/skills add ${s.id}\`.`), null;
+		return `Use the ${s.name} skill (${s.author}; its files are under @skills/${s.id}/): ${rest.trim() || "audit the code in scope with it"}`;
+	};
+	const submit = async () => {
+		const typed = (run ? say : goal).trim();
+		if (!typed.startsWith("/")) return void (run ? send() : start());
+		const next = await skillCommand(typed);
+		if (next === null) return run ? setSay("") : setGoal("");
+		// The rewritten request goes on directly (state set now would land only after this call).
+		if (run) {
+			setSay("");
+			await invoke("swarm_say", { folder, run, text: next }).catch((e) => setError(String(e)));
+		} else void start(next);
 	};
 
 	const spent = events.at(-1)?.spent ?? 0;
@@ -2907,7 +2948,7 @@ export function SwarmPanel({ folder, name, scan, bridge, session, file: openPath
 						rounded="rounded-2xl"
 						value={run ? say : goal}
 						onChange={(e) => (run ? setSay(e.target.value) : setGoal(e.target.value))}
-						onSubmit={() => void (run ? send() : start())}
+						onSubmit={() => void submit()}
 						// One button: ↑ starts and sends; while it runs, an empty box
 						// makes it Stop, which stops the session.
 						onStop={() => void invoke("swarm_stop", { folder, run })}
