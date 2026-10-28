@@ -3184,7 +3184,7 @@ export function SwarmPanel({ folder, name, scan, bridge, session, file: openPath
 						</button>
 					</aside>
 					{/* New agent messages since you folded the chat, counted like the bell's (outside the shape, so it isn't clipped). */}
-					{!chatOpen && unread ? <span className="pointer-events-none absolute bottom-[3.25rem] right-3 z-30 grid h-5 min-w-5 translate-x-1 place-items-center rounded-full border-2 border-background bg-red-500 px-1 text-[10px] font-semibold tabular-nums text-white">{unread > 99 ? "99+" : unread}</span> : null}
+					{!chatOpen && unread ? <span className="pointer-events-none absolute bottom-[3.25rem] right-3 z-30 grid h-5 min-w-5 translate-x-1 place-items-center fm-badge rounded-full border-2 border-background bg-red-500 px-1 text-[10px] font-semibold tabular-nums text-white">{unread > 99 ? "99+" : unread}</span> : null}
 				</>
 			) : null}
 		</div>
