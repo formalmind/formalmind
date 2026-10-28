@@ -82,7 +82,7 @@
     "@types/react": "^19",
     "@types/react-dom": "^19",
     "@vitejs/plugin-react": "5.0.4",
-    "eslint": "^9",
+    "eslint": "^10",
     "eslint-plugin-react-hooks": "7.1.1",
     "postcss": "^8",
     "storybook": "10.6.3",
