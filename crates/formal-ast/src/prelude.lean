@@ -152,6 +152,12 @@ def abiWordAt (bs : List Nat) (pos : Nat) : M σ Nat :=
 def abiBytesAt (bs : List Nat) (pos : Nat) : M σ (List Nat) := do
   let len ← abiWordAt bs pos
   if pos + 32 + len ≤ bs.length then pure ((bs.drop (pos + 32)).take len) else throw ⟨"abi.decode"⟩
+/-- A dynamic array of static elements at byte `pos`: its length, then element `i` at `pos + 32 + i * stride`;
+  data too short reverts, as `abi.decode` does. -/
+def abiArrayAt {α : Type} (bs : List Nat) (pos stride : Nat) (elem : Nat → M σ α) : M σ (List α) := do
+  let len ← abiWordAt bs pos
+  if pos + 32 + len * stride ≤ bs.length then (List.range len).mapM (fun i => elem (pos + 32 + i * stride))
+  else throw ⟨"abi.decode"⟩
 /-- `bytes` as an ABI tail: its length, the data, zero padding to a whole word. -/
 def abiBytes (bs : List Nat) : List Nat := wordBytes bs.length ++ bs ++ List.replicate ((32 - bs.length % 32) % 32) 0
 

@@ -26,6 +26,12 @@ The Lean model is generated from the compiler's syntax tree, one file per contra
 to another contract is an opaque step that returns whatever that contract returns, so a proof that relies on what a
 token or an oracle does says so in its assumptions.
 
+Immutables aren't storage: the deployed code reads them as constants, so the model reads them from the contract's
+`Ext`. The constructor's definition (`<Contract>.constructor`) runs the whole deployment, base constructors first,
+and returns that `Ext` with the immutables it set. A function that writes through a memory parameter (a struct or
+array its caller passed) returns the new value after its results, and the caller's copy is updated, as shared memory
+would be.
+
 Code written for Solidity before 0.8, where arithmetic wraps instead of reverting on overflow, is modelled that way:
 the model's arithmetic follows the compiler the code was written for.
 
