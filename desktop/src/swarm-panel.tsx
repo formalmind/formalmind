@@ -4,7 +4,6 @@ import { createPortal } from "react-dom";
 import { NvimTerminal } from "./nvim-terminal";
 import { reportError } from "@/lib/report-error";
 import { JsonTree } from "./json-tree";
-import { inDesktop } from "@/lib/open-web";
 import { ArrowDown, Bug, Check, ChevronDown, ChevronRight, CircleCheck, CircleX, LoaderCircle, MoreHorizontal, Pause, Code2, Copy, FileCode2, Folder, Network, Plus, ScanSearch, Square, SquareCheck, ThumbsDown, ThumbsUp, WandSparkles } from "lucide-react";
 
 // The project roadmap (GitHub Projects-style), the same view the web app had on its own page.
@@ -1339,8 +1338,9 @@ const PANE_VIEWS: { id: Mode; label: string; icon: React.ComponentType<{ classNa
 	{ id: "code", label: "Code", icon: Code2 },
 ];
 
-const MODES: { id: Mode; label: string; icon: typeof Code2 }[] = [
+const MODES: { id: Mode; label: string; icon: React.ComponentType<{ className?: string }> }[] = [
 	{ id: "code", label: "Code", icon: Code2 },
+	{ id: "chat", label: "Chat", icon: TalkIcon },
 	{ id: "swarm", label: "Swarm", icon: Network },
 	{ id: "audit", label: "Proofs", icon: ScanSearch },
 	{ id: "bugs", label: "Bugs", icon: Bug },
@@ -1930,8 +1930,8 @@ export function SwarmPanel({ folder, name, scan, bridge, session, file: openPath
 	// The page's mode (Code, Swarm, Audit) and the open file live in the URL, so they survive reloads.
 	const [params, setParams] = useSearchParams();
 	// The roadmap lives on the Swarm canvas now and Chat has no tab; old links to either open Swarm.
-	// In the Mac app the chat is the page: it opens first; the website keeps the canvas.
-	const mode = resolveMode(params.get("mode") ?? defaultMode ?? (inDesktop() ? "chat" : "swarm"));
+	// The chat is the page: it opens first, in the Mac app and on the website.
+	const mode = resolveMode(params.get("mode") ?? defaultMode ?? "chat");
 	const canvas = mode === "swarm";
 	// The main contract's entry points, read from the AST, so the plan can name the ones each item covers.
 	const [entryUnits, setEntryUnits] = useState<AstUnit[]>([]);
@@ -3117,7 +3117,14 @@ export function SwarmPanel({ folder, name, scan, bridge, session, file: openPath
 		<div ref={root} className="relative flex h-full min-h-0 flex-1" style={{ "--fm-top": slot ? "0px" : "3.5rem" } as React.CSSProperties}>
 			{/* The canvas, as on the Swarm page, with the plan, files and bugs floating over it as one accordion. */}
 			<div className="absolute inset-0 flex flex-col overflow-hidden">
-				{modeViews}
+				{mode === "chat" ? (
+					// The chat as the page: one centred column under the tabs, as wide as reads well.
+					<div className="flex min-h-0 flex-1 justify-center px-4 pb-3" style={{ paddingTop: "calc(var(--fm-top) + 3.25rem)" }}>
+						<div className="flex min-h-0 w-full max-w-3xl flex-col">{chatPanel}</div>
+					</div>
+				) : (
+					modeViews
+				)}
 				{nav}
 			</div>
 
