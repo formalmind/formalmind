@@ -702,7 +702,10 @@ export function SwarmCanvas({ state, fill = false, contain = false, title, actio
 			return null;
 		}
 	});
-	const besideWidth = beside ? Math.min(Math.max(240, besideW ?? beside.width), W - PAD * 2 - 360) : 0;
+	const [besideFitH, setBesideFitH] = useState<number | null>(null);
+	const [besideFitW, setBesideFitW] = useState<number | null>(null);
+	// As wide as its widest row unless the viewer dragged it (measured with the cards' heights, below).
+	const besideWidth = beside ? Math.min(Math.max(240, besideW ?? besideFitW ?? beside.width), W - PAD * 2 - 360) : 0;
 	/** A drag on an edge: calls `set` with the board-unit width as it moves, keeps it under `key` when it ends. */
 	const dragWidth = (e: React.PointerEvent, from: number, dir: 1 | -1, min: number, max: number, set: (w: number) => void, key: string) => {
 		e.preventDefault();
@@ -748,9 +751,34 @@ export function SwarmCanvas({ state, fill = false, contain = false, title, actio
 			const pad = parseFloat(getComputedStyle(scroller).paddingTop) + parseFloat(getComputedStyle(scroller).paddingBottom);
 			return top + pad + Array.from(scroller.children).reduce((h, c) => h + (c as HTMLElement).offsetHeight, 0);
 		};
+		// What the card beside needs across: its widest row (`data-hug-row`) at full length; a truncated span's
+		// scrollWidth is its whole text.
+		const across = (body: HTMLElement | null) => {
+			if (!body) return 0;
+			let w = 0;
+			for (const row of body.querySelectorAll<HTMLElement>("[data-hug-row]")) {
+				const cs = getComputedStyle(row);
+				const kids = Array.from(row.children) as HTMLElement[];
+				const gap = parseFloat(cs.columnGap) || 0;
+				w = Math.max(w, parseFloat(cs.paddingLeft) + parseFloat(cs.paddingRight) + kids.reduce((n, k) => n + k.scrollWidth, 0) + gap * Math.max(0, kids.length - 1));
+			}
+			return w;
+		};
 		const measure = () => {
-			const h = Math.ceil(Math.max(need(belowBody.current), need(besideBody.current))) + 36 + 8;
+			const h = Math.ceil(need(belowBody.current)) + 36 + 8;
 			setFitH((old) => (old === h ? old : h));
+			// The card beside is sized by its own content, not by the plan's: as tall as its rows (then it scrolls), as
+			// wide as its widest row.
+			// From its rows, where they're marked: the list's own end (a flex child that fills the card would measure the card).
+			const rows = besideBody.current?.querySelectorAll<HTMLElement>("[data-hug-row]");
+			const list = rows?.length ? (rows[0].parentElement as HTMLElement) : null;
+			const box = besideBody.current;
+			// On screen the board is zoomed and scaled: back to board units by the box's own on-screen-to-layout ratio.
+			const k = box && box.offsetWidth ? box.getBoundingClientRect().width / box.offsetWidth : 1;
+			const bh = list && box ? Math.ceil((list.getBoundingClientRect().bottom - box.getBoundingClientRect().top) / k + box.scrollTop) + 36 + 16 : 160;
+			setBesideFitH((old) => (old === bh ? old : bh));
+			const bw = Math.ceil(across(besideBody.current)) + 2;
+			setBesideFitW((old) => (old === bw ? old : bw));
 		};
 		measure();
 		// The plan and the history change as the swarm works: look again every second.
@@ -758,7 +786,9 @@ export function SwarmCanvas({ state, fill = false, contain = false, title, actio
 		return () => clearInterval(t);
 	}, [below]);
 	const belowHeight = below ? Math.max(240, belowH ?? fitH ?? below.height) : 0;
-	const boardH = below ? panelsEnd + BELOW_GAP + belowHeight + PAD : panelsEnd;
+	// Its own height: what its rows need, up to a screenful of the board (then it scrolls inside).
+	const besideHeight = beside ? Math.min(960, Math.max(160, besideFitH ?? belowHeight)) : 0;
+	const boardH = below ? panelsEnd + BELOW_GAP + Math.max(belowHeight, besideHeight) + PAD : panelsEnd;
 	// In fill mode people can pan and zoom: `view` sits on top of the fitted placement.
 	const [view, setRawView] = useState({ k: 1, x: 0, y: 0 });
 	// The canvas is unbounded: pan anywhere; the fit button in the zoom pill brings the board back.
@@ -961,16 +991,19 @@ export function SwarmCanvas({ state, fill = false, contain = false, title, actio
 	const s = scale * view.k;
 	const ox = fit.x + view.x;
 	const oy = fit.y + view.y;
-	// The zoom the text is laid out at. CSS `zoom` keeps text sharp, but laying it out again at every wheel step makes it
-	// jitter and restarts its animations (WebKit), so mid-gesture the board is scaled from the last sharp zoom on the
-	// GPU, and 160 ms after the last step the sharp zoom catches up.
-	const [sharp, setSharp] = useState(s);
+	// The zoom the text is laid out at. CSS `zoom` keeps zoomed-in text sharp, but laying it out again at every wheel step
+	// makes it jitter, so mid-gesture the board is scaled from the last sharp zoom on the GPU and 160 ms after the last
+	// step the sharp zoom catches up. Below 1 it stays at 1 and the board is only scaled: under `zoom` WebKit's minimum
+	// font size keeps small text from shrinking while its lines do, and the lines overlap.
+	const target = Math.max(1, s);
+	const [sharp, setSharp] = useState(target);
 	useEffect(() => {
-		if (sharp === s) return;
-		const t = setTimeout(() => setSharp(s), 160);
+		if (sharp === target) return;
+		const t = setTimeout(() => setSharp(target), 160);
 		return () => clearTimeout(t);
-	}, [s, sharp]);
-	// The lanes fade in once, when the board first shows, not again on each re-layout.
+	}, [target, sharp]);
+	// The lanes fade in once, when the board first shows; after that no entrance animation on the board plays again
+	// (WebKit restarts them when the zoom changes).
 	const [entered, setEntered] = useState(false);
 	useEffect(() => {
 		const t = setTimeout(() => setEntered(true), 900);
@@ -1198,7 +1231,7 @@ export function SwarmCanvas({ state, fill = false, contain = false, title, actio
 				}}
 			>
 				<div
-					className="absolute left-0 top-0 origin-top-left"
+					className={`absolute left-0 top-0 origin-top-left ${entered ? "[&_.animate-in]:![animation:none]" : ""}`}
 					style={{
 						width: W,
 						height: boardH,
@@ -1209,7 +1242,8 @@ export function SwarmCanvas({ state, fill = false, contain = false, title, actio
 						zoom: sharp,
 						transform: `translate(${ox / sharp}px, ${oy / sharp}px)${sharp === s ? "" : ` scale(${s / sharp})`}`,
 						transformOrigin: "0 0",
-						willChange: sharp === s ? undefined : "transform",
+						// A layer only mid-gesture: at rest the scaled text is drawn at its final size, not stretched.
+						willChange: sharp === target ? undefined : "transform",
 						...(fill ? {} : DOTS),
 					}}
 				>
@@ -1223,7 +1257,7 @@ export function SwarmCanvas({ state, fill = false, contain = false, title, actio
 						<section
 							data-canvas-ui
 							className="absolute flex flex-col overflow-hidden rounded-xl border bg-card shadow-card"
-							style={{ left: W - PAD - besideWidth, top: panelsEnd + BELOW_GAP, width: besideWidth, height: belowHeight }}
+							style={{ left: W - PAD - besideWidth, top: panelsEnd + BELOW_GAP, width: besideWidth, height: besideHeight }}
 						>
 							{/* Drag the left edge to widen it (the card beside it narrows); double-click for the default. */}
 							<div
@@ -1729,7 +1763,7 @@ function BoardCard({ card, x, y, hidden, href, onEnter, onLeave, onOpen, onMeasu
 				{card.kind === "doc" ? null : <span className="font-mono text-muted-foreground">{card.kind === "pr" ? "PR" : "#"}{card.number}</span>}
 				<span className={`rounded px-1.5 py-px font-mono text-[10px] ${LABEL_STYLES[card.label] ?? LABEL_STYLES.README}`}>{card.label}</span>
 			</div>
-			<p className="mt-1 text-[13px] leading-snug text-foreground">{card.title}</p>
+			<p className="mt-1 text-[13px] leading-snug text-foreground [overflow-wrap:anywhere]">{card.title}</p>
 		</Tag>
 	);
 }
@@ -1880,7 +1914,7 @@ function Panel({ index, title, repo, top = ONE.panelTop, onMeasure, count = 3, c
 		<div
 			ref={ref}
 			data-component
-			className="absolute flex cursor-default flex-col rounded-lg border bg-background p-3"
+			className="absolute flex cursor-default flex-col rounded-lg border bg-background p-3 [overflow-wrap:anywhere]"
 			style={{ left: panelX(index, count), top, width: panelW(count), ...(grows ? { minHeight: PANEL_H } : { height: PANEL_H }) }}
 		>
 			{repo ? (
