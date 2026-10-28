@@ -2766,8 +2766,10 @@ export function SwarmPanel({ folder, name, scan, bridge, session, file: openPath
 						</DropdownMenuContent>
 					</DropdownMenu>
 					{actionsSlot ? null : ctxMenu}
-					{actionsSlot ? null : costMenu}
-					{slot ? null : (
+					{/* On a plan the model picks it (a GPT model the ChatGPT plan, a Claude one the Claude plan); a key shows its spending cap. */}
+					{actionsSlot || payingPlan ? null : costMenu}
+					{/* Hiding the chat only applies to it floating over the canvas, not to the chat page. */}
+					{slot || mode === "chat" ? null : (
 						<button type="button" onClick={() => toggleChat(false)} title="Hide the chat" aria-label="Hide the chat" className="inline-flex size-7 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-background hover:text-foreground">
 							<ChevronDown className="size-3.5" />
 						</button>
@@ -3127,7 +3129,7 @@ export function SwarmPanel({ folder, name, scan, bridge, session, file: openPath
 		return (
 			<div ref={root} className="relative flex h-full min-h-0 flex-1">
 				{/* The folder's tab names it, in its own place among the tabs; only the page's actions go to the title bar. */}
-				{actionsSlot ? createPortal(<>{ctxMenu}{costMenu}{paneTools}</>, actionsSlot) : null}
+				{actionsSlot ? createPortal(<>{ctxMenu}{payingPlan ? null : costMenu}{paneTools}</>, actionsSlot) : null}
 				{mode === "chat" ? (
 					// The chat as the page: one centred column, as wide as reads well.
 					<div className="relative flex min-h-0 min-w-0 flex-1 justify-center px-4 pb-3 pt-2">
