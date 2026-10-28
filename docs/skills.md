@@ -5,12 +5,13 @@ Roadmap item 7: auditors bring their own skills, and Formal Mind runs them insid
 ## 1. The Skills page
 
 A page (Settings → Skills in the Mac app) listing free auditing skills, each with what it checks, who wrote it, its
-licence and its source. **Add** puts a skill into one folder's swarm; **Remove** takes it out.
+licence and its source. **Add** adds a skill for every project on this computer; **Remove** takes it out.
 
-- **What a skill is here:** Markdown checklists, pinned to a commit of their source repository. Added to a folder, the
-  files are copied into `.formal/skills/<id>/` with a `SOURCE.md` naming the author, licence, repository and commit.
+- **What a skill is here:** Markdown checklists, pinned to a commit of their source repository. Added, the files are
+  copied into `~/.formalmind/skills/<id>/` with a `SOURCE.md` naming the author, licence, repository and commit.
   Nothing runs: the files are read, never executed.
-- **How the swarm uses it:** each agent's system prompt lists the folder's added skills, the files that apply to its
+- **How the swarm uses it:** each agent's system prompt lists the added skills (as `@skills/<id>/<file>`, which
+  `read_file` resolves to that folder), the files that apply to its
   role, and when to read them (the reviewer before its verdict, the prover when it looks for what could break). The
   agent reads them with `read_file`. Our own skills and role prompts don't change, and our checks still decide:
   `lake build`, `forge test`, a PoC for every bug.

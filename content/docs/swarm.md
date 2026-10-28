@@ -65,8 +65,8 @@ git, and its shell is limited to `lake` and `forge`.
 ## Skills
 
 **Settings → Skills** lists free auditing checklists by other authors, such as Pashov Audit Group's hacking lenses
-(MIT). **Add** copies one into a project's `.formal/skills/`, pinned to a commit of its source with a `SOURCE.md` for
-the attribution. The agents whose work it fits then read it: the reviewer before a verdict, the prover when it looks
+(MIT). **Add** copies one into `~/.formalmind/skills/` for every project, pinned to a commit of its source with a
+`SOURCE.md` for the attribution. The agents whose work it fits then read it: the reviewer before a verdict, the prover when it looks
 for what could break, and the assistant in the chat. Nothing in a skill runs, and the swarm's own checks still decide.
 
 To audit from the chat, ask the assistant: "audit `Lending.liquidate` with the lenses". Each real issue it finds comes

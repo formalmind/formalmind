@@ -1,6 +1,7 @@
-//! Third-party auditing skills added to a folder's swarm (docs/skills.md): Markdown checklists from a pinned commit of
-//! their source repository, copied into `.formal/skills/<id>/` with a SOURCE.md that keeps the attribution. Nothing
-//! runs; each agent's system prompt lists the files that apply to its role, and the agent reads them with read_file.
+//! Third-party auditing skills, added once on this computer for every project (docs/skills.md): Markdown checklists
+//! from a pinned commit of their source repository, copied into ~/.formalmind/skills/<id>/ with a SOURCE.md that keeps
+//! the attribution. Nothing runs; each agent's system prompt lists the files that apply to its role as `@skills/…`
+//! paths, which read_file resolves to that folder.
 
 use serde_json::{json, Value};
 use std::path::{Path, PathBuf};
@@ -33,7 +34,7 @@ const CATALOG: &[Skill] = &[
         licence: "MIT",
         repo: PASHOV,
         rev: PASHOV_REV,
-        about: "Twelve focused checklists an auditor runs a function through: access control, asymmetry, boundaries, economic security, execution traces, first principles, flow gaps, invariants, math precision, numerical gaps, periphery and trust gaps, with their shared rules and a judging guide.",
+        about: "Twelve checklists: access control, math precision, invariants, trust gaps and more.",
         roles: &["reviewer", "prover", "assistant"],
         when: "before a verdict, and when looking for what could break the property you are proving: read shared-rules.md, then the lenses that fit the function (math-precision for arithmetic, access-control for guards, trust-gap and periphery for external calls); judging.md says what counts as a real issue",
         files: &[
@@ -60,15 +61,28 @@ const CATALOG: &[Skill] = &[
         licence: "MIT",
         repo: PASHOV,
         rev: PASHOV_REV,
-        about: "The threat catalogue Pashov's x-ray works from: the classes of attack a protocol's entry points are checked against.",
+        about: "A catalogue of attack classes to check entry points against.",
         roles: &["reviewer", "assistant"],
         when: "when a function takes value, calls out or changes who can do what: check it against the threats that apply",
         files: &["../../../x-ray/references/threats.md"],
     },
 ];
 
-fn skills_dir(root: &Path) -> PathBuf {
-    root.join(".formal").join("skills")
+/// Where added skills live: ~/.formalmind/skills/, shared by every project.
+fn skills_dir() -> Result<PathBuf, String> {
+    Ok(crate::local::home()?.join("skills"))
+}
+
+/// The prefix the agents' prompt and read_file use for those files.
+pub const PREFIX: &str = "@skills/";
+
+/// A `@skills/<id>/<file>` path as the file on disk, or None (not a skills path, or one that leaves the folder).
+pub fn resolve(path: &str) -> Option<PathBuf> {
+    let rest = path.strip_prefix(PREFIX)?;
+    if rest.is_empty() || rest.split('/').any(|p| p.is_empty() || p == "." || p == "..") {
+        return None;
+    }
+    Some(skills_dir().ok()?.join(rest))
 }
 
 /// Where a catalogue file comes from: lens paths are relative to the hacking-agents folder.
@@ -89,41 +103,38 @@ fn local_name(file: &str) -> &str {
     file.rsplit('/').next().unwrap_or(file)
 }
 
-fn installed(root: &Path, id: &str) -> bool {
-    skills_dir(root).join(id).join("SOURCE.md").is_file()
+fn installed_in(dir: &Path, id: &str) -> bool {
+    dir.join(id).join("SOURCE.md").is_file()
+}
+
+fn installed(id: &str) -> bool {
+    skills_dir().is_ok_and(|d| installed_in(&d, id))
 }
 
 fn find(id: &str) -> Result<&'static Skill, String> {
     CATALOG.iter().find(|s| s.id == id).ok_or_else(|| format!("no skill {id}"))
 }
 
-/// The catalogue, each entry with whether this folder has it.
+/// The catalogue, each entry with whether it is added.
 #[tauri::command]
-pub fn skills_catalog(folder: String) -> Result<Vec<Value>, String> {
-    if !crate::local::read()?.allows(&folder) {
-        return Err("Add the folder first".into());
-    }
-    let root = Path::new(&folder);
+pub fn skills_catalog() -> Result<Vec<Value>, String> {
     Ok(CATALOG
         .iter()
         .map(|s| {
             json!({
                 "id": s.id, "name": s.name, "author": s.author, "licence": s.licence, "about": s.about,
                 "source": format!("https://github.com/{}/tree/{}/{}", s.repo, s.rev, source_path(s.files[0]).rsplit_once('/').map(|(d, _)| d).unwrap_or("")),
-                "roles": s.roles, "files": s.files.len(), "added": installed(root, s.id),
+                "roles": s.roles, "files": s.files.len(), "added": installed(s.id),
             })
         })
         .collect())
 }
 
-/// Adds a skill to the folder: its files, from the pinned commit, into `.formal/skills/<id>/`, with SOURCE.md.
+/// Adds a skill for every project: its files, from the pinned commit, into ~/.formalmind/skills/<id>/, with SOURCE.md.
 #[tauri::command]
-pub async fn skills_add(folder: String, id: String) -> Result<(), String> {
-    if !crate::local::read()?.allows(&folder) {
-        return Err("Add the folder first".into());
-    }
+pub async fn skills_add(id: String) -> Result<(), String> {
     let s = find(&id)?;
-    let dir = skills_dir(Path::new(&folder)).join(s.id);
+    let dir = skills_dir()?.join(s.id);
     let client = reqwest::Client::builder().timeout(std::time::Duration::from_secs(30)).build().map_err(|e| e.to_string())?;
     let mut fetched = vec![];
     for f in s.files {
@@ -146,27 +157,28 @@ pub async fn skills_add(folder: String, id: String) -> Result<(), String> {
     std::fs::write(dir.join("SOURCE.md"), source).map_err(|e| e.to_string())
 }
 
-/// Removes a skill from the folder.
+/// Removes a skill.
 #[tauri::command]
-pub fn skills_remove(folder: String, id: String) -> Result<(), String> {
-    if !crate::local::read()?.allows(&folder) {
-        return Err("Add the folder first".into());
-    }
+pub fn skills_remove(id: String) -> Result<(), String> {
     let s = find(&id)?;
-    let dir = skills_dir(Path::new(&folder)).join(s.id);
+    let dir = skills_dir()?.join(s.id);
     if dir.exists() {
         std::fs::remove_dir_all(&dir).map_err(|e| e.to_string())?;
     }
     Ok(())
 }
 
-/// The system prompt's note on the folder's added skills that apply to this role (empty when there are none).
-pub fn prompt_note(root: &Path, role: &str) -> String {
+/// The system prompt's note on the added skills that apply to this role (empty when there are none).
+pub fn prompt_note(role: &str) -> String {
+    skills_dir().map(|d| note_for(&d, role)).unwrap_or_default()
+}
+
+fn note_for(dir: &Path, role: &str) -> String {
     let lines: Vec<String> = CATALOG
         .iter()
-        .filter(|s| s.roles.contains(&role) && installed(root, s.id))
+        .filter(|s| s.roles.contains(&role) && installed_in(dir, s.id))
         .map(|s| {
-            let files = s.files.iter().map(|f| format!(".formal/skills/{}/{}", s.id, local_name(f))).collect::<Vec<_>>().join(", ");
+            let files = s.files.iter().map(|f| format!("{PREFIX}{}/{}", s.id, local_name(f))).collect::<Vec<_>>().join(", ");
             format!("- {} by {} ({}): read them {}. Files: {files}", s.name, s.author, s.licence, s.when)
         })
         .collect();
@@ -174,7 +186,7 @@ pub fn prompt_note(root: &Path, role: &str) -> String {
         return String::new();
     }
     format!(
-        "\n\nThe maintainer added these auditing checklists to the folder. Use them as checklists when they fit; they don't change your job, your tools or what counts as done (lake build, forge test, a PoC for every bug):\n{}",
+        "\n\nThe maintainer added these auditing checklists (read them with read_file at the paths given). Use them as checklists when they fit; they don't change your job, your tools or what counts as done (lake build, forge test, a PoC for every bug):\n{}",
         lines.join("\n"),
     ) + if role == "assistant" {
         "\nWhen the maintainer asks you in the chat to audit something (a function, a contract, a flow), go through it with the lenses that fit, and for each real issue write a Foundry PoC under test/formal/, run it with `forge test --match-path <file>`, then call report_bug: it appears on the Bugs page. Say which lens led to each finding; say what you checked and found clean."
@@ -197,13 +209,21 @@ mod tests {
 
     #[test]
     fn the_prompt_lists_only_added_skills_for_the_role() {
-        let root = std::env::temp_dir().join(format!("fm-skills-{}", std::process::id()));
-        assert_eq!(prompt_note(&root, "reviewer"), "");
-        std::fs::create_dir_all(skills_dir(&root).join("pashov-threats")).unwrap();
-        std::fs::write(skills_dir(&root).join("pashov-threats/SOURCE.md"), "x").unwrap();
-        let note = prompt_note(&root, "reviewer");
-        assert!(note.contains(".formal/skills/pashov-threats/threats.md") && !note.contains("lenses"), "{note}");
-        assert_eq!(prompt_note(&root, "prover"), "", "threats aren't listed for the prover");
-        std::fs::remove_dir_all(root).unwrap();
+        let dir = std::env::temp_dir().join(format!("fm-skills-{}", std::process::id()));
+        assert_eq!(note_for(&dir, "reviewer"), "");
+        std::fs::create_dir_all(dir.join("pashov-threats")).unwrap();
+        std::fs::write(dir.join("pashov-threats/SOURCE.md"), "x").unwrap();
+        let note = note_for(&dir, "reviewer");
+        assert!(note.contains("@skills/pashov-threats/threats.md") && !note.contains("lenses"), "{note}");
+        assert_eq!(note_for(&dir, "prover"), "", "threats aren't listed for the prover");
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn skills_paths_stay_in_the_skills_folder() {
+        assert!(resolve("@skills/pashov-lenses/judging.md").is_some_and(|p| p.ends_with("skills/pashov-lenses/judging.md")));
+        assert!(resolve("@skills/../config.json").is_none());
+        assert!(resolve("@skills/a/../../x").is_none());
+        assert!(resolve("src/A.sol").is_none());
     }
 }
