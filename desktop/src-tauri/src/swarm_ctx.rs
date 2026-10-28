@@ -451,8 +451,59 @@ Check it with `lake build {proofs}.Swarm.{module}` (lake runs in {lake_rel}/). T
         if let Some(sl) = c.slices.get(u.name()) {
             s.push_str(&format!("\n### Its slice (from the AST)\n\n{}\n", crate::executor::clip(sl.clone())));
         }
+        let earlier = archived_proofs(root, &lean);
+        if !earlier.is_empty() {
+            s.push_str("\n### Earlier proofs of it (the archive, read only)\n\nThese theorems proved this def against an older version of the code and its model (formalmind.toml's `lean.archive`). Start from them: keep what still holds, adapt the rest to the def above, and drop what the new code no longer does. Write your proof in the file named above, never in the archive, and don't import from it.\n");
+            let mut room = ARCHIVE_ROOM;
+            for t in &earlier {
+                let text = t.text.trim_end();
+                if text.len() > room {
+                    s.push_str(&format!("\n(more in the archive: {}:{} {})\n", t.file, t.line, t.qualified));
+                    continue;
+                }
+                room -= text.len();
+                s.push_str(&format!("\n`{}` ({}:{}):\n\n```lean\n{text}\n```\n", t.qualified, t.file, t.line));
+            }
+        }
         s
     }
+}
+
+/// How much of the archive's text a brief carries, in bytes; the rest is named by place.
+const ARCHIVE_ROOM: usize = 12_000;
+
+/// formalmind.toml's `lean.archive`: a folder of earlier proofs (an old checkout, e.g. a git worktree at the commit
+/// they were written for), read where it is and never copied into the project. Folder-relative or absolute.
+pub fn archive(root: &Path) -> Option<PathBuf> {
+    let text = std::fs::read_to_string(root.join(CONFIG)).ok()?;
+    let table: toml::Table = text.parse().ok()?;
+    let at = table.get("lean")?.get("archive")?.as_str()?.trim();
+    let p = Path::new(at);
+    let dir = if p.is_absolute() { p.to_path_buf() } else { root.join(p) };
+    dir.is_dir().then_some(dir)
+}
+
+/// The archive's theorems that name `lean`, those without `sorry`, files shown relative to the folder: by its full
+/// name, or by its short name inside the contract's namespace (`namespace AsyncSwap … setMinOrder`).
+pub fn archived_proofs(root: &Path, lean: &str) -> Vec<formal_ast::Theorem> {
+    let Some(dir) = archive(root) else { return vec![] };
+    let names = |hay: &str, name: &str| {
+        !name.is_empty()
+            && hay.match_indices(name).any(|(at, _)| {
+                let edge = |c: Option<char>| c.map_or(true, |c| !(c.is_alphanumeric() || c == '_' || c == '.' || c == '\''));
+                edge(hay[..at].chars().next_back()) && edge(hay[at + name.len()..].chars().next())
+            })
+    };
+    let (ns, short) = lean.rsplit_once('.').unwrap_or(("", lean));
+    let shown = dir.strip_prefix(root).map(|p| p.to_string_lossy().replace('\\', "/")).unwrap_or_else(|_| dir.to_string_lossy().to_string());
+    formal_ast::theorems(&dir)
+        .into_iter()
+        .filter(|t| !t.sorry && (names(&t.text, lean) || (!ns.is_empty() && t.qualified.starts_with(&format!("{ns}.")) && names(&t.text, short))))
+        .map(|mut t| {
+            t.file = format!("{shown}/{}", t.file);
+            t
+        })
+        .collect()
 }
 
 fn status(f: &Func) -> String {
@@ -598,6 +649,26 @@ pub fn chrono_today() -> String {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn the_archive_gives_the_prover_its_old_proofs() {
+        let root = std::env::temp_dir().join(format!("fm-archive-{}", std::process::id()));
+        let old = root.join(".claude/worktrees/old/formal");
+        std::fs::create_dir_all(old.join("Refinement/Swarm")).unwrap();
+        std::fs::write(old.join("lakefile.toml"), "name = \"old\"\n").unwrap();
+        std::fs::write(
+            old.join("Refinement/Swarm/PoolFee.lean"),
+            "theorem fee_ok : AsyncSwap.fee 1 = 1 := by simp [AsyncSwap.fee]\n\ntheorem feeX_ok : AsyncSwap.feeX = 0 := rfl\n\ntheorem fee_todo : AsyncSwap.fee 2 = 2 := by sorry\n\nnamespace AsyncSwap\ntheorem inner : fee 3 = 3 := rfl\nend AsyncSwap\n\ntheorem other : Router.fee 4 = 4 := rfl\n",
+        )
+        .unwrap();
+        assert!(super::archived_proofs(&root, "AsyncSwap.fee").is_empty(), "no archive set");
+        std::fs::write(root.join(super::CONFIG), "[lean]\narchive = \".claude/worktrees/old\"\n").unwrap();
+        let got = super::archived_proofs(&root, "AsyncSwap.fee");
+        assert_eq!(got.iter().map(|t| t.name.as_str()).collect::<Vec<_>>(), ["fee_ok", "inner"], "whole-word matches without sorry, short names inside the namespace");
+        assert_eq!(got[0].file, ".claude/worktrees/old/formal/Refinement/Swarm/PoolFee.lean");
+        assert!(!root.join("validation").exists() && !root.join("Refinement").exists(), "nothing copied into the project");
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
     #[test]
     fn a_model_is_rewritten_when_the_code_changes() {
         let m = |n: usize, body: &str| format!("-- Translated: {n} functions.\ndef fee := {body}\n");
