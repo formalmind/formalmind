@@ -1949,8 +1949,9 @@ export function SwarmPanel({ folder, name, scan, bridge, session, file: openPath
 		}
 		void invoke<string>("folder_read", { folder, path }).then(
 			(text) => setFile({ path, text }),
-			// A path from an older message can point at a file that moved since (validation/lean/ is formal/ now).
-			(e) => setError(/os error 2|No such file/i.test(String(e)) ? `${path} isn't in this folder any more; it may have moved.` : String(e)),
+			// A file that can't be read (one that moved since a message or the address named it) just doesn't open; the
+			// chat's error line is for the swarm, not for files.
+			() => setFile(null),
 		);
 	};
 	/** Opens a file in the Code tab. */
