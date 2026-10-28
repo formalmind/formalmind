@@ -399,7 +399,8 @@ export function ProofWorkspace({ folder, path, invoke, onOpenFile, initialLine =
 				</div>
 				<aside aria-label="Lean infoview" style={{ width: infoview.size }} className="relative flex max-w-[70%] shrink-0 flex-col border-l bg-background text-[12px]">
 					{infoview.handle}
-					<div className="flex min-h-0 flex-1 flex-col overflow-y-auto pb-3">
+					{/* The goals and messages scroll here; nothing in it shrinks to fit (a long goal was cut off). */}
+					<div className="flex min-h-0 flex-1 flex-col overflow-y-auto overscroll-contain pb-3 [&>*]:shrink-0">
 					{error || state?.error ? (
 						<div className="m-2 rounded-lg border border-red-500/30 bg-red-500/5 p-2.5">
 							<pre className="whitespace-pre-wrap font-mono text-[11px] leading-4 text-red-700 dark:text-red-400">{error || state?.error}</pre>
@@ -440,7 +441,7 @@ export function ProofWorkspace({ folder, path, invoke, onOpenFile, initialLine =
 									{d.range.start.line + 1}:{d.range.start.character + 1}
 								</span>
 							</span>
-							<pre className="mt-0.5 max-h-40 overflow-hidden whitespace-pre-wrap break-words font-mono text-[11px] leading-4">{d.message}</pre>
+							<pre className="mt-0.5 max-h-60 overflow-y-auto whitespace-pre-wrap break-words font-mono text-[11px] leading-4">{d.message}</pre>
 						</button>
 					))}
 					{specs.length ? (
