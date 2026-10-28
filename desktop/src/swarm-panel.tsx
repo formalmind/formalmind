@@ -2655,7 +2655,6 @@ export function SwarmPanel({ folder, name, scan, bridge, session, file: openPath
 					ChatGPT plan
 					{provider === "codex" ? <Check className="ml-auto size-3.5" /> : null}
 				</DropdownMenuItem>
-				<p className="px-2 pb-1.5 text-[11px] text-muted-foreground">Nothing is metered; the plan's usage limit pauses the swarm.{run ? " This run keeps its plan; Stop and Resume to switch." : ""}</p>
 				<DropdownMenuSeparator />
 				<DropdownMenuItem onSelect={() => navigate("/settings?section=models")} className="text-[13px]">A key instead…</DropdownMenuItem>
 			</DropdownMenuContent>
