@@ -594,7 +594,8 @@ The maintainer follows your work in the chat and sees only what you write, so ne
         "reviewer" => "Review the prover's work on the plan item: does the Lean statement really say what the Solidity does (read the def in the generated model and the function's slice, in your task), is it about the generated def rather than a restatement, does it check, is there any sorry/admit/axiom? Then call verdict exactly once: approve, or changes with concrete notes. Check the prover's notes for the report too (in your task): does the statement say exactly what the theorems prove about the Solidity, no more, are the assumptions complete, and is it written as a report states a property (third person, what holds, never \"no bug found\")? When you approve, they go into Formal Mind's audit file; pass `statement`, `assumptions` or `theorems` only to correct them, or to write them if the prover gave none. Do not edit proofs yourself. If you spot a real bug in the contract, say so in your notes; the prover writes the PoC.",
         _ => "The maintainer wrote to the swarm. Answer them directly and briefly, using the tools to look things up. If they ask for a change of focus or a new property, update .formal/plan.md accordingly.",
     };
-    format!("{common}\n\n{job}")
+    // Auditing checklists the maintainer added to the folder (Settings → Skills), for the roles they apply to.
+    format!("{common}\n\n{job}{}", crate::skills::prompt_note(root, role))
 }
 
 /// report_bug's schema (also served to Claude Code by claude_code.rs).
