@@ -43,7 +43,7 @@ Settings → Models, one of:
 On the folder's page, type an optional focus ("the matching engine first") and press **Start**; set a spending cap in the chat header. The swarm then:
 
 1. **Plans**, without a model: \`.formal/plan.md\` gets one item per function of the in-scope contracts (what the Foundry scripts under \`script/\` deploy or call, their bases and what they deploy), the scripts' calls first, then the functions that write storage, then views. Functions already proved come checked.
-2. **Proves**: a prover takes the next \`- [ ]\` item with the function's slice of the solc AST and its generated Lean model (\`formal/Specs/<Contract>.lean\`), writes \`formal/Proofs/Swarm/<Contract><Fn>.lean\` and runs \`lake build\`.
+2. **Proves**: a prover takes the next \`- [ ]\` item with the function's slice of the solc AST and its generated Lean model (\`formal/Specs/<Contract>.lean\`), writes \`formal/Proofs/Functions/<Contract><Fn>.lean\` and runs \`lake build\`.
 3. **Checks**: no \`sorry\`, \`admit\`, \`axiom\` or \`native_decide\`, a clean build, and the Proofs page counting the function as proved. Three failures mark the item \`- [!]\`.
 4. **Reviews**: the reviewer checks the theorems and the prover's notes against the Solidity; approved items are \`- [x]\` and their notes go into \`audit/formal-mind.audit.json\`.
 5. **Files bugs**: a finding needs a Foundry PoC under \`test/\` (by convention \`test/formal/\`) that the swarm runs with \`forge test\`; it lands in \`audit/formal-mind-swarm.md\`, the audit index \`audit/README.md\` and \`audit/formal-mind.audit.json\`, and shows on the Bugs page.
@@ -129,7 +129,7 @@ Formal Mind keeps its state in the repository's own files, so an agent with the 
 | \`.formal/proofs.json\` | The proof files of each reviewed item. |
 | \`.formal/queue.json\`, \`.formal/jobs/\`, \`.formal/runs/*.jsonl\` | The swarm's queue, each job's saved conversation, and the event log of each run. |
 | \`formal/Specs/<Contract>.lean\` | The Lean model of each contract, generated from the solc AST by formal-ast. Regenerated, never hand-edited. |
-| \`formal/Proofs/…\` | Proofs about the generated defs; the swarm writes \`formal/Proofs/Swarm/<Contract><Fn>.lean\`. \`lake build\` checks them. |
+| \`formal/Proofs/…\` | Proofs about the generated defs; the swarm writes \`formal/Proofs/Functions/<Contract><Fn>.lean\`. \`lake build\` checks them. |
 | \`audit/README.md\` | The audit index: each report, with a table \`| ID | Severity | Finding | Status | Evidence |\`. |
 | \`audit/formal-mind-swarm.md\` | The swarm's findings, each with a PoC under \`test/\` (by convention \`test/formal/\`). |
 | \`<report>.audit.json\` | One per audit report, beside it, in the format below. Formal Mind's own is \`audit/formal-mind.audit.json\`. |

@@ -38,10 +38,10 @@ pub fn hash(text: &str) -> String {
     format!("{h:016x}")
 }
 
-/// A statement's proof (`Proofs/Statements/S01/…`): it is the statement's record (`.formal/statements.md`), not one
+/// A statement's proof (`Proofs/InformalSpecs/S01/…`, `Statements/` in older projects): it is the statement's record (`.formal/statements.md`), not one
 /// of the function's own theorems, so a new statement proof doesn't change, or lapse, a function's approval.
 fn statement_proof(file: &str) -> bool {
-    file.replace('\\', "/").split('/').any(|p| p == "Statements")
+    file.replace('\\', "/").split('/').any(|p| p == "InformalSpecs" || p == "Statements")
 }
 
 /// The libraries the Lake project builds (`[[lean_lib]] name = …` in lakefile.toml, `lean_lib X` in lakefile.lean).

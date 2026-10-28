@@ -1596,12 +1596,12 @@ async fn sync_plan(turn: &Turn<'_>, root: &Path) -> usize {
 }
 
 /// Where an item's proof belongs, folder-relative, when a file is there: a statement's obligation in
-/// `Proofs/Statements/<id>/`, a plan item in `Proofs/Swarm/`.
+/// `Proofs/InformalSpecs/<id>/`, a plan item in `Proofs/Functions/`.
 fn expected_proof(root: &Path, statement: Option<&str>, text: &str) -> Option<String> {
     let src = crate::swarm_ctx::lean_src(root)?;
     let lean = crate::statements::def_of(text)?;
     let path = match statement {
-        Some(id) => src.join(crate::statements::proof_file(id, lean, crate::swarm_ctx::layout(root).1)),
+        Some(id) => src.join(crate::statements::proof_file(id, lean, &crate::swarm_ctx::informal_dir(root))),
         None => {
             let (contract, function) = lean.split_once('.')?;
             root.join(proof_file_for(root, contract, function))
@@ -1806,7 +1806,7 @@ async fn run_swarm(turn: &Turn<'_>) -> String {
                 turn.emit("status", "prover", &id, "reading the item's def and slice (formal-ast)".into());
                 let brief = turn.context(true).await.brief(&job.text, crate::swarm_ctx::lake_dir(&root).as_deref(), &root);
                 let mut task = match &statement {
-                    Some(st) => format!("{}\n\nThe function: {}\n\n{brief}", crate::statements::obligation_task(st, job.item, &lib, crate::swarm_ctx::layout(&root).1), job.text),
+                    Some(st) => format!("{}\n\nThe function: {}\n\n{brief}", crate::statements::obligation_task(st, job.item, &lib, &crate::swarm_ctx::informal_dir(&root)), job.text),
                     None => format!("Plan item {id}: {}\n\n{brief}", job.text),
                 };
                 if !job.notes.is_empty() {
@@ -2362,12 +2362,13 @@ fn plan_item_for(root: &Path, lean: &str) -> Option<PlanItem> {
     read_plan(root).into_iter().find(|p| p.text.contains(&named))
 }
 
-/// Where the swarm's prover writes a function's proof, folder-relative: `formal/Proofs/Swarm/<Contract><Fn>.lean`.
+/// Where the swarm's prover writes a function's proof, folder-relative: `formal/Proofs/Functions/<Contract><Fn>.lean`.
 fn proof_file_for(root: &Path, contract: &str, function: &str) -> String {
     let lake = crate::swarm_ctx::lean_src(root).unwrap_or_else(|| root.join("formal"));
     let lib = lake.strip_prefix(root).map(|p| p.to_string_lossy().replace('\\', "/")).unwrap_or_default();
     let cap = crate::swarm_ctx::name_part(function.rsplit('.').next().unwrap_or(""), true);
-    format!("{}{}/Swarm/{contract}{cap}.lean", if lib.is_empty() { String::new() } else { format!("{lib}/") }, crate::swarm_ctx::layout(root).1)
+    let (proofs, functions) = (crate::swarm_ctx::layout(root).1, crate::swarm_ctx::functions_dir(root));
+    format!("{}{proofs}/{functions}/{contract}{cap}.lean", if lib.is_empty() { String::new() } else { format!("{lib}/") })
 }
 
 
@@ -2863,14 +2864,14 @@ mod lifecycle {
         let base = std::env::temp_dir().join(format!("fm-build-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&base);
         crate::swarm_ctx::scaffold(&base).unwrap();
-        let (a, b, bad) = ("formal/Proofs/Swarm/WETH9Deposit.lean".to_string(), "formal/Proofs/Statements/S01/WETH9Fallback.lean".to_string(), "formal/Proofs/Statements/S01/WETH9«».lean".to_string());
-        assert_eq!(super::build_command(&base, &[&a, &b]), "lake build Proofs.Swarm.WETH9Deposit Proofs.Statements.S01.WETH9Fallback");
+        let (a, b, bad) = ("formal/Proofs/Functions/WETH9Deposit.lean".to_string(), "formal/Proofs/InformalSpecs/S01/WETH9Fallback.lean".to_string(), "formal/Proofs/InformalSpecs/S01/WETH9«».lean".to_string());
+        assert_eq!(super::build_command(&base, &[&a, &b]), "lake build Proofs.Functions.WETH9Deposit Proofs.InformalSpecs.S01.WETH9Fallback");
         assert_eq!(super::build_command(&base, &[&bad]), "lake build");
         let item = "`WETH9.«»` — WETH9 (src/WETH9.sol:31): if it holds before a successful call, it holds after";
         assert_eq!(super::expected_proof(&base, Some("S-01"), item), None);
-        std::fs::create_dir_all(base.join("formal/Proofs/Statements/S01")).unwrap();
-        std::fs::write(base.join("formal/Proofs/Statements/S01/WETH9Fallback.lean"), "").unwrap();
-        assert_eq!(super::expected_proof(&base, Some("S-01"), item).as_deref(), Some("formal/Proofs/Statements/S01/WETH9Fallback.lean"));
+        std::fs::create_dir_all(base.join("formal/Proofs/InformalSpecs/S01")).unwrap();
+        std::fs::write(base.join("formal/Proofs/InformalSpecs/S01/WETH9Fallback.lean"), "").unwrap();
+        assert_eq!(super::expected_proof(&base, Some("S-01"), item).as_deref(), Some("formal/Proofs/InformalSpecs/S01/WETH9Fallback.lean"));
         let _ = std::fs::remove_dir_all(&base);
     }
 }
