@@ -2752,6 +2752,9 @@ export function SwarmPanel({ folder, name, scan, bridge, session, file: openPath
 						</button>
 					)}
 					{renaming !== null ? (
+						// The box hugs its text: a hidden copy of it sizes the grid cell the input fills, so it grows as you type.
+						<span className={`inline-grid min-w-0 ${chatPage ? (slot ? "max-w-[60%]" : "max-w-[max(9rem,calc(50%-9rem))]") : "flex-1"}`}>
+						<span aria-hidden className="invisible col-start-1 row-start-1 h-7 overflow-hidden whitespace-pre px-2 leading-7">{renaming || " "}</span>
 						<input
 							autoFocus
 							value={renaming}
@@ -2762,8 +2765,11 @@ export function SwarmPanel({ folder, name, scan, bridge, session, file: openPath
 							}}
 							onBlur={() => rename(renaming)}
 							aria-label="Chat name"
-							className={`h-7 min-w-0 rounded-md border bg-background px-2 text-foreground outline-none ${chatPage ? (slot ? "w-[60%]" : "w-[max(9rem,calc(50%-9rem))]") : "flex-1"}`}
+							// No built-in width (about 20 characters): the hidden copy of the text sizes the box.
+							size={1}
+							className="col-start-1 row-start-1 h-7 w-full min-w-0 rounded-md border bg-background px-2 text-foreground outline-none"
 						/>
+						</span>
 					) : (
 					<DropdownMenu modal={false}>
 						<DropdownMenuTrigger className={`flex min-w-0 items-center gap-1 rounded-md text-left text-[14px] text-muted-foreground outline-none hover:text-foreground ${chatPage ? (slot ? "max-w-[60%]" : "max-w-[max(9rem,calc(50%-9rem))]") : "flex-1"}`} title={`${title} — switch sessions (double-click to rename)`} onDoubleClick={() => viewing && setRenaming(title)}>
