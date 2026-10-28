@@ -98,7 +98,7 @@ export function GitTree({ folder, invoke, working, flat = false }: { folder: str
 							const head = c.id === graph?.head;
 							const refs = c.refs.map((r) => r.replace(/^HEAD -> /, "").replace(/^tag: /, "")).filter((r) => r !== "HEAD");
 							return (
-								<div key={c.id} className={`absolute inset-x-0 flex items-center gap-1.5 pr-2 text-[12px] ${head || c.id === "~work" ? "bg-emerald-500/5" : ""}`} style={{ top: i * ROW, height: ROW, paddingLeft: gutter + 4 }} title={c.id === "~work" ? "Not committed yet" : `${c.id.slice(0, 7)} · ${new Date(c.time * 1000).toLocaleString()}`}>
+								<div key={c.id} className={`absolute inset-x-0 flex items-center gap-1.5 pr-2 text-[12px] ${head || c.id === "~work" ? "bg-emerald-500/5" : ""}`} style={{ top: i * ROW, height: ROW, paddingLeft: gutter + 4 }} title={c.id === "~work" ? "Not committed yet" : `${c.id.slice(0, 7)} · ${new Date(c.time * 1000).toLocaleString()}\n${c.subject}`}>
 									{c.id === "~work" ? (
 										<span className="truncate text-emerald-700 dark:text-emerald-400">
 											{graph?.dirty} uncommitted {graph?.dirty === 1 ? "change" : "changes"}{working ? " · proving here" : ""}
