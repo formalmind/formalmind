@@ -78,6 +78,9 @@ pub const OPS: &[(&str, bool)] = &[
     ("correct_statement", true),
     ("mark_statement", true),
     ("remove_statement", true),
+    ("skills", false),
+    ("skill_add", true),
+    ("skill_remove", true),
     ("triage", true),
     ("github", true),
     ("refresh_model", true),
@@ -274,6 +277,9 @@ pub async fn dispatch<E: Engine + ?Sized>(app: &E, op: &str, folder: &str, a: &V
         }
         "questions" => Ok(json!(crate::answerer::questions(std::path::Path::new(&folder)))),
         "remove_statement" => json_of(crate::statements::swarm_remove_statement(folder, need("id")?)),
+        "skills" => json_of(crate::skills::skills_catalog(folder)),
+        "skill_add" => crate::skills::skills_add(folder, need("id")?).await.map(|_| Value::Null),
+        "skill_remove" => json_of(crate::skills::skills_remove(folder, need("id")?)),
         "triage" => {
             swarm::swarm_triage(folder.clone(), need("path")?, opt("run"))?;
             Ok(json!({ "running": work_queued(app, &folder)? }))

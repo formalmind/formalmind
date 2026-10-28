@@ -2398,6 +2398,9 @@ export function SwarmPanel({ folder, name, scan, bridge, session, file: openPath
 	const lastCtx = lastContextEv ? parseContext(lastContextEv.text) : null;
 	const ctx = contextEv ? parseContext(contextEv.text) : null;
 	const ctxPct = ctx ? Math.min(100, Math.round((ctx.used / ctx.window) * 100)) : null;
+	// Near compaction (85% of the way there), the chat offers a fresh session for the next audit, or keeping on here.
+	const [keepHere, setKeepHere] = useState<string | null>(null);
+	const nearlyFull = Boolean(run && ctx && ctx.used >= ctx.compact_at * 0.85 && keepHere !== viewing);
 	const agentMessages = useMemo(() => events.filter((e) => !["status", "context", "you", "tool"].includes(e.kind)).length, [events]);
 	const unread = chatOpen ? 0 : Math.max(0, agentMessages - seen);
 
@@ -2863,6 +2866,19 @@ export function SwarmPanel({ folder, name, scan, bridge, session, file: openPath
 						</p>
 					) : null}
 					{finished ? <p className="rounded-lg border px-3 py-2 text-xs text-muted-foreground">Finished: {finished.text}</p> : null}
+					{nearlyFull && ctx ? (
+						<div className="flex flex-wrap items-center gap-2 rounded-2xl border bg-card px-3 py-2.5">
+							<span className="min-w-0 flex-1 text-muted-foreground">
+								This chat's context is {Math.round((ctx.used / ctx.window) * 100)}% full. Start a new chat for the next audit?
+							</span>
+							<button type="button" onClick={() => pickSession("new")} className="btn-dark h-7 shrink-0 rounded-full px-3">
+								Start new chat
+							</button>
+							<button type="button" onClick={() => setKeepHere(viewing)} className="h-7 shrink-0 rounded-full border px-3 text-muted-foreground hover:text-foreground">
+								Keep going here
+							</button>
+						</div>
+					) : null}
 				</div>
 				<button
 					type="button"
