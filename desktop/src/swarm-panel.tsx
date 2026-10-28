@@ -548,7 +548,7 @@ export function QuestionStack({ asks, onSend, onSkip, onWrite }: { asks: Ev[]; /
 	);
 }
 
-export function AgentMessage({ e, onBug, onReply }: { e: Ev; onBug: () => void; /** A drafted reply picked: it goes to the composer to edit or send. */ onReply?: (text: string) => void }) {
+export function AgentMessage({ e, onBug, onReply, turn }: { e: Ev; onBug: () => void; /** A drafted reply picked: it goes to the composer to edit or send. */ onReply?: (text: string) => void; /** The whole turn's text when this is its last message (Copy and the thumbs show once per turn); otherwise none. */ turn?: string }) {
 	const color = e.kind === "bug" ? "#dc2626" : colorOf(e.role);
 	return (
 		<Message>
@@ -589,7 +589,7 @@ export function AgentMessage({ e, onBug, onReply }: { e: Ev; onBug: () => void; 
 				) : (
 					<div className="group/reply">
 						<ChatMarkdown>{e.text}</ChatMarkdown>
-						<ReplyActions text={e.text} />
+						{turn !== undefined ? <ReplyActions text={turn} /> : null}
 					</div>
 				)}
 			</MessageContent>
@@ -2322,6 +2322,27 @@ export function SwarmPanel({ folder, name, scan, bridge, session, file: openPath
 		const text = plan.find((p) => String(p.index) === item)?.text;
 		return text ? text.replace(/\*\*|`/g, "").split(" — ")[0].trim() : undefined;
 	};
+	// A turn: everything the agents say between two of your messages. Its last message carries Copy and the thumbs,
+	// for the whole turn's text.
+	const turnEnds = useMemo(() => {
+		const ends = new Map<number, string>();
+		let texts: string[] = [];
+		let last = -1;
+		const close = () => {
+			if (last >= 0) ends.set(last, texts.join("\n\n"));
+			texts = [];
+			last = -1;
+		};
+		chatBlocks.forEach((b, i) => {
+			if ("e" in b && b.e.kind === "you") return close();
+			if ("e" in b && b.e.kind === "say") {
+				texts.push(b.e.text);
+				last = i;
+			}
+		});
+		close();
+		return ends;
+	}, [chatBlocks]);
 	const chatList = useMemo(
 		() =>
 			chatBlocks.map((block, i) =>
@@ -2353,6 +2374,7 @@ export function SwarmPanel({ folder, name, scan, bridge, session, file: openPath
 					) : (
 						<AgentMessage
 							e={block.e}
+							turn={turnEnds.get(i)}
 							onReply={(text) => {
 								setSay(text);
 								toggleChat(true);
@@ -2368,7 +2390,7 @@ export function SwarmPanel({ folder, name, scan, bridge, session, file: openPath
 				</div>
 			)),
 		// eslint-disable-next-line react-hooks/exhaustive-deps
-		[chatBlocks, run, bugs, plan, questions.open],
+		[chatBlocks, run, bugs, plan, questions.open, turnEnds],
 	);
 	// How full the working agent's context window is and what fills it, from its last reply; past 75% its older steps
 	// are summarized.
