@@ -23,6 +23,8 @@ import { useHighlightedCode } from "@/hooks/use-highlighted-code";
 import { Message, MessageContent, MessageHeader } from "@/components/ui/message";
 import { SwarmCanvas } from "@/components/swarm/swarm-canvas";
 import { ROLE_COLORS, roleName } from "@/lib/swarm-roles";
+// AffectUI's run card from the private UI package when it is checked out; `null` otherwise (desktop/src/ui-fallback).
+import { RunCard } from "@formalmind/ui/run-card";
 import { localBoard } from "./local-board";
 import { ContextBody, ContextPanel, parseContext } from "./context-panel";
 import type { Scan } from "./local";
@@ -122,7 +124,7 @@ const store = { get: (k: string) => { try { return localStorage.getItem(k); } ca
 
 
 /** A row of an activity group: the agent's note on what it's about to do, or a tool call with its result. */
-type Row = { note: Ev } | { call: Ev; result?: Ev };
+export type Row = { note: Ev } | { call: Ev; result?: Ev };
 type Block = { e: Ev } | { steps: Row[] };
 
 /**
@@ -2311,13 +2313,18 @@ export function SwarmPanel({ folder, name, scan, bridge, session, file: openPath
 				// the length of the chat; its last measured height holds its place.
 				<div key={i} data-msg={i} className="fm-settle [contain-intrinsic-size:auto_96px] [content-visibility:auto]">
 					{"steps" in block ? (
-						<Steps
-							steps={block.steps}
-							running={Boolean(run) && i === chatBlocks.length - 1}
-							// The plan item the run works on, by its text (bold markers and code ticks off).
-							title={itemTitle(block.steps)}
-							onPause={run ? () => void invoke("swarm_stop", { folder, run }) : undefined}
-						/>
+						(() => {
+							const Card = RunCard ?? Steps;
+							return (
+								<Card
+									steps={block.steps}
+									running={Boolean(run) && i === chatBlocks.length - 1}
+									// The plan item the run works on, by its text (bold markers and code ticks off).
+									title={itemTitle(block.steps)}
+									onPause={run ? () => void invoke("swarm_stop", { folder, run }) : undefined}
+								/>
+							);
+						})()
 					) : block.e.kind === "you" ? (
 						<Message align="end">
 							<MessageContent>

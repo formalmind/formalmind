@@ -13,6 +13,15 @@ one-item-per-function loop working the same, and keep the skills (`worker/skills
 Proofs tab (`crates/formal-ast-wasm`, with solc-js in a Web Worker: `lib/ast/`). The wasm build is committed in
 `lib/formal-ast-wasm`: after changing either crate, run `bun run build:ast-wasm` and commit what it writes.
 
+## The private UI package
+
+The chat's licensed AffectUI components live in the private repository formalmind/affectui, mounted as the
+submodule `packages/ui` and imported as `@formalmind/ui/<name>` (Formal Mind's wrappers are in its `formalmind/`).
+Without it (a public clone, CI), `@formalmind/ui/*` resolves to `desktop/src/ui-fallback/`, and the chat uses the app's
+own components: `lib/ui-package.ts` (Vite) and tsconfig's `paths` pick between the two. Never copy AffectUI files into
+this repository. `git submodule update --init packages/ui` checks it out where you have access; check both builds
+(with and without it) when you change a wrapper or its fallback.
+
 ## The docs
 
 The guide at docs.formal.team (and formal.team/docs) is Markdown in `content/docs/`, one file per page, in the order
