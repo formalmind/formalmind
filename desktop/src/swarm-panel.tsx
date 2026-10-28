@@ -2754,11 +2754,29 @@ export function SwarmPanel({ folder, name, scan, bridge, session, file: openPath
 						atBottom.current = el.scrollHeight - el.scrollTop - el.clientHeight < 80;
 						setAway(!atBottom.current);
 					}}
-					className="min-h-0 flex-1 space-y-3.5 overflow-y-auto py-3 pl-6 pr-3 text-[13px]"
+					// The history fades out at its top and bottom edges as it scrolls under the header and into the composer.
+					className="min-h-0 flex-1 space-y-3.5 overflow-y-auto py-8 pl-6 pr-3 text-[13px] [mask-image:linear-gradient(to_bottom,transparent,black_2rem,black_calc(100%-2rem),transparent)]"
 				>
 					{loadingHistory && shown.length === 0 ? <ChatSkeleton /> : null}
 					{shown.length === 0 && !run && !loadingHistory ? <p className="text-muted-foreground">Talk to the agents here. Before a run, what you write is the swarm's focus and ↑ starts it; while it runs, they read your messages before their next turn.</p> : null}
 					{chatList}
+					{/* The agents' open questions, in the history after the latest message (not pinned over it). */}
+					{run ? (
+						<QuestionStack
+							asks={questions.open}
+							onSend={(answers) => {
+								questions.markAnswered(answers.map((a) => a.ask));
+								void (async () => {
+									for (const a of answers) await invoke("swarm_say", { folder, run, text: a.text }).catch((e) => setError(String(e)));
+								})();
+							}}
+							onSkip={questions.markAnswered}
+							onWrite={(ask) => {
+								questions.markAnswered([ask]);
+								setSay(`About ${parseAsk(ask.text).question.match(/\*\*([^*]+)\*\*/)?.[1] ?? "your question"}: `);
+							}}
+						/>
+					) : null}
 					{/* While an agent works: its name, and its current task shimmering until its next words. */}
 					{run && working ? (
 						<p className="flex items-center gap-2 text-[12px] text-muted-foreground">
@@ -2784,22 +2802,6 @@ export function SwarmPanel({ folder, name, scan, bridge, session, file: openPath
 
 				<div className="shrink-0 space-y-2 p-2">
 					{error ? <p className="text-xs text-red-600">{error}</p> : null}
-					{run ? (
-						<QuestionStack
-							asks={questions.open}
-							onSend={(answers) => {
-								questions.markAnswered(answers.map((a) => a.ask));
-								void (async () => {
-									for (const a of answers) await invoke("swarm_say", { folder, run, text: a.text }).catch((e) => setError(String(e)));
-								})();
-							}}
-							onSkip={questions.markAnswered}
-							onWrite={(ask) => {
-								questions.markAnswered([ask]);
-								setSay(`About ${parseAsk(ask.text).question.match(/\*\*([^*]+)\*\*/)?.[1] ?? "your question"}: `);
-							}}
-						/>
-					) : null}
 					{/* The Swarm page's composer: steer while it runs; before that, what you type is its focus and ↑ starts it. */}
 					{(() => {
 						// AffectUI's composer from the private UI package when it is checked out; the app's own otherwise.
@@ -3119,7 +3121,7 @@ export function SwarmPanel({ folder, name, scan, bridge, session, file: openPath
 			<div className="absolute inset-0 flex flex-col overflow-hidden">
 				{mode === "chat" ? (
 					// The chat as the page: one centred column under the tabs, as wide as reads well.
-					<div className="flex min-h-0 flex-1 justify-center px-4 pb-3" style={{ paddingTop: "calc(var(--fm-top) + 3.25rem)" }}>
+					<div className="flex min-h-0 flex-1 justify-center px-4 pb-3" style={{ paddingTop: "calc(var(--fm-top) + 0.75rem)" }}>
 						<div className="flex min-h-0 w-full max-w-3xl flex-col">{chatPanel}</div>
 					</div>
 				) : (
