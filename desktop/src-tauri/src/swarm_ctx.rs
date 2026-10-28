@@ -144,6 +144,21 @@ pub fn ensure_config(root: &Path) {
     let _ = std::fs::write(path, text);
 }
 
+/// Why the model on disk should be rewritten with the one formal-ast generates now, if it should: it is missing, the
+/// contract's code changed (so a def no longer says what the function does, and proofs of the old def prove nothing
+/// about the new code), or more functions are translated. Never when formal-ast translates fewer than the file has.
+fn refresh(on_disk: Option<&str>, generated: &str) -> Option<String> {
+    let Some(old) = on_disk else { return Some("missing".into()) };
+    if old == generated {
+        return None;
+    }
+    match (translated_count(old), translated_count(generated)) {
+        (Some(o), Some(n)) if n < o => None,
+        (Some(o), Some(n)) if n > o => Some(format!("{} more functions translated ({o} → {n}); proofs that used their `Ext` fields need repair", n - o)),
+        _ => Some("the contract's code changed; proofs of the functions whose defs changed are checked again".into()),
+    }
+}
+
 /// How many functions a generated model translated, from its header (`Translated: 7 functions.`).
 fn translated_count(model: &str) -> Option<usize> {
     let rest = model.split("Translated: ").nth(1)?;
@@ -223,24 +238,20 @@ pub fn context_with(root: &Path, write: bool) -> Context {
             })
             .collect();
         // The model the provers write against: Specs/<Contract>.lean (Generated/ in older projects) in the Lake project's sources, generated here
-        // when it is missing, and again when formal-ast now translates more functions than the file on disk does.
+        // when it is missing, and again when the contract's code changed or formal-ast now translates more functions
+        // than the file on disk does (see `refresh`).
         let mut model = None;
         if let Some(dir) = &lake {
             let path = dir.join(layout(root).0).join(format!("{name}.lean"));
             let on_disk = std::fs::read_to_string(&path).ok();
             let m = lean::Gen::new(&output, &a.graph, &a.scope).generate(&lean::ident(&name));
-            let (old, new) = (on_disk.as_deref().and_then(translated_count), translated_count(&m.text));
-            if on_disk.is_none() || matches!((old, new), (Some(o), Some(n)) if n > o) {
+            if let Some(why) = refresh(on_disk.as_deref(), &m.text) {
                 if write {
                     let _ = std::fs::create_dir_all(path.parent().unwrap_or(dir)).and_then(|_| std::fs::write(&path, &m.text));
                 }
-                if let (Some(o), Some(n)) = (old, new) {
+                if on_disk.is_some() {
                     let rel = path.strip_prefix(root).unwrap_or(&path).to_string_lossy().replace('\\', "/");
-                    ctx.regenerated.push(if write {
-                        format!("{rel}: regenerated, {} more functions translated ({o} → {n}); proofs that used their `Ext` fields need repair", n - o)
-                    } else {
-                        format!("{rel}: out of date, formal-ast now translates {} more functions ({o} → {n}); refreshing the model (or starting the swarm) rewrites it", n - o)
-                    });
+                    ctx.regenerated.push(if write { format!("{rel}: regenerated, {why}") } else { format!("{rel}: out of date, {why}; refreshing the model (or starting the swarm) rewrites it") });
                 }
             }
             if path.exists() {
@@ -587,6 +598,16 @@ pub fn chrono_today() -> String {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn a_model_is_rewritten_when_the_code_changes() {
+        let m = |n: usize, body: &str| format!("-- Translated: {n} functions.\ndef fee := {body}\n");
+        assert_eq!(super::refresh(None, &m(2, "30")).as_deref(), Some("missing"));
+        assert_eq!(super::refresh(Some(&m(2, "30")), &m(2, "30")), None, "the same model stays");
+        assert!(super::refresh(Some(&m(2, "30")), &m(2, "2")).unwrap().contains("code changed"), "a changed body");
+        assert!(super::refresh(Some(&m(2, "30")), &m(3, "30")).unwrap().contains("1 more"));
+        assert_eq!(super::refresh(Some(&m(3, "30")), &m(2, "2")), None, "never fewer functions than the file has");
+    }
+
     #[test]
     fn lean_sources_follow_the_config_then_the_lakefile() {
         let root = std::env::temp_dir().join(format!("fm-src-{}", std::process::id()));

@@ -21,6 +21,12 @@ in scope. The functions your deploy scripts call come first, then the ones that 
 Each start adds the functions the plan doesn't list yet. Functions the Proofs page already shows as proved come
 checked.
 
+A tick doesn't stay just because it was given once. When a contract's code changes, the swarm regenerates its model
+and Lean checks the proofs again. Any checked function that no longer counts as proved goes back to `[ ]`, with the
+reason in the chat ("reopened `Pool.fee`: …"), and is proved again against the new code. Only theorems in the folder
+Lake builds count (formalmind.toml's `sources`, or the lakefile's `srcDir`). A stray copy of `Generated/` or
+`Refinement/` elsewhere in the repository proves nothing.
+
 ## One function, start to finish
 
 1. **The prover** takes the next open item. It gets a brief built from the syntax tree: the function's generated

@@ -195,16 +195,54 @@ fn doc_above(lines: &[&str], at: usize) -> Option<String> {
     (!inner.is_empty()).then(|| inner.to_string())
 }
 
-/// Every theorem in the project's own `.lean` files (dependencies, build output and Lake's packages skipped).
+/// Every theorem in the project's own `.lean` files where Lake reads them (dependencies, build output and Lake's
+/// packages skipped).
 pub fn theorems(root: &Path) -> Vec<Theorem> {
     theorems_in(&fs::Disk(root.to_path_buf()))
 }
 
-/// [`theorems`], read from a project's files.
+/// Where Lake reads the project's Lean sources, root-relative ("" for the root): formalmind.toml's `lean.sources`,
+/// else the lakefile's `srcDir` in the Lake project (the root or formal/), else that Lake project, else the root.
+/// Only theorems there count: a `.lean` file elsewhere (a stale copy of `Generated/` or `Refinement/` left at the
+/// root) is never built by `lake build`, so it proves nothing.
+pub fn lean_sources(files: &dyn fs::Files) -> String {
+    let clean = |s: &str| s.trim().trim_matches('/').to_string();
+    let safe = |s: &String| !s.split('/').any(|p| p == "..");
+    let configured = files
+        .read("formalmind.toml")
+        .and_then(|t| t.parse::<toml::Table>().ok())
+        .and_then(|t| t.get("lean")?.get("sources")?.as_str().map(clean))
+        .filter(safe);
+    if let Some(s) = configured {
+        return if s == "." { String::new() } else { s };
+    }
+    for lake in ["", "formal"] {
+        let at = |f: &str| if lake.is_empty() { f.to_string() } else { format!("{lake}/{f}") };
+        let toml = files.read(&at("lakefile.toml"));
+        let lean = files.read(&at("lakefile.lean"));
+        if toml.is_none() && lean.is_none() {
+            continue;
+        }
+        let src = toml
+            .as_deref()
+            .and_then(|t| t.parse::<toml::Table>().ok())
+            .and_then(|t| t.get("srcDir")?.as_str().map(clean))
+            .or_else(|| lean.as_deref().and_then(|t| t.split("srcDir").nth(1)?.split('"').nth(1).map(clean)))
+            .filter(|s| !s.is_empty() && s != "." && safe(s));
+        return match src {
+            Some(s) if lake.is_empty() => s,
+            Some(s) => format!("{lake}/{s}"),
+            None => lake.to_string(),
+        };
+    }
+    String::new()
+}
+
+/// [`theorems`], read from a project's files: those under its Lean sources ([`lean_sources`]).
 pub fn theorems_in(files: &dyn fs::Files) -> Vec<Theorem> {
     const SKIP: [&str; 9] = [".git", ".lake", "lib", "dependencies", "node_modules", "out", "cache", "broadcast", "target"];
     let mut paths = vec![];
-    let mut stack = vec![String::new()];
+    let mut stack = vec![lean_sources(files)];
     while let Some(dir) = stack.pop() {
         for (name, is_dir) in files.read_dir(&dir) {
             let path = if dir.is_empty() { name.clone() } else { format!("{dir}/{name}") };
@@ -501,5 +539,35 @@ mod theorem_tests {
         assert_eq!(q, ["MorphoProofs.withdraw_spec", "MorphoProofs.inner_one", "MorphoProofs.Deep.Er.deep", "Top.thing", "outside"]);
         assert_eq!(t[0].doc.as_deref(), Some("`withdraw` never pays out more than the shares are worth."));
         assert_eq!(t[1].doc, None);
+    }
+
+    /// A stale `Refinement/` left at the root of a project whose lakefile reads `validation/lean` is never built, so
+    /// its theorems don't count; only the ones where Lake reads the sources do.
+    #[test]
+    fn only_theorems_lake_builds_count() {
+        use std::collections::BTreeMap;
+        let lakefile = "name = \"x\"\nsrcDir = \"validation/lean\"\n\n[[lean_lib]]\nname = \"Refinement\"\n";
+        let files = |extra: &[(&str, &str)]| {
+            let mut text = BTreeMap::from([
+                ("lakefile.toml".to_string(), lakefile.to_string()),
+                ("Refinement/Swarm/Fee.lean".to_string(), "theorem stale_fee : True := trivial\n".to_string()),
+                ("validation/lean/Refinement/Swarm/Fee.lean".to_string(), "theorem current_fee : True := trivial\n".to_string()),
+            ]);
+            for (k, v) in extra {
+                text.insert(k.to_string(), v.to_string());
+            }
+            crate::fs::Memory::new([], text)
+        };
+        let names = |f: &crate::fs::Memory| super::theorems_in(f).into_iter().map(|t| t.qualified).collect::<Vec<_>>();
+        assert_eq!(super::lean_sources(&files(&[])), "validation/lean");
+        assert_eq!(names(&files(&[])), ["current_fee"]);
+        assert_eq!(super::theorems_in(&files(&[]))[0].file, "validation/lean/Refinement/Swarm/Fee.lean", "paths stay root-relative");
+        // formalmind.toml says where the sources are, over the lakefile.
+        assert_eq!(super::lean_sources(&files(&[("formalmind.toml", "[lean]\nproject = \".\"\nsources = \".\"\n")])), "");
+        // A Lake project in formal/ without srcDir reads formal/; one with no lakefile at all, the whole folder.
+        let formal = crate::fs::Memory::new([], BTreeMap::from([("formal/lakefile.toml".to_string(), "name = \"formal\"\n".to_string()), ("Scratch.lean".to_string(), "theorem t : True := trivial\n".to_string())]));
+        assert_eq!(super::lean_sources(&formal), "formal");
+        assert!(super::theorems_in(&formal).is_empty());
+        assert_eq!(super::lean_sources(&crate::fs::Memory::new([], BTreeMap::new())), "");
     }
 }
