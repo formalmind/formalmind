@@ -508,26 +508,26 @@ export function QuestionStack({ asks, onSend, onSkip, onWrite }: { asks: Ev[]; /
 	};
 	return (
 		<div className="rounded-2xl border bg-card shadow-sm">
-			<div className="flex items-center gap-2 border-b px-3 py-2 text-[12px]">
+			<div className="flex items-center gap-2 border-b px-3 py-1.5 text-[12px]">
 				<span className="font-medium capitalize" style={{ color: colorOf(e.role) }}>{roleName(e.role)}</span>
 				<span className="text-muted-foreground">asks</span>
 				<span className="ml-auto tabular-nums text-muted-foreground">{asks.length > 1 ? `Question ${i + 1} of ${asks.length}` : "Question"}</span>
 			</div>
-			<div className="max-h-56 overflow-y-auto border-b px-3 py-2">
+			<div className="max-h-56 overflow-y-auto border-b px-3 py-1.5 [&_.chat-markdown]:leading-5 [&_.chat-markdown_blockquote]:my-1.5 [&_.chat-markdown_p]:my-1">
 				<ChatMarkdown>{ask.question}</ChatMarkdown>
 			</div>
-			<div className="flex flex-col gap-0.5 p-1.5" role="radiogroup" aria-label="Your answer">
+			<div className="flex flex-col p-1" role="radiogroup" aria-label="Your answer">
 				{ask.replies.map((r) => (
-					<button key={r} type="button" role="radio" aria-checked={picked === r} onClick={() => setPicks({ ...picks, [askKey(e)]: r })} className={`flex items-start gap-2 rounded-xl px-2.5 py-1.5 text-left text-[13px] ${picked === r ? "bg-muted" : "hover:bg-muted/60"}`}>
+					<button key={r} type="button" role="radio" aria-checked={picked === r} onClick={() => setPicks({ ...picks, [askKey(e)]: r })} className={`flex items-start gap-2 rounded-lg px-2.5 py-1 text-left text-[13px] ${picked === r ? "bg-muted" : "hover:bg-muted/60"}`}>
 						{picked === r ? <SquareCheck className="mt-0.5 size-3.5 shrink-0 text-primary" aria-hidden /> : <Square className="mt-0.5 size-3.5 shrink-0 text-muted-foreground" aria-hidden />}
 						<span>{r}</span>
 					</button>
 				))}
-				<button type="button" onClick={() => onWrite(e)} className="rounded-xl px-2.5 py-1.5 pl-8 text-left text-[13px] text-muted-foreground hover:bg-muted/60 hover:text-foreground">
+				<button type="button" onClick={() => onWrite(e)} className="rounded-lg px-2.5 py-1 pl-8 text-left text-[13px] text-muted-foreground hover:bg-muted/60 hover:text-foreground">
 					Something else…
 				</button>
 			</div>
-			<div className="flex items-center gap-1 border-t px-2 py-1.5">
+			<div className="flex items-center gap-1 border-t px-2 py-1">
 				<button type="button" onClick={() => setAt(i - 1)} disabled={i === 0} className="h-7 rounded-full px-2.5 text-[12px] text-muted-foreground hover:bg-muted hover:text-foreground disabled:opacity-40">Back</button>
 				<button type="button" onClick={() => (last ? (chosen.length ? send() : onSkip(asks)) : setAt(i + 1))} className="h-7 rounded-full px-2.5 text-[12px] text-muted-foreground hover:bg-muted hover:text-foreground">
 					{last && !chosen.length ? (asks.length > 1 ? "Skip all" : "Skip") : "Skip"}
@@ -2318,7 +2318,9 @@ export function SwarmPanel({ folder, name, scan, bridge, session, file: openPath
 	};
 	const chatList = useMemo(
 		() =>
-			chatBlocks.map((block, i) => (
+			chatBlocks.map((block, i) =>
+				// An open question shows once, as its question card after the history; its plain message is left out.
+				"e" in block && block.e.kind === "ask" && run && questions.open.includes(block.e) ? null : (
 				// Off screen, a message skips layout and paint (`content-visibility`), so scrolling costs what's in view, not
 				// the length of the chat; its last measured height holds its place.
 				<div key={i} data-msg={i} className="fm-settle [contain-intrinsic-size:auto_96px] [content-visibility:auto]">
@@ -2360,7 +2362,7 @@ export function SwarmPanel({ folder, name, scan, bridge, session, file: openPath
 				</div>
 			)),
 		// eslint-disable-next-line react-hooks/exhaustive-deps
-		[chatBlocks, run, bugs, plan],
+		[chatBlocks, run, bugs, plan, questions.open],
 	);
 	// How full the working agent's context window is and what fills it, from its last reply; past 75% its older steps
 	// are summarized.
@@ -2642,7 +2644,7 @@ export function SwarmPanel({ folder, name, scan, bridge, session, file: openPath
 	// against its cap on a key. A run keeps the route it started with; a change applies at the next start.
 	const costMenu = payingPlan ? (
 		<DropdownMenu>
-			<DropdownMenuTrigger className="inline-flex h-7 shrink-0 items-center gap-1 rounded-md border bg-background px-2 text-[11px] text-muted-foreground outline-none hover:text-foreground" title={`The agents run on ${provider === "codex" ? "Codex" : "Claude Code"} with your ${payingPlan}`}>
+			<DropdownMenuTrigger className="inline-flex h-7 shrink-0 items-center gap-1 rounded-full border bg-background px-2.5 text-[11px] text-muted-foreground outline-none hover:text-foreground" title={`The agents run on ${provider === "codex" ? "Codex" : "Claude Code"} with your ${payingPlan}`}>
 				{payingPlan}
 				<ChevronDown className="size-3" />
 			</DropdownMenuTrigger>
@@ -2662,7 +2664,7 @@ export function SwarmPanel({ folder, name, scan, bridge, session, file: openPath
 		</DropdownMenu>
 	) : (
 		<DropdownMenu>
-			<DropdownMenuTrigger className="inline-flex h-7 shrink-0 items-center gap-1 rounded-md border bg-background px-2 text-[11px] tabular-nums text-muted-foreground outline-none hover:text-foreground" title="Spending cap">
+			<DropdownMenuTrigger className="inline-flex h-7 shrink-0 items-center gap-1 rounded-full border bg-background px-2.5 text-[11px] tabular-nums text-muted-foreground outline-none hover:text-foreground" title="Spending cap">
 				{run || viewing ? `$${spent.toFixed(2)} / $${budget}` : `Budget $${budget}`}
 				<ChevronDown className="size-3" />
 			</DropdownMenuTrigger>
