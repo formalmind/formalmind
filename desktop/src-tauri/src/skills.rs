@@ -13,6 +13,8 @@ struct Skill {
     licence: &'static str,
     repo: &'static str,
     rev: &'static str,
+    /// The folder `files` are relative to, in the repository.
+    base: &'static str,
     /// What it checks, in a sentence.
     about: &'static str,
     /// The roles whose prompt lists it.
@@ -34,6 +36,7 @@ const CATALOG: &[Skill] = &[
         licence: "MIT",
         repo: PASHOV,
         rev: PASHOV_REV,
+        base: LENSES,
         about: "Twelve checklists: access control, math precision, invariants, trust gaps and more.",
         roles: &["reviewer", "prover", "assistant"],
         when: "before a verdict, and when looking for what could break the property you are proving: read shared-rules.md, then the lenses that fit the function (math-precision for arithmetic, access-control for guards, trust-gap and periphery for external calls); judging.md says what counts as a real issue",
@@ -61,10 +64,24 @@ const CATALOG: &[Skill] = &[
         licence: "MIT",
         repo: PASHOV,
         rev: PASHOV_REV,
+        base: LENSES,
         about: "A catalogue of attack classes to check entry points against.",
         roles: &["reviewer", "assistant"],
         when: "when a function takes value, calls out or changes who can do what: check it against the threats that apply",
         files: &["../../../x-ray/references/threats.md"],
+    },
+    Skill {
+        id: "web3-vuln-classes",
+        name: "Vulnerability classes",
+        author: "Dickson Wu (Web3 Audit Corpus)",
+        licence: "CC BY 4.0",
+        repo: "DicksonWu654/web3-audit-findings",
+        rev: "3a09c80f7eecc1b857bfbcdb7b6dd04db6046e3d",
+        base: "",
+        about: "17 classes and 58 sub-classes of smart contract bugs, drawn from 180,907 public audit findings.",
+        roles: &["reviewer", "assistant"],
+        when: "when you judge whether something is a bug and what kind: each class has a definition, what it includes and excludes, and links to past findings of that kind (taxonomy.yaml is JSON despite its name)",
+        files: &["taxonomy.yaml"],
     },
 ];
 
@@ -100,9 +117,9 @@ fn skills_file(rest: &str) -> Option<PathBuf> {
     Some(skills_dir().ok()?.join(rest))
 }
 
-/// Where a catalogue file comes from: lens paths are relative to the hacking-agents folder.
-fn source_path(file: &str) -> String {
-    let mut parts: Vec<&str> = LENSES.split('/').collect();
+/// Where a catalogue file comes from: relative to its skill's `base` folder.
+fn source_path(base: &str, file: &str) -> String {
+    let mut parts: Vec<&str> = base.split('/').filter(|p| !p.is_empty()).collect();
     for p in file.split('/') {
         if p == ".." {
             parts.pop();
@@ -138,7 +155,7 @@ pub fn skills_catalog() -> Result<Vec<Value>, String> {
         .map(|s| {
             json!({
                 "id": s.id, "name": s.name, "author": s.author, "licence": s.licence, "about": s.about,
-                "source": format!("https://github.com/{}/tree/{}/{}", s.repo, s.rev, source_path(s.files[0]).rsplit_once('/').map(|(d, _)| d).unwrap_or("")),
+                "source": format!("https://github.com/{}/tree/{}/{}", s.repo, s.rev, source_path(s.base, s.files[0]).rsplit_once('/').map(|(d, _)| d).unwrap_or("")),
                 "roles": s.roles, "files": s.files.len(), "added": installed(s.id),
             })
         })
@@ -153,7 +170,7 @@ pub async fn skills_add(id: String) -> Result<(), String> {
     let client = reqwest::Client::builder().timeout(std::time::Duration::from_secs(30)).build().map_err(|e| e.to_string())?;
     let mut fetched = vec![];
     for f in s.files {
-        let url = format!("https://raw.githubusercontent.com/{}/{}/{}", s.repo, s.rev, source_path(f));
+        let url = format!("https://raw.githubusercontent.com/{}/{}/{}", s.repo, s.rev, source_path(s.base, f));
         let res = client.get(&url).send().await.map_err(|e| format!("{url}: {e}"))?;
         if !res.status().is_success() {
             return Err(format!("{url}: {}", res.status()));
@@ -216,9 +233,10 @@ mod tests {
 
     #[test]
     fn catalogue_paths_resolve() {
-        assert_eq!(source_path("shared-rules.md"), "solidity-auditor/references/hacking-agents/shared-rules.md");
-        assert_eq!(source_path("../judging.md"), "solidity-auditor/references/judging.md");
-        assert_eq!(source_path("../../../x-ray/references/threats.md"), "x-ray/references/threats.md");
+        assert_eq!(source_path(LENSES, "shared-rules.md"), "solidity-auditor/references/hacking-agents/shared-rules.md");
+        assert_eq!(source_path(LENSES, "../judging.md"), "solidity-auditor/references/judging.md");
+        assert_eq!(source_path(LENSES, "../../../x-ray/references/threats.md"), "x-ray/references/threats.md");
+        assert_eq!(source_path("", "taxonomy.yaml"), "taxonomy.yaml");
         assert_eq!(local_name("../judging.md"), "judging.md");
     }
 
