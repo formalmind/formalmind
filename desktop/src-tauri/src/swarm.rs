@@ -1654,8 +1654,9 @@ async fn run_swarm(turn: &Turn<'_>) -> String {
     let _ = std::fs::create_dir_all(root.join(".formal"));
     // Where the proofs live, written down once for every tool that reads them (formalmind.toml).
     crate::swarm_ctx::ensure_config(&root);
-    // The plan follows the AST: every function in scope that it doesn't list yet is added at each start.
-    sync_plan(turn, &root).await;
+    // The plan follows the AST: every function in scope that it doesn't list yet is added at each start, once your
+    // messages are answered (a question needs no AST; the assistant reads it only through its tools).
+    let mut planned = false;
     loop {
         if turn.swarm.stop.load(Ordering::SeqCst) {
             return "paused: resume anytime, the queue carries on".into();
@@ -1668,6 +1669,11 @@ async fn run_swarm(turn: &Turn<'_>) -> String {
             // A start below what's already spent is held at the spend: name the cap that was asked for.
             let cap = if turn.req.budget_usd < budget { turn.req.budget_usd } else { budget };
             return format!("budget reached (${spent:.2} spent of ${cap:.2}); raise it and resume to carry on");
+        }
+
+        if !planned && !with_queue(&turn.queue, |q| q.jobs.iter().any(|j| j.kind == "answer" && (j.state == "queued" || j.state == "running"))) {
+            sync_plan(turn, &root).await;
+            planned = true;
         }
 
         // A run for queued work (a report to read, a statement you added or confirmed) also takes the statements
