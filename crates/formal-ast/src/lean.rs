@@ -531,7 +531,11 @@ impl<'a> Gen<'a> {
             None => ident(&s(&d["name"])),
         };
         if !self.consts.iter().any(|(c, _)| *c == id) {
-            let value = self.const_expr(&d["value"])?;
+            let value = match strip_location(&tstr(d)) {
+                // `bytes`/`string` constants: their bytes, computed here.
+                "bytes" | "string" => self.const_term(&d["value"], &tstr(d))?,
+                _ => self.const_expr(&d["value"])?,
+            };
             let ty = self.ty(&d["typeName"])?;
             if !self.consts.iter().any(|(c, _)| *c == id) {
                 self.consts.push((id, format!("def {name} : {ty} := {value}")));
@@ -540,8 +544,56 @@ impl<'a> Gen<'a> {
         Ok(name)
     }
 
+    /// The bytes of a compile-time `bytes`/`string` value: literals, constants holding them, `abi.encodePacked` of
+    /// them, and conversions between `bytes` and `string`.
+    fn const_bytes(&self, e: &Value) -> Option<Vec<u8>> {
+        match e["nodeType"].as_str()? {
+            "Literal" if matches!(e["kind"].as_str(), Some("string" | "hexString" | "unicodeString")) => literal_bytes(e),
+            "Identifier" | "MemberAccess" => {
+                let d = self.nodes.get(&e["referencedDeclaration"].as_i64()?)?;
+                (d["nodeType"] == "VariableDeclaration" && d["constant"] == true).then(|| self.const_bytes(&d["value"])).flatten()
+            }
+            "TupleExpression" => match e["components"].as_array()?.as_slice() {
+                [c] => self.const_bytes(c),
+                _ => None,
+            },
+            "FunctionCall" => {
+                let args = e["arguments"].as_array()?;
+                if e["kind"] == "typeConversion" && args.len() == 1 {
+                    let (to, from) = (strip_location(&tstr(e)).to_string(), tstr(&args[0]));
+                    let from = strip_location(&from);
+                    let text = |t: &str| t == "bytes" || t == "string" || t.starts_with("literal_string");
+                    return (text(&to) && text(from)).then(|| self.const_bytes(&args[0])).flatten();
+                }
+                let callee = &e["expression"];
+                if callee["memberName"] == "encodePacked" && callee["expression"]["name"] == "abi" && callee["expression"]["referencedDeclaration"].as_i64().is_some_and(|r| r < 0) {
+                    let mut out = vec![];
+                    for a in args {
+                        out.extend(self.const_bytes(a)?);
+                    }
+                    return Some(out);
+                }
+                None
+            }
+            _ => None,
+        }
+    }
+
+    /// A compile-time `bytes` or `string` value as a Lean term of type `ty`.
+    fn const_term(&self, e: &Value, ty: &str) -> R<String> {
+        let bytes = self.const_bytes(e).ok_or("a bytes/string constant not known at compile time")?;
+        if strip_location(ty) == "string" {
+            return lean_string(&bytes).ok_or_else(|| "a string constant that isn't UTF-8".into());
+        }
+        Ok(format!("[{}]", bytes.iter().map(|b| b.to_string()).collect::<Vec<_>>().join(", ")))
+    }
+
     /// A compile-time expression: plain Nat arithmetic.
     fn const_expr(&mut self, e: &Value) -> R<String> {
+        let ty = tstr(e);
+        if e["nodeType"] == "FunctionCall" && matches!(strip_location(&ty), "bytes" | "string") {
+            return self.const_term(e, &ty);
+        }
         match e["nodeType"].as_str().unwrap_or("") {
             "Literal" => literal(e),
             "Identifier" => {
@@ -590,8 +642,8 @@ impl<'a> Gen<'a> {
             }
             "FunctionCall" if matches!(e["expression"]["memberName"].as_str(), Some("wrap" | "unwrap")) => self.const_expr(&e["arguments"][0]),
             "FunctionCall" if e["expression"]["name"] == "keccak256" => {
-                // keccak256 of a literal: computed here, exactly.
-                let bytes = literal_bytes(&e["arguments"][0]).ok_or("keccak256 of a non-literal constant")?;
+                // keccak256 of a literal, or of bytes built from literals and constants: computed here, exactly.
+                let bytes = self.const_bytes(&e["arguments"][0]).ok_or("keccak256 of bytes not known at compile time")?;
                 Ok(keccak_hex(&bytes))
             }
             other => bail(format!("constant {other}")),
@@ -3163,7 +3215,7 @@ impl<'g, 'a> Fx<'g, 'a> {
         }
         if builtin && callee["nodeType"] == "Identifier" && callee["name"] == "keccak256" {
             let arg = &args[0];
-            if let Some(bytes) = literal_bytes(arg) {
+            if let Some(bytes) = self.g.const_bytes(arg) {
                 return Ok(keccak_hex(&bytes));
             }
             // keccak256(abi.encode(words…)): an arbitrary function of the words (the same one Yul scratch hashing uses).
@@ -3496,6 +3548,26 @@ fn split_tuple(t: &str) -> Vec<String> {
         parts.push(cur);
     }
     parts
+}
+
+/// A Lean string literal with these UTF-8 bytes.
+fn lean_string(bytes: &[u8]) -> Option<String> {
+    let s = std::str::from_utf8(bytes).ok()?;
+    let mut out = String::from("\"");
+    for c in s.chars() {
+        match c {
+            '"' => out.push_str("\\\""),
+            '\\' => out.push_str("\\\\"),
+            '\n' => out.push_str("\\n"),
+            '\t' => out.push_str("\\t"),
+            c if (c as u32) < 0x20 || c as u32 == 0x7f => {
+                let _ = write!(out, "\\x{:02x}", c as u32);
+            }
+            c => out.push(c),
+        }
+    }
+    out.push('"');
+    Some(out)
 }
 
 fn keccak_hex(bytes: &[u8]) -> String {

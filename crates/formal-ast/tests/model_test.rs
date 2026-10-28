@@ -53,3 +53,16 @@ fn constructors_set_immutables() {
     assert!(t.contains("return ext.nameHash"), "{t}");
     lean_checks("Deploy", t);
 }
+
+#[test]
+fn constants_built_from_literals() {
+    let Some(model) = model("src/Consts.sol", "Consts") else { return };
+    assert!(model.report.opaque.is_empty(), "{:?}", model.report.opaque);
+    let t = &model.text;
+    // keccak256 of a bytes constant, and of abi.encodePacked of literals and constants: computed here.
+    assert!(t.contains("Sigs.A_HASH : Nat := 0x8988d687b513e88abb9877146db58b35c367b58bc6305f31a77e0c4803826ed5"), "{t}");
+    assert!(t.contains("Sigs.B_HASH : Nat := 0x8633e574b533cf099552f4fb2dbb664685db0f0434ce91dc19e6cbad249dc2f2"), "{t}");
+    // A `string(abi.encodePacked(…))` constant is its text.
+    assert!(t.contains("Sigs.WITNESS : String := \"B witness)A(uint256 x)\""), "{t}");
+    lean_checks("Consts", t);
+}
