@@ -502,3 +502,8 @@ button:is(:hover, :focus-visible) > .fm-bell, .fm-bell-ring { animation: fm-bell
 .fm-app :is(strong, b, th) {
 	color: hsl(var(--foreground));
 }
+/* No all-caps labels: written as they are (sentence case), with normal letter spacing. */
+.fm-app :is(.uppercase, .uppercase *) {
+	text-transform: none !important;
+	letter-spacing: normal !important;
+}
