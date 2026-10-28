@@ -17,7 +17,6 @@ import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel,
 import { ChatMarkdown } from "@/components/chat-markdown";
 import { GitTree } from "./git-tree";
 import { CodeBlock, CodeBlockContent } from "@/components/ui/code-block";
-import { Skeleton } from "@/components/ui/skeleton";
 import { useHighlightedCode } from "@/hooks/use-highlighted-code";
 import { Message, MessageContent, MessageHeader } from "@/components/ui/message";
 import { SwarmCanvas } from "@/components/swarm/swarm-canvas";
@@ -1405,25 +1404,9 @@ export function NavGroup({ name, git, mode, onMode, inBar, compact }: { name: st
 	);
 }
 
-/** The chat while a session's history loads: an agent's lines, a step card, and a message of yours, in grey. */
+/** The chat while a session's history loads: one large blob with a strong shimmer. */
 function ChatSkeleton() {
-	return (
-		<div aria-label="Loading the chat" className="space-y-5">
-			{[0, 1].map((k) => (
-				<div key={k} className="space-y-5">
-					<div className="space-y-2">
-						<Skeleton className="h-3 w-24" />
-						<Skeleton className="h-3 w-11/12" />
-						<Skeleton className="h-3 w-3/4" />
-					</div>
-					<Skeleton className="h-20 w-full rounded-xl" />
-					<div className="flex justify-end">
-						<Skeleton className="h-9 w-1/2 rounded-2xl" />
-					</div>
-				</div>
-			))}
-		</div>
-	);
+	return <div aria-label="Loading the chat" className="fm-shimmer h-48 w-full rounded-3xl" />;
 }
 
 /** A filled speech bubble with two lines cut out of it: the "Talk to the swarm" mark. */
