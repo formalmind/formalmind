@@ -2746,10 +2746,6 @@ export function SwarmPanel({ folder, name, scan, bridge, session, file: openPath
 								<Plus className="size-3.5" /> Start new chat
 							</DropdownMenuItem>
 							<DropdownMenuSeparator />
-							<DropdownMenuItem onSelect={() => pickSession("new")} className="text-[13px]">
-								<Plus className="size-3.5" /> Start new chat
-							</DropdownMenuItem>
-							<DropdownMenuSeparator />
 							<DropdownMenuLabel className="text-xs font-normal text-muted-foreground">Sessions in {name}</DropdownMenuLabel>
 							{/* The session you're reading stays highlighted, with a check on the right. */}
 							{sessions.map((x, i) => (
