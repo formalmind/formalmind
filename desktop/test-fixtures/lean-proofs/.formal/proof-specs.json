@@ -1,0 +1,39 @@
+{
+  "schema": 1,
+  "specs": [
+    {
+      "id": "permission-updated",
+      "title": "Selected permission is updated (abstract model)",
+      "signature": "Permissions.setExecutor(address,bool)",
+      "solidity": {
+        "path": "Permissions.sol",
+        "line": 8
+      },
+      "lean": {
+        "path": "Permissions.lean",
+        "line": 10
+      },
+      "assumptions": [
+        "Lean models addresses as natural numbers.",
+        "The abstract function receives a maker argument; Solidity uses msg.sender.",
+        "Correspondence between Solidity and the Lean model is not proved."
+      ],
+      "relevantCode": [
+        {
+          "path": "Permissions.sol",
+          "startLine": 6,
+          "endLine": 6,
+          "reason": "State: permissions are indexed by maker and executor.",
+          "expectedText": "    mapping(address => mapping(address => bool)) public permissions;"
+        },
+        {
+          "path": "Permissions.sol",
+          "startLine": 8,
+          "endLine": 10,
+          "reason": "Operation: the caller selects its own permission entry and writes allow.",
+          "expectedText": "    function setExecutor(address executor, bool allow) external {\n        permissions[msg.sender][executor] = allow;\n    }"
+        }
+      ]
+    }
+  ]
+}

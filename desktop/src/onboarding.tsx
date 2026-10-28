@@ -203,7 +203,7 @@ function KeyStep({ onNext }: { onNext: () => void }) {
 	return (
 		<Frame step={2}>
 			<Cards />
-			<Headline muted="Agents run on Claude." strong="Pick how to pay for it." />
+			<Headline muted="Optional agent setup." strong="Choose a model provider." />
 			<div className="fm-rise w-full space-y-4 [animation-delay:160ms]">
 				{own ? (
 					<form
@@ -238,6 +238,7 @@ function KeyStep({ onNext }: { onNext: () => void }) {
 						</p>
 					</>
 				)}
+				<button type="button" onClick={onNext} className={quiet}>Set up agents later</button>
 			</div>
 		</Frame>
 	);
