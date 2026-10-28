@@ -47,9 +47,10 @@ Your messages come first: the **assistant** answers anything you type before the
 or add a [statement](/statements). A chat started with a message answers it and stops; ask for work ("prove the functions left") and the assistant
 sets the swarm going on the plan after its answer. Start with no message to run the plan straight away.
 
-In the chat, the agent at work shows its steps with a field to steer it. **Enter** queues a note, which the agent reads
-at its next step. **⌘ Enter**, or **Now** on a queued note, stops the session and starts it again on your note. When
-several agents work at once, the chat shows them as a tree under the swarm: pick one to see its steps.
+While the agents work, the chat's input steers them. **Enter** queues what you typed for the agent's next step; the
+note waits above the input until it is picked up. **⌘ Enter**, or **Now** on a queued note, stops the session and starts
+it again on your note. When several agents work at once, the chat shows them as a tree under the swarm: pick one to
+see its steps.
 
 ## Sessions, stopping and the cap
 

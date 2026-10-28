@@ -2490,8 +2490,9 @@ export function SwarmPanel({ folder, name, scan, bridge, session, file: openPath
 		const text = say.trim();
 		if (!text || !run) return;
 		setSay("");
-		// The app sends it back as a `you` event (desktop/src-tauri/src/swarm.rs), logged with the session.
-		await invoke("swarm_say", { folder, run, text }).catch((e) => setError(String(e)));
+		// Queued for the agent at work (it reads it at its next step); the app sends it back as a `you` event
+		// (desktop/src-tauri/src/swarm.rs), logged with the session.
+		await steerSend(text, false);
 	};
 
 	// Skill commands in the composer, as Claude Code writes them: `/skills`, `/skills add <id>`, `/skills remove <id>`
@@ -2642,7 +2643,6 @@ export function SwarmPanel({ folder, name, scan, bridge, session, file: openPath
 								<Card
 									steps={block.steps}
 									running={i === liveBlock}
-									steering={i === liveBlock ? { notes: steerNotes, send: (text, now, queued) => void steerSend(text, now, queued) } : undefined}
 									// The plan item the run works on, by its text (bold markers and code ticks off).
 									title={itemTitle(block.steps)}
 									onPause={run ? () => void invoke("swarm_stop", { folder, run }) : undefined}
@@ -3184,11 +3184,37 @@ export function SwarmPanel({ folder, name, scan, bridge, session, file: openPath
 
 				<div className="shrink-0 space-y-2 p-2">
 					{error ? <p className="text-xs text-red-600">{error}</p> : null}
+					{/* Your notes to the agent at work, until it takes them in at its next step; Now interrupts with one. */}
+					{run && queuedSteer.length ? (
+						<div className="flex flex-wrap items-center gap-1.5 px-1 text-[12px]">
+							<span className="text-muted-foreground">Queued for the next step</span>
+							{queuedSteer.map((n) => (
+								<span key={n.id} className="inline-flex max-w-full items-center gap-1 rounded-full bg-muted py-0.5 pl-2.5 pr-1">
+									<span className="truncate">{n.text}</span>
+									<button type="button" onClick={() => void steerSend(n.text, true, n.id)} title="Interrupt the agent with this note now (⌘↵)" className="shrink-0 rounded-full px-1.5 text-muted-foreground hover:bg-background hover:text-foreground">
+										Now
+									</button>
+								</span>
+							))}
+						</div>
+					) : null}
 					{/* The Swarm page's composer: steer while it runs; before that, what you type is its focus and ↑ starts it. */}
 					{(() => {
 						// AffectUI's composer from the private UI package when it is checked out; the app's own otherwise.
 						const Box = (Composer ?? ChatComposer) as typeof ChatComposer;
 						return (
+					// While it runs, ↵ queues what you typed for the agent's next step and ⌘↵ interrupts it with it now.
+					<div
+						className="contents"
+						onKeyDownCapture={(e) => {
+							if (!run || e.key !== "Enter" || !(e.metaKey || e.ctrlKey) || !say.trim()) return;
+							e.preventDefault();
+							e.stopPropagation();
+							const text = say.trim();
+							setSay("");
+							void steerSend(text, true);
+						}}
+					>
 					<Box
 						compact
 						rounded="rounded-2xl"
@@ -3224,7 +3250,7 @@ export function SwarmPanel({ folder, name, scan, bridge, session, file: openPath
 								store.set("fm:effort", v);
 							},
 						} : undefined}
-						placeholder={run ? "Talk to the agents: a question, a new focus, an idea to check…" : "What should the swarm focus on? (optional) ↑ starts it"}
+						placeholder={run ? "Talk to the agents: ↵ for their next step, ⌘↵ to interrupt now…" : "What should the swarm focus on? (optional) ↑ starts it"}
 						context={
 							<span className="inline-flex items-center gap-1.5">
 								<span className="inline-flex h-7 items-center gap-1.5 rounded-full bg-secondary px-2.5 text-[12px] font-medium text-secondary-foreground" title={folder}><Folder className="size-3 shrink-0" />{name}</span>
@@ -3238,6 +3264,7 @@ export function SwarmPanel({ folder, name, scan, bridge, session, file: openPath
 							</button>
 						) : null}
 					/>
+					</div>
 						);
 					})()}
 				</div>
