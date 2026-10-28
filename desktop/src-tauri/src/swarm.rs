@@ -1485,8 +1485,26 @@ async fn read_context(root: &Path) -> crate::swarm_ctx::Context {
     tauri::async_runtime::spawn_blocking(move || crate::swarm_ctx::context(&root)).await.unwrap_or_default()
 }
 
+/// The plan's checked items whose function the ledger no longer counts as proved (its code changed since the proof,
+/// or Lean no longer checks it), as (index, def, why): a tick is a fact the ledger derives, not a mark that stays.
+fn lapsed(plan: &[PlanItem], ledger: &Value) -> Vec<(usize, String, String)> {
+    let entries = ledger["entries"].as_array().cloned().unwrap_or_default();
+    plan.iter()
+        .filter(|i| i.mark == "x")
+        .filter_map(|i| {
+            let def = i.text.split('`').nth(1)?;
+            let e = entries.iter().find(|e| e["lean"] == def)?;
+            (e["status"] != "proved").then(|| {
+                let why = e["notYet"].as_array().and_then(|r| r.first()).and_then(Value::as_str).unwrap_or("not proved");
+                (i.index, def.to_string(), why.to_string())
+            })
+        })
+        .collect()
+}
+
 /// Writes the AST's plan items that .formal/plan.md doesn't have yet (one per function in scope; ones the Proofs page
-/// already shows as proved come checked). The planner's turn, without a model: returns how many were added.
+/// already shows as proved come checked), and reopens checked items the ledger no longer counts as proved. The
+/// planner's turn, without a model: returns how many items were added or reopened.
 async fn sync_plan(turn: &Turn<'_>, root: &Path) -> usize {
     turn.emit("status", "planner", "plan", "planner is working".into());
     turn.emit("status", "planner", "plan", "reading the contracts' AST (formal-ast)".into());
@@ -1514,8 +1532,33 @@ async fn sync_plan(turn: &Turn<'_>, root: &Path) -> usize {
     for r in &ctx.regenerated {
         turn.emit("result", "planner", "plan", r.clone());
     }
-    turn.emit("plan", "planner", "plan", if missing.is_empty() { "the plan has every function in scope".into() } else { format!("{} items from the AST", missing.len()) });
-    missing.len()
+    // Lean checks the proofs again when the sources changed since the last check (a changed model among them).
+    let reopened = match crate::ledger::build(root, true, false).await {
+        Ok(ledger) => {
+            let gone = lapsed(&read_plan(root), &ledger);
+            for (index, def, why) in &gone {
+                set_mark(root, *index, ' ');
+                turn.emit("result", "planner", &index.to_string(), format!("reopened `{def}`: {why}"));
+            }
+            gone.len()
+        }
+        Err(e) => {
+            turn.emit("result", "planner", "plan", format!("couldn't check the proofs against the current code ({e}); checked items stay as they are"));
+            0
+        }
+    };
+    turn.emit(
+        "plan",
+        "planner",
+        "plan",
+        match (missing.len(), reopened) {
+            (0, 0) => "the plan has every function in scope".into(),
+            (m, 0) => format!("{m} items from the AST"),
+            (0, r) => format!("{r} proved items reopened: their code changed or Lean no longer checks them"),
+            (m, r) => format!("{m} items from the AST; {r} proved items reopened"),
+        },
+    );
+    missing.len() + reopened
 }
 
 /// Where an item's proof belongs, folder-relative, when a file is there: a statement's obligation in
@@ -2542,6 +2585,26 @@ mod tests {
         assert!(runs.join("archive").join("local-1.jsonl").exists());
         assert_eq!(load_queue(&queue_file(&root, "swarm")).spent, 3.5);
         std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn changed_functions_are_reopened() {
+        let plan = vec![
+            PlanItem { index: 1, mark: "x".into(), text: "`Pool.fee` (Pool.sol)".into() },
+            PlanItem { index: 2, mark: "x".into(), text: "`Pool.swap` (Pool.sol)".into() },
+            PlanItem { index: 3, mark: " ".into(), text: "`Pool.new` (Pool.sol)".into() },
+            PlanItem { index: 4, mark: "!".into(), text: "`Pool.bug` (Pool.sol)".into() },
+        ];
+        let ledger = json!({ "entries": [
+            { "lean": "Pool.fee", "status": "pending", "notYet": ["the reviewer's approval: lapsed: the def or a theorem changed since it was approved"] },
+            { "lean": "Pool.swap", "status": "proved", "notYet": [] },
+            { "lean": "Pool.new", "status": "unproved", "notYet": ["no theorem"] },
+            { "lean": "Pool.bug", "status": "unproved", "notYet": ["no theorem"] },
+        ] });
+        let gone = lapsed(&plan, &ledger);
+        assert_eq!(gone.len(), 1, "only the checked item that is no longer proved: {gone:?}");
+        assert_eq!((gone[0].0, gone[0].1.as_str()), (1, "Pool.fee"));
+        assert!(gone[0].2.contains("lapsed"));
     }
 
     #[test]
