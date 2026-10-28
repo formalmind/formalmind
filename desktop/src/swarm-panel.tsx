@@ -2948,7 +2948,7 @@ export function SwarmPanel({ folder, name, scan, bridge, session, file: openPath
 				</span>
 				{ctxPct}%
 			</DropdownMenuTrigger>
-			<DropdownMenuContent align="end" className="w-auto rounded-2xl border-0 bg-transparent p-0 shadow-lg">
+			<DropdownMenuContent align="end" className="w-[340px] max-w-[calc(100vw-1.5rem)] rounded-2xl border-0 bg-transparent p-0 shadow-lg">
 				{(() => {
 					// AffectUI's context window from the private UI package when it is checked out; the app's own otherwise.
 					const Card = ContextCard ?? ContextPanel;
