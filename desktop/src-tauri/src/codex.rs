@@ -110,7 +110,10 @@ pub fn start_role(folder: &str, run: &str, job: u64, system: &str, task: &Value,
     let state = state_dir_in(&crate::local::home()?, &root, run);
     std::fs::create_dir_all(&state).map_err(|e| format!("{}: {e}", state.display()))?;
     let instructions = state.join("instructions.md");
-    std::fs::write(&instructions, system).map_err(|e| format!("{}: {e}", instructions.display()))?;
+    // Codex tells the model its sandbox is read-only, and a model then concludes it can't write at all; the swarm's own
+    // tools (write_file, run, report_bug) write and run through the app, outside that sandbox.
+    let system = format!("{system}\n\nYour own shell sandbox is read-only on purpose: write files only with the formalmind write_file tool, run lake and forge only with its run tool, and file bugs with report_bug. Those work; never say writing is blocked.");
+    std::fs::write(&instructions, &system).map_err(|e| format!("{}: {e}", instructions.display()))?;
     let saved = std::fs::read_to_string(state.join(format!("job-{job}.thread"))).ok().map(|s| s.trim().to_string()).filter(|s| !s.is_empty());
     let resumed = saved.is_some();
     // Codex takes text: a task's document blocks (a report's PDF) go in as the text beside them.
