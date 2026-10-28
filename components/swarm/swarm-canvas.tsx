@@ -16,7 +16,8 @@ export { ROLE_COLORS };
  * rules in the proofs repository's `.github/formalmind/README.md`.
  */
 
-const W = 1200;
+/** The board's width: the default lanes fit it; wider lanes (dragged by the viewer) widen it. */
+let W = 1200;
 /** A finished run stays on the board this long before the replay takes over again. */
 export const LIVE_WINDOW_MS = 10 * 60_000;
 
@@ -60,15 +61,24 @@ export const LABEL_STYLES: Record<string, string> = {
 	README: "bg-muted text-muted-foreground",
 };
 
-const LANE_W = 176;
 const LANE_GAP = 16;
 const PAD = 24;
+/** A lane's width, and the card's inside it: the default, or what the viewer dragged a lane's edge to (kept per
+ * viewer, `fm:canvas-lane-w`). Module-wide, as the board's geometry is; the board sets it before each render. */
+const LANE_W0 = 176;
+let LANE_W = LANE_W0;
+let CARD_W = LANE_W - 16;
+const LANE_KEY = "fm:canvas-lane-w";
+function setLaneWidth(w: number) {
+	LANE_W = w;
+	CARD_W = w - 16;
+	W = Math.max(1200, PAD * 2 + LANES.length * w + (LANES.length - 1) * LANE_GAP);
+}
 const LANE_TOP = 64;
 const LANE_BOTTOM = 400;
 const CARD_TOP = 100;
 const CARD_MIN_H = 78;
 const CARD_GAP = 10;
-const CARD_W = 160;
 const PANEL_H = 136;
 /** Each project's lanes repeat this far below the last one's. */
 const GROUP_H = LANE_BOTTOM;
@@ -657,6 +667,17 @@ export function SwarmCanvas({ state, fill = false, contain = false, title, actio
 	side?: { title: string; node: ReactNode };
 }) {
 	const frameRef = useRef<HTMLDivElement>(null);
+	// The lanes' width, as the viewer last dragged it; set on the module before anything below reads the geometry.
+	// Only on the app's canvas (fill: it pans); a board fitted to its frame (the landing demo) keeps the default.
+	const [laneW, setLaneW] = useState(() => {
+		if (!fill) return LANE_W0;
+		try {
+			return Number(localStorage.getItem(LANE_KEY)) || LANE_W0;
+		} catch {
+			return LANE_W0;
+		}
+	});
+	setLaneWidth(laneW);
 	const [fit, setFit] = useState({ scale: 1, x: 0, y: 0, w: 0, h: 0 });
 	const { scale } = fit;
 	// The panels grow with their text; the board grows with the tallest.
@@ -666,12 +687,45 @@ export function SwarmCanvas({ state, fill = false, contain = false, title, actio
 	// The live board has a lane group per project; the replay (and the board before any state) has one.
 	const projects = projectsOf(state);
 	const groups = state && (fill || isLiveRun(state.runs[0])) ? projects.length : 1;
-	const geo = useMemo(() => geometry(groups, panels), [groups, panels]);
+	const geo = useMemo(() => geometry(groups, panels), [groups, panels, laneW]);
 	const panelsEnd = Math.max(geo.height, geo.panelTop + Math.max(...panelHs.slice(0, panels)) + PAD);
 	const BELOW_GAP = 24;
 	// The card under the notebooks (and the one beside it) grow to show all they hold; dragging the bottom edge sets a
 	// height instead, kept per title (double-click goes back to fitting).
 	const belowKey = below ? `fm:canvas-below-h:${below.title}` : "";
+	// The git card's width (beside), dragged from its left edge, kept per title.
+	const besideKey = beside ? `fm:canvas-beside-w:${beside.title}` : "";
+	const [besideW, setBesideW] = useState<number | null>(() => {
+		try {
+			return Number(localStorage.getItem(besideKey)) || null;
+		} catch {
+			return null;
+		}
+	});
+	const besideWidth = beside ? Math.min(Math.max(240, besideW ?? beside.width), W - PAD * 2 - 360) : 0;
+	/** A drag on an edge: calls `set` with the board-unit width as it moves, keeps it under `key` when it ends. */
+	const dragWidth = (e: React.PointerEvent, from: number, dir: 1 | -1, min: number, max: number, set: (w: number) => void, key: string) => {
+		e.preventDefault();
+		e.stopPropagation();
+		const x0 = e.clientX;
+		const k = s || 1;
+		let last = from;
+		const move = (ev: PointerEvent) => {
+			last = Math.min(max, Math.max(min, Math.round(from + (dir * (ev.clientX - x0)) / k)));
+			set(last);
+		};
+		const up = () => {
+			window.removeEventListener("pointermove", move);
+			window.removeEventListener("pointerup", up);
+			try {
+				localStorage.setItem(key, String(last));
+			} catch {
+				/* not kept */
+			}
+		};
+		window.addEventListener("pointermove", move);
+		window.addEventListener("pointerup", up);
+	};
 	const [belowH, setBelowH] = useState<number | null>(() => {
 		try {
 			return Number(localStorage.getItem(belowKey)) || null;
@@ -784,12 +838,13 @@ export function SwarmCanvas({ state, fill = false, contain = false, title, actio
 				return setFit({ scale: next, x: 0, y: 0, w: W * next, h: boardH * next });
 			}
 			if (!fill) return setFit({ scale: width / W, x: 0, y: 0, w: width, h: height });
-			const next = Math.min(width / W, (height - PINNED) / Math.min(boardH, FIT_H));
-			setFit({ scale: next, x: (width - W * next) / 2, y: PINNED + Math.max(0, (height - PINNED - boardH * next) / 2), w: width, h: height });
+			// Fitted to the default width, so lanes you widened stay wide and the board runs on to the right (pan to it).
+			const next = Math.min(width / 1200, (height - PINNED) / Math.min(boardH, FIT_H));
+			setFit({ scale: next, x: Math.max(0, (width - W * next) / 2), y: PINNED + Math.max(0, (height - PINNED - boardH * next) / 2), w: width, h: height });
 		});
 		observer.observe(el);
 		return () => observer.disconnect();
-	}, [fill, contain, boardH]);
+	}, [fill, contain, boardH, laneW]);
 
 	// The desktop popover closes on a press outside it (another card re-anchors it instead) or on Escape.
 	const popoverOpen = !isMobile && modal !== null;
@@ -1150,8 +1205,27 @@ export function SwarmCanvas({ state, fill = false, contain = false, title, actio
 						<section
 							data-canvas-ui
 							className="absolute flex flex-col overflow-hidden rounded-xl border bg-card shadow-card"
-							style={{ left: W - PAD - beside.width, top: panelsEnd + BELOW_GAP, width: beside.width, height: belowHeight }}
+							style={{ left: W - PAD - besideWidth, top: panelsEnd + BELOW_GAP, width: besideWidth, height: belowHeight }}
 						>
+							{/* Drag the left edge to widen it (the card beside it narrows); double-click for the default. */}
+							<div
+								role="separator"
+								aria-orientation="vertical"
+								aria-label={`Resize ${beside.title}`}
+								title="Drag to resize · double-click to reset"
+								onPointerDown={(e) => dragWidth(e, besideWidth, -1, 240, W - PAD * 2 - 360, setBesideW, besideKey)}
+								onDoubleClick={() => {
+									setBesideW(null);
+									try {
+										localStorage.removeItem(besideKey);
+									} catch {
+										/* not kept */
+									}
+								}}
+								className="group/resize absolute inset-y-0 left-0 z-10 flex w-3 cursor-col-resize items-center"
+							>
+								<span className="ml-1 h-10 w-1 rounded-full bg-border transition-colors group-hover/resize:bg-muted-foreground/60" />
+							</div>
 							<div className="flex h-9 shrink-0 items-center gap-2 border-b px-4 font-mono text-[12px] font-medium text-muted-foreground">{beside.title}{beside.note ? <span className="truncate font-sans text-[11px] font-normal">{beside.note}</span> : null}</div>
 							<div ref={besideBody} data-scroll className="flex min-h-0 flex-1 flex-col overflow-auto">
 								{beside.node}
@@ -1162,7 +1236,7 @@ export function SwarmCanvas({ state, fill = false, contain = false, title, actio
 						<section
 							data-canvas-ui
 							className="absolute flex flex-col overflow-hidden rounded-xl border bg-card shadow-card"
-							style={{ left: PAD, top: panelsEnd + BELOW_GAP, width: W - PAD * 2 - (beside ? beside.width + BELOW_GAP : 0), height: belowHeight }}
+							style={{ left: PAD, top: panelsEnd + BELOW_GAP, width: W - PAD * 2 - (beside ? besideWidth + BELOW_GAP : 0), height: belowHeight }}
 						>
 							<div className="flex h-9 shrink-0 items-center gap-2 border-b px-4 font-mono text-[12px] font-medium text-muted-foreground">{below.title}{below.note ? <span className="font-sans text-[11px] font-normal">{below.note}</span> : null}</div>
 							<div ref={belowBody} data-scroll className="flex min-h-0 flex-1 flex-col overflow-auto">
@@ -1225,6 +1299,24 @@ export function SwarmCanvas({ state, fill = false, contain = false, title, actio
 										<span>{lane.title}</span>
 										<span>{shown.cards.filter((c) => c.group === group && c.lane === lane.key).length}</span>
 									</div>
+									{/* Drag a lane's right edge to widen every lane (the board widens too); double-click for the default. */}
+									{fill ? <div
+										data-canvas-ui
+										role="separator"
+										aria-orientation="vertical"
+										aria-label="Resize the lanes"
+										title="Drag to widen the lanes · double-click to reset"
+										onPointerDown={(e) => dragWidth(e, laneW, 1, LANE_W0, 420, setLaneW, LANE_KEY)}
+										onDoubleClick={() => {
+											setLaneW(LANE_W0);
+											try {
+												localStorage.removeItem(LANE_KEY);
+											} catch {
+												/* not kept */
+											}
+										}}
+										className="absolute inset-y-0 -right-2 w-3 cursor-col-resize"
+									/> : null}
 								</div>
 							))}
 						</div>
