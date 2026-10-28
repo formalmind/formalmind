@@ -66,3 +66,18 @@ fn constants_built_from_literals() {
     assert!(t.contains("Sigs.WITNESS : String := \"B witness)A(uint256 x)\""), "{t}");
     lean_checks("Consts", t);
 }
+
+#[test]
+fn abi_arrays_of_static_elements() {
+    let Some(model) = model("src/Arrays.sol", "Arrays") else { return };
+    assert!(model.report.opaque.is_empty(), "{:?}", model.report.opaque);
+    let t = &model.text;
+    // Encoding: the length, then each element's words in place.
+    assert!(t.contains("abiEncode (items.length :: items.flatMap (fun "), "{t}");
+    // Decoding: each element decoded and checked at `pos + 32 + i * stride` (an Item is three words).
+    assert!(t.contains("← abiArrayAt data __o") && t.contains(" 96 (fun __b"), "{t}");
+    assert!(t.contains("def Arrays.sum"), "{t}");
+    // solc checks a calldata array's elements only when read, so `sum` isn't decoded eagerly by the dispatcher.
+    assert!(!t.contains("Arrays.sum ext __d"), "{t}");
+    lean_checks("Arrays", t);
+}

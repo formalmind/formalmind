@@ -975,6 +975,11 @@ impl<'a> Gen<'a> {
             }
             let name = self.lean_fn_name(f);
             let types: Vec<String> = node["parameters"]["parameters"].as_array().into_iter().flatten().map(tstr).collect();
+            // solc checks a calldata array's elements only when they're read; decoding them all up front would revert
+            // where the contract doesn't, so such selectors go to `dispatch_other`.
+            if node["parameters"]["parameters"].as_array().into_iter().flatten().any(|p| p["storageLocation"] == "calldata" && tstr(p).contains('[')) {
+                continue;
+            }
             let rets: Vec<String> = node["returnParameters"]["parameters"].as_array().into_iter().flatten().map(tstr).collect();
             let mut fx = Fx::new(self, f);
             fx.indent = 1;
@@ -2116,6 +2121,21 @@ impl<'g, 'a> Fx<'g, 'a> {
         }
     }
 
+    /// A name for a new `let mut`: Lean won't shadow a mutable variable still in scope (`for (uint i…)` twice in a
+    /// row), so such a name gets a suffix. In scope means declared above with no line indented less in between.
+    fn unshadowed(&mut self, name: String) -> String {
+        let mut min = self.indent;
+        for l in self.out.iter().rev() {
+            let ind = (l.len() - l.trim_start().len()) / 2;
+            if ind <= min && (l.trim_start().starts_with(&format!("let mut {name} :")) || l.trim_start().starts_with(&format!("let mut {name} :="))) {
+                let n = self.fresh("");
+                return ident(&format!("{}_{n}", name.trim_matches(|c| c == '«' || c == '»')));
+            }
+            min = min.min(ind);
+        }
+        name
+    }
+
     fn declare(&mut self, st: &Value) -> R<()> {
         let decls: Vec<Value> = st["declarations"].as_array().cloned().unwrap_or_default();
         let init = &st["initialValue"];
@@ -2128,7 +2148,7 @@ impl<'g, 'a> Fx<'g, 'a> {
             }
             let ty = self.g.ty(&d["typeName"])?;
             let v = if init.is_null() { "default".to_string() } else { self.expr_for(init, std::slice::from_ref(d), 0)? };
-            let n = local_ident(&s(&d["name"]));
+            let n = self.unshadowed(local_ident(&s(&d["name"])));
             self.locals.insert(id_of(d), n.clone());
             self.line(format!("let mut {n} : {ty} := {v}"));
             return Ok(());
@@ -2144,7 +2164,7 @@ impl<'g, 'a> Fx<'g, 'a> {
                 return bail("storage pointer from a tuple");
             }
             let ty = self.g.ty(&d["typeName"])?;
-            let name = local_ident(&s(&d["name"]));
+            let name = self.unshadowed(local_ident(&s(&d["name"])));
             self.locals.insert(id_of(d), name.clone());
             self.line(format!("let mut {name} : {ty} := {}", proj(&t, i, n)));
         }
@@ -2612,8 +2632,12 @@ impl<'g, 'a> Fx<'g, 'a> {
         if t == "bytes" || t == "string" {
             return Ok(true);
         }
-        if t.ends_with("[]") {
-            return bail("ABI arrays aren't modelled yet");
+        if let Some(elem) = t.strip_suffix("[]") {
+            // An array is dynamic; its elements must be static (head-only) for the model.
+            if self.abi_dynamic(elem)? {
+                return bail("ABI arrays of dynamic elements aren't modelled yet");
+            }
+            return Ok(true);
         }
         if let Some(name) = t.strip_prefix("struct ") {
             let sid = *self.g.struct_by_canon.get(name).ok_or_else(|| format!("struct {name}"))?;
@@ -2674,6 +2698,13 @@ impl<'g, 'a> Fx<'g, 'a> {
         match tt.as_str() {
             "bytes" => Ok(format!("(abiBytes {v})")),
             "string" => Ok(format!("(abiBytes ({v}.toUTF8.toList.map (·.toNat)))")),
+            _ if tt.ends_with("[]") => {
+                // A dynamic array of static elements: its length, then each element's words in place.
+                let elem = tt.strip_suffix("[]").unwrap_or_default().to_string();
+                let x = self.fresh("__e");
+                let words = self.abi_words(&elem, &x)?;
+                Ok(format!("(abiEncode ({v}.length :: {v}.flatMap (fun {x} => [{}])))", words.join(", ")))
+            }
             _ => {
                 let members = self.struct_members(&tt)?;
                 let items: Vec<(String, String)> = members.into_iter().map(|(n, mt)| (mt, format!("({v}).{}", ident(&n)))).collect();
@@ -2709,6 +2740,30 @@ impl<'g, 'a> Fx<'g, 'a> {
                     Ok(v)
                 }
                 "string" => bail("abi.decode of a string"),
+                _ if tt.ends_with("[]") => {
+                    // Each element decoded (and checked) at its place: `pos + 32 + i * stride`.
+                    let elem = tt.strip_suffix("[]").unwrap_or_default().to_string();
+                    let stride = 32 * self.abi_words(&elem, "x")?.len();
+                    let b = self.fresh("__b");
+                    let saved = std::mem::take(&mut self.out);
+                    let indent = self.indent;
+                    self.indent = 0;
+                    let mut slot = 0;
+                    let r = self.abi_decode_at(&elem, data, &b, &mut slot);
+                    let lines = std::mem::replace(&mut self.out, saved);
+                    self.indent = indent;
+                    let ev = r?;
+                    let ty = self.g.ty_str(&tt)?;
+                    let v = self.fresh("__d");
+                    self.line(format!("let {v} : {ty} ← abiArrayAt {data} {pos} {stride} (fun {b} => do"));
+                    self.indent += 2;
+                    for l in lines {
+                        self.line(l);
+                    }
+                    self.line(format!("pure {ev})"));
+                    self.indent -= 2;
+                    Ok(v)
+                }
                 _ => {
                     let members = self.struct_members(&tt)?;
                     let types: Vec<String> = members.iter().map(|(_, mt)| mt.clone()).collect();
