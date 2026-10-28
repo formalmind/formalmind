@@ -2,14 +2,15 @@ import { useEffect, useState } from "react";
 import { ChevronDown } from "lucide-react";
 
 /** What an agent's last request carried, from its `context` event (see `measure` and the agent loop in swarm.rs). */
-export type ContextUse = { used: number; window: number; compact_at: number; system: number; tools: number; task: number };
+/** `estimated`: the fixed parts were estimated from their text (a turn on Claude Code or Codex, which report only the total). */
+export type ContextUse = { used: number; window: number; compact_at: number; system: number; tools: number; task: number; estimated?: boolean };
 
 /** A `context` event's text: JSON, or "<used>/<window>" from logs written before the breakdown existed. */
 export function parseContext(text: string): ContextUse | null {
 	try {
 		const c = JSON.parse(text) as Partial<ContextUse>;
 		if (typeof c.used === "number" && typeof c.window === "number" && c.window > 0) {
-			return { used: c.used, window: c.window, compact_at: c.compact_at ?? Math.round(c.window * 0.75), system: c.system ?? 0, tools: c.tools ?? 0, task: c.task ?? 0 };
+			return { used: c.used, window: c.window, compact_at: c.compact_at ?? Math.round(c.window * 0.75), system: c.system ?? 0, tools: c.tools ?? 0, task: c.task ?? 0, estimated: c.estimated === true };
 		}
 	} catch {
 		const [used, window] = text.split("/").map(Number);
@@ -69,7 +70,10 @@ export function ContextBody({ role, color, use, onCompact, rows: showRows = true
 						<li key={r.label} className="flex items-center gap-2 tabular-nums">
 							<span className={`size-2.5 shrink-0 rounded-sm ${r.swatch}`} />
 							<span className="flex-1 truncate text-foreground">{r.label}</span>
-							<span className="text-muted-foreground">{tokens(r.n)}</span>
+							<span className="text-muted-foreground" title={use.estimated && r.label !== "Compaction buffer" && r.label !== "Free space" ? "Estimated from the text: Claude Code and Codex report only the total" : undefined}>
+								{use.estimated && ["System prompt", "Tools", "Task", "Messages"].includes(r.label) ? "≈" : ""}
+								{tokens(r.n)}
+							</span>
 							<span className="w-11 text-right text-muted-foreground">{pct(r.n, use.window)}%</span>
 						</li>
 					))}

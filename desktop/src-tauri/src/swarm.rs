@@ -828,6 +828,18 @@ impl Turn<'_> {
         Ok((status, reply))
     }
 
+    /// The fixed parts of a turn run by Claude Code or Codex, for the Context panel: the CLI reports only the total, and
+    /// there is no key to count with, so each part is estimated from its text (about four characters a token).
+    fn estimate(&self, role: &str, goal: &str, task: &Value) -> (u64, u64, u64) {
+        let tokens = |chars: usize| (chars as u64).div_ceil(4);
+        let task_text = match task {
+            Value::String(t) => t.len(),
+            Value::Array(parts) => parts.iter().filter_map(|p| p["text"].as_str()).map(str::len).sum(),
+            other => other.to_string().len(),
+        };
+        (tokens(system(role, &self.req.folder, goal).len()), tokens(tools(role).to_string().len()), tokens(task_text))
+    }
+
     /// What the fixed parts of every request in this turn take, for the Context panel: the system prompt, the tool
     /// definitions and the task (with any attached report), counted by /v1/messages/count_tokens (free, not metered)
     /// as differences of three counts. Zeros where a count fails; the panel then shows them as messages.
@@ -1072,6 +1084,7 @@ impl Turn<'_> {
         let mut out = Outcome::default();
         self.emit("status", role, item, format!("{role} is working on Claude Code{}", if cc.resumed { ", resuming its conversation" } else { "" }));
         let window = context_window(model);
+        let (sys_tokens, tool_tokens, task_tokens) = self.estimate(role, &goal, &task);
         let compact_at = (window as f64 * COMPACT_AT) as u64;
         let mut result: Option<Result<String, String>> = None;
         let mut last_used = 0;
@@ -1136,7 +1149,7 @@ impl Turn<'_> {
                                 if let Some(h) = self.health.lock().unwrap().as_mut() {
                                     h.tokens = h.tokens.max(used);
                                 }
-                                self.emit("context", role, item, json!({ "used": used, "window": window, "compact_at": compact_at, "system": 0, "tools": 0, "task": 0 }).to_string());
+                                self.emit("context", role, item, json!({ "used": used, "window": window, "compact_at": compact_at, "system": sys_tokens, "tools": tool_tokens, "task": task_tokens, "estimated": true }).to_string());
                             }
                         }
                         Some("result") => result = Some(result_of(&v)),
@@ -1175,6 +1188,7 @@ impl Turn<'_> {
         let mut out = Outcome::default();
         self.emit("status", role, item, format!("{role} is working on Codex{}", if cx.resumed { ", resuming its thread" } else { "" }));
         let window = context_window(model);
+        let (sys_tokens, tool_tokens, task_tokens) = self.estimate(role, &goal, &task);
         let compact_at = (window as f64 * COMPACT_AT) as u64;
         let mut failed: Option<String> = None;
         let mut finished = false;
@@ -1220,7 +1234,7 @@ impl Turn<'_> {
                         if let Some(h) = self.health.lock().unwrap().as_mut() {
                             h.tokens = h.tokens.max(used);
                         }
-                        self.emit("context", role, item, json!({ "used": used, "window": window, "compact_at": compact_at, "system": 0, "tools": 0, "task": 0 }).to_string());
+                        self.emit("context", role, item, json!({ "used": used, "window": window, "compact_at": compact_at, "system": sys_tokens, "tools": tool_tokens, "task": task_tokens, "estimated": true }).to_string());
                     }
                     if let Some(e) = failure_of(&v) {
                         failed = Some(e);
