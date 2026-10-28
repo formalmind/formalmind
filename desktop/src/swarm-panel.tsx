@@ -5,7 +5,7 @@ import { NvimTerminal } from "./nvim-terminal";
 import { reportError } from "@/lib/report-error";
 import { JsonTree } from "./json-tree";
 import { inDesktop } from "@/lib/open-web";
-import { ArrowDown, Bug, MessageSquare, Check, ChevronDown, ChevronRight, CircleCheck, CircleX, LoaderCircle, MoreHorizontal, Pause, Code2, Copy, FileCode2, Folder, Network, Play, Plus, ScanSearch, Square, SquareCheck, ThumbsDown, ThumbsUp, WandSparkles } from "lucide-react";
+import { ArrowDown, Bug, Check, ChevronDown, ChevronRight, CircleCheck, CircleX, LoaderCircle, MoreHorizontal, Pause, Code2, Copy, FileCode2, Folder, Network, Play, Plus, ScanSearch, Square, SquareCheck, ThumbsDown, ThumbsUp, WandSparkles } from "lucide-react";
 
 // The project roadmap (GitHub Projects-style), the same view the web app had on its own page.
 import { motion as vimMotion, search as vimSearch, setVimMode, useVimMode, type Cursor } from "@/components/vim-mode";
@@ -14,11 +14,11 @@ import { ChatComposer } from "@/components/chat-composer";
 import { useReportDirs } from "@/lib/report-dirs";
 import { auditJsonPath, parseAuditDoc, type AuditDoc, type AuditFindingDoc } from "@/lib/audit-format";
 import { readEntryPoints, setMainEntryPoint } from "@/lib/entry-points";
-import { ChatScrubber } from "./chat-scrubber";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuRadioGroup, DropdownMenuRadioItem, DropdownMenuSeparator, DropdownMenuSub, DropdownMenuSubContent, DropdownMenuSubTrigger, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { ChatMarkdown } from "@/components/chat-markdown";
 import { GitTree } from "./git-tree";
 import { CodeBlock, CodeBlockContent } from "@/components/ui/code-block";
+import { Skeleton } from "@/components/ui/skeleton";
 import { useHighlightedCode } from "@/hooks/use-highlighted-code";
 import { Message, MessageContent, MessageHeader } from "@/components/ui/message";
 import { SwarmCanvas } from "@/components/swarm/swarm-canvas";
@@ -223,16 +223,19 @@ export function Steps({ steps, running, title, onPause }: { steps: Row[]; runnin
 	const elapsed = startAt && endAt ? took(endAt - startAt) : null;
 	const changed = items.filter((c) => c.call.text.startsWith("write_file")).length;
 	const broke = items.filter((c) => failed(c.result)).length;
-	const status = { label: running ? "Working" : items.some((c) => !c.result) ? "Stopped" : "Done" };
+	const status = running
+		? { label: "Working", cls: "bg-violet-500/15 text-violet-700 dark:text-violet-300" }
+		: items.some((c) => !c.result)
+			? { label: "Stopped", cls: "bg-muted text-muted-foreground" }
+			: { label: "Done", cls: "bg-emerald-500/15 text-emerald-700 dark:text-emerald-400" };
 	const folded = view.fold && !running;
 	const summary = () => [`${role}${item ? ` · item ${item}` : ""}${title ? ` · ${title}` : ""}`, ...items.map((c) => `${failed(c.result) ? "✗" : "✓"} ${c.call.text}`), ...trailing.map((n) => n.text)].join("\n");
 	return (
-		// Flat on the page, as the chat's text is: who and what, then one line per step, no box around it.
-		<div className="text-[13px]">
-			<div className="flex items-center gap-2 py-1">
+		<div className="overflow-hidden rounded-xl border bg-card text-[13px]">
+			<div className="flex items-center gap-2 border-b px-3 py-2">
 				<span className="shrink-0 font-medium capitalize" style={{ color: colorOf(role) }}>{role}</span>
 				{title || item ? <span className="min-w-0 truncate text-foreground">{title ?? `item ${item}`}</span> : null}
-				<span className="shrink-0 text-[12px] text-muted-foreground">{status.label}</span>
+				<span className={`shrink-0 rounded px-1.5 py-0.5 text-[11px] ${status.cls}`}>{status.label}</span>
 				<DropdownMenu>
 					<DropdownMenuTrigger className="ml-auto grid size-6 shrink-0 place-items-center rounded-md text-muted-foreground outline-none hover:bg-muted hover:text-foreground" aria-label="Card options">
 						<MoreHorizontal className="size-4" />
@@ -261,21 +264,21 @@ export function Steps({ steps, running, title, onPause }: { steps: Row[]; runnin
 				</DropdownMenu>
 			</div>
 			{folded ? (
-				<button type="button" onClick={() => setView({ fold: false })} className="flex w-full items-center gap-2 py-1 text-left text-muted-foreground hover:text-foreground">
+				<button type="button" onClick={() => setView({ fold: false })} className="flex w-full items-center gap-2 px-3 py-2 text-left text-muted-foreground hover:bg-muted/40">
 					<CircleCheck className="size-4 shrink-0 text-emerald-600 dark:text-emerald-400" />
 					Finished · {items.length} {items.length === 1 ? "step" : "steps"}
 					{changed ? <span className="rounded bg-violet-500/15 px-1.5 text-[11px] text-violet-700 dark:text-violet-300">{changed} changed</span> : null}
 					{broke ? <span className="rounded bg-amber-500/15 px-1.5 text-[11px] text-amber-700 dark:text-amber-300">{broke} to check</span> : null}
 				</button>
 			) : (
-				<ul>
+				<ul className="divide-y">
 					{items.map((c, i) => (
 						<CardStep key={i} step={c} running={running && i === items.length - 1 && !c.result} now={now} view={view} defaultOpen={running && i === items.length - 1} />
 					))}
 					{trailing.map((n, i) => <NoteRow key={`n${i}`} e={n} />)}
 				</ul>
 			)}
-			<div className="flex items-center gap-2 py-1 text-[11px] text-muted-foreground">
+			<div className="flex items-center gap-2 border-t px-3 py-1.5 text-[11px] text-muted-foreground">
 				<span className="tabular-nums">
 					{items.length} {items.length === 1 ? "step" : "steps"}
 					{elapsed ? ` · ${elapsed}` : ""}
@@ -302,16 +305,17 @@ function CardStep({ step, running, now, view, defaultOpen }: { step: { call: Ev;
 	const wrote = tool === "write_file";
 	return (
 		<li>
-			<button type="button" onClick={() => setOpen(!open)} aria-expanded={open} className={`group/step flex w-full items-start gap-2 text-left text-muted-foreground hover:text-foreground ${view.compact ? "py-0.5" : "py-1"}`}>
-				{running ? <LoaderCircle className="mt-0.5 size-3.5 shrink-0 animate-spin" /> : bad ? <CircleX className="mt-0.5 size-3.5 shrink-0 text-red-500" /> : null}
+			<button type="button" onClick={() => setOpen(!open)} aria-expanded={open} className={`flex w-full items-start gap-2 px-3 text-left hover:bg-muted/40 ${view.compact ? "py-1" : "py-2"}`}>
+				<span className="mt-0.5 shrink-0">
+					{running ? <LoaderCircle className="size-4 animate-spin text-muted-foreground" /> : bad ? <CircleX className="size-4 text-red-500" /> : <CircleCheck className="size-4 text-muted-foreground" />}
+				</span>
 				<span className="min-w-0 flex-1">
 					<span className="flex min-w-0 items-center gap-2">
-						<span className="shrink-0">{isRun ? (running ? "Running" : "Ran") : tool}</span>
+						<span className="shrink-0 text-foreground">{isRun ? (running ? "Running" : "Ran") : tool}</span>
 						{view.paths && arg ? <span className="min-w-0 truncate font-mono text-[12px] text-muted-foreground">{arg}</span> : null}
 						{wrote ? <span className="shrink-0 rounded bg-violet-500/15 px-1.5 text-[11px] text-violet-700 dark:text-violet-300">Changed</span> : null}
 						{bad ? <span className="shrink-0 rounded bg-red-500/15 px-1.5 text-[11px] text-red-700 dark:text-red-400">Failed</span> : null}
-						<ChevronRight className={`size-3.5 shrink-0 transition-transform ${open ? "rotate-90" : ""}`} />
-						{elapsed ? <span className="ml-auto shrink-0 tabular-nums text-[11px]">{elapsed}</span> : null}
+						{elapsed ? <span className="ml-auto shrink-0 tabular-nums text-[11px] text-muted-foreground">{elapsed}</span> : null}
 					</span>
 					{!view.compact && step.notes.length ? <span className="mt-0.5 line-clamp-2 block text-[12px] text-muted-foreground">{step.notes.map((n) => n.text).join(" ")}</span> : null}
 					{running ? (
@@ -322,7 +326,7 @@ function CardStep({ step, running, now, view, defaultOpen }: { step: { call: Ev;
 				</span>
 			</button>
 			{open ? (
-				<div className="space-y-1.5 py-1 pl-5">
+				<div className="space-y-1.5 border-t bg-muted/30 px-3 py-2">
 					<p className="whitespace-pre-wrap break-all font-mono text-[11px] text-foreground/80">$ {step.call.text}</p>
 					{step.result?.text.includes("\n```diff\n") ? (
 						<DiffOutput text={step.result.text} />
@@ -341,7 +345,7 @@ function NoteRow({ e }: { e: Ev }) {
 	const [open, setOpen] = useState(false);
 	return (
 		<li>
-			<button type="button" onClick={() => setOpen(!open)} aria-expanded={open} className="flex w-full items-center gap-2 py-1 text-left text-muted-foreground hover:text-foreground">
+			<button type="button" onClick={() => setOpen(!open)} aria-expanded={open} className="flex w-full items-center gap-2 px-3 py-2 text-left text-muted-foreground hover:bg-muted/50">
 				<span className={`min-w-0 flex-1 ${open ? "whitespace-pre-wrap" : "truncate"}`}>{e.text}</span>
 				{open ? null : <ChevronRight className="size-3.5 shrink-0" />}
 			</button>
@@ -1315,11 +1319,9 @@ export function BugsView({ folder, files, invoke, bugs, openBug, setOpenBug, wit
 
 export type Mode = "code" | "chat" | "swarm" | "roadmap" | "audit" | "bugs";
 
-const PANE_WIDTH = 440;
-
 /** The views the Mac app shows in the middle, in the order the title bar's icons show them. */
-const PANE_VIEWS: { id: Mode; label: string; icon: typeof Code2 }[] = [
-	{ id: "chat", label: "Chat", icon: MessageSquare },
+const PANE_VIEWS: { id: Mode; label: string; icon: React.ComponentType<{ className?: string }> }[] = [
+	{ id: "chat", label: "Chat", icon: TalkIcon },
 	{ id: "swarm", label: "Canvas", icon: Network },
 	{ id: "audit", label: "Proofs", icon: ScanSearch },
 	{ id: "bugs", label: "Bugs", icon: Bug },
@@ -1381,6 +1383,27 @@ export function NavGroup({ name, git, mode, onMode, inBar, compact }: { name: st
 					</button>
 				),
 			)}
+		</div>
+	);
+}
+
+/** The chat while a session's history loads: an agent's lines, a step card, and a message of yours, in grey. */
+function ChatSkeleton() {
+	return (
+		<div aria-label="Loading the chat" className="space-y-5">
+			{[0, 1].map((k) => (
+				<div key={k} className="space-y-5">
+					<div className="space-y-2">
+						<Skeleton className="h-3 w-24" />
+						<Skeleton className="h-3 w-11/12" />
+						<Skeleton className="h-3 w-3/4" />
+					</div>
+					<Skeleton className="h-20 w-full rounded-xl" />
+					<div className="flex justify-end">
+						<Skeleton className="h-9 w-1/2 rounded-2xl" />
+					</div>
+				</div>
+			))}
 		</div>
 	);
 }
@@ -1845,32 +1868,6 @@ export function SwarmPanel({ folder, name, scan, bridge, session, file: openPath
 		setChatSize({ w: 416, h: null });
 		store.set("fm:chat-size", JSON.stringify({ w: 416, h: null }));
 	};
-	// The Mac app's chat pane on the right: whether it is open and its width, dragged from its left edge. Kept across
-	// launches.
-	const [paneOpen, setPaneOpen] = useState(() => store.get("fm:pane-open") !== "0");
-	const [paneWidth, setPaneWidth] = useState(() => Number(store.get("fm:chat-pane-width")) || PANE_WIDTH);
-	const startPaneResize = (e: React.PointerEvent) => {
-		e.preventDefault();
-		const start = { x: e.clientX, w: paneWidth };
-		// Room for the view in the middle: it keeps at least 420px.
-		const max = (root.current?.clientWidth ?? 1200) - 420;
-		let last = paneWidth;
-		const move = (ev: PointerEvent) => {
-			last = Math.round(Math.min(max, Math.max(360, start.w + start.x - ev.clientX)));
-			setPaneWidth(last);
-		};
-		const up = () => {
-			window.removeEventListener("pointermove", move);
-			window.removeEventListener("pointerup", up);
-			store.set("fm:chat-pane-width", String(last));
-		};
-		window.addEventListener("pointermove", move);
-		window.addEventListener("pointerup", up);
-	};
-	const resetPaneWidth = () => {
-		setPaneWidth(PANE_WIDTH);
-		store.set("fm:chat-pane-width", String(PANE_WIDTH));
-	};
 	// Markdown files open rendered; the toggle shows their source (the choice is kept).
 	const [mdSource, setMdSource] = useState(() => store.get("fm:md-view") === "source");
 	// JSON files open as a collapsible tree; Raw shows the file as it is.
@@ -2068,15 +2065,6 @@ export function SwarmPanel({ folder, name, scan, bridge, session, file: openPath
 	// Grouped once per change of the events (a long session has about a thousand): typing in the composer re-renders the
 	// panel, and must not regroup the history, rebuild the board or redraw every message.
 	const chatBlocks = useMemo(() => blocks(events.filter((e) => e.kind !== "status" && e.kind !== "context")), [events]);
-	const scrubItems = useMemo(
-		() =>
-			chatBlocks.map((b) =>
-				"steps" in b
-					? { label: `${b.steps.filter((r) => "call" in r).length} tool step${b.steps.filter((r) => "call" in r).length === 1 ? "" : "s"}`, text: b.steps.map((r) => ("call" in r ? r.call.text : r.note.text)).join(" · ") }
-					: { label: b.e.kind === "you" ? "You" : `${roleName(b.e.role)[0]?.toUpperCase() ?? ""}${roleName(b.e.role).slice(1)}${b.e.item ? ` · item ${b.e.item}` : ""}`, text: b.e.text },
-			),
-		[chatBlocks],
-	);
 	const viewingRef = useRef<string | null>(null);
 	viewingRef.current = viewing;
 	const chat = useRef<HTMLDivElement>(null);
@@ -2092,10 +2080,15 @@ export function SwarmPanel({ folder, name, scan, bridge, session, file: openPath
 		for (let i = evs.length - 1; i >= 0; i--) if (!noise(evs[i]) || keep-- > 0) out.push(evs[i]);
 		return out.reverse();
 	};
+	// While a session's history is being read: the chat shows a skeleton instead of an empty page.
+	const [loadingHistory, setLoadingHistory] = useState(true);
 	/** Shows a session's saved events (.formal/runs/<run>.jsonl), so quitting the app loses nothing. */
 	const load = (id: string) => {
 		setViewing(id);
-		void invoke<Ev[]>("swarm_history", { folder, run: id }).then((evs) => setEvents(trim(evs)), () => setEvents([]));
+		setLoadingHistory(true);
+		void invoke<Ev[]>("swarm_history", { folder, run: id })
+			.then((evs) => setEvents(trim(evs)), () => setEvents([]))
+			.finally(() => setLoadingHistory(false));
 	};
 	const listSessions = () =>
 		invoke<Session[]>("swarm_sessions", { folder }).then(
@@ -2128,6 +2121,7 @@ export function SwarmPanel({ folder, name, scan, bridge, session, file: openPath
 		setEvents([]);
 		setViewing(null);
 		setRuns([]);
+		setLoadingHistory(true);
 		refresh();
 		void invoke<boolean>(provider === "openai" ? "openai_key_status" : "anthropic_key_status").then(setHasKey);
 		void invoke<string[]>("swarm_running", { folder }).then(async (r) => {
@@ -2136,7 +2130,8 @@ export function SwarmPanel({ folder, name, scan, bridge, session, file: openPath
 			// Reopen where you left off: the session picked, else a running one, else the latest.
 			const id = (session === "new" ? undefined : session) ?? r[0] ?? list[0]?.run;
 			if (id) load(id);
-		});
+			else setLoadingHistory(false);
+		}, () => setLoadingHistory(false));
 		const off = listen<Ev>("swarm", ({ payload }) => {
 			// Other folders' sessions send events too.
 			if (payload.folder && payload.folder !== folder) return;
@@ -2312,7 +2307,9 @@ export function SwarmPanel({ folder, name, scan, bridge, session, file: openPath
 	const chatList = useMemo(
 		() =>
 			chatBlocks.map((block, i) => (
-				<div key={i} data-msg={i} className="fm-settle">
+				// Off screen, a message skips layout and paint (`content-visibility`), so scrolling costs what's in view, not
+				// the length of the chat; its last measured height holds its place.
+				<div key={i} data-msg={i} className="fm-settle [contain-intrinsic-size:auto_96px] [content-visibility:auto]">
 					{"steps" in block ? (
 						<Steps
 							steps={block.steps}
@@ -2693,20 +2690,6 @@ export function SwarmPanel({ folder, name, scan, bridge, session, file: openPath
 					<Icon className="size-4" />
 				</button>
 			))}
-			{/* The chat pane on the right: open or close it. */}
-			<button
-				type="button"
-				aria-pressed={paneOpen}
-				title={paneOpen ? "Hide the chat" : "Talk to the swarm"}
-				aria-label="Chat"
-				onClick={() => {
-					setPaneOpen(!paneOpen);
-					store.set("fm:pane-open", paneOpen ? "0" : "1");
-				}}
-				className={`ml-1 inline-flex size-7 items-center justify-center rounded-md ${paneOpen ? "bg-background text-foreground shadow-sm" : "text-muted-foreground hover:bg-background hover:text-foreground"}`}
-			>
-				<TalkIcon className="size-4" />
-			</button>
 		</span>
 	);
 	// The conversation with the swarm: its sessions, budget and Stop on a gray bar, the messages and composer under it.
@@ -2743,12 +2726,7 @@ export function SwarmPanel({ folder, name, scan, bridge, session, file: openPath
 				</div>
 				{/* Corners nest: the panel 28px, inset 4px; this card 24px; the composer 16px, inset 8px. */}
 				<div className={`mt-1 flex min-h-0 flex-1 flex-col overflow-hidden ${slot ? "" : "rounded-[24px] border bg-card"}`}>
-				{/* The scrubber: a tick per message along the left edge, to preview and jump through the chat. */}
 				<div className="relative flex min-h-0 flex-1 flex-col">
-				<ChatScrubber
-					scroller={chat}
-					items={scrubItems}
-				/>
 				<div
 					ref={chat}
 					onScroll={(e) => {
@@ -2758,7 +2736,8 @@ export function SwarmPanel({ folder, name, scan, bridge, session, file: openPath
 					}}
 					className="min-h-0 flex-1 space-y-3.5 overflow-y-auto py-3 pl-6 pr-3 text-[13px]"
 				>
-					{shown.length === 0 && !run ? <p className="text-muted-foreground">Talk to the agents here. Before a run, what you write is the swarm's focus and ↑ starts it; while it runs, they read your messages before their next turn.</p> : null}
+					{loadingHistory && shown.length === 0 ? <ChatSkeleton /> : null}
+					{shown.length === 0 && !run && !loadingHistory ? <p className="text-muted-foreground">Talk to the agents here. Before a run, what you write is the swarm's focus and ↑ starts it; while it runs, they read your messages before their next turn.</p> : null}
 					{chatList}
 					{/* While an agent works: its name, and its current task shimmering until its next words. */}
 					{run && working ? (
@@ -2876,8 +2855,8 @@ export function SwarmPanel({ folder, name, scan, bridge, session, file: openPath
 				// An agent's name tag opens the chat addressed to it.
 				onTalk={(role) => {
 					toggleChat(true);
-					setPaneOpen(true);
-					store.set("fm:pane-open", "1");
+					// In the Mac app the chat is its own page.
+					if (slot) setMode("chat");
 					const to = (v: string) => (v.startsWith("@") ? v.replace(/^@\S+\s*/, `@${role} `) : `@${role} ${v}`);
 					if (run) setSay(to);
 					else setGoal(to);
@@ -3103,18 +3082,11 @@ export function SwarmPanel({ folder, name, scan, bridge, session, file: openPath
 						<div className="flex min-h-0 w-full max-w-3xl flex-col">{chatPanel}</div>
 					</div>
 				) : (
-					// The view in the middle (Canvas, Proofs, Bugs, Code); the chat in the right pane.
+					// The view in the middle (Canvas, Proofs, Bugs, Code).
 					<div className="relative min-w-0 flex-1" style={{ "--fm-top": "0px" } as React.CSSProperties}>
 						<div className="absolute inset-0 flex flex-col overflow-hidden">{modeViews}</div>
 					</div>
 				)}
-				{paneOpen && mode !== "chat" ? (
-					<section className="relative flex min-h-0 shrink-0 flex-col border-l px-3 pb-3 pt-2" style={{ width: paneWidth }}>
-						{chatPanel}
-						{/* Drag the separator to resize; double-click for the default width. */}
-						<div onPointerDown={startPaneResize} onDoubleClick={resetPaneWidth} title="Drag to resize" className="absolute inset-y-0 -left-1.5 z-30 w-3 cursor-col-resize" />
-					</section>
-				) : null}
 			</div>
 		);
 	}
