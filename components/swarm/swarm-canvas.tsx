@@ -961,6 +961,21 @@ export function SwarmCanvas({ state, fill = false, contain = false, title, actio
 	const s = scale * view.k;
 	const ox = fit.x + view.x;
 	const oy = fit.y + view.y;
+	// The zoom the text is laid out at. CSS `zoom` keeps text sharp, but laying it out again at every wheel step makes it
+	// jitter and restarts its animations (WebKit), so mid-gesture the board is scaled from the last sharp zoom on the
+	// GPU, and 160 ms after the last step the sharp zoom catches up.
+	const [sharp, setSharp] = useState(s);
+	useEffect(() => {
+		if (sharp === s) return;
+		const t = setTimeout(() => setSharp(s), 160);
+		return () => clearTimeout(t);
+	}, [s, sharp]);
+	// The lanes fade in once, when the board first shows, not again on each re-layout.
+	const [entered, setEntered] = useState(false);
+	useEffect(() => {
+		const t = setTimeout(() => setEntered(true), 900);
+		return () => clearTimeout(t);
+	}, []);
 
 	// The demo always has the assistant follow you; in the app it's opt-in (it can get in the way), remembered here.
 	const [followPref, setFollowPref] = useState(() => {
@@ -1187,11 +1202,14 @@ export function SwarmCanvas({ state, fill = false, contain = false, title, actio
 					style={{
 						width: W,
 						height: boardH,
-						// `zoom`, not `scale()`: the text is laid out again at the new size and stays sharp, where a scaled
-						// layer is drawn once and stretched (blurry in the Mac app's web view). Under `zoom` the translate is in
-						// the board's own units, hence the division.
-						zoom: s,
-						transform: `translate(${ox / s}px, ${oy / s}px)`,
+						// At rest `zoom`, not `scale()`: the text is laid out again at the new size and stays sharp, where a scaled
+						// layer is drawn once and stretched (blurry in the Mac app's web view). Mid-gesture a `scale()` from the
+						// last sharp zoom covers the difference (see `sharp`). Under `zoom` the translate is in the board's own
+						// units, hence the division.
+						zoom: sharp,
+						transform: `translate(${ox / sharp}px, ${oy / sharp}px)${sharp === s ? "" : ` scale(${s / sharp})`}`,
+						transformOrigin: "0 0",
+						willChange: sharp === s ? undefined : "transform",
 						...(fill ? {} : DOTS),
 					}}
 				>
@@ -1292,7 +1310,7 @@ export function SwarmCanvas({ state, fill = false, contain = false, title, actio
 							{LANES.map((lane) => (
 								<div
 									key={lane.key}
-									className="absolute rounded-lg border border-dashed bg-muted/40 animate-in fade-in-0 duration-700"
+									className={`absolute rounded-lg border border-dashed bg-muted/40 ${entered ? "" : "animate-in fade-in-0 duration-700"}`}
 									style={{ left: laneX(lane.key), top: groupY(group) + LANE_TOP, width: LANE_W, height: LANE_BOTTOM - LANE_TOP }}
 								>
 									<div className="flex items-center justify-between px-3 pt-2.5 font-mono text-[12px] font-medium text-muted-foreground">
