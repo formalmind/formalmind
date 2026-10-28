@@ -187,6 +187,8 @@ enum Base {
     Local(String),
     /// A storage parameter: `n_get` / `n_set` for the location the caller passed.
     Lens(String),
+    /// An immutable being set by the constructor: a field of the constructor's own `ext`.
+    Imm(String),
 }
 #[derive(Clone, Debug)]
 enum Step {
@@ -359,9 +361,18 @@ impl<'a> Gen<'a> {
         // Inside a def `C.f`, Lean resolves names in `C` first, so a function named like the monad's operations the
         // bodies call unqualified (`get`, `read`, `modify`, `throw`, `pure`) would shadow them: a contract's `get()`
         // turned `(← get)` into a call to itself. Those get a trailing underscore.
-        let short = if MONAD_OPS.contains(&func.name.as_str()) { format!("{}_", func.name) } else { func.name.clone() };
+        let short = if MONAD_OPS.contains(&func.name.as_str()) {
+            format!("{}_", func.name)
+        } else if func.name.is_empty() && func.kind == "constructor" {
+            // The constructor has no name of its own.
+            func.kind.clone()
+        } else {
+            func.name.clone()
+        };
         let base = format!("{}.{}", ident(c), ident(&short));
-        let taken = self.fn_name.values().any(|n| n == &base);
+        // `C.«»` was the constructor's name when constructors were opaque: receive/fallback keep the names they had.
+        let ctor_had_it = func.name.is_empty() && func.kind != "constructor" && self.g.contracts.get(&func.contract).is_some_and(|k| k.functions.iter().any(|x| self.g.functions[x].kind == "constructor"));
+        let taken = ctor_had_it || self.fn_name.values().any(|n| n == &base);
         let name = if taken { format!("{}.{}", ident(c), ident(&format!("{}_{}", func.name, f))) } else { base };
         self.fn_name.insert(f, name.clone());
         name
@@ -597,9 +608,16 @@ impl<'a> Gen<'a> {
         self.in_progress.insert(f);
         let func = &self.g.functions[&f];
         let mut callees: Vec<Id> = func.modifiers.iter().map(|m| self.scope.resolve(self.g, *m)).collect();
-        for c in &func.calls {
+        let mut calls: Vec<&crate::graph::Call> = func.calls.iter().collect();
+        if func.kind == "constructor" {
+            // The deployment runs every base's constructor too.
+            for k in self.base_ctors() {
+                calls.extend(self.g.functions[&k].calls.iter());
+            }
+        }
+        for c in calls {
             if c.kind.runs_here() {
-                if let Some(t) = c.target {
+                if let Some(t) = c.target.filter(|t| !self.is_storage_slot_getter(*t)) {
                     callees.push(if c.direct { t } else { self.scope.resolve(self.g, t) });
                 }
             }
@@ -621,6 +639,9 @@ impl<'a> Gen<'a> {
         let node = self.nodes.get(&f).copied().ok_or("no node")?;
         if node["body"].is_null() {
             return bail("no body");
+        }
+        if node["kind"] == "constructor" {
+            return self.translate_ctor(f);
         }
         let modifier = node["nodeType"] == "ModifierDefinition";
         let name = self.lean_fn_name(f);
@@ -739,6 +760,157 @@ impl<'a> Gen<'a> {
         Ok(out)
     }
 
+    /// OpenZeppelin's `StorageSlot.getStringSlot(string storage)` / `getBytesSlot(bytes storage)`: assembly that
+    /// re-types a storage reference (`r.slot := store.slot`). Its uses become the reference itself.
+    fn is_storage_slot_getter(&self, f: Id) -> bool {
+        let Some(func) = self.g.functions.get(&f) else { return false };
+        let lib = self.g.contracts.get(&func.contract).is_some_and(|c| c.name == "StorageSlot");
+        lib && self.g.is_dependency(f)
+            && matches!(func.name.as_str(), "getStringSlot" | "getBytesSlot")
+            && self.nodes.get(&f).is_some_and(|n| n["parameters"]["parameters"].as_array().is_some_and(|ps| ps.len() == 1 && ps[0]["storageLocation"] == "storage"))
+    }
+
+    /// `StorageSlot.getStringSlot(x)` with `x` a storage reference: `x`.
+    fn storage_slot_of(&self, e: &Value) -> Option<Value> {
+        if e["nodeType"] != "FunctionCall" {
+            return None;
+        }
+        let t = e["expression"]["referencedDeclaration"].as_i64()?;
+        if !self.is_storage_slot_getter(t) {
+            return None;
+        }
+        e["arguments"].as_array()?.first().cloned()
+    }
+
+    /// The constructor of contract `c`, if it has one.
+    fn ctor_of(&self, c: Id) -> Option<Id> {
+        self.g.contracts.get(&c)?.functions.iter().copied().find(|f| self.g.functions[f].kind == "constructor" && self.g.functions[f].implemented)
+    }
+
+    /// The bases' constructors (not the entry's own).
+    fn base_ctors(&self) -> Vec<Id> {
+        self.scope.contracts.iter().filter(|c| **c != self.scope.entry).filter_map(|c| self.ctor_of(*c)).collect()
+    }
+
+    /// The deployment: every base's state initializers and constructor body, most base first, then the entry's, as
+    /// solc runs them. Immutables aren't storage: the deployed code reads them as constants, so here they are
+    /// fields of a mutable copy of `ext` (zero until set), and the def returns that `ext`: the runtime defs read the
+    /// same fields.
+    fn translate_ctor(&mut self, f: Id) -> R<String> {
+        let node = self.nodes[&f];
+        let name = self.lean_fn_name(f);
+        let contracts = self.scope.contracts.clone();
+        let ctors: HashMap<Id, Id> = contracts.iter().filter_map(|c| self.ctor_of(*c).map(|k| (*c, k))).collect();
+        let mut imms = vec![];
+        for c in &contracts {
+            for v in &self.g.contracts[c].state_vars {
+                if self.g.state_vars[v].immutable {
+                    imms.push(ident(&self.g.state_vars[v].name));
+                }
+            }
+        }
+        let mut assigned = HashSet::new();
+        for k in ctors.values() {
+            collect_assigned(&self.nodes[k]["body"], &mut assigned);
+        }
+        let mut params = vec![];
+        let mut fx = Fx::new(self, f);
+        fx.ctor = true;
+        fx.indent = 1;
+        if imms.is_empty() {
+            fx.line("let mut ext := ext".into());
+        } else {
+            fx.line(format!("let mut ext := {{ ext with {} }}", imms.iter().map(|i| format!("{i} := default")).collect::<Vec<_>>().join(", ")));
+        }
+        for p in node["parameters"]["parameters"].as_array().into_iter().flatten() {
+            let ty = fx.g.ty(&p["typeName"])?;
+            let n = local_ident(&s(&p["name"]));
+            let n = if n.is_empty() || n == "«»" { format!("arg{}", params.len()) } else { n };
+            if assigned.contains(&id_of(p)) {
+                if p["storageLocation"] == "memory" && ty != "Nat" && ty != "Bool" {
+                    return bail("writes to a memory parameter (shared with the caller)");
+                }
+                fx.line(format!("let mut {n} := {n}"));
+            }
+            fx.locals.insert(id_of(p), n.clone());
+            params.push(format!("({n} : {ty})"));
+        }
+        // Base constructors' arguments, most derived first: each may use the parameters of the constructor that
+        // passes it. They are pure here (no calls, no storage reads), so when solc evaluates them doesn't matter.
+        for c in &contracts {
+            let cnode = fx.g.nodes[c];
+            let mut specs: Vec<(Id, Vec<Value>)> = vec![];
+            for b in cnode["baseContracts"].as_array().into_iter().flatten() {
+                if let Some(args) = b["arguments"].as_array() {
+                    specs.push((b["baseName"]["referencedDeclaration"].as_i64().unwrap_or(0), args.clone()));
+                }
+            }
+            if let Some(k) = ctors.get(c) {
+                for m in fx.g.nodes[k]["modifiers"].as_array().into_iter().flatten() {
+                    if m["kind"] != "baseConstructorSpecifier" {
+                        return bail("a modifier on a constructor");
+                    }
+                    let args = m["arguments"].as_array().cloned().unwrap_or_default();
+                    specs.push((m["modifierName"]["referencedDeclaration"].as_i64().unwrap_or(0), args));
+                }
+            }
+            for (base, args) in specs {
+                let Some(bk) = ctors.get(&base).copied() else {
+                    if args.is_empty() {
+                        continue;
+                    }
+                    return bail("arguments to a base without a constructor");
+                };
+                let bparams = fx.g.nodes[&bk]["parameters"]["parameters"].as_array().cloned().unwrap_or_default();
+                for (p, a) in bparams.iter().zip(&args) {
+                    let before = fx.out.len();
+                    let v = fx.expr_for(a, std::slice::from_ref(p), 0)?;
+                    if fx.out.len() != before || v.contains("(← get)") {
+                        return bail("a base constructor argument with effects");
+                    }
+                    let ty = fx.g.ty(&p["typeName"])?;
+                    let n = ident(&format!("{}_{}", s(&p["name"]).trim_start_matches('_'), fx.fresh("b")));
+                    let m = if assigned.contains(&id_of(p)) { "mut " } else { "" };
+                    fx.line(format!("let {m}{n} : {ty} := {v}"));
+                    fx.locals.insert(id_of(p), n);
+                }
+            }
+        }
+        for c in contracts.iter().rev() {
+            if let Some(k) = ctors.get(c) {
+                if *k != f && fx.g.nodes[k]["parameters"]["parameters"].as_array().is_some_and(|ps| ps.iter().any(|p| !fx.locals.contains_key(&id_of(p)))) {
+                    return bail(format!("{} gets no arguments", fx.g.g.qualified(*k)));
+                }
+            }
+            // State variables with an initial value, in declaration order, before the constructor body.
+            for v in fx.g.g.contracts[c].state_vars.clone() {
+                let var = &fx.g.g.state_vars[&v];
+                let d = fx.g.nodes[&v];
+                if var.constant || d["value"].is_null() {
+                    continue;
+                }
+                let val = fx.expr_for(&d["value"], std::slice::from_ref(d), 0)?;
+                let val = fx.atom(val);
+                let p = if var.immutable {
+                    Path { base: Base::Imm(ident(&var.name)), steps: vec![] }
+                } else {
+                    Path { base: Base::State(fx.g.state_field.get(&v).cloned().ok_or("state variable without a field")?), steps: vec![] }
+                };
+                fx.write(&p, |_| val.clone())?;
+            }
+            if let Some(k) = ctors.get(c) {
+                let body = fx.g.nodes[k]["body"].clone();
+                fx.stmt(&body)?;
+            }
+        }
+        fx.line("return ext".into());
+        let body = fx.out.join("\n");
+        let mut out = String::new();
+        let _ = writeln!(out, "/-- {} (constructor): the deployment, bases first; returns `ext` with the immutables it set -/", self.g.qualified(f));
+        let _ = writeln!(out, "def {name} {{σ : Type}} (ext : Ext σ) {} : M σ (Ext σ) := do\n{body}", params.join(" "));
+        Ok(out)
+    }
+
     /// The contract's ABI entry point: the selector picks a public function, its arguments are decoded, its results
     /// encoded, as the compiled dispatcher does. Selectors the model doesn't translate go to `Ext.dispatch_other`.
     fn dispatch(&mut self) -> String {
@@ -837,7 +1009,11 @@ impl<'a> Gen<'a> {
     /// The model for the scope's surface, in pieces.
     pub fn parts(mut self) -> Parts {
         self.ext.insert("dispatch_other : List Nat → M σ (List Nat)".into(), "calls to selectors the model doesn't dispatch (and fallback/receive)".into());
-        for f in self.scope.surface.clone() {
+        // The constructor last, so the functions only the deployment reaches don't take the names of overloads the
+        // runtime code already uses.
+        let surface = self.scope.surface.clone();
+        let (ctors, runtime): (Vec<Id>, Vec<Id>) = surface.iter().partition(|f| self.g.functions[f].kind == "constructor");
+        for f in runtime.into_iter().chain(ctors) {
             self.function(f);
         }
         // Immutables are parameters of the model.
@@ -1167,11 +1343,13 @@ struct Fx<'g, 'a> {
     lens: HashMap<Id, String>,
     modifier: bool,
     placeholder: bool,
+    /// Translating the deployment (constructor): immutables are fields of a mutable `ext`.
+    ctor: bool,
 }
 
 impl<'g, 'a> Fx<'g, 'a> {
     fn new(g: &'g mut Gen<'a>, _f: Id) -> Self {
-        Fx { g, out: vec![], indent: 0, tmp: 0, unchecked: 0, locals: HashMap::new(), alias: HashMap::new(), named: vec![], loops: vec![], params: vec![], rets: vec![], lens: HashMap::new(), modifier: false, placeholder: false }
+        Fx { g, out: vec![], indent: 0, tmp: 0, unchecked: 0, locals: HashMap::new(), alias: HashMap::new(), named: vec![], loops: vec![], params: vec![], rets: vec![], lens: HashMap::new(), modifier: false, placeholder: false, ctor: false }
     }
 
     fn line(&mut self, l: String) {
@@ -1261,6 +1439,9 @@ impl<'g, 'a> Fx<'g, 'a> {
             "Return" => {
                 if self.modifier {
                     return bail("return in a modifier");
+                }
+                if self.ctor {
+                    return bail("return in a constructor");
                 }
                 if st["expression"].is_null() {
                     let t = tuple(&self.named.clone());
@@ -2052,6 +2233,12 @@ impl<'g, 'a> Fx<'g, 'a> {
                 if let Some(n) = self.locals.get(&r) {
                     return Ok(Path { base: Base::Local(n.clone()), steps: vec![] });
                 }
+                if let Some(v) = self.g.g.state_vars.get(&r).filter(|v| v.immutable) {
+                    if self.ctor {
+                        return Ok(Path { base: Base::Imm(ident(&v.name)), steps: vec![] });
+                    }
+                    return bail(format!("writes immutable {} outside the constructor", v.name));
+                }
                 bail(format!("can't write {}", s(&e["name"])))
             }
             "IndexAccess" => {
@@ -2066,6 +2253,12 @@ impl<'g, 'a> Fx<'g, 'a> {
                 Ok(p)
             }
             "MemberAccess" => {
+                // OpenZeppelin's `StorageSlot.getStringSlot(store).value` (and the bytes one) is `store` itself.
+                if e["memberName"] == "value" {
+                    if let Some(arg) = self.g.storage_slot_of(&e["expression"]) {
+                        return self.lpath(&arg);
+                    }
+                }
                 let t = tstr(&e["expression"]);
                 if !t.starts_with("struct ") {
                     return bail(format!("member .{} isn't a struct field", s(&e["memberName"])));
@@ -2169,6 +2362,7 @@ impl<'g, 'a> Fx<'g, 'a> {
         let mut cur = match &p.base {
             Base::State(f) => format!("(ext.get (← get)).{f}"),
             Base::Local(n) => n.clone(),
+            Base::Imm(f) => format!("ext.{f}"),
             Base::Lens(l) => {
                 let t = self.fresh("__t");
                 self.line(format!("let {t} ← {l}_get"));
@@ -2213,6 +2407,13 @@ impl<'g, 'a> Fx<'g, 'a> {
                 let v = set(c, &p.steps, &leaf);
                 self.line(format!("{l}_set ({v})"));
             }
+            Base::Imm(f) => {
+                if !p.steps.is_empty() {
+                    return bail("write into part of an immutable");
+                }
+                let v = leaf(&format!("ext.{f}"));
+                self.line(format!("ext := {{ ext with {f} := {v} }}"));
+            }
         }
         Ok(())
     }
@@ -2246,6 +2447,7 @@ impl<'g, 'a> Fx<'g, 'a> {
                 format!("(fun x => do {l}_set ({}))", set(format!("(← {l}_get)"), &p.steps, &|_: &str| "x".to_string())),
             ),
             Base::Local(_) => return bail("storage reference to a local"),
+            Base::Imm(_) => return bail("storage reference to an immutable"),
         })
     }
 
@@ -2773,6 +2975,13 @@ impl<'g, 'a> Fx<'g, 'a> {
             }
             let a = self.expr(&args[0])?;
             let literal = from.starts_with("int_const") || from.starts_with("rational");
+            if strip_location(&from) == "string" && strip_location(&to) == "bytes" {
+                // A string's bytes: its UTF-8 encoding.
+                return Ok(format!("({}.toUTF8.toList.map (·.toNat))", paren(&a)));
+            }
+            if strip_location(&from) == "bytes" && strip_location(&to) == "string" {
+                return bail("conversion from bytes to string (strings are Lean `String`s, not bytes)");
+            }
             if strip_location(&from) == "bytes" {
                 if let Some(n) = bytes_n(&to).or((to == "bytes32").then_some(32)) {
                     return Ok(format!("(bytesWord (({} ++ List.replicate {n} 0).take {n}))", paren(&a)));
@@ -2865,8 +3074,47 @@ impl<'g, 'a> Fx<'g, 'a> {
         if callee["nodeType"] == "MemberAccess" && matches!(callee["memberName"].as_str(), Some("wrap" | "unwrap")) && tstr(&callee["expression"]).starts_with("type(") {
             return self.expr(&args[0]);
         }
+        if callee["nodeType"] == "NewExpression" {
+            let tn = &callee["typeName"];
+            if tn["nodeType"] == "UserDefinedTypeName" {
+                // `new C(args)`: a contract creation, opaque like any external call (C's constructor runs and may
+                // call back into us); the result is the new contract's address.
+                if call_value.is_some() {
+                    return bail("`new` with value");
+                }
+                let cid = tn["referencedDeclaration"].as_i64().ok_or("new of an unknown contract")?;
+                let cname = self.g.g.contracts.get(&cid).map(|c| c.name.clone()).ok_or("new of an unknown contract")?;
+                let cparams = self.g.ctor_of(cid).map(|k| self.g.nodes[&k]["parameters"]["parameters"].as_array().cloned().unwrap_or_default()).unwrap_or_default();
+                let mut ptys = vec![];
+                for p in &cparams {
+                    ptys.push(self.g.ty(&p["typeName"])?);
+                }
+                let mut a = vec![];
+                for (i, x) in args.iter().enumerate() {
+                    let v = self.expr_for(x, &cparams, i)?;
+                    a.push(self.atom(v));
+                }
+                let field = format!("new_{cname}");
+                let ty = format!("{}M σ Nat", ptys.iter().map(|p| format!("{p} → ")).collect::<String>());
+                self.g.ext.insert(format!("{field} : {ty}"), format!("`new {cname}(…)`: deploys a {cname} (its constructor may call back into us) → its address"));
+                let t = self.fresh("__t");
+                self.line(format!("let {t} ← ext.{field} {}", a.join(" ")));
+                return Ok(t);
+            }
+            // `new T[](n)`, `new bytes(n)`: n zeroed elements.
+            let t = tstr(e);
+            let n = self.expr(&args[0])?;
+            let n = self.atom(n);
+            if strip_location(&t) == "string" {
+                return bail("`new string(n)` (strings are Lean `String`s, not bytes)");
+            }
+            let ty = self.g.ty_str(&t)?;
+            let v = self.fresh("__t");
+            self.line(format!("let {v} : {ty} := List.replicate {n} default"));
+            return Ok(v);
+        }
         let builtin = callee["referencedDeclaration"].as_i64().is_some_and(|r| r < 0);
-        let abi = callee["nodeType"] == "MemberAccess" && callee["expression"]["name"] == "abi" && callee["expression"]["referencedDeclaration"].as_i64().is_some_and(|r| r < 0);
+        let abi =callee["nodeType"] == "MemberAccess" && callee["expression"]["name"] == "abi" && callee["expression"]["referencedDeclaration"].as_i64().is_some_and(|r| r < 0);
         if abi && callee["memberName"] == "encode" {
             let mut items = vec![];
             for a in &args {
@@ -2932,6 +3180,13 @@ impl<'g, 'a> Fx<'g, 'a> {
                 }
                 self.g.ext.insert("keccak : List Nat → Nat".into(), "keccak256 over words (any function: no collision assumptions)".into());
                 return Ok(format!("(ext.keccak [{}])", words.join(", ")));
+            }
+            // keccak256 of a `bytes` value the model holds as its byte list.
+            if strip_location(&self.g.norm(&tstr(arg))) == "bytes" && !(arg["nodeType"] == "FunctionCall" && arg["expression"]["expression"]["name"] == "abi") {
+                let v = self.expr(arg)?;
+                let v = self.atom(v);
+                self.g.ext.insert("keccakBytes : List Nat → Nat".into(), "keccak256 over bytes (any function: no collision assumptions)".into());
+                return Ok(format!("(ext.keccakBytes {v})"));
             }
             return bail("keccak256 of bytes the model doesn't build");
         }
