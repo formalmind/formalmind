@@ -83,10 +83,10 @@ const MODELS = [
 /** With your OpenAI key (Settings → Models), these instead. */
 /** Claude Code's thinking effort for the agents (`--effort`); "" leaves it to Claude Code. */
 const EFFORTS = [
-	{ value: "", label: "Thinking: default" },
-	{ value: "low", label: "Thinking: low" },
-	{ value: "medium", label: "Thinking: medium" },
-	{ value: "high", label: "Thinking: high" },
+	{ value: "", label: "Default" },
+	{ value: "low", label: "Low" },
+	{ value: "medium", label: "Medium" },
+	{ value: "high", label: "High" },
 ];
 const OPENAI_MODELS = [
 	{ value: "gpt-5", label: "GPT-5" },
