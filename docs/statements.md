@@ -158,7 +158,7 @@ Each obligation is a `prove` job for one function. The prover's task comes from 
 - the obligation as a theorem to prove, with its exact name and type. For an invariant:
   `theorem S02.preserved_withdraw (s : Vault.State) … (h : S02.inv s) : S02.inv (Vault.withdraw s …).2` (shaped to
   the generated def's signature and monad), and `S02.init` for setup;
-- the file to write: `Proofs/Swarm/S02Withdraw.lean`.
+- the file to write: `Proofs/Functions/S02Withdraw.lean`.
 
 `check_proof` runs unchanged: no cheats, `lake build`, and the def named. One check is added for an obligation: the theorem with its given name is in its given file, `#print axioms` shows no `sorryAx`, and its type, as `#check` prints it, names the def. A function or access obligation is stated in words, not as a Lean type, so the type isn't matched against an expected one. Instead the reviewer gets it as Lean prints it, next to the user's words and the back-translation, and approves only if it says what the obligation says. (Invariants, step 5, come with their Lean predicate, so their obligations' types can be checked exactly.)
 

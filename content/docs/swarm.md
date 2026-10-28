@@ -32,7 +32,7 @@ Lake builds count (formalmind.toml's `sources`, or the lakefile's `srcDir`). A s
 1. **The prover** takes the next open item. It gets a brief built from the syntax tree: the function's generated
    Lean definition, its guards, the storage it reads and writes, and its callees. It writes a proof of what the
    function does (when it reverts, what it writes, what it returns or sends) in
-   `formal/Proofs/Swarm/<Contract><Function>.lean`, and checks it with `lake build`.
+   `formal/Proofs/Functions/<Contract><Function>.lean`, and checks it with `lake build`.
 2. **The swarm checks the proof** before anyone reviews it: no `sorry`, `admit`, new axioms or `native_decide`,
    `lake build` passes, and the Proofs page now counts the function as proved. If not, the prover gets the output
    back. After three tries the item is marked `[!]`.

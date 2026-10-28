@@ -107,6 +107,23 @@ pub fn layout(root: &Path) -> (&'static str, &'static str) {
     if legacy { ("Generated", "Refinement") } else { ("Specs", "Proofs") }
 }
 
+/// The folder under the proofs where the swarm writes one file per function: `Functions/`, or `Swarm/` where the project
+/// already keeps them there (an older project, or the `Refinement/` layout), so its proofs stay in one place.
+pub fn functions_dir(root: &Path) -> &'static str {
+    let proofs = layout(root).1;
+    let has = |d: &str| lean_src(root).is_some_and(|src| src.join(proofs).join(d).is_dir());
+    if proofs == "Refinement" || (has("Swarm") && !has("Functions")) { "Swarm" } else { "Functions" }
+}
+
+/// Where the proofs of statements (informal specs: claims in plain words) go, under the Lake sources:
+/// `Proofs/InformalSpecs`, or `<proofs>/Statements` where the project already keeps them there.
+pub fn informal_dir(root: &Path) -> String {
+    let proofs = layout(root).1;
+    let has = |d: &str| lean_src(root).is_some_and(|src| src.join(proofs).join(d).is_dir());
+    let dir = if proofs == "Refinement" || (has("Statements") && !has("InformalSpecs")) { "Statements" } else { "InformalSpecs" };
+    format!("{proofs}/{dir}")
+}
+
 pub fn lean_src(root: &Path) -> Option<PathBuf> {
     let lake = lake_dir(root)?;
     if let Some(d) = configured(root, "sources").filter(|d| d.starts_with(&lake)) {
@@ -428,13 +445,14 @@ impl Context {
         let short = u.name().rsplit('.').next().unwrap_or("").trim_start_matches('_');
         let module = format!("{}{}", c.name, name_part(short, true));
         let (specs, proofs) = layout(root);
+        let functions = functions_dir(root);
         let mut s = format!(
             "## The target\n\n`{}` in {} ({}) — Lean def `{lean}` in the generated model `{}`.\n{}\n\
 Prove what its slice says: the conditions under which it reverts (its guards), and on success the storage it writes \
 (its footprint) and what it returns or hands to its external calls. \
-Write the proof as `{lib}/{proofs}/Swarm/{module}.lean` (module `{proofs}.Swarm.{module}`), starting with `import {specs}.{}` (and `import {proofs}.Monad` for its simp lemmas when the project has it). \
+Write the proof as `{lib}/{proofs}/{functions}/{module}.lean` (module `{proofs}.{functions}.{module}`), starting with `import {specs}.{}` (and `import {proofs}.Monad` for its simp lemmas when the project has it). \
 Every theorem about the def must spell it fully qualified as `{lean}` in its statement — the Proofs page counts the function as proved only when a theorem without `sorry` names exactly that. \
-Check it with `lake build {proofs}.Swarm.{module}` (lake runs in {lake_rel}/). The swarm itself re-runs `lake build` and the coverage before your work goes to review.\n",
+Check it with `lake build {proofs}.{functions}.{module}` (lake runs in {lake_rel}/). The swarm itself re-runs `lake build` and the coverage before your work goes to review.\n",
             u.name(),
             c.name,
             u.at(),
