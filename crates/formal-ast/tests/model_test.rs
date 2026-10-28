@@ -81,3 +81,34 @@ fn abi_arrays_of_static_elements() {
     assert!(!t.contains("Arrays.sum ext __d"), "{t}");
     lean_checks("Arrays", t);
 }
+
+#[test]
+fn memory_calls_and_assembly() {
+    let Some(model) = model("src/Memory.sol", "Memory") else { return };
+    let t = &model.text;
+    // Only the function where another local names the same memory stays opaque.
+    let opaque: Vec<&str> = model.report.opaque.iter().map(|(f, _)| f.as_str()).collect();
+    assert_eq!(opaque, ["Memory.aliased"], "{:?}", model.report.opaque);
+    assert!(model.report.opaque[0].1.contains("another local also refers to"));
+    // A memory parameter written through comes back after the results, and the caller writes it back.
+    assert!(t.contains("def Batches.add {σ : Type} (ext : Ext σ) (b : Batches.Batch) (to : Nat) (amount : Nat) : M σ Batches.Batch"), "{t}");
+    assert!(t.contains("← Batches.add ext x a 1\n  x := "), "{t}");
+    // A fixed-size array starts as that many zero elements.
+    assert!(t.contains("instance : Inhabited Batches.Batch := ⟨{ items := (List.replicate 4 default), count := default }⟩"), "{t}");
+    // mload of a memory struct's field; bytes at the free memory pointer hashed byte by byte.
+    assert!(t.contains("(r).d"), "{t}");
+    assert!(t.contains("ext.keccakBytes (((wordBytes "), "{t}");
+    // staticcall reads the world and can't write; bytes4 → bytes32 pads on the right.
+    assert!(t.contains("view (fun env s => .ok (ext.staticCall env s t data))"), "{t}");
+    assert!(t.contains("0x12345678 * 2 ^ 224"), "{t}");
+    // A public variable's getter on another contract is a view call.
+    assert!(t.contains("view_Owned_owner : Env → σ → Nat → Except Revert Nat"), "{t}");
+    // hex"0f" as a bytes1, and `new uint256[](0)`.
+    assert!(t.contains("return (0x0f, "), "{t}");
+    assert!(t.contains("List.replicate 0 default"), "{t}");
+    // keccak256(abi.encodePacked(two words)) is keccak256 over the words.
+    assert!(t.contains("(ext.keccak [id, "), "{t}");
+    // A storage parameter read as a value.
+    assert!(t.contains("← store_get"), "{t}");
+    lean_checks("Memory", t);
+}

@@ -231,6 +231,9 @@ pub struct Gen<'a> {
     ext_calls: BTreeMap<String, ExtCall>,
     /// Functions given a hand-written summary instead of a translation.
     summaries: Vec<String>,
+    /// Per function: the memory parameters (by position) it writes through, so its callers see the change.
+    mem_w: HashMap<Id, Vec<usize>>,
+    mem_computing: HashSet<Id>,
 }
 
 impl<'a> Gen<'a> {
@@ -349,6 +352,8 @@ impl<'a> Gen<'a> {
             transient: false,
             ext_calls: BTreeMap::new(),
             summaries: vec![],
+            mem_w: HashMap::new(),
+            mem_computing: HashSet::new(),
         }
     }
 
@@ -700,6 +705,11 @@ impl<'a> Gen<'a> {
         let mut params = vec![];
         let mut assigned = HashSet::new();
         collect_assigned(&node["body"], &mut assigned);
+        let written = if modifier { vec![] } else { self.mem_written(f) };
+        if !written.is_empty() {
+            mem_param_check(node, &written)?;
+        }
+        let mut extra_types: Vec<String> = vec![];
         let mut fx = Fx::new(self, f);
         let mut mut_params = vec![];
         for p in node["parameters"]["parameters"].as_array().into_iter().flatten() {
@@ -715,9 +725,15 @@ impl<'a> Gen<'a> {
             }
             fx.locals.insert(id_of(p), n.clone());
             fx.params.push((n.clone(), tstr(p), s(&p["storageLocation"])));
-            if assigned.contains(&id_of(p)) {
-                if p["storageLocation"] == "memory" && ty != "Nat" && ty != "Bool" {
-                    return bail("writes to a memory parameter (shared with the caller)");
+            let i = params.len();
+            if written.contains(&i) {
+                // Shared with the caller: it comes back as an extra result.
+                fx.extra.push(n.clone());
+                extra_types.push(ty.clone());
+                mut_params.push(n.clone());
+            } else if assigned.contains(&id_of(p)) {
+                if p["storageLocation"] == "memory" && is_reference(&tstr(p)) {
+                    return bail("re-points a memory parameter");
                 }
                 mut_params.push(n.clone());
             }
@@ -733,10 +749,10 @@ impl<'a> Gen<'a> {
             if !n.is_empty() {
                 let n = local_ident(&n);
                 fx.locals.insert(id_of(r), n.clone());
-                named.push((n, ty));
+                named.push((n, ty, fx.g.default_term(&r["typeName"])));
             }
         }
-        fx.named = named.iter().map(|(n, _)| n.clone()).collect();
+        fx.named = named.iter().map(|(n, _, _)| n.clone()).collect();
         if !fx.named.is_empty() && fx.named.len() != ret_types.len() {
             return bail("partly named returns");
         }
@@ -744,8 +760,8 @@ impl<'a> Gen<'a> {
         for m in &mut_params {
             fx.line(format!("let mut {m} := {m}"));
         }
-        for (n, ty) in &named {
-            fx.line(format!("let mut {n} : {ty} := default"));
+        for (n, ty, zero) in &named {
+            fx.line(format!("let mut {n} : {ty} := {zero}"));
         }
         fx.modifier = modifier;
         if modifier {
@@ -760,11 +776,15 @@ impl<'a> Gen<'a> {
         } else if fx.out.last().is_some_and(|l| l.starts_with("  return ")) {
             // The body already ends in a return.
         } else if !named.is_empty() {
-            fx.line(format!("return {}", tuple(&fx.named)));
-        } else if ret_types.is_empty() {
+            let items: Vec<String> = fx.named.iter().chain(&fx.extra).cloned().collect();
+            fx.line(format!("return {}", tuple(&items)));
+        } else if ret_types.is_empty() && fx.extra.is_empty() {
             fx.line("return ()".into());
-        } else {
+        } else if fx.extra.is_empty() {
             fx.line("return default".into());
+        } else {
+            let items: Vec<String> = ret_types.iter().map(|_| "default".to_string()).chain(fx.extra.iter().cloned()).collect();
+            fx.line(format!("return {}", tuple(&items)));
         }
         let body = fx.out.join("\n");
 
@@ -775,7 +795,7 @@ impl<'a> Gen<'a> {
             let _ = writeln!(out, "def {name} {{σ α : Type}} [Inhabited α] (ext : Ext σ) {} (k : M σ α) : M σ α := do\n{body}", params.join(" "));
             return Ok(out);
         }
-        let ret = product(&ret_types);
+        let ret = product(&ret_types.iter().chain(&extra_types).cloned().collect::<Vec<_>>());
         // Modifiers wrap the body, outermost first.
         let mut head = String::new();
         let mut tail = String::new();
@@ -832,6 +852,49 @@ impl<'a> Gen<'a> {
             return None;
         }
         e["arguments"].as_array()?.first().cloned()
+    }
+
+    /// The memory parameters of reference type (structs, arrays, bytes) that `f` writes through (`p.x = …`,
+    /// `p[i] = …`), directly, in assembly, or by passing them to a function that does. Memory is shared with the
+    /// caller, so these come back as extra results and the caller writes them back to what it passed.
+    fn mem_written(&mut self, f: Id) -> Vec<usize> {
+        if let Some(v) = self.mem_w.get(&f) {
+            return v.clone();
+        }
+        let Some(node) = self.nodes.get(&f).copied() else { return vec![] };
+        let params: Vec<Value> = node["parameters"]["parameters"].as_array().cloned().unwrap_or_default();
+        let refs: Vec<(usize, Id)> = params.iter().enumerate().filter(|(_, p)| p["storageLocation"] == "memory" && is_reference(&tstr(p))).map(|(i, p)| (i, id_of(p))).collect();
+        if refs.is_empty() || node["body"].is_null() {
+            self.mem_w.insert(f, vec![]);
+            return vec![];
+        }
+        if self.mem_computing.contains(&f) {
+            // Recursion: assume every one is written (an over-approximation is sound: the value comes back).
+            return refs.iter().map(|(i, _)| *i).collect();
+        }
+        self.mem_computing.insert(f);
+        let ids: HashSet<Id> = refs.iter().map(|(_, id)| *id).collect();
+        let mut written = HashSet::new();
+        let mut sites = vec![];
+        mem_writes(&node["body"], &ids, &mut written, &mut HashSet::new(), &mut sites);
+        for (src, args) in sites {
+            let Some((kind, Some(target), direct)) = Src::parse(&src).and_then(|s| self.calls.get(&s).copied()) else { continue };
+            if kind != CallKind::Internal {
+                continue;
+            }
+            let callee = if direct { target } else { self.scope.resolve(self.g, target) };
+            for k in self.mem_written(callee) {
+                if let Some(Some(root)) = args.get(k) {
+                    if ids.contains(root) {
+                        written.insert(*root);
+                    }
+                }
+            }
+        }
+        self.mem_computing.remove(&f);
+        let out: Vec<usize> = refs.iter().filter(|(_, id)| written.contains(id)).map(|(i, _)| *i).collect();
+        self.mem_w.insert(f, out.clone());
+        out
     }
 
     /// The constructor of contract `c`, if it has one.
@@ -981,17 +1044,18 @@ impl<'a> Gen<'a> {
                 continue;
             }
             let rets: Vec<String> = node["returnParameters"]["parameters"].as_array().into_iter().flatten().map(tstr).collect();
+            let extra = self.mem_written(f).len();
             let mut fx = Fx::new(self, f);
             fx.indent = 1;
             let case = (|| -> R<Vec<String>> {
                 let args = fx.abi_decode_tuple(&types, "args", "0")?;
                 let call = format!("{name} ext {}", args.iter().map(|a| paren(a)).collect::<Vec<_>>().join(" "));
                 if rets.is_empty() {
-                    fx.line(call);
+                    fx.line(if extra > 0 { format!("let _ ← {call}") } else { call });
                     fx.line("return []".into());
                 } else {
                     fx.line(format!("let r ← {call}"));
-                    let items: Vec<(String, String)> = rets.iter().enumerate().map(|(i, t)| (t.clone(), proj("r", i, rets.len()))).collect();
+                    let items: Vec<(String, String)> = rets.iter().enumerate().map(|(i, t)| (t.clone(), proj("r", i, rets.len() + extra))).collect();
                     let enc = fx.abi_encode(&items)?;
                     fx.line(format!("return {enc}"));
                 }
@@ -1040,6 +1104,37 @@ impl<'a> Gen<'a> {
                         "  if decide (result.length < 32) || bytesWordAt result 0 / 2 ^ 224 != bytesWordAt data 0 / 2 ^ 224 then".into(),
                         "    throw ⟨\"InvalidHookResponse\"⟩".into(),
                         "  return result\n".into(),
+                    ]
+                    .join("\n"),
+                )
+            }
+            // v4-core CurrencyLibrary.transfer: native ETH is a plain call with the value; an ERC-20 is a call of
+            // `transfer(to, amount)` that succeeds when the call does and it returned nothing or a word equal to 1
+            // (`and(or(and(eq(mload(0), 1), gt(returndatasize(), 31)), iszero(returndatasize())), call(…))`; Yul
+            // evaluates the call first). A failure reverts through CustomRevert.bubbleUpAndRevertWith.
+            ("CurrencyLibrary", "transfer", "transfer(Currency,address,uint256)") => {
+                let name = self.lean_fn_name(f);
+                let bubble = func.calls.iter().find(|c| c.name == "bubbleUpAndRevertWith").and_then(|c| c.target)?;
+                let bubble = if self.status.get(&bubble) == Some(&true) { format!("{} ext", self.lean_fn_name(bubble)) } else if self.status.contains_key(&bubble) { format!("ext.{}", self.ext_fn_field(bubble)) } else { return None };
+                let sel = |sig: &str| format!("0x{}", &keccak_hex(sig.as_bytes())[2..10]);
+                self.ext.insert(
+                    "lowCall : Nat → Nat → List Nat → M σ (Bool × List Nat)".into(),
+                    "a low-level call (address, value, calldata) → (success, returndata); a failed call returns false and doesn't revert".into(),
+                );
+                self.summaries.push(self.g.qualified(f));
+                Some(
+                    [
+                        "/-- CurrencyLibrary.transfer (summary of its code: the native call, or the ERC-20 `transfer` call and its returned data) -/".to_string(),
+                        format!("def {name} {{σ : Type}} (ext : Ext σ) (currency : Nat) («to» : Nat) (amount : Nat) : M σ Unit := do"),
+                        "  if currency == 0 then".into(),
+                        "    let r ← ext.lowCall «to» amount []".into(),
+                        "    if !r.1 then".into(),
+                        format!("      {bubble} «to» 0 {}", sel("NativeTransferFailed()")),
+                        "  else".into(),
+                        "    let r ← ext.lowCall currency 0 ((wordBytes (0xa9059cbb * 2 ^ 224)).take 4 ++ abiEncode [«to» % 2 ^ 160, amount])".into(),
+                        "    if !(r.1 && ((decide (r.2.length ≥ 32) && bytesWordAt r.2 0 == 1) || r.2.length == 0)) then".into(),
+                        format!("      {bubble} currency 0xa9059cbb {}", sel("ERC20TransferFailed()")),
+                        "  return ()\n".into(),
                     ]
                     .join("\n"),
                 )
@@ -1161,7 +1256,8 @@ impl<'a> Gen<'a> {
                 Entry {
                     name: s(&node["name"]),
                     params: node["parameters"]["parameters"].as_array().into_iter().flatten().map(|p| self.clone_ty(&p["typeName"]).unwrap_or_default()).collect(),
-                    lean: (self.status.get(f) == Some(&true)).then(|| self.fn_name[f].clone()),
+                    // A def that also returns memory it wrote isn't the ABI function a linked caller expects.
+                    lean: (self.status.get(f) == Some(&true) && self.mem_w.get(f).is_none_or(|w| w.is_empty())).then(|| self.fn_name[f].clone()),
                 }
             })
             .collect();
@@ -1197,12 +1293,33 @@ impl<'a> Gen<'a> {
             }
         }
         let _ = writeln!(out, "structure {} where", self.struct_name(id));
+        let mut defaults = vec![];
         for m in d["members"].as_array().into_iter().flatten() {
             let ty = self.clone_ty(&m["typeName"]).unwrap_or_else(|| "Nat".into());
             let _ = writeln!(out, "  {} : {ty}", ident(&s(&m["name"])));
+            defaults.push(format!("{} := {}", ident(&s(&m["name"])), self.default_term(&m["typeName"])));
         }
-        let _ = writeln!(out, "deriving Inhabited\n");
+        if defaults.iter().all(|d| d.ends_with(":= default")) {
+            let _ = writeln!(out, "deriving Inhabited\n");
+        } else {
+            // A fixed-size array member starts with its length in zeroed elements, as in the EVM.
+            let _ = writeln!(out, "\ninstance : Inhabited {} := ⟨{{ {} }}⟩\n", self.struct_name(id), defaults.join(", "));
+        }
         list.push((self.struct_name(id), out.clone()));
+    }
+
+    /// The zero value of a type: `default`, except that a fixed-size array `T[n]` is n zero elements.
+    fn default_term(&self, t: &Value) -> String {
+        if t["nodeType"] == "ArrayTypeName" && !t["length"].is_null() {
+            let n = t["length"]["value"].as_str().and_then(|v| v.parse::<u64>().ok()).or_else(|| {
+                let ts = tstr(t);
+                ts.rsplit_once('[').and_then(|(_, r)| r.trim_end_matches(']').parse().ok())
+            });
+            if let Some(n) = n {
+                return format!("(List.replicate {n} {})", self.default_term(&t["baseType"]));
+            }
+        }
+        "default".into()
     }
 
     fn opaque_sig(&mut self, f: Id) -> String {
@@ -1217,7 +1334,11 @@ impl<'a> Gen<'a> {
                 parts.push(ty);
             }
         }
-        let rets: Vec<String> = node["returnParameters"]["parameters"].as_array().into_iter().flatten().map(|r| self.clone_ty(&r["typeName"]).unwrap_or_else(|| "Nat".into())).collect();
+        let mut rets: Vec<String> = node["returnParameters"]["parameters"].as_array().into_iter().flatten().map(|r| self.clone_ty(&r["typeName"]).unwrap_or_else(|| "Nat".into())).collect();
+        let params: Vec<Value> = node["parameters"]["parameters"].as_array().cloned().unwrap_or_default();
+        for i in self.mem_written(f) {
+            rets.push(self.clone_ty(&params[i]["typeName"]).unwrap_or_else(|| "Nat".into()));
+        }
         parts.push(format!("M σ {}", product(&rets)));
         parts.join(" → ")
     }
@@ -1402,11 +1523,15 @@ struct Fx<'g, 'a> {
     placeholder: bool,
     /// Translating the deployment (constructor): immutables are fields of a mutable `ext`.
     ctor: bool,
+    /// Memory parameters written through: returned after the results.
+    extra: Vec<String>,
+    /// The function being translated.
+    func: Id,
 }
 
 impl<'g, 'a> Fx<'g, 'a> {
-    fn new(g: &'g mut Gen<'a>, _f: Id) -> Self {
-        Fx { g, out: vec![], indent: 0, tmp: 0, unchecked: 0, locals: HashMap::new(), alias: HashMap::new(), named: vec![], loops: vec![], params: vec![], rets: vec![], lens: HashMap::new(), modifier: false, placeholder: false, ctor: false }
+    fn new(g: &'g mut Gen<'a>, f: Id) -> Self {
+        Fx { func: f, g, out: vec![], indent: 0, tmp: 0, unchecked: 0, locals: HashMap::new(), alias: HashMap::new(), named: vec![], loops: vec![], params: vec![], rets: vec![], lens: HashMap::new(), modifier: false, placeholder: false, ctor: false, extra: vec![] }
     }
 
     fn line(&mut self, l: String) {
@@ -1501,20 +1626,27 @@ impl<'g, 'a> Fx<'g, 'a> {
                     return bail("return in a constructor");
                 }
                 if st["expression"].is_null() {
-                    let t = tuple(&self.named.clone());
+                    let items: Vec<String> = self.named.iter().chain(&self.extra).cloned().collect();
+                    let t = tuple(&items);
                     self.line(format!("return {t}"));
                 } else {
                     let e = &st["expression"];
                     let rets = self.rets.clone();
-                    let t = if e["nodeType"] == "TupleExpression" && rets.len() > 1 {
+                    let mut items = if e["nodeType"] == "TupleExpression" && rets.len() > 1 {
                         let mut items = vec![];
                         for (i, c) in e["components"].as_array().cloned().unwrap_or_default().iter().enumerate() {
                             items.push(self.expr_for(c, &rets, i)?);
                         }
-                        tuple(&items)
+                        items
+                    } else if rets.len() > 1 && !self.extra.is_empty() {
+                        let v = self.expr_for(e, &rets, 0)?;
+                        let v = self.atom(v);
+                        (0..rets.len()).map(|i| proj(&v, i, rets.len())).collect()
                     } else {
-                        self.expr_for(e, &rets, 0)?
+                        vec![self.expr_for(e, &rets, 0)?]
                     };
+                    items.extend(self.extra.iter().cloned());
+                    let t = tuple(&items);
                     self.line(format!("return {t}"));
                 }
                 Ok(())
@@ -1678,7 +1810,7 @@ impl<'g, 'a> Fx<'g, 'a> {
         for r in n["externalReferences"].as_array().into_iter().flatten() {
             refs.insert(s(&r["src"]), (r["declaration"].as_i64().unwrap_or(0), r["isSlot"] == true, r["isOffset"] == true));
         }
-        let mut y = Yul { refs, vars: vec![HashMap::new()], mem: HashMap::new(), slots: HashMap::new() };
+        let mut y = Yul { refs, vars: vec![HashMap::new()], mem: HashMap::new(), slots: HashMap::new(), ptrs: HashSet::new(), rel: vec![] };
         self.line("-- assembly".into());
         self.yul_block(&n["AST"], &mut y)
     }
@@ -1708,7 +1840,11 @@ impl<'g, 'a> Fx<'g, 'a> {
         self.indent += 1;
         // Memory written inside a branch is unknown after it.
         let saved = y.mem.clone();
+        let rel = y.rel.len();
         let r = self.yul_block(b, y);
+        if y.rel.len() != rel {
+            y.rel.clear();
+        }
         let changed: Vec<u64> = y.mem.keys().filter(|k| saved.get(k) != y.mem.get(k)).copied().collect();
         for k in changed {
             y.mem.remove(&k);
@@ -1725,8 +1861,8 @@ impl<'g, 'a> Fx<'g, 'a> {
                     return bail("Yul multi-variable declaration");
                 }
                 let v = if st["value"].is_null() { "0".to_string() } else { self.yul_expr(&st["value"], y)? };
-                if y.slots.contains_key(&v) {
-                    // A storage location, not a number: the name just refers to it.
+                if y.slots.contains_key(&v) || y.ptrs.contains(&v) {
+                    // A storage location or the free memory pointer, not a number: the name just refers to it.
                     y.vars.last_mut().unwrap().insert(vars[0].clone(), v);
                     return Ok(());
                 }
@@ -1771,8 +1907,20 @@ impl<'g, 'a> Fx<'g, 'a> {
                         self.line(format!("modify fun w => ext.set w (let s := ext.get w; {{ s with «transient» := upd s.«transient» {k} {v} }})"));
                         Ok(())
                     }
+                    "mstore" if self.yul_ptr_off(&args[0], y).is_some() => {
+                        let off = self.yul_ptr_off(&args[0], y).unwrap();
+                        let v = self.yul_expr(&args[1], y)?;
+                        let m = self.fresh("m");
+                        self.line(format!("let {m} := {v}"));
+                        y.rel.push((off, m));
+                        Ok(())
+                    }
                     "mstore" => {
                         let off = yul_const(&args[0]).ok_or("mstore at a computed offset")?;
+                        if off >= 0x60 {
+                            // Could be anywhere past the scratch space, the pointer included.
+                            y.rel.clear();
+                        }
                         let v = self.yul_expr(&args[1], y)?;
                         if y.slots.contains_key(&v) {
                             y.mem.insert(off, v);
@@ -1932,6 +2080,59 @@ impl<'g, 'a> Fx<'g, 'a> {
         Ok(to_word(&self.g.norm(&r.ty), &cur))
     }
 
+    /// `p` or `add(p, k)` with `p` the free memory pointer: the offset `k` from it.
+    fn yul_ptr_off(&self, e: &Value, y: &Yul) -> Option<u64> {
+        match e["nodeType"].as_str()? {
+            "YulIdentifier" => y.var(&s(&e["name"])).filter(|v| y.ptrs.contains(v)).map(|_| 0),
+            "YulFunctionCall" if yul_call_name(e) == Some("add") => {
+                let a = e["arguments"].as_array()?;
+                for (p, k) in [(0, 1), (1, 0)] {
+                    if let (Some(base), Some(k)) = (self.yul_ptr_off(&a[p], y), yul_const(&a[k])) {
+                        return Some(base + k);
+                    }
+                }
+                None
+            }
+            _ => None,
+        }
+    }
+
+    /// `mload(s)` or `mload(add(s, 32k))` with `s` a memory struct of value-type fields: field k, as a word.
+    fn yul_struct_word(&mut self, e: &Value, y: &Yul) -> R<Option<String>> {
+        let (id, off) = match e["nodeType"].as_str().unwrap_or("") {
+            "YulIdentifier" => (e, 0),
+            "YulFunctionCall" if yul_call_name(e) == Some("add") => {
+                let a = e["arguments"].as_array().cloned().unwrap_or_default();
+                match (yul_const(&a[0]), yul_const(&a[1])) {
+                    (None, Some(k)) if a[0]["nodeType"] == "YulIdentifier" => (&e["arguments"][0], k),
+                    (Some(k), None) if a[1]["nodeType"] == "YulIdentifier" => (&e["arguments"][1], k),
+                    _ => return Ok(None),
+                }
+            }
+            _ => return Ok(None),
+        };
+        if y.var(&s(&id["name"])).is_some() {
+            return Ok(None);
+        }
+        let Some(&(decl, false, false)) = y.refs.get(&s(&id["src"])) else { return Ok(None) };
+        let Some(d) = self.g.nodes.get(&decl).copied() else { return Ok(None) };
+        let t = tstr(d);
+        if d["storageLocation"] != "memory" || !t.starts_with("struct ") {
+            return Ok(None);
+        }
+        let Some(local) = self.locals.get(&decl).cloned() else { return Ok(None) };
+        let members = self.struct_members(&t)?;
+        if off % 32 != 0 || off / 32 >= members.len() as u64 {
+            return bail("mload past a memory struct's fields");
+        }
+        let (name, mt) = &members[(off / 32) as usize];
+        let mt = self.g.norm(mt);
+        if mt.starts_with("struct") || mt.contains('[') || mt.starts_with("mapping") || mt == "bytes" || mt == "string" {
+            return bail("mload of a memory struct's reference field");
+        }
+        Ok(Some(to_word(&mt, &format!("({local}).{}", ident(name)))))
+    }
+
     /// A Yul identifier naming an outside `bytes memory` value: its Lean name.
     fn yul_bytes_ref(&self, e: &Value, y: &Yul) -> Option<String> {
         if e["nodeType"] != "YulIdentifier" || y.var(&s(&e["name"])).is_some() {
@@ -1965,6 +2166,9 @@ impl<'g, 'a> Fx<'g, 'a> {
             "YulIdentifier" => {
                 let name = s(&e["name"]);
                 if let Some(lean) = y.var(&name) {
+                    if y.ptrs.contains(&lean) {
+                        return bail("the free memory pointer's value");
+                    }
                     return Ok(lean);
                 }
                 let (decl, slot, offset) = *y.refs.get(&s(&e["src"])).ok_or_else(|| format!("Yul name {name}"))?;
@@ -2032,6 +2236,15 @@ impl<'g, 'a> Fx<'g, 'a> {
                         let off = self.yul_expr(&parts[oi], y)?;
                         return Ok(format!("(bytesWordAt {b} ({} - 32))", paren(&off)));
                     }
+                    "mload" if self.yul_struct_word(&args[0], y)?.is_some() => {
+                        return Ok(self.yul_struct_word(&args[0], y)?.unwrap());
+                    }
+                    "mload" if yul_const(&args[0]) == Some(0x40) && !y.mem.contains_key(&0x40) => {
+                        // The free memory pointer: a place only addressed relative to itself below.
+                        let ph = self.fresh("__fmp");
+                        y.ptrs.insert(ph.clone());
+                        return Ok(ph);
+                    }
                     "mload" => {
                         let off = yul_const(&args[0]).ok_or("mload at a computed offset")?;
                         return y.mem.get(&off).cloned().ok_or_else(|| "mload of memory the model didn't see written".into());
@@ -2068,6 +2281,24 @@ impl<'g, 'a> Fx<'g, 'a> {
                         let ph = self.fresh("__slot");
                         y.slots.insert(ph.clone(), SlotRef { path, ty: value_ty, extra: 0 });
                         return Ok(ph);
+                    }
+                    "keccak256" if self.yul_ptr_off(&args[0], y).is_some() => {
+                        // keccak256 of bytes written above at the free memory pointer: each byte from the last write
+                        // that covers it.
+                        let start = self.yul_ptr_off(&args[0], y).unwrap();
+                        let len = yul_const(&args[1]).ok_or("keccak256 of a computed length")?;
+                        let mut parts: Vec<(usize, u64, u64)> = vec![]; // (write, first byte in it, count)
+                        for i in start..start + len {
+                            let w = y.rel.iter().rposition(|(o, _)| *o <= i && i < o + 32).ok_or("keccak256 of memory the model didn't see written")?;
+                            let at = i - y.rel[w].0;
+                            match parts.last_mut() {
+                                Some((pw, first, n)) if *pw == w && *first + *n == at => *n += 1,
+                                _ => parts.push((w, at, 1)),
+                            }
+                        }
+                        let bytes: Vec<String> = parts.iter().map(|(w, first, n)| format!("((wordBytes {}).drop {first}).take {n}", y.rel[*w].1)).collect();
+                        self.g.ext.insert("keccakBytes : List Nat → Nat".into(), "keccak256 over bytes (any function: no collision assumptions)".into());
+                        return Ok(format!("(ext.keccakBytes ({}))", if bytes.is_empty() { "[]".to_string() } else { bytes.join(" ++ ") }));
                     }
                     "keccak256" => {
                         let (off, len) = (yul_const(&args[0]).ok_or("keccak256 of computed memory")?, yul_const(&args[1]).ok_or("keccak256 of a computed length")?);
@@ -2121,6 +2352,42 @@ impl<'g, 'a> Fx<'g, 'a> {
         }
     }
 
+    /// Where a memory argument a callee wrote through goes back to: a local (or a part of one). A copy the call
+    /// made (from storage or calldata) or a fresh value (`S(…)`) has no one else to see it.
+    fn writeback(&mut self, x: &Value) -> R<Option<Path>> {
+        let t = tstr(x);
+        if !t.contains(" memory") {
+            return Ok(None);
+        }
+        match x["nodeType"].as_str().unwrap_or("") {
+            "Identifier" | "MemberAccess" | "IndexAccess" => {
+                let root = mem_root(x).ok_or("memory written by a callee, from an unknown place")?;
+                let body = self.g.nodes.get(&self.func).map(|n| n["body"].clone()).unwrap_or_default();
+                let is_param = self.g.nodes.get(&self.func).is_some_and(|n| n["parameters"]["parameters"].as_array().is_some_and(|ps| ps.iter().any(|p| id_of(p) == root)));
+                if is_param {
+                    // Our own parameter: written through, so it goes back to our caller in turn.
+                    let n = self.locals.get(&root).cloned().unwrap_or_default();
+                    if !self.extra.contains(&n) {
+                        return bail("memory written by a callee, from a parameter");
+                    }
+                } else if !local_owns(&body, root) {
+                    return bail("memory written by a callee that another local also refers to");
+                }
+                let p = self.lpath(x)?;
+                match p.base {
+                    Base::Local(_) => Ok(Some(p)),
+                    _ => bail("memory written by a callee, reached through storage"),
+                }
+            }
+            "TupleExpression" => match x["components"].as_array().map(|c| c.as_slice()) {
+                Some([c]) => self.writeback(c),
+                _ => bail("memory written by a callee, passed as a tuple"),
+            },
+            "FunctionCall" if x["kind"] == "structConstructorCall" || x["expression"]["nodeType"] == "NewExpression" => Ok(None),
+            _ => bail("memory written by a callee that the caller got from elsewhere (a call or a conditional)"),
+        }
+    }
+
     /// A name for a new `let mut`: Lean won't shadow a mutable variable still in scope (`for (uint i…)` twice in a
     /// row), so such a name gets a suffix. In scope means declared above with no line indented less in between.
     fn unshadowed(&mut self, name: String) -> String {
@@ -2147,7 +2414,7 @@ impl<'g, 'a> Fx<'g, 'a> {
                 return Ok(());
             }
             let ty = self.g.ty(&d["typeName"])?;
-            let v = if init.is_null() { "default".to_string() } else { self.expr_for(init, std::slice::from_ref(d), 0)? };
+            let v = if init.is_null() { self.g.default_term(&d["typeName"]) } else { self.expr_for(init, std::slice::from_ref(d), 0)? };
             let n = self.unshadowed(local_ident(&s(&d["name"])));
             self.locals.insert(id_of(d), n.clone());
             self.line(format!("let mut {n} : {ty} := {v}"));
@@ -2937,6 +3204,12 @@ impl<'g, 'a> Fx<'g, 'a> {
 
     /// An argument for the i-th parameter: a string literal passed as `bytes` is its byte list.
     fn expr_for(&mut self, e: &Value, params: &[Value], i: usize) -> R<String> {
+        let fixed = params.get(i).and_then(|p| p["typeName"]["name"].as_str()).and_then(|n| bytes_n(n).or((n == "bytes32").then_some(32)));
+        if let (Some(n), true) = (fixed, e["nodeType"] == "Literal" && matches!(e["kind"].as_str(), Some("string" | "hexString"))) {
+            let mut bytes = literal_bytes(e).ok_or("bytes literal")?;
+            bytes.resize(n as usize, 0);
+            return Ok(format!("0x{}", bytes.iter().map(|b| format!("{b:02x}")).collect::<String>()));
+        }
         let bytes_param = params.get(i).is_some_and(|p| p["typeName"]["name"] == "bytes");
         if bytes_param && e["nodeType"] == "Literal" {
             let bytes = literal_bytes(e).ok_or("bytes literal")?;
@@ -2962,7 +3235,7 @@ impl<'g, 'a> Fx<'g, 'a> {
                 return Ok(format!("ext.{}", ident(&v.name)));
             }
         }
-        if self.alias.contains_key(&r) || self.g.state_field.contains_key(&r) {
+        if self.alias.contains_key(&r) || self.g.state_field.contains_key(&r) || self.lens.contains_key(&r) {
             let p = self.lpath(e)?;
             return self.read(&p);
         }
@@ -3094,6 +3367,15 @@ impl<'g, 'a> Fx<'g, 'a> {
                     return Ok(format!("(bytesWord (({} ++ List.replicate {n} 0).take {n}))", paren(&a)));
                 }
             }
+            let fixed = |t: &str| bytes_n(t).or((t == "bytes32").then_some(32));
+            if let (Some(tn), Some(fnb)) = (fixed(&to), fixed(&from)) {
+                // bytesM → bytesN keeps the leading bytes: widening pads on the right, narrowing drops the tail.
+                return Ok(match tn.cmp(&fnb) {
+                    std::cmp::Ordering::Greater => format!("({} * 2 ^ {})", paren(&a), 8 * (tn - fnb)),
+                    std::cmp::Ordering::Less => format!("({} / 2 ^ {})", paren(&a), 8 * (fnb - tn)),
+                    std::cmp::Ordering::Equal => a,
+                });
+            }
             return Ok(match (int_bits(&to), int_bits(&from), bits_of(&to), bits_of(&from)) {
                 // intM → intN: narrowing wraps, widening keeps the value.
                 (Some(tb), Some(fb), _, _) if tb < fb => format!("(wrapI {tb} {})", paren(&a)),
@@ -3157,6 +3439,27 @@ impl<'g, 'a> Fx<'g, 'a> {
             );
             let t = self.fresh("__t");
             self.line(format!("let {t} ← ext.lowCall {addr} {value} {data}"));
+            return Ok(t);
+        }
+        // `addr.staticcall(data)`: (success, returndata), and it can't change any state.
+        if callee["nodeType"] == "MemberAccess" && callee["memberName"] == "staticcall" && tstr(&callee["expression"]).starts_with("address") && call_value.is_none() {
+            let addr = self.expr(&callee["expression"])?;
+            let addr = self.atom(addr);
+            let data = match args.first() {
+                Some(a) if a["nodeType"] == "Literal" => {
+                    let bytes = literal_bytes(a).ok_or("bytes literal")?;
+                    format!("[{}]", bytes.iter().map(|b| b.to_string()).collect::<Vec<_>>().join(", "))
+                }
+                Some(a) => self.expr(a)?,
+                None => return bail("staticcall without data"),
+            };
+            let data = self.atom(data);
+            self.g.ext.insert(
+                "staticCall : Env → σ → Nat → List Nat → Bool × List Nat".into(),
+                "a low-level staticcall (environment, world, address, calldata) → (success, returndata): reads, can't write; a failed call returns false".into(),
+            );
+            let t = self.fresh("__t");
+            self.line(format!("let {t} ← view (fun env s => .ok (ext.staticCall env s {addr} {data}))"));
             return Ok(t);
         }
         // `addr.transfer(v)` / `addr.send(v)`: the same low-level call with no data; transfer reverts when it fails,
@@ -3274,7 +3577,17 @@ impl<'g, 'a> Fx<'g, 'a> {
                 return Ok(keccak_hex(&bytes));
             }
             // keccak256(abi.encode(words…)): an arbitrary function of the words (the same one Yul scratch hashing uses).
-            if arg["nodeType"] == "FunctionCall" && arg["expression"]["memberName"] == "encode" && arg["expression"]["expression"]["name"] == "abi" {
+            // abi.encodePacked of 32-byte values is the same bytes as abi.encode of them.
+            let packed_words = arg["nodeType"] == "FunctionCall"
+                && arg["expression"]["memberName"] == "encodePacked"
+                && arg["expression"]["expression"]["name"] == "abi"
+                && arg["arguments"].as_array().is_some_and(|a| {
+                    a.iter().all(|x| {
+                        let t = self.g.norm(&tstr(x));
+                        t == "bytes32" || t == "uint256" || t == "int256"
+                    })
+                });
+            if arg["nodeType"] == "FunctionCall" && (arg["expression"]["memberName"] == "encode" || packed_words) && arg["expression"]["expression"]["name"] == "abi" {
                 let mut words = vec![];
                 for a in arg["arguments"].as_array().cloned().unwrap_or_default() {
                     let t = self.g.norm(&tstr(&a));
@@ -3322,6 +3635,24 @@ impl<'g, 'a> Fx<'g, 'a> {
             return bail(format!("builtin {}{}", s(&callee["name"]), s(&callee["memberName"])));
         };
         let Some((ck, _, direct)) = self.g.calls.get(&Src::parse(e["src"].as_str().unwrap_or("")).unwrap_or(Src { start: 0, len: 0, file: -1 })).copied() else {
+            // `other.x()` where `x` is a public state variable: its getter, a view call.
+            let d = self.g.nodes.get(&target).copied();
+            if let Some(d) = d.filter(|d| d["nodeType"] == "VariableDeclaration" && d["stateVariable"] == true && callee["nodeType"] == "MemberAccess") {
+                let ty = self.g.ty(&d["typeName"])?;
+                let t = tstr(d);
+                if !args.is_empty() || t.starts_with("mapping") || t.contains('[') || t.starts_with("struct") || t == "string" || t == "bytes" {
+                    return bail("the getter of a public mapping, array, struct or string");
+                }
+                let addr = self.expr(&callee["expression"])?;
+                let addr = self.atom(addr);
+                let owner = self.g.g.contracts.values().find(|c| c.state_vars.contains(&target)).map(|c| c.name.clone()).unwrap_or_default();
+                let name = s(&d["name"]);
+                let field = format!("view_{owner}_{name}");
+                self.g.ext.insert(format!("{field} : Env → σ → Nat → Except Revert {ty}"), format!("view call {owner}.{name}() (a public variable's getter): reads, can't write our storage"));
+                let v = self.fresh("__t");
+                self.line(format!("let {v} ← view (fun env s => ext.{field} env s {addr})"));
+                return Ok(v);
+            }
             return bail("call the graph didn't classify (event, error or function value)");
         };
         // Arguments, with `using for` receivers first and named arguments in parameter order.
@@ -3395,6 +3726,33 @@ impl<'g, 'a> Fx<'g, 'a> {
                 } else {
                     format!("ext.{} {}", self.g.ext_fn_field(f), a.join(" "))
                 };
+                let written = if ck == CallKind::Internal { self.g.mem_written(f) } else { vec![] };
+                if !written.is_empty() {
+                    // The callee writes through memory we passed: its new value comes back after the results.
+                    let mut roots = HashSet::new();
+                    for &i in &written {
+                        if let Some(r) = ordered.get(i).and_then(mem_root) {
+                            if !roots.insert(r) {
+                                return bail("the same memory passed twice to a function that writes it");
+                            }
+                        }
+                    }
+                    let t = self.fresh("__t");
+                    self.line(format!("let {t} ← {call}"));
+                    let n = rets.len() + written.len();
+                    for (k, &i) in written.iter().enumerate() {
+                        let Some(x) = ordered.get(i) else { continue };
+                        if let Some(p) = self.writeback(x)? {
+                            let v = self.atom(proj(&t, rets.len() + k, n));
+                            self.write(&p, |_| v.clone())?;
+                        }
+                    }
+                    return Ok(match rets.len() {
+                        0 => "()".into(),
+                        1 => proj(&t, 0, n),
+                        r => tuple(&(0..r).map(|i| proj(&t, i, n)).collect::<Vec<_>>()),
+                    });
+                }
                 if unit {
                     self.line(call);
                     return Ok("()".into());
@@ -3468,6 +3826,10 @@ struct Yul {
     mem: HashMap<u64, String>,
     /// Storage locations named in Yul (`self.slot`, `keccak256(key, self.slot)`, `add(p, k)`): placeholder → where.
     slots: HashMap<String, SlotRef>,
+    /// The free memory pointer read with `mload(0x40)`: placeholders for it.
+    ptrs: HashSet<String>,
+    /// Words stored at the free memory pointer: (byte offset from it, the word's name), in order.
+    rel: Vec<(u64, String)>,
 }
 
 /// A storage location reached in assembly: a path, the Solidity type stored there, and a slot offset into it.
@@ -3515,8 +3877,11 @@ fn yul_literal(e: &Value) -> R<String> {
         "number" => Ok(s(&e["value"])),
         "bool" => Ok(if e["value"] == "true" { "1".into() } else { "0".into() }),
         "string" => {
-            // A short string literal is its bytes, left-aligned in the word.
-            let bytes = s(&e["value"]).into_bytes();
+            // A short string (or hex) literal is its bytes, left-aligned in the word.
+            let bytes = match e["hexValue"].as_str() {
+                Some(h) if !h.is_empty() => (0..h.len()).step_by(2).map(|i| u8::from_str_radix(&h[i..i + 2], 16).map_err(|_| "Yul hex literal".to_string())).collect::<R<Vec<u8>>>()?,
+                _ => s(&e["value"]).into_bytes(),
+            };
             if bytes.len() > 32 {
                 return bail("long Yul string");
             }
@@ -3603,6 +3968,201 @@ fn split_tuple(t: &str) -> Vec<String> {
         parts.push(cur);
     }
     parts
+}
+
+/// A memory reference type: a struct, an array, `bytes` or `string`.
+fn is_reference(t: &str) -> bool {
+    let t = strip_location(t);
+    t.starts_with("struct ") || t.contains('[') || t == "bytes" || t == "string"
+}
+
+/// The local or parameter an lvalue expression starts from (`b` in `b.credits[i].amount`).
+fn mem_root(e: &Value) -> Option<Id> {
+    match e["nodeType"].as_str()? {
+        "Identifier" => e["referencedDeclaration"].as_i64(),
+        "MemberAccess" => mem_root(&e["expression"]),
+        "IndexAccess" => mem_root(&e["baseExpression"]),
+        "TupleExpression" => match e["components"].as_array()?.as_slice() {
+            [c] => mem_root(c),
+            _ => None,
+        },
+        _ => None,
+    }
+}
+
+/// Writes through the parameters `ids` in `n`: assignments, `++`/`--`/`delete` of a part of one, and assembly that
+/// names one (taken as a write). `rebound` gets those assigned whole (`p = q`). `sites` gets each call with the
+/// root of every argument (with a `using for` receiver first), for the callee's own writes.
+fn mem_writes(n: &Value, ids: &HashSet<Id>, written: &mut HashSet<Id>, rebound: &mut HashSet<Id>, sites: &mut Vec<(String, Vec<Option<Id>>)>) {
+    match n {
+        Value::Object(m) => {
+            let lhs = match n["nodeType"].as_str() {
+                Some("Assignment") => Some(&n["leftHandSide"]),
+                Some("UnaryOperation") if matches!(n["operator"].as_str(), Some("++" | "--" | "delete")) => Some(&n["subExpression"]),
+                _ => None,
+            };
+            if let Some(l) = lhs {
+                let mut targets = vec![l];
+                if l["nodeType"] == "TupleExpression" {
+                    targets = l["components"].as_array().map(|c| c.iter().collect()).unwrap_or_default();
+                }
+                for l in targets {
+                    if let Some(r) = mem_root(l).filter(|r| ids.contains(r)) {
+                        if l["nodeType"] == "Identifier" { rebound.insert(r) } else { written.insert(r) };
+                    }
+                }
+            }
+            // Assembly that can write memory (mstore, a copy, a call's output) and names a parameter: written.
+            let text = n["AST"].to_string();
+            let writes_memory = ["mstore", "mstore8", "mcopy", "calldatacopy", "codecopy", "extcodecopy", "returndatacopy", "call", "staticcall", "delegatecall", "callcode"]
+                .iter()
+                .any(|op| text.contains(&format!("\"name\":\"{op}\"")));
+            if n["nodeType"] == "InlineAssembly" && writes_memory {
+                for r in n["externalReferences"].as_array().into_iter().flatten() {
+                    if let Some(d) = r["declaration"].as_i64().filter(|d| ids.contains(d)) {
+                        written.insert(d);
+                    }
+                }
+            }
+            if n["nodeType"] == "FunctionCall" {
+                let callee = &n["expression"];
+                let mut roots = vec![];
+                if callee["nodeType"] == "MemberAccess" && !tstr(&callee["expression"]).starts_with("type(") {
+                    roots.push(mem_root(&callee["expression"]));
+                }
+                roots.extend(n["arguments"].as_array().into_iter().flatten().map(mem_root));
+                sites.push((s(&n["src"]), roots));
+            }
+            m.values().for_each(|v| mem_writes(v, ids, written, rebound, sites));
+        }
+        Value::Array(a) => a.iter().for_each(|v| mem_writes(v, ids, written, rebound, sites)),
+        _ => {}
+    }
+}
+
+/// Whether the memory local `root` is the only name for its memory: declared empty or from a fresh value
+/// (`S(…)`, `new …`), and never copied into, or re-pointed at, another reference.
+fn local_owns(body: &Value, root: Id) -> bool {
+    let mut ok = true;
+    fn walk(n: &Value, root: Id, ok: &mut bool) {
+        match n {
+            Value::Object(m) => {
+                if n["nodeType"] == "VariableDeclarationStatement" {
+                    let decls = n["declarations"].as_array().cloned().unwrap_or_default();
+                    let init = &n["initialValue"];
+                    let fresh = init.is_null() || init["kind"] == "structConstructorCall" || init["expression"]["nodeType"] == "NewExpression";
+                    if decls.iter().any(|d| id_of(d) == root) && !fresh {
+                        *ok = false;
+                    }
+                    if mem_root(init) == Some(root) && decls.iter().any(|d| is_reference(&tstr(d))) {
+                        *ok = false;
+                    }
+                }
+                if n["nodeType"] == "Assignment" {
+                    let (l, r) = (&n["leftHandSide"], &n["rightHandSide"]);
+                    if mem_root(l) == Some(root) && l["nodeType"] == "Identifier" {
+                        *ok = false;
+                    }
+                    if mem_root(r) == Some(root) && is_reference(&tstr(r)) {
+                        *ok = false;
+                    }
+                }
+                m.values().for_each(|v| walk(v, root, ok));
+            }
+            Value::Array(a) => a.iter().for_each(|v| walk(v, root, ok)),
+            _ => {}
+        }
+    }
+    walk(body, root, &mut ok);
+    ok
+}
+
+/// The model passes memory by value and hands written parameters back. That's faithful when nothing else in the
+/// function refers to the same memory: no parameter written is also re-pointed (`p = q`), and no local copied
+/// from one (`S memory x = p.items[i]`) is written or read after a write through the parameter.
+fn mem_param_check(node: &Value, written: &[usize]) -> R<()> {
+    let params: Vec<Value> = node["parameters"]["parameters"].as_array().cloned().unwrap_or_default();
+    let ids: HashSet<Id> = written.iter().map(|i| id_of(&params[*i])).collect();
+    let (mut w, mut rebound, mut sites) = (HashSet::new(), HashSet::new(), vec![]);
+    mem_writes(&node["body"], &ids, &mut w, &mut rebound, &mut sites);
+    if !rebound.is_empty() {
+        return bail("re-points a memory parameter it also writes through");
+    }
+    // Locals that alias part of a written parameter.
+    fn walk<'v>(n: &'v Value, f: &mut impl FnMut(&'v Value)) {
+        match n {
+            Value::Object(m) => {
+                f(n);
+                m.values().for_each(|v| walk(v, f));
+            }
+            Value::Array(a) => a.iter().for_each(|v| walk(v, f)),
+            _ => {}
+        }
+    }
+    let mut aliases: Vec<(Id, &Value, i64)> = vec![]; // (local, its enclosing block, where it is declared)
+    let mut blocks: Vec<&Value> = vec![];
+    walk(&node["body"], &mut |n| {
+        if matches!(n["nodeType"].as_str(), Some("Block" | "UncheckedBlock")) {
+            blocks.push(n);
+        }
+    });
+    for b in &blocks {
+        for st in b["statements"].as_array().into_iter().flatten() {
+            if st["nodeType"] != "VariableDeclarationStatement" {
+                continue;
+            }
+            let from_param = mem_root(&st["initialValue"]).is_some_and(|r| ids.contains(&r));
+            for d in st["declarations"].as_array().into_iter().flatten() {
+                if from_param && d["storageLocation"] == "memory" && is_reference(&tstr(d)) {
+                    aliases.push((id_of(d), *b, s(&st["src"]).split(':').next().and_then(|x| x.parse().ok()).unwrap_or(0)));
+                }
+            }
+        }
+    }
+    let start = |n: &Value| s(&n["src"]).split(':').next().and_then(|x| x.parse::<i64>().ok()).unwrap_or(0);
+    let end = |n: &Value| {
+        let mut it = s(&n["src"]).split(':').map(|x| x.parse::<i64>().unwrap_or(0)).collect::<Vec<_>>().into_iter();
+        let (a, l) = (it.next().unwrap_or(0), it.next().unwrap_or(0));
+        a + l
+    };
+    for (local, block, decl) in aliases {
+        let (lo, hi) = (start(block), end(block));
+        let mut assigned = HashSet::new();
+        collect_assigned(block, &mut assigned);
+        if assigned.contains(&local) {
+            return bail("writes a local copied from a memory parameter (they share memory)");
+        }
+        // Writes through the parameter in the alias's block, and reads of the alias there.
+        let mut write_at = vec![];
+        let mut loops: Vec<(i64, i64)> = vec![];
+        walk(block, &mut |n| {
+            let lhs = match n["nodeType"].as_str() {
+                Some("Assignment") => Some(&n["leftHandSide"]),
+                Some("UnaryOperation") if matches!(n["operator"].as_str(), Some("++" | "--" | "delete")) => Some(&n["subExpression"]),
+                Some("FunctionCall") => n["arguments"].as_array().and_then(|a| a.iter().find(|x| mem_root(x).is_some_and(|r| ids.contains(&r)))),
+                _ => None,
+            };
+            if lhs.and_then(mem_root).is_some_and(|r| ids.contains(&r)) {
+                write_at.push(start(n));
+            }
+            if matches!(n["nodeType"].as_str(), Some("ForStatement" | "WhileStatement" | "DoWhileStatement")) {
+                loops.push((start(n), end(n)));
+            }
+        });
+        let mut bad = false;
+        walk(block, &mut |n| {
+            if n["nodeType"] == "Identifier" && n["referencedDeclaration"].as_i64() == Some(local) {
+                let at = start(n);
+                // After a write in source order, or in a loop (inside the alias's block) that also writes.
+                bad |= write_at.iter().any(|w| decl < *w && *w < at && *w >= lo && *w <= hi);
+                bad |= loops.iter().any(|(a, b)| *a <= at && at <= *b && write_at.iter().any(|w| a <= w && w <= b));
+            }
+        });
+        if bad {
+            return bail("reads a local copied from a memory parameter after writing the parameter (they share memory)");
+        }
+    }
+    Ok(())
 }
 
 /// A Lean string literal with these UTF-8 bytes.
