@@ -2185,7 +2185,11 @@ pub fn swarm_sessions(folder: String) -> Result<Vec<Session>, String> {
                     let run = name.strip_suffix(".jsonl")?.to_string();
                     let text = std::fs::read_to_string(e.path()).ok()?;
                     let last: Value = text.lines().last().and_then(|l| serde_json::from_str(l).ok()).unwrap_or(json!({}));
-                    let title = text.lines().filter_map(|l| serde_json::from_str::<Value>(l).ok()).find(|e| e["kind"] == "start").and_then(|e| e["text"].as_str().map(String::from)).unwrap_or_default();
+                    // A name you gave it (`<run>.title`, from Rename), else the focus it was started with, else your first
+                    // message in it, as a short name.
+                    let named = std::fs::read_to_string(e.path().with_extension("title")).ok().map(|t| t.trim().to_string()).filter(|t| !t.is_empty());
+                    let first = |kind: &str| text.lines().filter_map(|l| serde_json::from_str::<Value>(l).ok()).find(|e| e["kind"] == kind && e["text"].as_str().is_some_and(|t| !t.trim().is_empty())).and_then(|e| e["text"].as_str().map(String::from));
+                    let title = named.or_else(|| first("start")).or_else(|| first("you").map(|t| short_name(&t))).unwrap_or_default();
                     let outcome = if last["kind"] == "done" { last["text"].as_str().unwrap_or("").to_string() } else { String::new() };
                     Some(Session { run, title, outcome, spent: last["spent"].as_f64().unwrap_or(0.0), events: text.lines().count() })
                 })
@@ -2194,6 +2198,35 @@ pub fn swarm_sessions(folder: String) -> Result<Vec<Session>, String> {
         .unwrap_or_default();
     out.sort_by(|a, b| b.run.cmp(&a.run));
     Ok(out)
+}
+
+/// A chat's name from a message: its first line, cut at a word to about 60 characters.
+fn short_name(text: &str) -> String {
+    let line = text.trim().lines().next().unwrap_or("").trim();
+    if line.chars().count() <= 60 {
+        return line.to_string();
+    }
+    let cut: String = line.chars().take(60).collect();
+    format!("{}…", cut.rsplit_once(' ').map(|(a, _)| a).unwrap_or(&cut).trim_end_matches([',', '.', ';', ':']))
+}
+
+/// Renames a session (the chat's name): kept beside its log as `<run>.title`; an empty name goes back to the default.
+#[tauri::command]
+pub fn swarm_rename(folder: String, run: String, title: String) -> Result<(), String> {
+    if !local::read()?.allows(&folder) {
+        return Err("Add the folder first".into());
+    }
+    if run.is_empty() || !run.chars().all(|c| c.is_ascii_alphanumeric() || c == '-') {
+        return Err("Bad session id".into());
+    }
+    let path = runs_dir(&folder).join(format!("{run}.title"));
+    let title: String = title.trim().chars().filter(|c| !c.is_control()).take(120).collect();
+    if title.is_empty() {
+        let _ = std::fs::remove_file(path);
+        return Ok(());
+    }
+    std::fs::create_dir_all(runs_dir(&folder)).map_err(|e| e.to_string())?;
+    std::fs::write(path, title).map_err(|e| e.to_string())
 }
 
 /// One session's events, oldest first.
@@ -2206,7 +2239,46 @@ pub fn swarm_history(folder: String, run: String) -> Result<Vec<Value>, String> 
         return Err("Bad session id".into());
     }
     let text = std::fs::read_to_string(runs_dir(&folder).join(format!("{run}.jsonl"))).map_err(|e| e.to_string())?;
-    Ok(text.lines().filter_map(|l| serde_json::from_str(l).ok()).collect())
+    Ok(history_of(&text))
+}
+
+/// The tool steps (and status lines) a session's history keeps: the latest ones; its messages are all kept.
+const HISTORY_STEPS: usize = 600;
+/// How much of one event's text the chat is sent (a tool's output can be megabytes; the chat shows its start).
+const HISTORY_TEXT: usize = 8_000;
+
+/// What the chat shows of a session's log, so opening a long session stays fast: every message, the latest
+/// HISTORY_STEPS tool calls, results, statuses and context counts, and each text cut to HISTORY_TEXT bytes.
+fn history_of(text: &str) -> Vec<Value> {
+    let noise = |v: &Value| matches!(v["kind"].as_str(), Some("tool" | "result" | "status" | "context"));
+    let mut keep = HISTORY_STEPS;
+    let mut out: Vec<Value> = text
+        .lines()
+        .rev()
+        .filter_map(|l| serde_json::from_str::<Value>(l).ok())
+        .filter(|v| {
+            if !noise(v) {
+                return true;
+            }
+            if keep == 0 {
+                return false;
+            }
+            keep -= 1;
+            true
+        })
+        .map(|mut v| {
+            if let Some(t) = v["text"].as_str().filter(|t| t.len() > HISTORY_TEXT) {
+                let mut cut = HISTORY_TEXT;
+                while !t.is_char_boundary(cut) {
+                    cut -= 1;
+                }
+                v["text"] = json!(format!("{}\n…", &t[..cut]));
+            }
+            v
+        })
+        .collect();
+    out.reverse();
+    out
 }
 
 /// The app is quitting: stop every swarm and record the pause in its session, so Resume picks up from the plan.
@@ -2622,7 +2694,29 @@ mod tests {
     }
 
     #[test]
-    fn plan_round_trip() {
+    fn chats_are_named_from_a_message() {
+        assert_eq!(short_name("Focus on liquidations next.\nAnd more."), "Focus on liquidations next.");
+        let long = short_name("Check that every function that writes the oracle reverts unless the owner calls it, then prove it");
+        assert!(long.ends_with('…') && long.chars().count() <= 61, "{long}");
+    }
+
+    #[test]
+    fn long_histories_are_cut_to_what_the_chat_shows() {
+        let mut log = String::new();
+        for i in 0..2000 {
+            log.push_str(&json!({ "kind": "tool", "text": format!("run {i}") }).to_string());
+            log.push('\n');
+        }
+        log.push_str(&json!({ "kind": "say", "text": "x".repeat(20_000) }).to_string());
+        log.push('\n');
+        let h = history_of(&log);
+        assert_eq!(h.iter().filter(|v| v["kind"] == "tool").count(), HISTORY_STEPS, "the latest steps only");
+        assert_eq!(h[0]["text"], "run 1400", "in order, oldest kept first");
+        assert!(h.last().unwrap()["text"].as_str().unwrap().len() < 8_100, "long text cut");
+    }
+
+    #[test]
+        fn plan_round_trip() {
         let root = std::env::temp_dir().join(format!("fm-plan-{}", std::process::id()));
         std::fs::create_dir_all(root.join(".formal")).unwrap();
         std::fs::write(plan_path(&root), "# Plan\n\n- [ ] first (a.sol)\n- [x] second\n  - [ ] third\n").unwrap();

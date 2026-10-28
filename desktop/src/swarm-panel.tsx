@@ -4,7 +4,7 @@ import { createPortal } from "react-dom";
 import { NvimTerminal } from "./nvim-terminal";
 import { reportError } from "@/lib/report-error";
 import { JsonTree } from "./json-tree";
-import { ArrowDown, Bug, Check, ChevronDown, ChevronRight, CircleCheck, CircleX, LoaderCircle, MoreHorizontal, Pause, Code2, Copy, FileCode2, Folder, Network, Plus, ScanSearch, ThumbsDown, ThumbsUp, WandSparkles } from "lucide-react";
+import { ArrowDown, Bug, Check, Pencil, ChevronDown, ChevronRight, CircleCheck, CircleX, LoaderCircle, MoreHorizontal, Pause, Code2, Copy, FileCode2, Folder, Network, Plus, ScanSearch, ThumbsDown, ThumbsUp, WandSparkles } from "lucide-react";
 
 // The project roadmap (GitHub Projects-style), the same view the web app had on its own page.
 import { motion as vimMotion, search as vimSearch, setVimMode, useVimMode, type Cursor } from "@/components/vim-mode";
@@ -1335,6 +1335,9 @@ export function BugsView({ folder, files, invoke, bugs, openBug, setOpenBug, wit
 export type Mode = "code" | "chat" | "swarm" | "roadmap" | "audit" | "bugs";
 
 /** The views the Mac app shows in the middle, in the order the title bar's icons show them. */
+/** How many of a session's latest messages the chat draws at first (and adds per "Show earlier messages"). */
+const CHAT_WINDOW = 150;
+
 const PANE_VIEWS: { id: Mode; label: string; icon: React.ComponentType<{ className?: string }> }[] = [
 	{ id: "chat", label: "Chat", icon: TalkIcon },
 	{ id: "swarm", label: "Canvas", icon: Network },
@@ -2281,6 +2284,13 @@ export function SwarmPanel({ folder, name, scan, bridge, session, file: openPath
 		return sessions[i].title || (sessions[i].run === "swarm" ? "Main session" : `Session ${sessions.length - i}`);
 	};
 	const title = sessionTitle(viewing);
+	// Renaming the chat in place: its name becomes a text box; Enter keeps it, Escape leaves it.
+	const [renaming, setRenaming] = useState<string | null>(null);
+	const rename = (name: string) => {
+		setRenaming(null);
+		if (!viewing || name.trim() === title) return;
+		void invoke("swarm_rename", { folder, run: viewing, title: name }).then(() => listSessions(), (e) => setError(String(e)));
+	};
 	const working = run ? [...events].reverse().find((e) => e.kind === "status" && e.role !== "swarm") : undefined;
 	// What the working agent did last (a tool call, or the step it's thinking on), shown under its plan item.
 	const activity = working ? [...events].reverse().find((e) => (e.kind === "tool" || e.kind === "status") && e.role === working.role) : undefined;
@@ -2325,9 +2335,14 @@ export function SwarmPanel({ folder, name, scan, bridge, session, file: openPath
 		close();
 		return ends;
 	}, [chatBlocks]);
+	// How many of the latest messages are drawn: a long session (thousands of messages) would otherwise build every one
+	// on each switch. "Show earlier messages" adds more; a new session starts from the latest again.
+	const [drawn, setDrawn] = useState(CHAT_WINDOW);
+	useEffect(() => setDrawn(CHAT_WINDOW), [viewing]);
+	const firstDrawn = Math.max(0, chatBlocks.length - drawn);
 	const chatList = useMemo(
 		() =>
-			chatBlocks.map((block, i) =>
+			chatBlocks.slice(firstDrawn).map((block, k) => ({ block, i: firstDrawn + k })).map(({ block, i }) =>
 				// An open question shows once, as its question card after the history; its plain message is left out.
 				"e" in block && block.e.kind === "ask" && run && questions.open.includes(block.e) ? null : (
 				// Off screen, a message skips layout and paint (`content-visibility`), so scrolling costs what's in view, not
@@ -2372,7 +2387,7 @@ export function SwarmPanel({ folder, name, scan, bridge, session, file: openPath
 				</div>
 			)),
 		// eslint-disable-next-line react-hooks/exhaustive-deps
-		[chatBlocks, run, bugs, plan, questions.open, turnEnds],
+		[chatBlocks, firstDrawn, run, bugs, plan, questions.open, turnEnds],
 	);
 	// How full the working agent's context window is and what fills it, from its last reply; past 75% its older steps
 	// are summarized.
@@ -2619,7 +2634,7 @@ export function SwarmPanel({ folder, name, scan, bridge, session, file: openPath
 
 	const slot = useTitlebarSlot();
 	// The website's chat page: the history runs the page's full height, under the tabs and the session controls.
-	const chatPage = mode === "chat" && !slot;
+	const chatPage = mode === "chat";
 	const actionsSlot = useTitlebarSlot("fm-titlebar-actions");
 	// Narrow pages show the modes as icons only (the Mac title bar also holds the app's tabs, so it needs more room).
 	const root = useRef<HTMLDivElement | null>(null);
@@ -2730,14 +2745,28 @@ export function SwarmPanel({ folder, name, scan, bridge, session, file: openPath
 		<>
 				{/* On the website's chat page the sessions sit at the page's top left and New chat at its top right, over the
 				    history; floating over the canvas they head the chat. */}
-				<div className={chatPage ? "pointer-events-none absolute inset-x-0 top-3 z-30 flex h-8 items-center gap-1 pl-12 pr-3 *:pointer-events-auto" : "flex h-8 shrink-0 items-center gap-1 pl-3 pr-0.5"}>
+				<div className={chatPage ? `pointer-events-none absolute inset-x-0 top-3 z-30 flex h-8 items-center gap-1 pr-3 *:pointer-events-auto ${slot ? "pl-3" : "pl-12"}` : "flex h-8 shrink-0 items-center gap-1 pl-3 pr-0.5"}>
 					{chatPage ? null : (
 						<button type="button" onClick={() => pickSession("new")} aria-label="New chat" title="New chat" className="grid size-7 shrink-0 place-items-center rounded-full text-muted-foreground hover:bg-background hover:text-foreground">
 							<Plus className="size-3.5" />
 						</button>
 					)}
-					<DropdownMenu>
-						<DropdownMenuTrigger className={`flex min-w-0 items-center gap-1 rounded-md text-left text-[14px] text-muted-foreground outline-none hover:text-foreground ${chatPage ? "max-w-[calc(50%-10rem)]" : "flex-1"}`} title={`${title} — switch sessions`}>
+					{renaming !== null ? (
+						<input
+							autoFocus
+							value={renaming}
+							onChange={(e) => setRenaming(e.target.value)}
+							onKeyDown={(e) => {
+								if (e.key === "Enter") rename(renaming);
+								if (e.key === "Escape") setRenaming(null);
+							}}
+							onBlur={() => rename(renaming)}
+							aria-label="Chat name"
+							className={`h-7 min-w-0 rounded-md border bg-background px-2 text-foreground outline-none ${chatPage ? "w-[calc(50%-10rem)]" : "flex-1"}`}
+						/>
+					) : (
+					<DropdownMenu modal={false}>
+						<DropdownMenuTrigger className={`flex min-w-0 items-center gap-1 rounded-md text-left text-[14px] text-muted-foreground outline-none hover:text-foreground ${chatPage ? "max-w-[calc(50%-10rem)]" : "flex-1"}`} title={`${title} — switch sessions (double-click to rename)`} onDoubleClick={() => viewing && setRenaming(title)}>
 							<span className="truncate">{title}</span>
 							<ChevronDown className="size-3 shrink-0 text-muted-foreground" />
 						</DropdownMenuTrigger>
@@ -2745,6 +2774,11 @@ export function SwarmPanel({ folder, name, scan, bridge, session, file: openPath
 							<DropdownMenuItem onSelect={() => pickSession("new")} className="text-[13px]">
 								<Plus className="size-3.5" /> Start new chat
 							</DropdownMenuItem>
+							{viewing ? (
+								<DropdownMenuItem onSelect={() => setRenaming(title)} className="text-[13px]">
+									<Pencil className="size-3.5" /> Rename
+								</DropdownMenuItem>
+							) : null}
 							<DropdownMenuSeparator />
 							<DropdownMenuLabel className="text-xs font-normal text-muted-foreground">Sessions in {name}</DropdownMenuLabel>
 							{/* The session you're reading stays highlighted, with a check on the right. */}
@@ -2757,6 +2791,7 @@ export function SwarmPanel({ folder, name, scan, bridge, session, file: openPath
 							))}
 						</DropdownMenuContent>
 					</DropdownMenu>
+					)}
 					{actionsSlot ? null : ctxMenu}
 					{/* On a plan the model picks it (a GPT model the ChatGPT plan, a Claude one the Claude plan); a key shows its spending cap. */}
 					{actionsSlot || payingPlan ? null : costMenu}
@@ -2772,7 +2807,7 @@ export function SwarmPanel({ folder, name, scan, bridge, session, file: openPath
 						</button>
 					) : null}
 					{/* Settings and the bell, which the other views show at their top right. */}
-					{chatPage ? <span className="flex shrink-0 items-center gap-2">{actions}</span> : null}
+					{chatPage && !slot ? <span className="flex shrink-0 items-center gap-2">{actions}</span> : null}
 				</div>
 				{/* Corners nest: the panel 28px, inset 4px; this card 24px; the composer 16px, inset 8px. */}
 				{/* On the chat page it has no card around it; floating over the canvas it does. */}
@@ -2789,6 +2824,11 @@ export function SwarmPanel({ folder, name, scan, bridge, session, file: openPath
 					className={`min-h-0 flex-1 space-y-3.5 overflow-y-auto pb-8 pl-6 pr-3 text-[13px] ${chatPage ? "pt-16 [mask-image:linear-gradient(to_bottom,transparent_1.5rem,black_4.5rem,black_calc(100%-2rem),transparent)]" : "pt-8 [mask-image:linear-gradient(to_bottom,transparent,black_2rem,black_calc(100%-2rem),transparent)]"}`}
 				>
 					{shown.length === 0 && !run && !loadingHistory ? <p className="text-muted-foreground">Talk to the agents here. Before a run, what you write is the swarm's focus and ↑ starts it; while it runs, they read your messages before their next turn.</p> : null}
+					{firstDrawn > 0 ? (
+						<button type="button" onClick={() => setDrawn((n) => n + CHAT_WINDOW)} className="mx-auto block rounded-full border px-3 py-1 text-muted-foreground hover:text-foreground">
+							Show earlier messages ({firstDrawn})
+						</button>
+					) : null}
 					{chatList}
 					{/* The agents' open questions, in the history after the latest message (not pinned over it). */}
 					{run ? (
@@ -2934,9 +2974,9 @@ export function SwarmPanel({ folder, name, scan, bridge, session, file: openPath
 					height: 640,
 					node: <div className="min-h-0 flex-1 overflow-y-auto">{planList}{statementsList}{entryList}</div>,
 				}}
-				// In the Mac app the folder's git tree has a card of its own beside the plan: where the swarm works, HEAD and its
+				// The folder's git tree has a card of its own beside the plan: where the swarm works, HEAD and its
 				// uncommitted proofs.
-				beside={slot && scan?.git ? { title: "Git", width: 440, node: <GitTree folder={folder} invoke={invoke} working={Boolean(run)} flat /> } : undefined}
+				beside={scan?.git ? { title: "Git", width: 440, node: <GitTree folder={folder} invoke={invoke} working={Boolean(run)} flat /> } : undefined}
 			/>
 		) : (
 			<div className="relative h-full w-full bg-background">
