@@ -36,6 +36,9 @@ pub struct Swarm {
     budget: Mutex<f64>,
     /// Set by the Context panel's Compact now: the working agent compacts before its next step.
     compact_now: AtomicBool,
+    /// The plan's work goes on once the queued jobs are done: from the start, unless the session was started only for
+    /// them (a message to answer, a report to read); the assistant's start_work turns it on when you ask for work.
+    work: AtomicBool,
 }
 
 /// The running swarms, one per session: several can run at once, in one folder or several. Keyed by `key(folder, run)`.
@@ -600,6 +603,12 @@ The maintainer follows your work in the chat and sees only what you write, so ne
     format!("{common}\n\n{job}{}", crate::skills::prompt_note(role))
 }
 
+/// The assistant's switch from answering to working: a session started with a message answers it and stops, unless
+/// the maintainer asked for work.
+fn start_work_tool() -> Value {
+    json!({ "name": "start_work", "description": "Only when the maintainer asks the swarm to do work (prove the plan or the functions left, review, carry on): after your answer, the session goes on with the plan instead of stopping. Not for a question, an explanation or an audit you do yourself in the chat.", "input_schema": { "type": "object", "properties": {}, "required": [] } })
+}
+
 /// report_bug's schema (also served to Claude Code by claude_code.rs).
 pub(crate) fn report_bug_tool() -> Value {
     let s = |props: Value, req: Vec<&str>| json!({ "type": "object", "properties": props, "required": req, "additionalProperties": false });
@@ -653,6 +662,7 @@ fn tools(role: &str) -> Value {
     if role == "assistant" {
         t.push(crate::statements::formalize_tool());
         t.push(crate::statements::confirm_tool());
+        t.push(start_work_tool());
     }
     if role == "prover" {
         t.push(json!({ "name": "record_property", "description": "Once your proof checks, write the notes that go into Formal Mind's report for this property (audit/formal-mind.audit.json). The reviewer checks them against the Solidity and your proof before they count. Call it again to replace them.", "input_schema": s(json!({
@@ -1018,6 +1028,13 @@ impl Turn<'_> {
                     let label = format!("{} {} · {}", input["id"].as_str().unwrap_or(""), input["title"].as_str().unwrap_or(""), input["status"].as_str().unwrap_or(""));
                     self.emit("tool", role, item, format!("record_finding {label}"));
                     r.map(|idx| format!("recorded in {idx}")).unwrap_or_else(|e| format!("error: {e}"))
+                }
+                "start_work" => {
+                    self.emit("tool", role, item, "start_work".into());
+                    let was = self.swarm.work.swap(true, Ordering::SeqCst);
+                    let r = if was { "the swarm is already working on the plan" } else { "after your answer, the swarm works on the plan (the prover first), as the maintainer asked" };
+                    self.emit("result", role, item, r.into());
+                    r.into()
                 }
                 "report_bug" => {
                     self.emit("tool", role, item, format!("report_bug {shown}"));
@@ -1679,7 +1696,7 @@ async fn run_swarm(turn: &Turn<'_>) -> String {
         // A run for queued work (a report to read, a statement you added or confirmed) also takes the statements
         // waiting for the swarm, then stops.
         let statement_work = crate::statements::awaiting_formalize(&root).is_some() || crate::statements::next_obligation(&root, read_plan(&root).iter().all(|i| i.mark != " " && i.mark != "~")).is_some();
-        if turn.req.only_queued.unwrap_or(false) && !statement_work && with_queue(&turn.queue, |q| !q.jobs.iter().any(|j| j.state == "running" || j.state == "queued")) {
+        if !turn.swarm.work.load(Ordering::SeqCst) && !statement_work && with_queue(&turn.queue, |q| !q.jobs.iter().any(|j| j.state == "running" || j.state == "queued")) {
             return "done: the queued work is finished".into();
         }
         // Next job: an interrupted one first, then your messages, then the rest in order; derive one if the queue is empty.
@@ -2078,7 +2095,7 @@ pub fn swarm_start(app: AppHandle, swarms: State<'_, Swarms>, request: SwarmRequ
             enqueue(q, "answer", 0, text, 1, "");
         });
     }
-    let swarm = Arc::new(Swarm { stop: AtomicBool::new(false), folder: request.folder.clone(), queue: qf.clone(), spent: Mutex::new(spent), budget: Mutex::new(request.budget_usd.max(spent)), compact_now: AtomicBool::new(false) });
+    let swarm = Arc::new(Swarm { stop: AtomicBool::new(false), folder: request.folder.clone(), queue: qf.clone(), spent: Mutex::new(spent), budget: Mutex::new(request.budget_usd.max(spent)), compact_now: AtomicBool::new(false), work: AtomicBool::new(!request.only_queued.unwrap_or(false)) });
     swarms.0.lock().unwrap().insert(key(&request.folder, &run), swarm.clone());
     broadcast_running(&app);
     let id = run.clone();

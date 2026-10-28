@@ -35,7 +35,7 @@ export const MAC_OPS = {
 	verify_repo: { write: true, args: "repo, ref?, goal?, budget?, path?", about: "verify any GitHub repository at a branch, tag or commit: the Mac forks it into formalmind, clones it (into ~/formal-targets unless path is given), checks out ref on its own branch, adds the folder with Report to GitHub on, and starts the swarm; each approved proof is committed (co-authored by formalmind[bot]) and pushed to the fork" },
 	add_folder: { write: true, args: "path", about: "add a folder on the Mac (an absolute path; folder not needed)" },
 	remove_folder: { write: true, args: "path", about: "remove a folder from the list (its files stay)" },
-	start: { write: true, args: "goal?, budget?, run?, title?", about: "start or resume the swarm, with the model route Settings uses; title names the chat in the app's session list" },
+	start: { write: true, args: "goal?, budget?, run?, title?, answer_only?", about: "start or resume the swarm, with the model route Settings uses; title names the chat in the app's session list; answer_only: the assistant answers goal and the session stops, unless it asks for work" },
 	stop: { write: true, args: "run", about: "stop a session (as pause)" },
 	pause: { write: true, args: "run?", about: "pause a session now, or every running session in the folder: the agent's turn and the folder's background tasks (a long lean or forge run) stop, the job stays queued" },
 	resume: { write: true, args: "run?", about: "resume a paused session (the folder's main one by default) from its queue, on the model route Settings uses (your Claude plan by default)" },

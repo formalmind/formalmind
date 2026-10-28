@@ -44,7 +44,8 @@ Lake builds count (formalmind.toml's `sources`, or the lakefile's `srcDir`). A s
    moves on.
 
 Your messages come first: the **assistant** answers anything you type before the next turn, and can change the plan
-or add a [statement](/statements). A session started with a message answers it before the planner reads the AST.
+or add a [statement](/statements). A chat started with a message answers it and stops; ask for work ("prove the functions left") and the assistant
+sets the swarm going on the plan after its answer. Start with no message to run the plan straight away.
 
 In the chat, the agent at work shows its steps with a field to steer it. **Enter** queues a note, which the agent reads
 at its next step. **⌘ Enter**, or **Now** on a queued note, stops the session and starts it again on your note. When

@@ -235,7 +235,8 @@ pub async fn dispatch<E: Engine + ?Sized>(app: &E, op: &str, folder: &str, a: &V
         "brief" => swarm::swarm_brief(folder, need("function")?).map(Value::String),
         "ledger" => crate::ledger::build(std::path::Path::new(&folder), a["check"].as_bool().unwrap_or(true), a["force"].as_bool().unwrap_or(false)).await,
         "start" => {
-            let run = start(app, &folder, opt("goal"), opt("run"), false, usd("budget"))?;
+            // With answer_only, the session answers its message (and what that queues) and stops.
+            let run = start(app, &folder, opt("goal"), opt("run"), a["answer_only"].as_bool().unwrap_or(false), usd("budget"))?;
             // A name for the chat, as Rename gives one: sessions started with the same goal stay apart in the list.
             if let Some(title) = opt("title") {
                 swarm::swarm_rename(folder.clone(), run.clone(), title)?;
@@ -456,6 +457,10 @@ mod ops {
         assert_eq!(run["run"], "swarm");
         let s = e.started.lock().unwrap()[0].clone();
         assert_eq!((s["provider"].clone(), s["goal"].clone(), s["budget"].clone(), s["onlyQueued"].clone()), (json!("claude-code"), json!("the owner check"), json!(7.5), json!(false)), "{s}");
+        // A question: answered, then the session stops (unless the assistant starts work).
+        ok(&e, "start", &f, json!({ "goal": "what classes of bugs do you know?", "run": "s-q", "answer_only": true })).await;
+        assert_eq!(e.started.lock().unwrap().last().unwrap()["onlyQueued"], true);
+        ok(&e, "stop", &f, json!({ "run": "s-q" })).await;
         ok(&e, "say", &f, json!({ "run": "swarm", "text": "check set" })).await;
         ok(&e, "set_budget", &f, json!({ "run": "swarm", "usd": 12.0 })).await;
         assert_eq!(ok(&e, "running", &f, json!({})).await, json!(["swarm"]));

@@ -2262,13 +2262,16 @@ export function SwarmPanel({ folder, name, scan, bridge, session, file: openPath
 	// `onlyQueued`: a run for the work already queued (reading a report), which stops when that's done.
 	// The page says what to start; the backend (its control API, as the MCP uses it) picks the model
 	// route, the model and the cap from the settings.
-	const start = async (focus?: string) => {
+	/** Starts the swarm. With a message (typed, or `focus`), the assistant answers it and the session stops unless it
+	 * asks for work; `work` (a steering interrupt) carries on with the plan after it either way. */
+	const start = async (focus?: string, work = false) => {
 		setError(null);
 		// A new session starts empty; Resume carries on below the chat you're reading.
 		const fresh = session === "new" && !viewing;
 		if (fresh) setEvents([]);
 		try {
-			const started = await invoke<{ run: string } | undefined>("control", { op: "start", folder, args: { goal: (focus ?? goal).trim(), run: fresh ? `s-${Date.now().toString(16)}` : viewing ?? "swarm" } });
+			const text = (focus ?? goal).trim();
+			const started = await invoke<{ run: string } | undefined>("control", { op: "start", folder, args: { goal: text, run: fresh ? `s-${Date.now().toString(16)}` : viewing ?? "swarm", answer_only: Boolean(text) && !work } });
 			if (!started?.run) throw new Error("The swarm didn't start: no session came back.");
 			const id = started.run;
 			setRuns((r) => (r.includes(id) ? r : [...r, id]));
@@ -2410,7 +2413,7 @@ export function SwarmPanel({ folder, name, scan, bridge, session, file: openPath
 		// Now: the session stops and starts again on your note; next: the swarm reads it between steps.
 		if (now) {
 			await invoke("swarm_stop", { folder, run }).catch(() => {});
-			void start(queued ? "" : text);
+			void start(queued ? "" : text, true);
 		} else await invoke("swarm_say", { folder, run, text }).catch((e) => setError(String(e)));
 	};
 	const lastCall = useMemo(() => events.reduce((t, e) => (e.kind === "tool" ? Math.max(t, e.at ?? 0) : t), 0), [events]);
