@@ -1769,11 +1769,23 @@ export function SwarmPanel({ folder, name, scan, bridge, session, file: openPath
 			() => setClaudePlan(null),
 		);
 	}, [invoke]);
+	// Whether Codex is signed in with ChatGPT here, so the agents can run on that plan instead.
+	const [codexReady, setCodexReady] = useState(false);
+	useEffect(() => {
+		void invoke<string>("codex_status").then(() => setCodexReady(true), () => setCodexReady(false));
+	}, [invoke]);
+	const choosePlan = (p: "claude-code" | "codex") => {
+		setProvider(p);
+		store.set("fm:provider", p);
+	};
 	const navigate = useNavigate();
 	// The models for how the agents are run: GPT on your OpenAI key or ChatGPT plan, Claude otherwise.
 	const models = provider === "openai" ? OPENAI_MODELS : provider === "codex" ? CODEX_MODELS : MODELS;
 	// The plan that pays when the agents run on Claude Code or Codex (no spend or cap), else null.
 	const payingPlan = provider === "claude-code" ? (claudePlan ?? "Claude plan") : provider === "codex" ? "ChatGPT plan" : null;
+	// On a plan, the picker offers both plans' models: Claude, and GPT when Codex is signed in with ChatGPT.
+	const both = [...(claudePlan ? MODELS : []), ...(codexReady ? CODEX_MODELS : [])];
+	const pickable = payingPlan && both.length ? both : models;
 	const pickedModel = models.some((m) => m.value === model) ? model : models[0].value;
 	const ownKey = provider === "anthropic" ? "Anthropic" : provider === "openai" ? "OpenAI" : null;
 	const [hasKey, setHasKey] = useState(false);
@@ -2618,11 +2630,15 @@ export function SwarmPanel({ folder, name, scan, bridge, session, file: openPath
 			</DropdownMenuTrigger>
 			<DropdownMenuContent align="end" className="w-56">
 				<DropdownMenuLabel className="text-xs font-normal text-muted-foreground">The agents run on</DropdownMenuLabel>
-				<DropdownMenuItem className="text-[13px]">
-					{payingPlan}
-					<Check className="ml-auto size-3.5" />
+				<DropdownMenuItem onSelect={() => choosePlan("claude-code")} disabled={!claudePlan} className="text-[13px]">
+					{claudePlan ?? "Claude plan"}
+					{provider === "claude-code" ? <Check className="ml-auto size-3.5" /> : null}
 				</DropdownMenuItem>
-				<p className="px-2 pb-1.5 text-[11px] text-muted-foreground">Nothing is metered; the plan's usage limit pauses the swarm.</p>
+				<DropdownMenuItem onSelect={() => choosePlan("codex")} disabled={!codexReady} title={codexReady ? "Codex, signed in with ChatGPT" : "Sign in to Codex with ChatGPT first (`codex login`)"} className="text-[13px]">
+					ChatGPT plan
+					{provider === "codex" ? <Check className="ml-auto size-3.5" /> : null}
+				</DropdownMenuItem>
+				<p className="px-2 pb-1.5 text-[11px] text-muted-foreground">Nothing is metered; the plan's usage limit pauses the swarm.{run ? " This run keeps its plan; Stop and Resume to switch." : ""}</p>
 				<DropdownMenuSeparator />
 				<DropdownMenuItem onSelect={() => navigate("/settings?section=models")} className="text-[13px]">A key instead…</DropdownMenuItem>
 			</DropdownMenuContent>
@@ -2650,18 +2666,11 @@ export function SwarmPanel({ folder, name, scan, bridge, session, file: openPath
 						{b === budget ? <Check className="ml-auto size-3.5" /> : null}
 					</DropdownMenuItem>
 				))}
-				{claudePlan ? (
+				{claudePlan || codexReady ? (
 					<>
 						<DropdownMenuSeparator />
-						<DropdownMenuItem
-							onSelect={() => {
-								setProvider("claude-code");
-								store.set("fm:provider", "claude-code");
-							}}
-							className="text-[13px]"
-						>
-							Use my {claudePlan}
-						</DropdownMenuItem>
+						{claudePlan ? <DropdownMenuItem onSelect={() => choosePlan("claude-code")} className="text-[13px]">Use my {claudePlan}</DropdownMenuItem> : null}
+						{codexReady ? <DropdownMenuItem onSelect={() => choosePlan("codex")} className="text-[13px]">Use my ChatGPT plan</DropdownMenuItem> : null}
 						{run ? <p className="px-2 pb-1.5 text-[11px] text-muted-foreground">This run keeps its key; Stop and Resume to switch.</p> : null}
 					</>
 				) : null}
@@ -2809,9 +2818,11 @@ export function SwarmPanel({ folder, name, scan, bridge, session, file: openPath
 						sendTitle={run ? (say.trim() ? "Send" : "Stop the session") : ownKey && !hasKey ? `Add your ${ownKey} key in Settings first` : "Start the swarm"}
 						modelPicker={{
 							value: pickedModel,
-							options: models,
+							options: pickable,
 							disabled: Boolean(run),
 							onChange: (m) => {
+								// On a plan, a GPT model moves the agents to your ChatGPT plan and a Claude one back to your Claude plan.
+								if (payingPlan) choosePlan(CODEX_MODELS.some((c) => c.value === m) ? "codex" : "claude-code");
 								setModel(m);
 								store.set("fm:model", m);
 							},
