@@ -210,6 +210,7 @@ pub fn run() {
             swarm::openai_key_set,
             swarm::openai_key_status,
             swarm::swarm_sessions,
+            swarm::swarm_rename,
             swarm::swarm_history,
             swarm::swarm_proofs,
             swarm::folder_read,

@@ -507,3 +507,11 @@ button:is(:hover, :focus-visible) > .fm-bell, .fm-bell-ring { animation: fm-bell
 	text-transform: none !important;
 	letter-spacing: normal !important;
 }
+/* Truncated text fades out at its end instead of "…" (lib/fade-truncate.ts marks the ones that overflow). */
+.truncate {
+	text-overflow: clip;
+}
+.truncate[data-clipped] {
+	-webkit-mask-image: linear-gradient(to right, #000 calc(100% - 1.75rem), transparent);
+	mask-image: linear-gradient(to right, #000 calc(100% - 1.75rem), transparent);
+}

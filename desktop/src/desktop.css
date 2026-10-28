@@ -30,8 +30,8 @@
 
 /* One text size and weight across the app, the file tree's: 13px, regular. Headings, chat markdown, labels and chips all
    use it. What measures its own text keeps its sizes: the Neovim terminal (xterm), maths (KaTeX), diagrams (SVG) and
-   the display face (the wordmark, the account name, the home headline). */
-.fm-shell *:not(.xterm, .xterm *, .katex, .katex *, svg, svg *, .font-display, .font-display *) {
+   the display face (the wordmark, the account name, the home headline), and count badges (.fm-badge). */
+.fm-shell *:not(.xterm, .xterm *, .katex, .katex *, svg, svg *, .font-display, .font-display *, .fm-badge) {
 	font-size: 13px !important;
 	font-weight: 400 !important;
 }
