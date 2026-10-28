@@ -483,3 +483,12 @@ button:is(:hover, :focus-visible) > .fm-bell, .fm-bell-ring { animation: fm-bell
 @media (prefers-reduced-motion: reduce) {
 	.fm-settle { animation: none; }
 }
+
+/* One text size across the app (the Mac app and the web app's shell): change --fm-text to try another. The wordmark
+   (.font-display) and headings (the empty screens' titles) keep their own sizes; icons are left alone. */
+.fm-app {
+	--fm-text: 13px;
+}
+.fm-app *:not(svg, svg *, h1, h1 *, h2, h2 *, .font-display, .font-display *) {
+	font-size: var(--fm-text) !important;
+}
