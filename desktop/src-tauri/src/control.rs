@@ -159,6 +159,7 @@ pub async fn dispatch<E: Engine + ?Sized>(app: &E, op: &str, folder: &str, a: &V
             return Ok(json!({
                 "version": env!("CARGO_PKG_VERSION"),
                 "claudeCode": crate::claude_code::claude_code_status().unwrap_or_else(|e| format!("unavailable: {e}")),
+                "codex": crate::codex::codex_status().unwrap_or_else(|e| format!("unavailable: {e}")),
                 "anthropicKey": swarm::anthropic_key_status(),
                 "openaiKey": swarm::openai_key_status(),
                 "provider": settings.provider(),

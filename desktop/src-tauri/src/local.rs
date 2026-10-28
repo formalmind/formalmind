@@ -24,7 +24,7 @@ pub struct Settings {
     /// formal.team, or another server set on the sign-in screen.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub api_base: Option<String>,
-    /// "claude-code" (your Claude plan, the default), "formal" (credits), "anthropic" or "openai" (your key).
+    /// "claude-code" (your Claude plan, the default), "codex" (your ChatGPT plan), "formal" (credits), "anthropic" or "openai" (your key).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub provider: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -57,7 +57,7 @@ impl Settings {
 
     /// Claude Code (your Claude plan) unless credits or a key were picked, as the Settings and folder pages default.
     pub fn provider(&self) -> String {
-        self.provider.clone().filter(|p| ["claude-code", "formal", "anthropic", "openai"].contains(&p.as_str())).unwrap_or_else(|| "claude-code".into())
+        self.provider.clone().filter(|p| ["claude-code", "codex", "formal", "anthropic", "openai"].contains(&p.as_str())).unwrap_or_else(|| "claude-code".into())
     }
 
     pub fn budget(&self, folder: &str) -> f64 {

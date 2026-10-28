@@ -47,7 +47,7 @@ fn settings_always_give_a_valid_route_effort_and_cap() {
             s.api_base = Some(r.pick(&["", "https://formal.team", "http://localhost:8787"]).into());
         }
         // The route is always one the app can run; an unset or unknown one is the Claude plan.
-        assert!(["claude-code", "formal", "anthropic", "openai"].contains(&s.provider().as_str()));
+        assert!(["claude-code", "codex", "formal", "anthropic", "openai"].contains(&s.provider().as_str()));
         if !providers[1..4].contains(&s.provider.as_deref().unwrap_or("")) {
             assert_eq!(s.provider(), "claude-code");
         }

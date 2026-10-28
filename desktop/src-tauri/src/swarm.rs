@@ -5,7 +5,8 @@
 //! coverage before review; findings land in the audit index Bugs reads (see swarm_ctx). Files, `lake` and `forge` stay
 //! here; only the model calls leave: through
 //! formal.team's metered Claude proxy (charged to your credits as `local/<folder>` with the agent and item), straight
-//! to Anthropic with your own key, or through Claude Code on your own Claude plan (claude_code.rs).
+//! to Anthropic with your own key, or through Claude Code on your own Claude plan (claude_code.rs) or Codex on your own
+//! ChatGPT plan (codex.rs).
 
 use crate::executor::{call_tool, clip, inside};
 use crate::local;
@@ -80,7 +81,7 @@ pub struct SwarmRequest {
     pub budget_usd: f64,
     /// formal.team (or a local Worker) and the desktop session token, from the app.
     pub api_base: String,
-    /// "claude-code" (your Claude plan), "anthropic" or "openai" (your own key from the keychain); "formal"
+    /// "claude-code" (your Claude plan), "codex" (your ChatGPT plan), "anthropic" or "openai" (your own key from the keychain); "formal"
     /// (formal.team's metered route) still works for accounts with credits but is no longer offered.
     pub provider: Option<String>,
     /// claude-opus-5-5 (default), claude-sonnet-5-5 or claude-haiku-5-5.
@@ -321,6 +322,9 @@ fn splice(messages: &[Value], cut: usize, summary: Value, task: &Value) -> Vec<V
 const SUMMARY_INSTRUCTIONS: &str = "Summarize this agent's work so far for the agent itself, which continues the job from your summary and the few most recent steps that follow it. Keep: the task and the plan item or report it is about; every file written or changed and what it now holds; the commands run and their results (which `lake build` or `forge test` runs passed or failed, and the errors that matter); findings recorded or bugs reported, with their IDs and statuses; what was tried and didn't work; and what is left to do next. Be specific: names of defs, theorems, lemmas, files, line numbers. Do not call tools; respond with the summary text only.";
 
 fn model_of(req: &SwarmRequest) -> &str {
+    if req.provider.as_deref() == Some("codex") {
+        return req.model.as_deref().filter(|m| crate::codex::MODELS.contains(m)).unwrap_or(crate::codex::MODELS[0]);
+    }
     if req.provider.as_deref() == Some("openai") {
         return req.model.as_deref().filter(|m| crate::openai::MODELS.contains(m)).unwrap_or(crate::openai::MODELS[0]);
     }
@@ -767,6 +771,9 @@ async fn model_access(client: &reqwest::Client, folder_path: &str, api_base: &st
         if provider == Some("claude-code") {
             return Err("Claude Code runs this on your Claude plan, not through a key".into());
         }
+        if provider == Some("codex") {
+            return Err("Codex runs this on your ChatGPT plan, not through a key".into());
+        }
         if provider == Some("openai") {
             let key = openai_entry()?.get_password().map_err(|_| "Add your OpenAI key first".to_string())?;
             return Ok((key, "https://api.openai.com".into()));
@@ -1152,17 +1159,106 @@ impl Turn<'_> {
         }
     }
 
-    /// One agent turn, on Claude Code or the API, with its health record (crate::health): written when the turn ends,
+    /// One agent turn on Codex, with your ChatGPT plan: as on Claude Code, the same system prompt, tools and task as on
+    /// the API, the tools answered over the same Bridge, and Codex running the loop. Nothing is charged to the session's
+    /// spend; your plan's usage limits apply, and hitting one pauses the swarm with the job's thread kept to resume.
+    async fn agent_on_codex(&self, role: &str, item: &str, task: Value) -> Result<Outcome, String> {
+        use crate::claude_code::{bridge, rpc, tool_reply, Rpc};
+        use crate::codex::{context_used, failure_of, said, start_role};
+        let goal = self.req.goal.clone().unwrap_or_default();
+        let job = self.job.lock().unwrap().unwrap_or(0);
+        let tools = crate::claude_code::mcp_tools(tools(role).as_array().cloned().unwrap_or_default());
+        let instructions = format!("Formal Mind's tools for the {role}, run by the app in the folder.");
+        let mut bridge = bridge()?;
+        let model = model_of(self.req);
+        let mut cx = start_role(&self.req.folder, self.run, job, &system(role, &self.req.folder, &goal), &task, model, &bridge)?;
+        let mut out = Outcome::default();
+        self.emit("status", role, item, format!("{role} is working on Codex{}", if cx.resumed { ", resuming its thread" } else { "" }));
+        let window = context_window(model);
+        let compact_at = (window as f64 * COMPACT_AT) as u64;
+        let mut failed: Option<String> = None;
+        let mut finished = false;
+        loop {
+            if self.swarm.stop.load(Ordering::SeqCst) {
+                let _ = cx.child.kill().await;
+                return Ok(out);
+            }
+            tokio::select! {
+                call = bridge.calls.recv() => {
+                    let Some(call) = call else { continue };
+                    match rpc(&call.msg, &tools, &instructions) {
+                        Rpc::Reply(r) => call.answer(r),
+                        Rpc::Tool { id, name, args } => {
+                            let text = self.tool(role, item, &name, &args, &mut out).await;
+                            call.answer(Some(tool_reply(id, &clip(text))));
+                        }
+                    }
+                }
+                line = cx.lines.next_line() => {
+                    let Ok(Some(line)) = line else { break };
+                    cx.log(&line);
+                    let Ok(v) = serde_json::from_str::<Value>(&line) else { continue };
+                    // A thread starts only once its required tools connected (Codex refuses to start without them).
+                    if v["type"] == "thread.started" {
+                        if let Some(h) = self.health.lock().unwrap().as_mut() {
+                            h.tools = Some("connected".into());
+                        }
+                        cx.started(job, v["thread_id"].as_str().unwrap_or(""));
+                        self.emit("status", role, item, format!("Codex · {model} · your ChatGPT plan · in {}", self.req.folder));
+                    }
+                    // Its words; the tool calls and results are emitted by `tool` as it runs them.
+                    if let Some(text) = said(&v) {
+                        if let Some(h) = self.health.lock().unwrap().as_mut() {
+                            h.said(&text);
+                        }
+                        out.summary = text.clone();
+                        self.emit("say", role, item, text);
+                    }
+                    let used = context_used(&v);
+                    if used > 0 {
+                        finished = true;
+                        if let Some(h) = self.health.lock().unwrap().as_mut() {
+                            h.tokens = h.tokens.max(used);
+                        }
+                        self.emit("context", role, item, json!({ "used": used, "window": window, "compact_at": compact_at, "system": 0, "tools": 0, "task": 0 }).to_string());
+                    }
+                    if let Some(e) = failure_of(&v) {
+                        failed = Some(e);
+                    }
+                }
+            }
+        }
+        let status = cx.child.wait().await.map_err(|e| e.to_string())?;
+        match failed {
+            // A usage limit or an API error: the job stays running, and the next start resumes it.
+            Some(e) => Err(e),
+            None if finished || status.success() => Ok(out),
+            None => {
+                let why = cx.stderr_tail();
+                // Its tools didn't connect: the same as Claude Code's, so the turn is tried again before pausing.
+                Err(if why.contains("required MCP servers failed") { format!("{NO_TOOLS} (Codex couldn't connect them)") } else { format!("Codex exited with {status}: {why}") })
+            }
+        }
+    }
+
+    /// One agent turn, on Claude Code, Codex or the API, with its health record (crate::health): written when the turn ends,
     /// and anything that looks wrong said in the session. A Claude Code turn whose tools didn't connect is stopped
     /// before the agent works, then tried twice more before the swarm pauses.
     async fn agent(&self, role: &str, item: &str, task: impl Into<Value>) -> Result<Outcome, String> {
         let task: Value = task.into();
         let on_claude_code = self.req.provider.as_deref() == Some("claude-code");
+        let on_codex = self.req.provider.as_deref() == Some("codex");
         let mut tries = 0;
         loop {
             let job = self.job.lock().unwrap().unwrap_or(0);
             *self.health.lock().unwrap() = Some(crate::health::Turn::new(&self.req.folder, self.run, job, role, item, self.req.provider.as_deref().unwrap_or("formal"), model_of(self.req)));
-            let result = if on_claude_code { self.agent_on_claude_code(role, item, task.clone()).await } else { self.agent_api(role, item, task.clone()).await };
+            let result = if on_claude_code {
+                self.agent_on_claude_code(role, item, task.clone()).await
+            } else if on_codex {
+                self.agent_on_codex(role, item, task.clone()).await
+            } else {
+                self.agent_api(role, item, task.clone()).await
+            };
             let paused = self.swarm.stop.load(Ordering::SeqCst);
             if let Some(h) = self.health.lock().unwrap().take() {
                 let (ended, error) = match &result {
@@ -1175,7 +1271,7 @@ impl Turn<'_> {
                 }
             }
             match result {
-                Err(e) if on_claude_code && e.starts_with(NO_TOOLS) && tries < 2 => {
+                Err(e) if (on_claude_code || on_codex) && e.starts_with(NO_TOOLS) && tries < 2 => {
                     tries += 1;
                     self.emit("status", role, item, format!("{e}; starting the turn again"));
                     tokio::time::sleep(Duration::from_secs(3 * tries)).await;
@@ -1506,9 +1602,9 @@ async fn run_swarm(turn: &Turn<'_>) -> String {
         }
         let spent = *turn.swarm.spent.lock().unwrap();
         let budget = *turn.swarm.budget.lock().unwrap();
-        // On Claude Code your Claude plan pays and nothing is metered, so the cap (on credits or a key) doesn't stop it;
-        // the plan's own usage limit pauses it instead.
-        if spent >= budget && turn.req.provider.as_deref() != Some("claude-code") {
+        // On Claude Code or Codex your plan pays and nothing is metered, so the cap (on credits or a key) doesn't stop
+        // it; the plan's own usage limit pauses it instead.
+        if spent >= budget && !matches!(turn.req.provider.as_deref(), Some("claude-code" | "codex")) {
             // A start below what's already spent is held at the spend: name the cap that was asked for.
             let cap = if turn.req.budget_usd < budget { turn.req.budget_usd } else { budget };
             return format!("budget reached (${spent:.2} spent of ${cap:.2}); raise it and resume to carry on");
@@ -1895,6 +1991,8 @@ pub fn swarm_start(app: AppHandle, swarms: State<'_, Swarms>, request: SwarmRequ
         openai_entry()?.get_password().map_err(|_| "Add your OpenAI key first".to_string())?;
     } else if request.provider.as_deref() == Some("claude-code") {
         crate::claude_code::signed_in()?;
+    } else if request.provider.as_deref() == Some("codex") {
+        crate::codex::signed_in()?;
     } else {
         token()?;
     }
@@ -2470,6 +2568,9 @@ const SUGGEST_SYSTEM: &str = "You draft the user's next message to a swarm of ag
 pub async fn swarm_suggest(folder: String, api_base: String, provider: Option<String>, run: String, transcript: String) -> Result<String, String> {
     if provider.as_deref() == Some("claude-code") {
         return crate::claude_code::ask(&folder, SUGGEST_SYSTEM, &format!("The chat so far:\n{transcript}\n\nDraft my next message."), "claude-haiku-5-5").await;
+    }
+    if provider.as_deref() == Some("codex") {
+        return crate::codex::ask(&folder, SUGGEST_SYSTEM, &format!("The chat so far:\n{transcript}\n\nDraft my next message."), "gpt-5.6-luna").await;
     }
     let client = reqwest::Client::builder().timeout(Duration::from_secs(60)).build().unwrap_or_default();
     let (key, base) = model_access(&client, &folder, &api_base, provider.as_deref(), &run, "assistant", "suggest").await?;

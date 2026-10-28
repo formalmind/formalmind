@@ -189,11 +189,11 @@ function FolderStep({ onNext }: { onNext: () => void }) {
 	);
 }
 
-/** Step 3: how agents reach Claude — your Claude plan through Claude Code (no key), or your own Anthropic key kept in the keychain. */
+/** Step 3: how agents reach a model — your Claude plan through Claude Code or your ChatGPT plan through Codex (no key), or your own Anthropic key kept in the keychain. */
 function KeyStep({ onNext }: { onNext: () => void }) {
 	const [own, setOwn] = useState(false);
 	const [key, setKey] = useState("");
-	const choose = (provider: "claude-code" | "anthropic") => {
+	const choose = (provider: "claude-code" | "codex" | "anthropic") => {
 		try {
 			localStorage.setItem("fm:provider", provider);
 		} catch {
@@ -231,6 +231,10 @@ function KeyStep({ onNext }: { onNext: () => void }) {
 						<p className="text-sm text-white/50">
 							No key needed: agents run through the Claude Code you're signed in to.{" "}
 							<button type="button" onClick={() => setOwn(true)} className={quiet}>Use my own Anthropic key</button>
+						</p>
+						<p className="text-sm text-white/50">
+							On ChatGPT instead?{" "}
+							<button type="button" onClick={() => { choose("codex"); onNext(); }} className={quiet}>Use my ChatGPT plan</button> (through the Codex you're signed in to)
 						</p>
 					</>
 				)}

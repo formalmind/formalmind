@@ -6,6 +6,7 @@ mod analysis;
 mod answerer;
 mod ast;
 mod claude_code;
+mod codex;
 mod control;
 mod diagnose;
 mod executor;
@@ -189,6 +190,7 @@ pub fn run() {
             swarm::swarm_say,
             swarm::swarm_triage,
             claude_code::claude_code_status,
+            codex::codex_status,
             swarm::swarm_running,
             swarm::swarm_work_map,
             swarm::swarm_brief,
