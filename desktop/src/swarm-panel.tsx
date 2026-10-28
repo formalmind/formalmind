@@ -2725,7 +2725,7 @@ export function SwarmPanel({ folder, name, scan, bridge, session, file: openPath
 						<Plus className="size-3.5" />
 					</button>
 					<DropdownMenu>
-						<DropdownMenuTrigger className="flex min-w-0 flex-1 items-center gap-1 rounded-md text-left text-[12px] text-muted-foreground outline-none hover:text-foreground" title={`${title} — switch sessions`}>
+						<DropdownMenuTrigger className="flex min-w-0 flex-1 items-center gap-1 rounded-md text-left text-[14px] text-muted-foreground outline-none hover:text-foreground" title={`${title} — switch sessions`}>
 							<span className="truncate">{title}</span>
 							<ChevronDown className="size-3 shrink-0 text-muted-foreground" />
 						</DropdownMenuTrigger>
@@ -2785,7 +2785,7 @@ export function SwarmPanel({ folder, name, scan, bridge, session, file: openPath
 					) : null}
 					{/* While an agent works: its name, and its current task shimmering until its next words. */}
 					{run && working ? (
-						<p className="flex items-center gap-2 text-[12px] text-muted-foreground">
+						<p className="flex items-center gap-2 text-[14px] text-muted-foreground">
 							<span className="font-medium" style={{ color: colorOf(working.role) }}>{roleName(working.role)}</span>
 							<span className="fm-text-shimmer truncate">{working.text}</span>
 						</p>
