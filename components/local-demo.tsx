@@ -214,6 +214,7 @@ const makeDemo = (data: DemoData | null): Bridge => {
 		if (cmd === "swarm_statements") return statements.map((st) => ({ ...st })) as T;
 		// Adding or confirming a statement starts a stopped swarm in the app; the demo's session is already there.
 		if (cmd === "swarm_start") return (sample ? RUN : SAMPLE_RUN) as T;
+		if (cmd === "control" && (args as { op?: string })?.op === "start") return { run: sample ? RUN : SAMPLE_RUN } as T;
 		return answers[cmd] as T;
 	},
 	};

@@ -2243,7 +2243,9 @@ export function SwarmPanel({ folder, name, scan, bridge, session, file: openPath
 		const fresh = session === "new" && !viewing;
 		if (fresh) setEvents([]);
 		try {
-			const { run: id } = await invoke<{ run: string }>("control", { op: "start", folder, args: { goal: goal.trim(), run: fresh ? `s-${Date.now().toString(16)}` : viewing ?? "swarm" } });
+			const started = await invoke<{ run: string } | undefined>("control", { op: "start", folder, args: { goal: goal.trim(), run: fresh ? `s-${Date.now().toString(16)}` : viewing ?? "swarm" } });
+			if (!started?.run) throw new Error("The swarm didn't start: no session came back.");
+			const id = started.run;
 			setRuns((r) => (r.includes(id) ? r : [...r, id]));
 			setViewing(id);
 			void listSessions();
@@ -2616,6 +2618,8 @@ export function SwarmPanel({ folder, name, scan, bridge, session, file: openPath
 	);
 
 	const slot = useTitlebarSlot();
+	// The website's chat page: the history runs the page's full height, under the tabs and the session controls.
+	const chatPage = mode === "chat" && !slot;
 	const actionsSlot = useTitlebarSlot("fm-titlebar-actions");
 	// Narrow pages show the modes as icons only (the Mac title bar also holds the app's tabs, so it needs more room).
 	const root = useRef<HTMLDivElement | null>(null);
@@ -2724,12 +2728,16 @@ export function SwarmPanel({ folder, name, scan, bridge, session, file: openPath
 	// The conversation with the swarm: its sessions, budget and Stop on a gray bar, the messages and composer under it.
 	const chatPanel = (
 		<>
-				<div className="flex h-8 shrink-0 items-center gap-1 pl-3 pr-0.5">
-					<button type="button" onClick={() => pickSession("new")} aria-label="New chat" title="New chat" className="grid size-7 shrink-0 place-items-center rounded-full text-muted-foreground hover:bg-background hover:text-foreground">
-						<Plus className="size-3.5" />
-					</button>
+				{/* On the website's chat page the sessions sit at the page's top left and New chat at its top right, over the
+				    history; floating over the canvas they head the chat. */}
+				<div className={chatPage ? "pointer-events-none absolute inset-x-0 top-3 z-30 flex h-8 items-center gap-1 pl-12 pr-3 *:pointer-events-auto" : "flex h-8 shrink-0 items-center gap-1 pl-3 pr-0.5"}>
+					{chatPage ? null : (
+						<button type="button" onClick={() => pickSession("new")} aria-label="New chat" title="New chat" className="grid size-7 shrink-0 place-items-center rounded-full text-muted-foreground hover:bg-background hover:text-foreground">
+							<Plus className="size-3.5" />
+						</button>
+					)}
 					<DropdownMenu>
-						<DropdownMenuTrigger className="flex min-w-0 flex-1 items-center gap-1 rounded-md text-left text-[14px] text-muted-foreground outline-none hover:text-foreground" title={`${title} — switch sessions`}>
+						<DropdownMenuTrigger className={`flex min-w-0 items-center gap-1 rounded-md text-left text-[14px] text-muted-foreground outline-none hover:text-foreground ${chatPage ? "max-w-[calc(50%-10rem)]" : "flex-1"}`} title={`${title} — switch sessions`}>
 							<span className="truncate">{title}</span>
 							<ChevronDown className="size-3 shrink-0 text-muted-foreground" />
 						</DropdownMenuTrigger>
@@ -2754,6 +2762,13 @@ export function SwarmPanel({ folder, name, scan, bridge, session, file: openPath
 							<ChevronDown className="size-3.5" />
 						</button>
 					)}
+					{chatPage ? (
+						<button type="button" onClick={() => pickSession("new")} aria-label="New chat" title="New chat" className="ml-auto inline-flex h-8 shrink-0 items-center gap-1.5 rounded-full border bg-background/90 px-3 text-muted-foreground shadow-sm backdrop-blur hover:text-foreground">
+							<Plus className="size-3.5" /> New chat
+						</button>
+					) : null}
+					{/* Settings and the bell, which the other views show at their top right. */}
+					{chatPage ? <span className="flex shrink-0 items-center gap-2">{actions}</span> : null}
 				</div>
 				{/* Corners nest: the panel 28px, inset 4px; this card 24px; the composer 16px, inset 8px. */}
 				{/* On the chat page it has no card around it; floating over the canvas it does. */}
@@ -2767,7 +2782,7 @@ export function SwarmPanel({ folder, name, scan, bridge, session, file: openPath
 						setAway(!atBottom.current);
 					}}
 					// The history fades out at its top and bottom edges as it scrolls under the header and into the composer.
-					className="min-h-0 flex-1 space-y-3.5 overflow-y-auto py-8 pl-6 pr-3 text-[13px] [mask-image:linear-gradient(to_bottom,transparent,black_2rem,black_calc(100%-2rem),transparent)]"
+					className={`min-h-0 flex-1 space-y-3.5 overflow-y-auto pb-8 pl-6 pr-3 text-[13px] ${chatPage ? "pt-16 [mask-image:linear-gradient(to_bottom,transparent_1.5rem,black_4.5rem,black_calc(100%-2rem),transparent)]" : "pt-8 [mask-image:linear-gradient(to_bottom,transparent,black_2rem,black_calc(100%-2rem),transparent)]"}`}
 				>
 					{shown.length === 0 && !run && !loadingHistory ? <p className="text-muted-foreground">Talk to the agents here. Before a run, what you write is the swarm's focus and ↑ starts it; while it runs, they read your messages before their next turn.</p> : null}
 					{chatList}
@@ -3131,7 +3146,7 @@ export function SwarmPanel({ folder, name, scan, bridge, session, file: openPath
 			<div className="absolute inset-0 flex flex-col overflow-hidden">
 				{mode === "chat" ? (
 					// The chat as the page: one centred column under the tabs, as wide as reads well.
-					<div className="flex min-h-0 flex-1 justify-center px-4 pb-3" style={{ paddingTop: "calc(var(--fm-top) + 0.75rem)" }}>
+					<div className="flex min-h-0 flex-1 justify-center px-4 pb-3">
 						<div className="flex min-h-0 w-full max-w-3xl flex-col">{chatPanel}</div>
 					</div>
 				) : (
