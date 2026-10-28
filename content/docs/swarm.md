@@ -44,7 +44,12 @@ Lake builds count (formalmind.toml's `sources`, or the lakefile's `srcDir`). A s
    moves on.
 
 Your messages come first: the **assistant** answers anything you type before the next turn, and can change the plan
-or add a [statement](/statements).
+or add a [statement](/statements). A chat started with a message answers it and stops; ask for work ("prove the functions left") and the assistant
+sets the swarm going on the plan after its answer. Start with no message to run the plan straight away.
+
+In the chat, the agent at work shows its steps with a field to steer it. **Enter** queues a note, which the agent reads
+at its next step. **⌘ Enter**, or **Now** on a queued note, stops the session and starts it again on your note. When
+several agents work at once, the chat shows them as a tree under the swarm: pick one to see its steps.
 
 ## Sessions, stopping and the cap
 
@@ -61,3 +66,17 @@ resume to carry on. On your Claude plan nothing is charged, and your plan's usag
 The swarm's state is your folder's: the plan and progress in `.formal/`, proofs in `formal/`, findings in your audit
 folder with their tests under `test/`. It opens no issues or pull requests and pushes nothing. Its tools can't run
 git, and its shell is limited to `lake` and `forge`.
+
+## Skills
+
+**Settings → Skills** lists free auditing checklists by other authors, such as Pashov Audit Group's hacking lenses
+(MIT) and the Web3 Audit Corpus's vulnerability classes (CC BY 4.0). **Add** copies one into `~/.formalmind/skills/` for every project, pinned to a commit of its source with a
+`SOURCE.md` for the attribution. The agents whose work it fits then read it: the reviewer before a verdict, the prover when it looks
+for what could break, and the assistant in the chat. Nothing in a skill runs, and the swarm's own checks still decide.
+
+To audit from the chat, ask the assistant: "audit `Lending.liquidate` with the lenses". Each real issue it finds comes
+with a Foundry PoC and lands on the Bugs page, naming the lens that led to it.
+
+In the chat, skills work as they do in Claude Code: `/skills` lists them, `/skills add <id>` and `/skills remove <id>`
+add or remove one for every project, and `/<id> <request>` asks the agents to use it, as in
+`/pashov-lenses audit Lending.liquidate`.

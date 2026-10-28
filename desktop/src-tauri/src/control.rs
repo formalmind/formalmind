@@ -78,6 +78,9 @@ pub const OPS: &[(&str, bool)] = &[
     ("correct_statement", true),
     ("mark_statement", true),
     ("remove_statement", true),
+    ("skills", false),
+    ("skill_add", true),
+    ("skill_remove", true),
     ("triage", true),
     ("github", true),
     ("refresh_model", true),
@@ -231,7 +234,15 @@ pub async fn dispatch<E: Engine + ?Sized>(app: &E, op: &str, folder: &str, a: &V
         "work_map" => swarm::swarm_work_map(folder),
         "brief" => swarm::swarm_brief(folder, need("function")?).map(Value::String),
         "ledger" => crate::ledger::build(std::path::Path::new(&folder), a["check"].as_bool().unwrap_or(true), a["force"].as_bool().unwrap_or(false)).await,
-        "start" => Ok(json!({ "run": start(app, &folder, opt("goal"), opt("run"), false, usd("budget"))? })),
+        "start" => {
+            // With answer_only, the session answers its message (and what that queues) and stops.
+            let run = start(app, &folder, opt("goal"), opt("run"), a["answer_only"].as_bool().unwrap_or(false), usd("budget"))?;
+            // A name for the chat, as Rename gives one: sessions started with the same goal stay apart in the list.
+            if let Some(title) = opt("title") {
+                swarm::swarm_rename(folder.clone(), run.clone(), title)?;
+            }
+            Ok(json!({ "run": run }))
+        }
         "stop" => {
             app.stop(&folder, &need("run")?);
             Ok(Value::Null)
@@ -274,6 +285,9 @@ pub async fn dispatch<E: Engine + ?Sized>(app: &E, op: &str, folder: &str, a: &V
         }
         "questions" => Ok(json!(crate::answerer::questions(std::path::Path::new(&folder)))),
         "remove_statement" => json_of(crate::statements::swarm_remove_statement(folder, need("id")?)),
+        "skills" => json_of(crate::skills::skills_catalog()),
+        "skill_add" => crate::skills::skills_add(need("id")?).await.map(|_| Value::Null),
+        "skill_remove" => json_of(crate::skills::skills_remove(need("id")?)),
         "triage" => {
             swarm::swarm_triage(folder.clone(), need("path")?, opt("run"))?;
             Ok(json!({ "running": work_queued(app, &folder)? }))
@@ -443,6 +457,10 @@ mod ops {
         assert_eq!(run["run"], "swarm");
         let s = e.started.lock().unwrap()[0].clone();
         assert_eq!((s["provider"].clone(), s["goal"].clone(), s["budget"].clone(), s["onlyQueued"].clone()), (json!("claude-code"), json!("the owner check"), json!(7.5), json!(false)), "{s}");
+        // A question: answered, then the session stops (unless the assistant starts work).
+        ok(&e, "start", &f, json!({ "goal": "what classes of bugs do you know?", "run": "s-q", "answer_only": true })).await;
+        assert_eq!(e.started.lock().unwrap().last().unwrap()["onlyQueued"], true);
+        ok(&e, "stop", &f, json!({ "run": "s-q" })).await;
         ok(&e, "say", &f, json!({ "run": "swarm", "text": "check set" })).await;
         ok(&e, "set_budget", &f, json!({ "run": "swarm", "usd": 12.0 })).await;
         assert_eq!(ok(&e, "running", &f, json!({})).await, json!(["swarm"]));

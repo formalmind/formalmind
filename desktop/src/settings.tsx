@@ -1,7 +1,8 @@
 import { useEffect, useState } from "react";
 import { useSearchParams } from "react-router";
 import { invoke } from "@tauri-apps/api/core";
-import { ArrowUpRight, Cable, Crosshair, FolderSearch, Server, Sparkles, SquareCode, type LucideIcon } from "lucide-react";
+import { ArrowUpRight, Cable, Crosshair, FolderSearch, Puzzle, Server, Sparkles, SquareCode, type LucideIcon } from "lucide-react";
+import { Skills } from "./skills-section";
 import { apiBase, DEFAULT_API, setApiBase } from "./api";
 import { setVimMode, useVimMode } from "@/components/vim-mode";
 import { AuditFolders, EntryPoints } from "@/components/audit-folders";
@@ -65,6 +66,7 @@ const SECTIONS = [
 	{ id: "remote", title: "Remote control (MCP)", icon: Cable, group: "This computer" },
 	{ id: "github", title: "GitHub", icon: ArrowUpRight, group: "This computer" },
 	{ id: "server", title: "Server", icon: Server, group: "This computer" },
+	{ id: "skills", title: "Skills", icon: Puzzle, group: "This computer" },
 	{ id: "entry-points", title: "Entry points", icon: Crosshair, group: "Projects" },
 	{ id: "audit-reports", title: "Audit reports", icon: FolderSearch, group: "Projects" },
 ] as const satisfies readonly { id: string; title: string; icon: LucideIcon; group: string }[];
@@ -201,6 +203,10 @@ export function SettingsPage() {
 							.map(([repo, path]) => (
 								<AuditFolders key={path} folder={path} label={repo} />
 							))}
+					</Section> : null}
+					{section === "skills" ? <Section title="Skills">
+						<p className="text-xs text-muted-foreground">Auditing checklists by other authors, for every project. The agents read them while they prove and review.</p>
+						<Skills />
 					</Section> : null}
 					{section === "remote" ? <Section title="Remote control (MCP)">
 						<label className="flex items-center justify-between gap-4">

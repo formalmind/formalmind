@@ -162,7 +162,8 @@ pub(crate) async fn call_tool(root: &Path, name: &str, args: &Value) -> String {
     let s = |k: &str| args.get(k).and_then(Value::as_str).unwrap_or("").to_string();
     let result = match name {
         "list_files" => list_files(root, &s("dir")),
-        "read_file" => inside(root, &s("path")).and_then(|p| std::fs::read_to_string(p).map_err(|e| e.to_string())).map(|text| {
+        // `@skills/…`: the auditing checklists added on this computer (skills.rs), outside the folder.
+        "read_file" => crate::skills::resolve(&s("path")).or_else(|| crate::skills::resolve_bare(root, &s("path"))).map(Ok).unwrap_or_else(|| inside(root, &s("path"))).and_then(|p| std::fs::read_to_string(p).map_err(|e| e.to_string())).map(|text| {
             let n = |k: &str| args.get(k).and_then(Value::as_u64).map(|v| v as usize);
             match (n("start_line"), n("end_line")) {
                 (None, None) if text.len() <= OUTPUT_LIMIT => text,

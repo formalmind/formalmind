@@ -22,7 +22,7 @@ import { Message, MessageContent, MessageHeader } from "@/components/ui/message"
 import { SwarmCanvas } from "@/components/swarm/swarm-canvas";
 import { ROLE_COLORS, roleName } from "@/lib/swarm-roles";
 // AffectUI's run card from the private UI package when it is checked out; `null` otherwise (desktop/src/ui-fallback).
-import { RunCard } from "@formalmind/ui/run-card";
+import { RunCard, type Steer } from "@formalmind/ui/run-card";
 import { Composer } from "@formalmind/ui/composer";
 import { ContextCard } from "@formalmind/ui/context";
 import { ReplyActions as AuiReplyActions } from "@formalmind/ui/reply-actions";
@@ -70,7 +70,7 @@ function CopyButton({ text, get, label = "Copy" }: { text?: string; get?: () => 
 	);
 }
 
-type Session = { run: string; title: string; outcome: string; spent: number; events: number };
+type Session = { run: string; title: string; outcome: string; spent: number; events: number; at: number };
 
 const BUDGETS = [2, 5, 10, 20, 50, 100];
 /** Claude models the local swarm can run on; the choice applies when the swarm starts. */
@@ -160,6 +160,27 @@ export function blocks(events: Ev[]): Block[] {
 		// A line with nothing to say (a start without a focus) isn't shown.
 	}
 	return out;
+}
+
+/** A scrolling list whose top and bottom edges fade out only while there is more past them. */
+function FadeScroll({ className, children }: { className?: string; children: React.ReactNode }) {
+	const box = useRef<HTMLDivElement>(null);
+	const [more, setMore] = useState({ up: false, down: false });
+	const measure = () => {
+		const el = box.current;
+		if (!el) return;
+		const up = el.scrollTop > 1;
+		const down = el.scrollTop + el.clientHeight < el.scrollHeight - 1;
+		setMore((m) => (m.up === up && m.down === down ? m : { up, down }));
+	};
+	useLayoutEffect(measure);
+	const edge = (on: boolean) => (on ? "transparent" : "black");
+	const mask = `linear-gradient(to bottom, ${edge(more.up)}, black 2rem, black calc(100% - 2rem), ${edge(more.down)})`;
+	return (
+		<div ref={box} onScroll={measure} className={`overflow-y-auto ${className ?? ""}`} style={{ maskImage: mask, WebkitMaskImage: mask }}>
+			{children}
+		</div>
+	);
 }
 
 /** 12s, 1m 05s. */
@@ -1949,8 +1970,9 @@ export function SwarmPanel({ folder, name, scan, bridge, session, file: openPath
 		}
 		void invoke<string>("folder_read", { folder, path }).then(
 			(text) => setFile({ path, text }),
-			// A path from an older message can point at a file that moved since (validation/lean/ is formal/ now).
-			(e) => setError(/os error 2|No such file/i.test(String(e)) ? `${path} isn't in this folder any more; it may have moved.` : String(e)),
+			// A file that can't be read (one that moved since a message or the address named it) just doesn't open; the
+			// chat's error line is for the swarm, not for files.
+			() => setFile(null),
 		);
 	};
 	/** Opens a file in the Code tab. */
@@ -2240,13 +2262,16 @@ export function SwarmPanel({ folder, name, scan, bridge, session, file: openPath
 	// `onlyQueued`: a run for the work already queued (reading a report), which stops when that's done.
 	// The page says what to start; the backend (its control API, as the MCP uses it) picks the model
 	// route, the model and the cap from the settings.
-	const start = async () => {
+	/** Starts the swarm. With a message (typed, or `focus`), the assistant answers it and the session stops unless it
+	 * asks for work; `work` (a steering interrupt) carries on with the plan after it either way. */
+	const start = async (focus?: string, work = false) => {
 		setError(null);
 		// A new session starts empty; Resume carries on below the chat you're reading.
 		const fresh = session === "new" && !viewing;
 		if (fresh) setEvents([]);
 		try {
-			const started = await invoke<{ run: string } | undefined>("control", { op: "start", folder, args: { goal: goal.trim(), run: fresh ? `s-${Date.now().toString(16)}` : viewing ?? "swarm" } });
+			const text = (focus ?? goal).trim();
+			const started = await invoke<{ run: string } | undefined>("control", { op: "start", folder, args: { goal: text, run: fresh ? `s-${Date.now().toString(16)}` : viewing ?? "swarm", answer_only: Boolean(text) && !work } });
 			if (!started?.run) throw new Error("The swarm didn't start: no session came back.");
 			const id = started.run;
 			setRuns((r) => (r.includes(id) ? r : [...r, id]));
@@ -2275,6 +2300,47 @@ export function SwarmPanel({ folder, name, scan, bridge, session, file: openPath
 		setSay("");
 		// The app sends it back as a `you` event (desktop/src-tauri/src/swarm.rs), logged with the session.
 		await invoke("swarm_say", { folder, run, text }).catch((e) => setError(String(e)));
+	};
+
+	// Skill commands in the composer, as Claude Code writes them: `/skills`, `/skills add <id>`, `/skills remove <id>`
+	// are handled here and answered in the chat; `/<id> <request>` asks the agents to use that skill. Returns the text to
+	// send on (rewritten for `/<id>`), or null when the command was handled.
+	const note = (text: string) => setEvents((all) => [...all, { run: viewing ?? "", kind: "say", role: "swarm", item: "", text, spent: all.at(-1)?.spent ?? 0, at: Date.now() }]);
+	const skillCommand = async (text: string): Promise<string | null> => {
+		const m = text.match(/^\/([\w-]+)(?:\s+([\s\S]*))?$/);
+		if (!m) return text;
+		type S = { id: string; name: string; author: string; added: boolean };
+		const list = (await invoke<S[] | undefined>("skills_catalog").catch(() => undefined)) ?? [];
+		const [, cmd, rest = ""] = m;
+		if (cmd === "skills") {
+			const [verb, id] = rest.trim().split(/\s+/);
+			if (verb === "add" || verb === "remove") {
+				const s = list.find((x) => x.id === id);
+				if (!s) return note(`No skill \`${id ?? ""}\`. \`/skills\` lists them.`), null;
+				await invoke(verb === "add" ? "skills_add" : "skills_remove", { id: s.id }).then(
+					() => note(`${verb === "add" ? "Added" : "Removed"} ${s.name} (${s.author}) for every project.`),
+					(e) => note(`Couldn't ${verb} ${s.name}: ${String(e)}`),
+				);
+				return null;
+			}
+			note(list.map((x) => `- \`${x.id}\` ${x.name} · ${x.author}${x.added ? " · added" : ""}`).join("\n") + "\n\n`/skills add <id>` · `/skills remove <id>` · `/<id> <request>` to use one");
+			return null;
+		}
+		const s = list.find((x) => x.id === cmd);
+		if (!s) return text;
+		if (!s.added) return note(`${s.name} isn't added yet: \`/skills add ${s.id}\`.`), null;
+		return `Use the ${s.name} skill (${s.author}; its files are under @skills/${s.id}/): ${rest.trim() || "audit the code in scope with it"}`;
+	};
+	const submit = async () => {
+		const typed = (run ? say : goal).trim();
+		if (!typed.startsWith("/")) return void (run ? send() : start());
+		const next = await skillCommand(typed);
+		if (next === null) return run ? setSay("") : setGoal("");
+		// The rewritten request goes on directly (state set now would land only after this call).
+		if (run) {
+			setSay("");
+			await invoke("swarm_say", { folder, run, text: next }).catch((e) => setError(String(e)));
+		} else void start(next);
 	};
 
 	const spent = events.at(-1)?.spent ?? 0;
@@ -2335,6 +2401,33 @@ export function SwarmPanel({ folder, name, scan, bridge, session, file: openPath
 		close();
 		return ends;
 	}, [chatBlocks]);
+	// Notes you sent the agent at work from its steering card. Each waits in the card's queue until a step starts after
+	// it; its chat copy (your message) shows from then on.
+	const [steerNotes, setSteerNotes] = useState<Steer[]>([]);
+	useEffect(() => setSteerNotes([]), [viewing]);
+	const steerSend = async (text: string, now: boolean, queued?: string) => {
+		if (!run) return;
+		// A queued note the swarm already has: it interrupts with it, without sending it twice.
+		if (queued) setSteerNotes((n) => n.map((x) => (x.id === queued ? { ...x, now: true } : x)));
+		else setSteerNotes((n) => [...n, { id: `steer-${Date.now()}`, text, at: Date.now(), now }]);
+		// Now: the session stops and starts again on your note; next: the swarm reads it between steps.
+		if (now) {
+			await invoke("swarm_stop", { folder, run }).catch(() => {});
+			void start(queued ? "" : text, true);
+		} else await invoke("swarm_say", { folder, run, text }).catch((e) => setError(String(e)));
+	};
+	const lastCall = useMemo(() => events.reduce((t, e) => (e.kind === "tool" ? Math.max(t, e.at ?? 0) : t), 0), [events]);
+	const queuedSteer = steerNotes.filter((n) => lastCall <= n.at);
+	// The steps block of the agent at work: the latest one, while only your messages follow it.
+	const liveBlock = useMemo(() => {
+		if (!run) return -1;
+		for (let i = chatBlocks.length - 1; i >= 0; i--) {
+			const b = chatBlocks[i];
+			if ("steps" in b) return i;
+			if (b.e.kind !== "you") return -1;
+		}
+		return -1;
+	}, [chatBlocks, run]);
 	// How many of the latest messages are drawn: a long session (thousands of messages) would otherwise build every one
 	// on each switch. "Show earlier messages" adds more; a new session starts from the latest again.
 	const [drawn, setDrawn] = useState(CHAT_WINDOW);
@@ -2344,7 +2437,9 @@ export function SwarmPanel({ folder, name, scan, bridge, session, file: openPath
 		() =>
 			chatBlocks.slice(firstDrawn).map((block, k) => ({ block, i: firstDrawn + k })).map(({ block, i }) =>
 				// An open question shows once, as its question card after the history; its plain message is left out.
-				"e" in block && block.e.kind === "ask" && run && questions.open.includes(block.e) ? null : (
+				("e" in block && block.e.kind === "ask" && run && questions.open.includes(block.e)) ||
+				// A note still in the steering card's queue shows there, not twice.
+				("e" in block && block.e.kind === "you" && queuedSteer.some((n) => n.text === block.e.text && (block.e.at ?? 0) >= n.at - 5000)) ? null : (
 				// Off screen, a message skips layout and paint (`content-visibility`), so scrolling costs what's in view, not
 				// the length of the chat; its last measured height holds its place.
 				<div key={i} data-msg={i} className="fm-settle [contain-intrinsic-size:auto_96px] [content-visibility:auto]">
@@ -2354,7 +2449,8 @@ export function SwarmPanel({ folder, name, scan, bridge, session, file: openPath
 							return (
 								<Card
 									steps={block.steps}
-									running={Boolean(run) && i === chatBlocks.length - 1}
+									running={i === liveBlock}
+									steering={i === liveBlock ? { notes: steerNotes, send: (text, now, queued) => void steerSend(text, now, queued) } : undefined}
 									// The plan item the run works on, by its text (bold markers and code ticks off).
 									title={itemTitle(block.steps)}
 									onPause={run ? () => void invoke("swarm_stop", { folder, run }) : undefined}
@@ -2387,7 +2483,7 @@ export function SwarmPanel({ folder, name, scan, bridge, session, file: openPath
 				</div>
 			)),
 		// eslint-disable-next-line react-hooks/exhaustive-deps
-		[chatBlocks, firstDrawn, run, bugs, plan, questions.open, turnEnds],
+		[chatBlocks, firstDrawn, run, bugs, plan, questions.open, turnEnds, liveBlock, steerNotes, lastCall],
 	);
 	// How full the working agent's context window is and what fills it, from its last reply; past 75% its older steps
 	// are summarized.
@@ -2398,6 +2494,9 @@ export function SwarmPanel({ folder, name, scan, bridge, session, file: openPath
 	const lastCtx = lastContextEv ? parseContext(lastContextEv.text) : null;
 	const ctx = contextEv ? parseContext(contextEv.text) : null;
 	const ctxPct = ctx ? Math.min(100, Math.round((ctx.used / ctx.window) * 100)) : null;
+	// Near compaction (85% of the way there), the chat offers a fresh session for the next audit, or keeping on here.
+	const [keepHere, setKeepHere] = useState<string | null>(null);
+	const nearlyFull = Boolean(run && ctx && ctx.used >= ctx.compact_at * 0.85 && keepHere !== viewing);
 	const agentMessages = useMemo(() => events.filter((e) => !["status", "context", "you", "tool"].includes(e.kind)).length, [events]);
 	const unread = chatOpen ? 0 : Math.max(0, agentMessages - seen);
 
@@ -2788,8 +2887,8 @@ export function SwarmPanel({ folder, name, scan, bridge, session, file: openPath
 							<DropdownMenuSeparator />
 							<DropdownMenuLabel className="text-xs font-normal text-muted-foreground">Sessions in {name}</DropdownMenuLabel>
 							{/* The session you're reading stays highlighted, with a check on the right. */}
-							{/* The sessions scroll inside the card and fade out at its top and bottom edges. */}
-							<div className="max-h-72 overflow-y-auto py-1 [mask-image:linear-gradient(to_bottom,transparent,black_0.75rem,black_calc(100%-0.75rem),transparent)]">
+							{/* The sessions scroll inside the card; an edge with more chats past it fades out. */}
+							<FadeScroll className="max-h-72 py-1">
 							{sessions.map((x, i) => (
 								<DropdownMenuItem key={x.run} onSelect={() => pickSession(x.run)} aria-current={x.run === viewing} className={`text-[13px] ${x.run === viewing ? "bg-accent text-accent-foreground" : ""}`}>
 									<span className="truncate">{x.title || (x.run === "swarm" ? "Main session" : `Session ${sessions.length - i}`)}</span>
@@ -2797,7 +2896,7 @@ export function SwarmPanel({ folder, name, scan, bridge, session, file: openPath
 									{x.run === viewing ? <Check className={`size-3.5 shrink-0 ${runs.includes(x.run) ? "" : "ml-auto"}`} /> : null}
 								</DropdownMenuItem>
 							))}
-							</div>
+							</FadeScroll>
 						</DropdownMenuContent>
 					</DropdownMenu>
 					)}
@@ -2863,6 +2962,19 @@ export function SwarmPanel({ folder, name, scan, bridge, session, file: openPath
 						</p>
 					) : null}
 					{finished ? <p className="rounded-lg border px-3 py-2 text-xs text-muted-foreground">Finished: {finished.text}</p> : null}
+					{nearlyFull && ctx ? (
+						<div className="flex flex-wrap items-center gap-2 rounded-2xl border bg-card px-3 py-2.5">
+							<span className="min-w-0 flex-1 text-muted-foreground">
+								This chat's context is {Math.round((ctx.used / ctx.window) * 100)}% full. Start a new chat for the next audit?
+							</span>
+							<button type="button" onClick={() => pickSession("new")} className="btn-dark h-7 shrink-0 rounded-full px-3">
+								Start new chat
+							</button>
+							<button type="button" onClick={() => setKeepHere(viewing)} className="h-7 shrink-0 rounded-full border px-3 text-muted-foreground hover:text-foreground">
+								Keep going here
+							</button>
+						</div>
+					) : null}
 				</div>
 				<button
 					type="button"
@@ -2890,7 +3002,7 @@ export function SwarmPanel({ folder, name, scan, bridge, session, file: openPath
 						rounded="rounded-2xl"
 						value={run ? say : goal}
 						onChange={(e) => (run ? setSay(e.target.value) : setGoal(e.target.value))}
-						onSubmit={() => void (run ? send() : start())}
+						onSubmit={() => void submit()}
 						// One button: ↑ starts and sends; while it runs, an empty box
 						// makes it Stop, which stops the session.
 						onStop={() => void invoke("swarm_stop", { folder, run })}

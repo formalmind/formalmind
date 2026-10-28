@@ -7,6 +7,7 @@ mod answerer;
 mod ast;
 mod claude_code;
 mod codex;
+mod skills;
 mod control;
 mod diagnose;
 mod executor;
@@ -211,6 +212,9 @@ pub fn run() {
             swarm::openai_key_status,
             swarm::swarm_sessions,
             swarm::swarm_rename,
+            skills::skills_catalog,
+            skills::skills_add,
+            skills::skills_remove,
             swarm::swarm_history,
             swarm::swarm_proofs,
             swarm::folder_read,
