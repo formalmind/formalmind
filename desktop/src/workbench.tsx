@@ -1,6 +1,8 @@
 import { invoke } from "@tauri-apps/api/core";
 import { homeDir, join } from "@tauri-apps/api/path";
 import { listen } from "@tauri-apps/api/event";
+import { FileTree } from "@/components/file-tree";
+import { TreeFolder } from "@/components/session-folder";
 import { Component, Suspense, createContext, lazy, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 
 /** The new version (SPEC.md B64, B65): one project, a copy of Formal Mind itself in ~/.formalmind/formalmind. The
@@ -79,9 +81,17 @@ function useWorkbenchState() {
 
 	const send = (goal: string) => {
 		if (!goal || busy || !folder) return;
+		// A first message starts its chat here, so the run knows its id.
+		if (!live.current) {
+			const c = newChat();
+			live.current = c.id;
+			setChats((cs) => [c, ...cs]);
+			setChatId(c.id);
+		}
 		setLines((l) => [...l, { who: "you", text: goal }]);
 		setBusy(true);
-		invoke("agent_start", { folder, goal })
+		// The chat's id is its Claude Code session (and names its Codex thread), so the agent remembers it.
+		invoke("agent_start", { folder, goal, chat: live.current, provider: localStorage.getItem("fm:provider") || "claude-code", model: localStorage.getItem("fm:model") || null })
 			.catch((e) => setLines((l) => [...l, { who: "error", text: String(e) }]))
 			.finally(() => setBusy(false));
 	};
@@ -108,14 +118,11 @@ export function WorkbenchSide() {
 				))}
 			</div>
 			{left === "files" ? (
-				<div className="min-h-0 flex-1 overflow-auto px-2 font-mono text-muted-foreground">
-					<div className="px-1 pb-2 text-foreground">{folder.split(/[\\/]/).filter(Boolean).pop()}</div>
-					{files.map((f) => (
-						<div key={f} className="truncate px-1 py-0.5" title={f}>
-							{f}
-						</div>
-					))}
-				</div>
+				<ul className="min-h-0 flex-1 overflow-auto px-2">
+					<TreeFolder name={folder.split(/[\\/]/).filter(Boolean).pop() ?? "formalmind"} title={folder} href="/" current>
+						<FileTree paths={files} storageKey={`fm:tree:${folder}`} onOpen={() => {}} />
+					</TreeFolder>
+				</ul>
 			) : (
 				<div className="min-h-0 flex-1 overflow-auto px-2">
 					<button type="button" disabled={busy} onClick={() => setChatId(null)} className="block w-full px-1 py-0.5 text-left text-muted-foreground hover:text-foreground">
@@ -198,20 +205,23 @@ export function Workbench() {
 }
 
 // AffectUI's components when the private package is checked out (packages/ui); none without it.
-const modules = import.meta.glob<Record<string, unknown>>("../../packages/ui/components/*.tsx");
-const nameOf = (path: string) => path.split("/").pop()!.replace(/\.tsx$/, "");
-const pascal = (name: string) => name.replace(/-clean$/, "").replace(/(^|-)(\w)/g, (_, __, c: string) => c.toUpperCase());
+// Screens and blocks carry their own demo data; most components need theirs passed in.
+const modules = import.meta.glob<Record<string, unknown>>(["../../packages/ui/screens/*.tsx", "../../packages/ui/blocks/*.tsx", "../../packages/ui/components/*.tsx"]);
+const KINDS = ["screens", "blocks", "components"];
+const nameOf = (path: string) => path.split("/").slice(-2).join("/").replace(/\.tsx$/, "");
+const rank = (n: string) => KINDS.indexOf(n.split("/")[0]);
+const pascal = (name: string) => name.split("/").pop()!.replace(/-clean$/, "").replace(/(^|-)(\w)/g, (_, __, c: string) => c.toUpperCase());
 
 function ComponentViewer() {
-	const names = useMemo(() => Object.keys(modules).map(nameOf).sort(), []);
-	const [picked, setPicked] = useState(() => localStorage.getItem("fm:viewer-pick") ?? names[0] ?? "");
+	const names = useMemo(() => Object.keys(modules).map(nameOf).sort((a, b) => rank(a) - rank(b) || a.localeCompare(b)), []);
+	const [picked, setPicked] = useState(() => (names.includes(localStorage.getItem("fm:viewer-pick") ?? "") ? localStorage.getItem("fm:viewer-pick")! : names[0]) ?? "");
 	useEffect(() => localStorage.setItem("fm:viewer-pick", picked), [picked]);
 	const Shown = useMemo(() => {
-		const load = modules[`../../packages/ui/components/${picked}.tsx`];
+		const load = modules[`../../packages/ui/${picked}.tsx`];
 		if (!load) return null;
 		return lazy(async () => {
 			const m = await load();
-			const C = (m[pascal(picked)] ?? Object.values(m).find((v) => typeof v === "function")) as (() => ReactNode) | undefined;
+			const C = (m[pascal(picked)] ?? m[`${pascal(picked)}Screen`] ?? Object.values(m).find((v) => typeof v === "function")) as (() => ReactNode) | undefined;
 			return { default: C ?? (() => <p>No component exported.</p>) };
 		});
 	}, [picked]);

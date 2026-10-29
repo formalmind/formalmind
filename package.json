@@ -73,6 +73,8 @@
     "zod": "3.25.76"
   },
   "devDependencies": {
+    "@hugeicons/core-free-icons": "^4.4.0",
+    "@hugeicons/react": "^1.1.10",
     "@storybook/addon-docs": "10.6.3",
     "@storybook/addon-themes": "10.6.3",
     "@storybook/react-vite": "10.6.3",

@@ -246,17 +246,157 @@ impl Model for Anthropic {
 
 static STOP: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
-/// Starts the agent on a folder; its steps arrive as `agent` events with the folder.
+/// Where each chat's Claude Code session or Codex thread is kept, so the next message continues it.
+fn chat_state(chat: &str) -> Result<PathBuf, String> {
+    let safe: String = chat.chars().filter(|c| c.is_ascii_alphanumeric() || *c == '-').collect();
+    if safe.is_empty() {
+        return Err("no chat".into());
+    }
+    let dir = crate::platform::home().join(".formalmind").join("agent");
+    std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+    Ok(dir.join(safe))
+}
+
+/// Claude Code's built-in file tools, and nothing that runs commands.
+const CLAUDE_TOOLS: &str = "Read,Write,Edit,Glob,Grep";
+
+/// What one line of Claude Code's stream-json says, as steps.
+pub fn claude_steps(line: &Value) -> Vec<Step> {
+    let mut out = vec![];
+    match line["type"].as_str() {
+        Some("assistant") => {
+            for c in line["message"]["content"].as_array().into_iter().flatten() {
+                match c["type"].as_str() {
+                    Some("text") if !c["text"].as_str().unwrap_or("").trim().is_empty() => out.push(Step::Text { text: c["text"].as_str().unwrap_or("").trim().to_string() }),
+                    Some("tool_use") => out.push(Step::Tool { name: c["name"].as_str().unwrap_or("").to_string(), input: c["input"].clone(), output: String::new() }),
+                    _ => {}
+                }
+            }
+        }
+        Some("result") if line["is_error"] == true => out.push(Step::Error { error: line["result"].as_str().unwrap_or("Claude Code failed").to_string() }),
+        _ => {}
+    }
+    out
+}
+
+/// What one line of `codex exec --json` says, as steps.
+pub fn codex_steps(line: &Value) -> Vec<Step> {
+    if let Some(error) = crate::codex::failure_of(line) {
+        return vec![Step::Error { error }];
+    }
+    if line["type"] != "item.completed" {
+        return vec![];
+    }
+    let item = &line["item"];
+    match item["type"].as_str() {
+        Some("agent_message") => crate::codex::said(line).map(|text| vec![Step::Text { text }]).unwrap_or_default(),
+        Some("file_change") => item["changes"].as_array().into_iter().flatten().map(|c| Step::Tool { name: format!("{}_file", c["kind"].as_str().unwrap_or("edit")), input: json!({ "path": c["path"] }), output: String::new() }).collect(),
+        Some("command_execution") => vec![Step::Tool { name: "run".into(), input: json!({ "path": item["command"] }), output: item["aggregated_output"].as_str().unwrap_or("").chars().take(500).collect() }],
+        _ => vec![],
+    }
+}
+
+/// Runs one message through a CLI (Claude Code or Codex), streaming its steps, until it exits or `stop`.
+async fn run_cli(mut cmd: tokio::process::Command, parse: fn(&Value) -> Vec<Step>, mut on_line: impl FnMut(&Value), on: &mut impl FnMut(Step)) -> Result<(), String> {
+    use tokio::io::AsyncBufReadExt;
+    cmd.env("PATH", crate::platform::tool_path(None)).stdin(std::process::Stdio::null()).stdout(std::process::Stdio::piped()).stderr(std::process::Stdio::piped()).kill_on_drop(true);
+    let mut child = cmd.spawn().map_err(|e| e.to_string())?;
+    let mut lines = tokio::io::BufReader::new(child.stdout.take().ok_or("no output")?).lines();
+    let mut stderr = child.stderr.take();
+    let mut failed = false;
+    loop {
+        let next = tokio::select! {
+            l = lines.next_line() => l.map_err(|e| e.to_string())?,
+            _ = async { while !STOP.load(std::sync::atomic::Ordering::Relaxed) { tokio::time::sleep(std::time::Duration::from_millis(200)).await } } => {
+                let _ = child.kill().await;
+                on(Step::Done);
+                return Ok(());
+            }
+        };
+        let Some(line) = next else { break };
+        let Ok(v) = serde_json::from_str::<Value>(&line) else { continue };
+        on_line(&v);
+        for step in parse(&v) {
+            failed |= matches!(step, Step::Error { .. });
+            on(step);
+        }
+    }
+    let status = child.wait().await.map_err(|e| e.to_string())?;
+    if !status.success() && !failed {
+        let mut err = String::new();
+        if let Some(e) = stderr.as_mut() {
+            let _ = tokio::io::AsyncReadExt::read_to_string(e, &mut err).await;
+        }
+        let error = err.lines().rev().find(|l| !l.trim().is_empty()).unwrap_or("it stopped with an error").to_string();
+        on(Step::Error { error: error.clone() });
+        return Err(error);
+    }
+    on(Step::Done);
+    Ok(())
+}
+
+/// One message on Claude Code (your Claude plan): its own file tools in the folder, the chat's session resumed.
+async fn on_claude(folder: &Folder, chat: &str, goal: &str, model: &str, on: &mut impl FnMut(Step)) -> Result<(), String> {
+    let state = chat_state(chat)?.with_extension("claude");
+    let resume = state.exists();
+    let mut cmd = tokio::process::Command::new(crate::platform::find_tool("claude"));
+    cmd.current_dir(&folder.root).args(["-p", "--output-format", "stream-json", "--verbose", "--append-system-prompt"]).arg(system(folder));
+    cmd.args(["--tools", CLAUDE_TOOLS, "--allowedTools", CLAUDE_TOOLS, "--permission-mode", "acceptEdits", "--strict-mcp-config"]);
+    if !model.is_empty() {
+        cmd.args(["--model", model]);
+    }
+    cmd.args([if resume { "--resume" } else { "--session-id" }, chat]).arg(goal);
+    let result = run_cli(cmd, claude_steps, |_| {}, on).await;
+    let _ = std::fs::write(&state, chat);
+    result
+}
+
+/// One message on Codex (your ChatGPT plan): its workspace-write sandbox on the folder, the chat's thread resumed.
+async fn on_codex(folder: &Folder, chat: &str, goal: &str, model: &str, on: &mut impl FnMut(Step)) -> Result<(), String> {
+    let state = chat_state(chat)?.with_extension("codex");
+    let thread = std::fs::read_to_string(&state).ok().map(|t| t.trim().to_string()).filter(|t| !t.is_empty());
+    let mut cmd = tokio::process::Command::new(crate::platform::find_tool("codex"));
+    cmd.current_dir(&folder.root).arg("exec");
+    if let Some(t) = &thread {
+        cmd.args(["resume", t.as_str()]);
+    }
+    cmd.args(["--json", "--skip-git-repo-check", "-c", "sandbox_mode=\"workspace-write\""]);
+    if !model.is_empty() && !model.starts_with("claude") {
+        cmd.args(["-m", model]);
+    }
+    let prompt = if thread.is_some() { goal.to_string() } else { format!("{}\n\n{goal}", system(folder)) };
+    cmd.arg(prompt);
+    let mut started = None;
+    let result = run_cli(cmd, codex_steps, |v| {
+        if v["type"] == "thread.started" {
+            started = v["thread_id"].as_str().map(str::to_string);
+        }
+    }, on).await;
+    if let Some(t) = started {
+        let _ = std::fs::write(&state, t);
+    }
+    result
+}
+
+/// Starts the agent on a folder through the route picked in Settings → Models ("claude-code", "codex", or your own
+/// Anthropic key); `chat` keeps one conversation going across messages. Steps arrive as `agent` events.
 #[tauri::command]
-pub async fn agent_start(app: tauri::AppHandle, folder: String, goal: String) -> Result<(), String> {
+pub async fn agent_start(app: tauri::AppHandle, folder: String, goal: String, chat: String, provider: Option<String>, model: Option<String>) -> Result<(), String> {
     let f = Folder::open(Path::new(&folder))?;
-    let key = crate::swarm::anthropic_key().ok_or("Add your Anthropic API key in Settings first")?;
     STOP.store(false, std::sync::atomic::Ordering::Relaxed);
-    let mut model = Anthropic { client: reqwest::Client::new(), key };
-    run(&mut model, &f, &goal, &STOP, |step| {
-        let _ = app.emit("agent", json!({ "folder": folder, "step": step }));
-    })
-    .await
+    let model = model.unwrap_or_default();
+    let mut on = |step: Step| {
+        let _ = app.emit("agent", json!({ "folder": folder, "chat": chat, "step": step }));
+    };
+    match provider.as_deref().unwrap_or("claude-code") {
+        "claude-code" => on_claude(&f, &chat, &goal, &model, &mut on).await,
+        "codex" => on_codex(&f, &chat, &goal, &model, &mut on).await,
+        _ => {
+            let key = crate::swarm::anthropic_key().ok_or("Add your Anthropic API key in Settings first")?;
+            let mut m = Anthropic { client: reqwest::Client::new(), key };
+            run(&mut m, &f, &goal, &STOP, on).await
+        }
+    }
 }
 
 #[tauri::command]
@@ -349,6 +489,23 @@ mod tests {
         let mut steps = Vec::new();
         run(&mut model, &f, "x", &AtomicBool::new(true), |s| steps.push(s)).await.unwrap();
         assert_eq!(steps, vec![Step::Done]);
+    }
+
+    #[test]
+    fn b65_claude_code_lines_become_steps() {
+        let line = json!({ "type": "assistant", "message": { "content": [{ "type": "text", "text": " Done. " }, { "type": "tool_use", "name": "Edit", "input": { "file_path": "a.rs" } }] } });
+        assert_eq!(claude_steps(&line), vec![Step::Text { text: "Done.".into() }, Step::Tool { name: "Edit".into(), input: json!({ "file_path": "a.rs" }), output: String::new() }]);
+        assert!(matches!(claude_steps(&json!({ "type": "result", "is_error": true, "result": "limit" }))[..], [Step::Error { .. }]));
+        assert!(claude_steps(&json!({ "type": "result", "is_error": false })).is_empty());
+    }
+
+    #[test]
+    fn b65_codex_lines_become_steps() {
+        let msg = json!({ "type": "item.completed", "item": { "type": "agent_message", "text": "Hi" } });
+        assert_eq!(codex_steps(&msg), vec![Step::Text { text: "Hi".into() }]);
+        let change = json!({ "type": "item.completed", "item": { "type": "file_change", "changes": [{ "path": "x.ts", "kind": "update" }] } });
+        assert!(matches!(&codex_steps(&change)[..], [Step::Tool { name, .. }] if name == "update_file"));
+        assert!(matches!(codex_steps(&json!({ "type": "turn.failed", "error": { "message": "usage limit" } }))[..], [Step::Error { .. }]));
     }
 
     #[tokio::test]
