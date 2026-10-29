@@ -1,7 +1,5 @@
-import { DesktopHome } from "./home";
-import { lazy, Suspense, useCallback, useEffect, useState } from "react";
+import { Suspense, useCallback, useEffect, useState } from "react";
 import { Navigate, Route, Routes, useNavigate } from "react-router";
-import { AddProjectHost } from "@/components/add-project";
 import { getCurrent, onOpenUrl } from "@tauri-apps/plugin-deep-link";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { getCurrentWindow } from "@tauri-apps/api/window";
@@ -14,17 +12,12 @@ import { WorkspaceContent } from "@/components/workspace-content";
 import type { SessionData } from "@/lib/session";
 import { apiBase, clearToken, exchangeCode, loadToken, syncSettings } from "./api";
 
-import { LocalFolderPage, LocalFolders, recentFolders, useFolders, useRepoSource } from "./local";
-import { Workbench } from "./workbench";
+import { Workbench, WorkbenchProvider, WorkbenchSide } from "./workbench";
 import { onboarded, SetupSteps, SignInStep } from "./onboarding";
 import { SettingsPage } from "./settings";
 import { TabBar } from "./tabs";
 import { UpdateNotice } from "./update";
 
-const UsagePage = lazy(() => import("@/components/usage/usage-page").then((m) => ({ default: m.UsagePage })));
-const pages = () => import("@/components/projects/project-pages");
-const ProjectHomePage = lazy(() => pages().then((m) => ({ default: m.ProjectHomePage })));
-const ProjectFilePage = lazy(() => import("@/components/projects/project-file").then((m) => ({ default: m.ProjectFilePage })));
 
 type User = SessionData["user"];
 
@@ -39,23 +32,18 @@ const codeFrom = (link: string) => {
 };
 
 function Shell({ user }: { user: User }) {
-	const repoSource = useRepoSource();
 	return (
+		<WorkbenchProvider>
 		<AuthProvider value={{ user, tokenSet: { accessToken: "", expiresAt: 0 } }}>
 			<ChatConversationsProvider>
 				<SidebarProvider defaultOpen className="fm-app">
 					<TabBar />
-					<AppSidebar extra={<LocalFolders />} repoSource={repoSource} />
-					<AddLocalHost />
+					<AppSidebar only={<WorkbenchSide />} />
 					<WorkspaceContent>
 						<Suspense fallback={null}>
 							<Routes>
-								{/* Home is an empty screen with the next step. */}
-								<Route path="/" element={<Start />} />
-								<Route path="/usage" element={<UsagePage />} />
-								<Route path="/projects/:owner/:name" element={<ProjectHomePage />} />
-								<Route path="/projects/:owner/:name/file" element={<ProjectFilePage />} />
-								<Route path="/local" element={<LocalFolderPage />} />
+								{/* Home is the project's agent chat; its files and chats are in the sidebar. */}
+								<Route path="/" element={<Workbench />} />
 								<Route path="/settings" element={<SettingsPage />} />
 								{/* Other pages come over from the web app as the desktop app grows. */}
 								<Route path="*" element={<Navigate to="/" replace />} />
@@ -65,6 +53,7 @@ function Shell({ user }: { user: User }) {
 				</SidebarProvider>
 			</ChatConversationsProvider>
 		</AuthProvider>
+		</WorkbenchProvider>
 	);
 }
 
@@ -139,16 +128,4 @@ export function DesktopApp() {
 	);
 }
 
-/** The Add a project popup; its Local folder is this Mac's folder picker, and the folder opens once added. */
-function AddLocalHost() {
-	const { add } = useFolders();
-	const navigate = useNavigate();
-	return <AddProjectHost onLocal={() => add().then((p) => p && navigate(`/local?path=${encodeURIComponent(p)}`))} />;
-}
 
-/** The first screen: the most recently opened folder's files and its agent; the add-a-folder step with none. */
-function Start() {
-	const { folders } = useFolders();
-	const folder = recentFolders(folders, 1)[0];
-	return folder ? <Workbench folder={folder} /> : <DesktopHome />;
-}

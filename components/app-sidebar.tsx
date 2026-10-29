@@ -273,8 +273,9 @@ function Projects({ pathname, source }: { pathname: string; source?: RepoSource 
 	)
 }
 
-/** `extra` is for a host's own sections under the projects (the desktop app's local folders). */
-export function AppSidebar({ extra, repoSource, ...props }: React.ComponentProps<typeof Sidebar> & { extra?: React.ReactNode; repoSource?: RepoSource }) {
+/** `extra` is for a host's own sections under the projects (the desktop app's local folders); `only` replaces the
+ * whole middle of the sidebar (the Mac app's files and chats). */
+export function AppSidebar({ extra, only, repoSource, ...props }: React.ComponentProps<typeof Sidebar> & { extra?: React.ReactNode; only?: React.ReactNode; repoSource?: RepoSource }) {
 	const location = useLocation()
 	const navigate = useNavigate()
 	const pathname = location.pathname
@@ -307,6 +308,7 @@ export function AppSidebar({ extra, repoSource, ...props }: React.ComponentProps
 				{/* The toggle lives on the sidebar's edge (SidebarResizer); the Mac app also keeps one in its tab bar. */}
 			</SidebarHeader>
 			<SidebarContent>
+				{only ?? <>
 				{extra}
 				{/* On localhost, the desktop app's local-folder page with demo data, for design feedback. */}
 				{!extra && typeof window !== "undefined" && window.location.hostname === "localhost" ? (
@@ -379,6 +381,7 @@ export function AppSidebar({ extra, repoSource, ...props }: React.ComponentProps
 					</SidebarMenu>
 					<Projects pathname={pathname} source={repoSource} />
 				</SidebarGroup>
+				</>}
 			</SidebarContent>
 			<SidebarFooter>
 				<SidebarMenu>

@@ -62,13 +62,8 @@ function ApiKey({ vendor, name, placeholder, onSaved }: { vendor: "anthropic" | 
 /** The page's subsections, in menu order under their group labels. `?section=` picks one, so a reload or a link lands on it. */
 const SECTIONS = [
 	{ id: "models", title: "Models", icon: Sparkles, group: "This computer" },
-	{ id: "editor", title: "Editor", icon: SquareCode, group: "This computer" },
-	{ id: "remote", title: "Remote control (MCP)", icon: Cable, group: "This computer" },
-	{ id: "github", title: "GitHub", icon: ArrowUpRight, group: "This computer" },
 	{ id: "server", title: "Server", icon: Server, group: "This computer" },
 	{ id: "skills", title: "Skills", icon: Puzzle, group: "This computer" },
-	{ id: "entry-points", title: "Entry points", icon: Crosshair, group: "Projects" },
-	{ id: "audit-reports", title: "Audit reports", icon: FolderSearch, group: "Projects" },
 ] as const satisfies readonly { id: string; title: string; icon: LucideIcon; group: string }[];
 const GROUPS = [...new Set(SECTIONS.map((s) => s.group))];
 type SectionId = (typeof SECTIONS)[number]["id"];
@@ -171,111 +166,9 @@ export function SettingsPage() {
 						<ApiKey vendor="anthropic" name="Anthropic" placeholder="sk-ant-…" onSaved={() => flash("Key saved")} />
 						<ApiKey vendor="openai" name="OpenAI" placeholder="sk-…" onSaved={() => flash("Key saved")} />
 					</Section> : null}
-					{section === "entry-points" ? <Section title="Entry points">
-						<p className="text-xs text-muted-foreground">The contracts Proofs models for each folder; the first opens by default. Picking a contract on the Proofs page makes it the first.</p>
-						{folders.map((f) => (
-							<EntryPoints key={f} folder={f} />
-						))}
-						{Object.entries(repos)
-							.filter(([, path]) => !folders.includes(path))
-							.map(([repo, path]) => (
-								<EntryPoints key={path} folder={path} label={repo} />
-							))}
-					</Section> : null}
-					{section === "editor" ? <Section title="Editor">
-						<label className="flex items-center justify-between gap-4">
-							<span>
-								<span className="font-medium">Vim mode</span>
-								<span className="block text-xs text-muted-foreground">The Code tab runs Neovim (bundled with the app), with your own config from ~/.config/nvim if you have one.</span>
-							</span>
-							<input type="checkbox" checked={vim} onChange={(e) => setVimMode(e.target.checked)} className="size-4" />
-						</label>
-					</Section> : null}
-					{section === "audit-reports" ? <Section title="Audit reports">
-						<p className="text-xs text-muted-foreground">Bugs reads each project's audit reports from audit/, audits/ and reports/. Add any other folder, relative to the project.</p>
-						{folders.length + Object.keys(repos).length === 0 ? <p className="text-xs text-muted-foreground">Add a folder or import a repository in the sidebar first.</p> : null}
-						{folders.map((f) => (
-							<AuditFolders key={f} folder={f} />
-						))}
-						{/* Imported repositories, by the folder they are cloned (or mapped) to on this machine. */}
-						{Object.entries(repos)
-							.filter(([, path]) => !folders.includes(path))
-							.map(([repo, path]) => (
-								<AuditFolders key={path} folder={path} label={repo} />
-							))}
-					</Section> : null}
 					{section === "skills" ? <Section title="Skills">
 						<p className="text-xs text-muted-foreground">Auditing checklists by other authors, for every project. The agents read them while they prove and review.</p>
 						<Skills />
-					</Section> : null}
-					{section === "remote" ? <Section title="Remote control (MCP)">
-						<label className="flex items-center justify-between gap-4">
-							<span>
-								<span className="font-medium">Let agents follow and steer the swarm through the MCP</span>
-								<span className="block text-xs text-muted-foreground">
-									The swarm keeps running here. What its agents say goes to your formal.team account as it happens, and the MCP's
-									mac_* tools (from Claude, ChatGPT or Cursor, signed in as you) come back to this Mac. Your code stays here.
-								</span>
-							</span>
-							<input
-								type="checkbox"
-								checked={relay}
-								onChange={(e) => {
-									setRelay(e.target.checked);
-									try {
-										localStorage.setItem("fm:relay", e.target.checked ? "1" : "0");
-									} catch {
-										/* kept for this window only */
-									}
-									window.dispatchEvent(new Event("fm:relay"));
-								}}
-								className="size-4"
-							/>
-						</label>
-					</Section> : null}
-					{section === "github" ? <Section title="GitHub">
-						<p className="text-xs text-muted-foreground">
-							Off, a folder's work stays on this Mac: nothing is committed, pushed or posted. On, Formal Mind's GitHub App comments
-							on that repository's pull requests with what the proof ledger says changed: proofs that broke, approvals that
-							lapsed, functions that lost coverage, new findings.
-						</p>
-						{folders.length === 0 ? <p className="text-xs text-muted-foreground">Add a folder in the sidebar first.</p> : null}
-						{folders.map((path) => (
-							<label key={path} className="flex items-center justify-between gap-4">
-								<span className="min-w-0 truncate font-mono text-xs" title={path}>{path.split("/").filter(Boolean).pop()}</span>
-								<input
-									type="checkbox"
-									checked={github[path] ?? false}
-									onChange={(e) => {
-										const on = e.target.checked;
-										setGithub((g) => ({ ...g, [path]: on }));
-										void invoke("control", { op: "github", folder: path, args: { on } }).catch(() => setGithub((g) => ({ ...g, [path]: !on })));
-									}}
-									className="size-4"
-								/>
-							</label>
-						))}
-						<label className="flex items-center justify-between gap-4 border-t pt-3">
-							<span>
-								Questions
-								<span className="block text-xs text-muted-foreground">
-									Who answers when the swarm asks whether a statement means what you meant: you, or an MCP client acting
-									for you; or an answerer agent, which confirms or corrects each one once and leaves doubts for you.
-								</span>
-							</span>
-							<select
-								value={answers}
-								onChange={(e) => {
-									const who = e.target.value as "mcp" | "agent";
-									setAnswers(who);
-									void invoke("control", { op: "answers", folder: "", args: { who } }).catch(() => setAnswers(who === "agent" ? "mcp" : "agent"));
-								}}
-								className="rounded border bg-transparent px-2 py-1 text-xs"
-							>
-								<option value="mcp">You or the MCP</option>
-								<option value="agent">Answerer agent</option>
-							</select>
-						</label>
 					</Section> : null}
 					{section === "server" ? <Section title="Server">
 						<label className="flex items-center justify-between gap-4">

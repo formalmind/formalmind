@@ -1,9 +1,11 @@
 import { invoke } from "@tauri-apps/api/core";
+import { homeDir, join } from "@tauri-apps/api/path";
 import { listen } from "@tauri-apps/api/event";
-import { Component, Suspense, lazy, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { Component, Suspense, createContext, lazy, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 
-/** The new version's first screen (SPEC.md B64, B65): the folder's files, a chat with the agent that reads and writes
- * them, and AffectUI's components in a half screen beside it. */
+/** The new version (SPEC.md B64, B65): one project, a copy of Formal Mind itself in ~/.formalmind/formalmind. The
+ * sidebar shows its files or the chats; the page is a chat with the agent that reads and writes those files, with
+ * AffectUI's components in a half screen beside it. */
 
 type Step =
 	| { kind: "text"; text: string }
@@ -24,11 +26,14 @@ const loadChats = (folder: string): Chat[] => {
 };
 const newChat = (): Chat => ({ id: crypto.randomUUID(), title: "New chat", lines: [] });
 
-export function Workbench({ folder }: { folder: string }) {
+function useWorkbenchState() {
+	const [folder, setFolder] = useState("");
+	useEffect(() => void homeDir().then((h) => join(h, ".formalmind", "formalmind")).then(setFolder), []);
 	const [files, setFiles] = useState<string[]>([]);
-	const [chats, setChats] = useState<Chat[]>(() => loadChats(folder));
-	const [chatId, setChatId] = useState<string | null>(() => loadChats(folder)[0]?.id ?? null);
+	const [chats, setChats] = useState<Chat[]>([]);
+	const [chatId, setChatId] = useState<string | null>(null);
 	const [left, setLeft] = useState<"files" | "chats">("files");
+	const [busy, setBusy] = useState(false);
 	const lines = chats.find((c) => c.id === chatId)?.lines ?? [];
 	// Adds lines to the open chat, starting one (titled by its first message) when none is open.
 	const live = useRef(chatId);
@@ -50,16 +55,13 @@ export function Workbench({ folder }: { folder: string }) {
 			});
 		});
 	useEffect(() => {
+		if (!folder) return;
 		setChats(loadChats(folder));
 		setChatId(loadChats(folder)[0]?.id ?? null);
 	}, [folder]);
-	useEffect(() => localStorage.setItem(chatsKey(folder), JSON.stringify(chats)), [folder, chats]);
-	const [draft, setDraft] = useState("");
-	const [busy, setBusy] = useState(false);
-	const [viewer, setViewer] = useState(() => localStorage.getItem("fm:viewer") === "1");
-	const end = useRef<HTMLDivElement>(null);
+	useEffect(() => void (folder && localStorage.setItem(chatsKey(folder), JSON.stringify(chats))), [folder, chats]);
 
-	const look = () => void invoke<{ files: string[] }>("folder_tree", { path: folder }).then((t) => setFiles(t.files), () => setFiles([]));
+	const look = () => void (folder && invoke<{ files: string[] }>("folder_tree", { path: folder }).then((t) => setFiles(t.files), () => setFiles([])));
 	useEffect(look, [folder]);
 	useEffect(() => {
 		const off = listen<{ folder: string; step: Step }>("agent", ({ payload }) => {
@@ -74,52 +76,78 @@ export function Workbench({ folder }: { folder: string }) {
 		});
 		return () => void off.then((f) => f());
 	}, [folder]);
-	useEffect(() => end.current?.scrollIntoView({ block: "end" }), [lines]);
-	useEffect(() => localStorage.setItem("fm:viewer", viewer ? "1" : "0"), [viewer]);
 
-	const send = () => {
-		const goal = draft.trim();
-		if (!goal || busy) return;
-		setDraft("");
+	const send = (goal: string) => {
+		if (!goal || busy || !folder) return;
 		setLines((l) => [...l, { who: "you", text: goal }]);
 		setBusy(true);
 		invoke("agent_start", { folder, goal })
 			.catch((e) => setLines((l) => [...l, { who: "error", text: String(e) }]))
 			.finally(() => setBusy(false));
 	};
+	return { folder, files, chats, chatId, setChatId, left, setLeft, busy, lines, send };
+}
 
+const Ctx = createContext<ReturnType<typeof useWorkbenchState> | null>(null);
+const useWorkbench = () => useContext(Ctx)!;
+
+export function WorkbenchProvider({ children }: { children: ReactNode }) {
+	return <Ctx.Provider value={useWorkbenchState()}>{children}</Ctx.Provider>;
+}
+
+/** The sidebar: the project's files, or its chats. */
+export function WorkbenchSide() {
+	const { folder, files, chats, chatId, setChatId, left, setLeft, busy } = useWorkbench();
 	return (
-		<div className="flex h-full min-h-0 text-[13px]">
-			<aside className="flex w-60 shrink-0 flex-col border-r">
-				<div className="flex gap-3 border-b px-3 py-1.5">
-					{(["files", "chats"] as const).map((k) => (
-						<button key={k} type="button" onClick={() => setLeft(k)} className={left === k ? "text-foreground" : "text-muted-foreground hover:text-foreground"}>
-							{k === "files" ? "Files" : "Chats"}
+		<div className="flex min-h-0 flex-1 flex-col text-[13px] group-data-[collapsible=icon]:hidden">
+			<div className="flex gap-3 px-3 py-1.5">
+				{(["files", "chats"] as const).map((k) => (
+					<button key={k} type="button" onClick={() => setLeft(k)} className={left === k ? "text-foreground" : "text-muted-foreground hover:text-foreground"}>
+						{k === "files" ? "Files" : "Chats"}
+					</button>
+				))}
+			</div>
+			{left === "files" ? (
+				<div className="min-h-0 flex-1 overflow-auto px-2 font-mono text-muted-foreground">
+					<div className="px-1 pb-2 text-foreground">{folder.split(/[\\/]/).filter(Boolean).pop()}</div>
+					{files.map((f) => (
+						<div key={f} className="truncate px-1 py-0.5" title={f}>
+							{f}
+						</div>
+					))}
+				</div>
+			) : (
+				<div className="min-h-0 flex-1 overflow-auto px-2">
+					<button type="button" disabled={busy} onClick={() => setChatId(null)} className="block w-full px-1 py-0.5 text-left text-muted-foreground hover:text-foreground">
+						New chat
+					</button>
+					{chats.map((c) => (
+						<button key={c.id} type="button" disabled={busy} onClick={() => setChatId(c.id)} className={`block w-full truncate px-1 py-0.5 text-left ${c.id === chatId ? "text-foreground" : "text-muted-foreground hover:text-foreground"}`}>
+							{c.title}
 						</button>
 					))}
 				</div>
-				{left === "files" ? (
-					<div className="min-h-0 flex-1 overflow-auto p-2 font-mono text-muted-foreground">
-						<div className="px-1 pb-2 text-foreground">{folder.split(/[\\/]/).filter(Boolean).pop()}</div>
-						{files.map((f) => (
-							<div key={f} className="truncate px-1 py-0.5" title={f}>
-								{f}
-							</div>
-						))}
-					</div>
-				) : (
-					<div className="min-h-0 flex-1 overflow-auto p-2">
-						<button type="button" disabled={busy} onClick={() => setChatId(null)} className="block w-full px-1 py-0.5 text-left text-muted-foreground hover:text-foreground">
-							New chat
-						</button>
-						{chats.map((c) => (
-							<button key={c.id} type="button" disabled={busy} onClick={() => setChatId(c.id)} className={`block w-full truncate px-1 py-0.5 text-left ${c.id === chatId ? "text-foreground" : "text-muted-foreground hover:text-foreground"}`}>
-								{c.title}
-							</button>
-						))}
-					</div>
-				)}
-			</aside>
+			)}
+		</div>
+	);
+}
+
+/** The page: the chat and its input, and the components half screen. */
+export function Workbench() {
+	const { busy, lines, send } = useWorkbench();
+	const [draft, setDraft] = useState("");
+	const [viewer, setViewer] = useState(() => localStorage.getItem("fm:viewer") === "1");
+	const end = useRef<HTMLDivElement>(null);
+	useEffect(() => end.current?.scrollIntoView({ block: "end" }), [lines]);
+	useEffect(() => localStorage.setItem("fm:viewer", viewer ? "1" : "0"), [viewer]);
+	const submit = () => {
+		if (!draft.trim() || busy) return;
+		send(draft.trim());
+		setDraft("");
+	};
+
+	return (
+		<div className="flex h-full min-h-0 text-[13px]">
 			<section className="flex min-w-0 flex-1 flex-col">
 				<div className="flex justify-end border-b px-3 py-1.5">
 					<button type="button" className="text-muted-foreground hover:text-foreground" onClick={() => setViewer((v) => !v)}>
@@ -142,11 +170,11 @@ export function Workbench({ folder }: { folder: string }) {
 						onKeyDown={(e) => {
 							if (e.key === "Enter" && !e.shiftKey) {
 								e.preventDefault();
-								send();
+								submit();
 							}
 						}}
 						rows={2}
-						placeholder="Ask the agent to change this project"
+						placeholder="Ask the agent to change Formal Mind"
 						className="min-w-0 flex-1 resize-none rounded-lg border bg-card p-2 outline-none"
 					/>
 					{busy ? (
@@ -154,7 +182,7 @@ export function Workbench({ folder }: { folder: string }) {
 							Stop
 						</button>
 					) : (
-						<button type="button" className="rounded-lg border px-3" disabled={!draft.trim()} onClick={send}>
+						<button type="button" className="rounded-lg border px-3" disabled={!draft.trim()} onClick={submit}>
 							Send
 						</button>
 					)}
