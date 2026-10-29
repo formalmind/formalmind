@@ -98,6 +98,8 @@ struct Fake {
     approved: Mutex<Vec<String>>,
     cancelled: Mutex<Vec<String>>,
     exits: AtomicUsize,
+    /// How long formal-ast takes to read the folder (solc on a big codebase).
+    ast_delay: Mutex<Duration>,
 }
 
 impl World for Fake {
@@ -114,7 +116,11 @@ impl World for Fake {
         format!("you are the {role}")
     }
     fn ast<'a>(&'a self, _root: &'a Path) -> BoxFuture<'a, Option<Arc<crate::swarm_ctx::Context>>> {
-        Box::pin(async { None })
+        let delay = *self.ast_delay.lock().unwrap();
+        Box::pin(async move {
+            tokio::time::sleep(delay).await;
+            None
+        })
     }
     fn scan<'a>(&'a self, _root: &'a Path, _plan: &'a str) -> BoxFuture<'a, Scan> {
         Box::pin(async { Scan { in_scope: "functions: 2 in scope across Vault".into(), ..Scan::default() } })
@@ -200,6 +206,7 @@ impl Bench {
             approved: Mutex::default(),
             cancelled: Mutex::default(),
             exits: AtomicUsize::new(0),
+            ast_delay: Mutex::new(Duration::ZERO),
         });
         let rec = Arc::new(Recorder::default());
         let engine = Engine::new(rec.clone(), world.clone());
@@ -342,6 +349,19 @@ fn b5_stop_ends_a_turn_mid_model_call() {
     let ended = Instant::now();
     assert!(ended.duration_since(stopped_at.join().unwrap()) < Duration::from_secs(1));
     assert_eq!(b.done(), vec![PAUSED]);
+}
+
+#[test]
+fn b5_stop_ends_the_wait_for_formal_ast() {
+    let b = Bench::new("b5-ast", &[(Mark::Open, ITEM1)]);
+    *b.world.ast_delay.lock().unwrap() = Duration::from_secs(30);
+    b.turn(vec![Act::Think]);
+    let h = b.start(b.req());
+    let stopped_at = b.stop_soon("swarm");
+    wait(h);
+    assert!(Instant::now().duration_since(stopped_at.join().unwrap()) < Duration::from_secs(1));
+    assert_eq!(b.done(), vec![PAUSED]);
+    assert!(b.script.seen.lock().unwrap().is_empty(), "no agent turn after the stop");
 }
 
 #[test]

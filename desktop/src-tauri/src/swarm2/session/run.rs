@@ -121,7 +121,8 @@ impl Engine {
                 return Some(c);
             }
         }
-        let c = self.world.ast(&s.root).await;
+        // solc can take minutes on a big codebase: Stop and Pause end the wait (B5), and the turn after it sees the stop.
+        let c = s.stop.race(self.world.ast(&s.root)).await.flatten();
         if c.is_some() {
             *s.ast.lock().unwrap() = c.clone();
         }
@@ -132,6 +133,10 @@ impl Engine {
     async fn agent(self: &Arc<Self>, s: &Arc<Session>, job: u64, role: &str, item: &str, task: Value) -> Result<Out, TurnError> {
         if s.ast.lock().unwrap().is_none() {
             self.ast(s, false).await;
+        }
+        // Stopped while formal-ast was reading: no turn, the job stays as it is (B6).
+        if s.stopped() {
+            return Ok(Out { stopped: true, ..Out::default() });
         }
         let side = Arc::new(Side {
             engine: self.clone(),
