@@ -4,6 +4,7 @@ import { listen } from "@tauri-apps/api/event";
 import { useLocation, useNavigate } from "react-router";
 import { FileTree } from "@/components/file-tree";
 import { TreeFolder } from "@/components/session-folder";
+import { HomeEmpty } from "@/components/home-empty";
 import { useResizable } from "./resize-handle";
 import { Component, Suspense, createContext, lazy, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 
@@ -180,7 +181,7 @@ export function Workbench() {
 		<div className="flex h-full min-h-0 text-[13px]">
 			{left === "files" ? <FileView folder={folder} file={file} toggle={toggle} /> : <section className="flex min-w-0 flex-1 flex-col">
 				<div className="flex justify-end border-b px-3 py-1.5">{toggle}</div>
-				<div className="min-h-0 flex-1 space-y-2 overflow-auto p-4">
+				{lines.length || busy ? <div className="min-h-0 flex-1 space-y-2 overflow-auto p-4">
 					{lines.map((l, i) => (
 						<div key={i} className={l.who === "you" ? "text-foreground" : l.who === "tool" ? "font-mono text-muted-foreground" : l.who === "error" ? "text-destructive" : "whitespace-pre-wrap text-foreground/80"}>
 							{l.text}
@@ -188,7 +189,7 @@ export function Workbench() {
 					))}
 					{busy ? <div className="text-muted-foreground">Working…</div> : null}
 					<div ref={end} />
-				</div>
+				</div> : <HomeEmpty muted="Bugs, proofs and code." strong="What should we change?" />}
 				<div className="flex gap-2 border-t p-3">
 					<textarea
 						value={draft}

@@ -25,7 +25,7 @@ human sentence shown as is.
 The folder guard: commands marked **[added]** fail with `"Add the folder first"` unless the folder is in
 `config.folders` or is a value of `config.repos` (`Config::allows`).
 
-### 1.1 Tauri commands (77)
+### 1.1 Tauri commands (75)
 
 Sign-in and keys (keychain service `team.formal.desktop`):
 
@@ -105,8 +105,6 @@ formal-ast, Lean and the Code tab:
 | `ast_slice` [added] | `folder, entry, function` | Markdown |
 | `ast_formal` [added] | `folder, entry` | Lean coverage JSON |
 | `ast_scripts` [added] | `folder` | script entries JSON |
-| `semantics_status` | – | JSON (experiment; never affects coverage) |
-| `semantics_run` | `solidcore, solc` | JSON |
 | `lsp_definition` | `folder, path, line, character` | `Location[]` (solidity-language-server; retries a few seconds while it indexes) |
 | `lsp_hover` | `folder, path, line, character` | `string \| null` |
 | `lean_open` | `folder, path` | `{text, version, project, toolchain}` |
@@ -126,7 +124,7 @@ formal-ast, Lean and the Code tab:
 
 Only some are invoked by `desktop/src` directly today (folder_read, control, folder_tree, swarm_stop/say/running,
 term_*, lean_*, lsp_*, …); the rest are used by `components/local-demo.tsx`, `components/projects/git-bridge.ts`, the
-`control` op table or the MCP. All 77 stay registered.
+`control` op table or the MCP. All 75 stay registered.
 
 ### 1.2 Events the backend emits (5)
 
@@ -609,7 +607,7 @@ so a concurrent approval isn't lost; `pause_all` appends to the log without emit
 
 | Module | Owns | Behaviours | Tests |
 |---|---|---|---|
-| `contract` (Tauri glue) | the 77 commands, 5 events, menu, window and quit | 1.1, 1.2, B11, B62 | a compile-time list compared with `generate_handler!`; a JS-side snapshot of invoke names from `desktop/src` |
+| `contract` (Tauri glue) | the 75 commands, 5 events, menu, window and quit | 1.1, 1.2, B11, B62 | a compile-time list compared with `generate_handler!`; a JS-side snapshot of invoke names from `desktop/src` |
 | `config` | `~/.formalmind`, settings defaults, folder guard | 2.1, B55, B64 | temp HOME (`TEST_HOME`), round-trip unknown fields |
 | `fsguard` | `inside`, stray detection, `.formal` guard | B24, B25, B27, R2, R5 | path table tests, symlink escape |
 | `lake` | project discovery, layout, scaffold, build command, run allowlist, lean guard | 2.4, B26, R1, R12 | fixtures per layout; `run_command` refusals |

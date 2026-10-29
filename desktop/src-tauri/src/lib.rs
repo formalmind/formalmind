@@ -26,7 +26,6 @@ mod platform;
 mod publish;
 mod relay;
 mod statements;
-mod semantics;
 mod term;
 
 use keyring::Entry;
@@ -173,8 +172,6 @@ pub fn run() {
             ast::ast_slice,
             ast::ast_formal,
             ast::ast_scripts,
-            semantics::semantics_run,
-            semantics::semantics_status,
             lsp::lsp_definition,
             lsp::lsp_hover,
             lean_lsp::lean_open,
@@ -259,7 +256,7 @@ mod tests {
             .lines()
             .filter_map(|l| l.strip_prefix("| `")?.split('`').next())
             .collect();
-        assert_eq!(commands.len(), 77, "{commands:?}");
+        assert_eq!(commands.len(), 75, "{commands:?}");
         let src = include_str!("lib.rs");
         let handler = &src[src.find("generate_handler![").unwrap()..];
         let handler = &handler[..handler.find("])").unwrap()];

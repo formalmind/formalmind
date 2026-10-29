@@ -1,6 +1,5 @@
 import { MarkGithubIcon } from "@primer/octicons-react";
 import { isTauri } from "@tauri-apps/api/core";
-import { SemanticsPanel } from "./semantics-panel";
 import { ProofWorkspace } from "./proof-workspace";
 import { ProofRail, fnKey, proofGutter, useFileProofs } from "./code-proof-panel";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
@@ -1734,28 +1733,9 @@ function CoverageView({ data, scripts, onOpenFile }: { data: Formal; scripts: Sc
 	);
 }
 
-/** Audit mode: what's been established for the contract picked here, as Lean coverage; on the Mac, also the SolidCore experiment. */
+/** Audit mode: what's been established for the contract picked here, as Lean coverage. */
 export function AuditView(props: { folder: string; scan: Scan | null; invoke: Bridge["invoke"]; onOpenFile: (path: string, line?: number) => void; reload?: number }) {
-	const [view, setView] = useState<"coverage" | "semantics">("coverage");
-	const views = isTauri() ? (["coverage", "semantics"] as const) : (["coverage"] as const);
-	const switcher =
-		views.length > 1 ? (
-			<span role="tablist" aria-label="Proofs view" className="inline-flex h-6 items-center rounded-md border bg-muted/60 p-0.5">
-				{views.map((v) => (
-					<button key={v} type="button" role="tab" aria-selected={view === v} onClick={() => setView(v)} className={`h-5 rounded px-2 text-[11px] ${view === v ? "bg-background font-medium text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"}`}>
-						{v === "coverage" ? "Coverage" : "Semantics"}
-					</button>
-				))}
-			</span>
-		) : null;
-	return view === "semantics" ? (
-		<>
-			<div className="flex h-8 shrink-0 items-center gap-2 px-1.5">{switcher}</div>
-			<SemanticsPanel invoke={props.invoke} />
-		</>
-	) : (
-		<CoverageAuditView {...props} switcher={switcher} />
-	);
+	return <CoverageAuditView {...props} />;
 }
 
 function CoverageAuditView({ folder, scan, invoke, onOpenFile, reload = 0, switcher }: { folder: string; scan: Scan | null; invoke: Bridge["invoke"]; onOpenFile: (path: string, line?: number) => void; reload?: number; switcher?: React.ReactNode }) {
