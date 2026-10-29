@@ -256,44 +256,64 @@ const nameOf = (path: string) => path.split("/").slice(-2).join("/").replace(/\.
 const rank = (n: string) => KINDS.indexOf(n.split("/")[0]);
 const pascal = (name: string) => name.split("/").pop()!.replace(/-clean$/, "").replace(/(^|-)(\w)/g, (_, __, c: string) => c.toUpperCase());
 
+// One lazy component per name, made once.
+const loaded = new Map<string, React.LazyExoticComponent<() => ReactNode>>();
+function lazyOf(name: string) {
+	let C = loaded.get(name);
+	if (C) return C;
+	const demo = demos[`../../packages/ui/formalmind/demos/${name.replace("/", "--")}.tsx`];
+	const load = modules[`../../packages/ui/${name}.tsx`];
+	C = lazy(
+		demo ??
+			(async () => {
+				const m = await load();
+				const F = (m[pascal(name)] ?? m[`${pascal(name)}Screen`] ?? Object.values(m).find((v) => typeof v === "function")) as (() => ReactNode) | undefined;
+				return { default: F ?? (() => <p>No component exported.</p>) };
+			}),
+	);
+	loaded.set(name, C);
+	return C;
+}
+
+/** Every AffectUI screen, block and component on one page, each under its name; the list jumps to one. */
 function ComponentViewer() {
 	const names = useMemo(() => Object.keys(modules).map(nameOf).sort((a, b) => rank(a) - rank(b) || a.localeCompare(b)), []);
 	const list = useResizable("fm:viewer-list", 192, 120, 400, "right");
-	const [picked, setPicked] = useState(() => (names.includes(localStorage.getItem("fm:viewer-pick") ?? "") ? localStorage.getItem("fm:viewer-pick")! : names[0]) ?? "");
-	useEffect(() => localStorage.setItem("fm:viewer-pick", picked), [picked]);
-	const Shown = useMemo(() => {
-		const demo = demos[`../../packages/ui/formalmind/demos/${picked.replace("/", "--")}.tsx`];
-		if (demo) return lazy(demo);
-		const load = modules[`../../packages/ui/${picked}.tsx`];
-		if (!load) return null;
-		return lazy(async () => {
-			const m = await load();
-			const C = (m[pascal(picked)] ?? m[`${pascal(picked)}Screen`] ?? Object.values(m).find((v) => typeof v === "function")) as (() => ReactNode) | undefined;
-			return { default: C ?? (() => <p>No component exported.</p>) };
-		});
-	}, [picked]);
+	const page = useRef<HTMLDivElement>(null);
 	if (!names.length) return <p className="p-4 text-muted-foreground">AffectUI isn't checked out: git submodule update --init packages/ui</p>;
 	return (
 		<div className="flex h-full min-h-0">
 			<nav className="relative shrink-0 overflow-auto border-r py-1" style={{ width: list.size }}>
 				{list.handle}
 				{names.map((n) => (
-					<button key={n} type="button" onClick={() => setPicked(n)} className={`block w-full truncate px-3 py-0.5 text-left ${n === picked ? "text-foreground" : "text-muted-foreground hover:text-foreground"}`}>
+					<button key={n} type="button" onClick={() => page.current?.querySelector(`[data-ui="${n}"]`)?.scrollIntoView({ block: "start" })} className="block w-full truncate px-3 py-0.5 text-left text-muted-foreground hover:text-foreground">
 						{n}
 					</button>
 				))}
 			</nav>
-			<Stage screen={picked.startsWith("screens/")}>
-				<Caught key={picked}>
-					<Suspense fallback={null}>{Shown ? <Shown /> : null}</Suspense>
-				</Caught>
-			</Stage>
+			<div ref={page} className="min-w-0 flex-1 space-y-10 overflow-auto p-4">
+				{names.map((n) => {
+					const Shown = lazyOf(n);
+					return (
+						<section key={n} data-ui={n}>
+							<h2 className="mb-2 font-mono text-muted-foreground">{n}</h2>
+							<Stage screen={n.startsWith("screens/")}>
+								<Caught>
+									<Suspense fallback={null}>
+										<Shown />
+									</Suspense>
+								</Caught>
+							</Stage>
+						</section>
+					);
+				})}
+			</div>
 		</div>
 	);
 }
 
 /** Where a component is drawn. Screens are whole desktop pages that fold up below 900px, so they get a 1280×800
- * canvas scaled down to the pane's width. */
+ * canvas scaled down to the page's width. */
 function Stage({ screen, children }: { screen: boolean; children: ReactNode }) {
 	const box = useRef<HTMLDivElement>(null);
 	const [width, setWidth] = useState(0);
@@ -304,9 +324,9 @@ function Stage({ screen, children }: { screen: boolean; children: ReactNode }) {
 		ro.observe(el);
 		return () => ro.disconnect();
 	}, []);
-	const zoom = Math.min(1, Math.max(0.2, (width - 32) / 1280));
+	const zoom = Math.min(1, Math.max(0.2, width / 1280));
 	return (
-		<div ref={box} className="min-w-0 flex-1 overflow-auto p-4">
+		<div ref={box} className="min-w-0">
 			{screen ? <div style={{ width: 1280, height: 800, zoom }}>{children}</div> : children}
 		</div>
 	);
