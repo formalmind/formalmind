@@ -2624,6 +2624,8 @@ export function SwarmPanel({ folder, name, scan, bridge, session, file: openPath
 									// The plan item the run works on, by its text (bold markers and code ticks off).
 									title={itemTitle(block.steps)}
 									onPause={run ? () => void invoke("swarm_stop", { folder, run }) : undefined}
+									// Retry from the Agents tree: the session carries on, back on that item.
+									onRetry={(role, item) => void start(item ? `Retry plan item ${item}: the ${role} failed on it.` : `Retry: the ${role} failed.`, true)}
 								/>
 							);
 						})()
