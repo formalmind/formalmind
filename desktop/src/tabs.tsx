@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { useLocation, useNavigate } from "react-router";
 import { listen } from "@tauri-apps/api/event";
-import { Gauge, HardDrive, Network, PanelLeft, Plus, RefreshCw, Settings, Sparkles, X, type LucideIcon } from "lucide-react";
+import { Gauge, HardDrive, Network, PanelLeft, Plus, RefreshCw, Settings, X, type LucideIcon } from "lucide-react";
 import { NotificationCenter } from "@/components/notification-center";
 import { useSidebar } from "@/components/ui/sidebar";
 import { PANE_VIEWS } from "./pane-views";
@@ -18,7 +18,6 @@ function describe(path: string): { title: string; icon: LucideIcon } {
 	const [pathname, search = ""] = path.split("?");
 	if (pathname === "/usage") return { title: "Usage", icon: Gauge };
 	if (pathname === "/settings") return { title: "Settings", icon: Settings };
-	if (pathname === "/components") return { title: "Components", icon: Sparkles };
 	if (pathname === "/local") {
 		const folder = new URLSearchParams(search).get("path") ?? "";
 		return { title: folder.split(/[\\/]/).filter(Boolean).pop() ?? "Folder", icon: HardDrive };
@@ -204,9 +203,6 @@ export function TabBar() {
 			{/* Refresh, settings and the bell stay here on every page; the canvases leave them to the tab bar. */}
 			<button type="button" onClick={() => window.dispatchEvent(new Event("fm:refresh"))} title="Refresh" className="grid size-7 shrink-0 place-items-center rounded-md text-muted-foreground hover:bg-sidebar-accent hover:text-foreground">
 				<RefreshCw className="size-4" />
-			</button>
-			<button type="button" onClick={() => navigate("/components")} title="Components" className="grid size-7 shrink-0 place-items-center rounded-md text-muted-foreground hover:bg-sidebar-accent hover:text-foreground">
-				<Sparkles className="size-4" />
 			</button>
 			<button type="button" onClick={() => navigate("/settings")} title="Settings" className="grid size-7 shrink-0 place-items-center rounded-md text-muted-foreground hover:bg-sidebar-accent hover:text-foreground">
 				<Settings className="size-4" />
