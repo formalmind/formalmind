@@ -3,11 +3,10 @@ import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import react from "@vitejs/plugin-react";
 import { defineConfig } from "vite";
-import { uiPackage } from "./lib/ui-package";
 
 export default defineConfig({
 	plugins: [react()],
-	resolve: { alias: [uiPackage, { find: "@", replacement: fileURLToPath(new URL(".", import.meta.url)) }] },
+	resolve: { alias: [{ find: "@", replacement: fileURLToPath(new URL(".", import.meta.url)) }] },
 	// Shared modules read process.env on the Worker; in the browser there is none.
 	define: {
 		"process.env": "{}",

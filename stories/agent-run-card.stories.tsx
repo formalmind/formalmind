@@ -1,7 +1,7 @@
 import type { Meta, StoryObj } from "@storybook/react-vite";
 import { useState } from "react";
-import { RunCard, type Steer } from "@formalmind/ui/run-card";
-import { Steps, type Ev, type Row } from "@/desktop/src/swarm-panel";
+import { RunCard, type Steer } from "@/desktop/src/chat-ui/run-card";
+import { type Ev, type Row } from "@/desktop/src/swarm-panel";
 import events from "./fixtures/run-card-events.json";
 
 /** The fixture's prover run as rows; with `split`, every other call is the reviewer's, as when both work at once. */
@@ -19,7 +19,7 @@ function rows(evs: Ev[], split = false): Row[] {
 	return out;
 }
 
-const Card = RunCard ?? Steps;
+const Card = RunCard;
 const title = "Conservation of supply and borrow shares across repay and withdraw";
 const still = (all: Row[]) => [...all.slice(0, -1), { call: (all[all.length - 1] as { call: Ev }).call }];
 
@@ -36,11 +36,11 @@ const meta = {
 } satisfies Meta;
 export default meta;
 
-/** Two agents' steps in one stretch of the chat: AffectUI's Agent Tree, then the picked agent's steps. */
+/** Two agents' steps in one stretch of the chat: the Agents tree, then the picked agent's steps. */
 export const TwoAgents: StoryObj = { render: () => <Card steps={rows(events as Ev[], true)} running={false} title={title} /> };
 
 /** The same while they work. */
 export const TwoAgentsWorking: StoryObj = { render: () => <Card steps={still(rows(events as Ev[], true))} running title={title} onPause={() => {}} /> };
 
-/** One agent at work, on AffectUI's Agent Steering. */
+/** One agent at work, with the steering card. */
 export const SteeringOne: StoryObj = { render: () => <Steering /> };
