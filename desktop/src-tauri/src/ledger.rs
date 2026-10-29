@@ -375,18 +375,8 @@ pub async fn build(root: &Path, check: bool, force: bool) -> Result<Value, Strin
         // The reviewer's approval, for this def and these theorems as they are now.
         let texts: BTreeMap<String, String> = theorems.iter().filter(|(_, m)| m.is_some()).map(|(t, _)| (t.qualified.clone(), hash(&t.text))).collect();
         let review = ledger["reviews"][&f.lean].clone();
-        let approved_for_now = review["verdict"] == "approve" && review["defHash"] == json!(def_hash) && serde_json::from_value::<BTreeMap<String, String>>(review["theorems"].clone()).ok().as_ref() == Some(&texts);
-        // Proved before the ledger: ticked in the plan with what proved it recorded.
-        let legacy = !approved_for_now && review.is_null() && plan.get(&f.lean).is_some_and(|m| m == "x") && proofs_json.as_object().is_some_and(|o| o.values().any(|p| p["item"].as_str().is_some_and(|i| i.contains(&format!("`{}`", f.lean)))));
-        let review_state = if approved_for_now {
-            "approved"
-        } else if legacy {
-            "approved before the ledger"
-        } else if review["verdict"] == "approve" {
-            "lapsed: the def or a theorem changed since it was approved"
-        } else {
-            "not reviewed"
-        };
+        let recorded: Vec<&Value> = proofs_json.as_object().map(|o| o.values().filter(|p| p["item"].as_str().is_some_and(|i| i.contains(&format!("`{}`", f.lean)))).collect()).unwrap_or_default();
+        let (approved_for_now, legacy, review_state) = review_state(&review, &def_hash, &texts, plan.get(&f.lean).map(String::as_str), &recorded);
         if !approved_for_now && !legacy {
             reasons.push(format!("the reviewer's approval: {review_state}"));
         }
@@ -434,6 +424,28 @@ pub async fn build(root: &Path, check: bool, force: bool) -> Result<Value, Strin
         "checked": { "at": ledger["checked"]["at"], "current": checked_now },
         "entries": entries,
     }))
+}
+
+/// Where the reviewer's approval of a def stands: (approved for the def and theorems as they are now, proved before the
+/// ledger, the state shown). Proved before the ledger means ticked in the plan with what proved it recorded in
+/// proofs.json, for the def as it is now: a record without the def's hash can't say which code it proved (Async Swap's
+/// changed functions kept their ticks), so it goes back to the reviewer.
+fn review_state(review: &Value, def_hash: &str, texts: &BTreeMap<String, String>, plan_mark: Option<&str>, recorded: &[&Value]) -> (bool, bool, &'static str) {
+    let approved_for_now = review["verdict"] == "approve" && review["defHash"] == json!(def_hash) && serde_json::from_value::<BTreeMap<String, String>>(review["theorems"].clone()).ok().as_ref() == Some(texts);
+    let ticked = review.is_null() && plan_mark == Some("x") && !recorded.is_empty();
+    let legacy = !approved_for_now && ticked && recorded.iter().any(|p| p["defHash"] == json!(def_hash));
+    let state = if approved_for_now {
+        "approved"
+    } else if legacy {
+        "approved before the ledger"
+    } else if ticked {
+        "lapsed: proved before the ledger, with no record of the code it proved"
+    } else if review["verdict"] == "approve" {
+        "lapsed: the def or a theorem changed since it was approved"
+    } else {
+        "not reviewed"
+    };
+    (approved_for_now, legacy, state)
 }
 
 /// The reviewer approved the proof of the plan item `item_text` names: recorded for its def and its theorems as they
@@ -495,6 +507,23 @@ mod tests {
     fn a_statement_mentioning_error_is_not_an_error() {
         assert!(!super::is_lean_error("  (e : FormalAst.Revert), WETH9.WETH9.approve ext guy wad env w ≠ Except.error e"));
         assert!(super::is_lean_error("/p/.formal/check/ledger.lean:4:7: error: unknown identifier 'x'"));
+    }
+
+    #[test]
+    fn a_tick_from_before_the_ledger_holds_only_for_the_code_it_proved() {
+        use serde_json::json;
+        let texts = std::collections::BTreeMap::new();
+        let old = json!({ "item": "`Pool.fee` (Pool.sol)", "files": [] });
+        let hashed = json!({ "item": "`Pool.fee` (Pool.sol)", "files": [], "defHash": "aaaa" });
+        // Async Swap's case: ticked, proofs.json has it, no review, no record of the def: back to the reviewer.
+        let (ok, legacy, state) = super::review_state(&json!(null), "bbbb", &texts, Some("x"), &[&old]);
+        assert!(!ok && !legacy && state.starts_with("lapsed"), "{state}");
+        assert!(super::review_state(&json!(null), "aaaa", &texts, Some("x"), &[&hashed]).1, "the def it proved");
+        assert!(!super::review_state(&json!(null), "bbbb", &texts, Some("x"), &[&hashed]).1, "the def changed since");
+        // A review for an older def lapses; one for this def holds.
+        let review = json!({ "verdict": "approve", "defHash": "aaaa", "theorems": {} });
+        assert!(super::review_state(&review, "aaaa", &texts, Some("x"), &[]).0);
+        assert!(super::review_state(&review, "bbbb", &texts, Some("x"), &[]).2.starts_with("lapsed"));
     }
 
     #[test]

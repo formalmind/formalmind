@@ -76,7 +76,73 @@ pub fn lake_dir(root: &Path) -> Option<PathBuf> {
     if let Some(d) = configured(root, "project").filter(|d| has_lakefile(d)) {
         return Some(d);
     }
-    [root.to_path_buf(), root.join("formal")].into_iter().find(|d| has_lakefile(d))
+    [root.to_path_buf(), root.join("formal")].into_iter().find(|d| has_lakefile(d)).or_else(|| nested_lake(root))
+}
+
+/// A Lake project deeper in the folder (Async Swap kept one in `validation/lean/`): the shallowest lakefile, at most
+/// three folders down, that declares the models' library. Without it the swarm would set up a second project (or, in
+/// older versions, write the models next to the folder's root) and prove against a copy Lake never builds.
+fn nested_lake(root: &Path) -> Option<PathBuf> {
+    let skip = [".git", ".lake", ".formal", ".claude", "node_modules", "lib", "dependencies", "out", "cache", "broadcast", "target", "dist"];
+    let mut level = vec![root.to_path_buf()];
+    for _ in 0..3 {
+        let mut next = vec![];
+        for d in &level {
+            let Ok(entries) = std::fs::read_dir(d) else { continue };
+            let mut dirs: Vec<PathBuf> = entries.flatten().filter(|e| e.file_type().is_ok_and(|t| t.is_dir()) && !skip.contains(&e.file_name().to_string_lossy().as_ref())).map(|e| e.path()).collect();
+            dirs.sort();
+            next.extend(dirs);
+        }
+        let found = next.iter().find(|d| {
+            let text: String = ["lakefile.toml", "lakefile.lean"].iter().filter_map(|f| std::fs::read_to_string(d.join(f)).ok()).collect();
+            ["Generated", "Specs"].iter().any(|l| text.contains(&format!("\"{l}\"")) || text.contains(&format!("lean_lib {l}")))
+        });
+        if let Some(d) = found {
+            return Some(d.clone());
+        }
+        level = next;
+    }
+    None
+}
+
+/// Whether a folder-relative path is a copy of the models or proofs outside the Lake sources: `Generated/AsyncSwap.lean`
+/// at the root when Lake reads `validation/lean/Generated/`. Lake never builds such a copy, so an agent reading, writing
+/// or checking it proves against a stale model; the error names the file Lake builds.
+pub fn stray(root: &Path, rel: &str) -> Option<String> {
+    let src = lean_src(root)?;
+    let lake = lake_dir(root)?;
+    let rel = Path::new(rel).strip_prefix(root).unwrap_or(Path::new(rel));
+    let rel = rel.strip_prefix("./").unwrap_or(rel);
+    let path = root.join(rel);
+    if path.starts_with(&src) {
+        return None;
+    }
+    let (specs, proofs) = layout(root);
+    // The library folders, as they'd sit in the Lake project's own folder or the folder's root.
+    let first = [&lake, &root.to_path_buf()].into_iter().find_map(|base| {
+        let r = path.strip_prefix(base).ok()?;
+        let top = r.components().next()?.as_os_str().to_string_lossy().to_string();
+        [specs, proofs].contains(&top.as_str()).then(|| r.to_path_buf())
+    })?;
+    let right = src.join(&first);
+    let show = |p: &Path| p.strip_prefix(root).unwrap_or(p).to_string_lossy().replace('\\', "/");
+    Some(format!("{} is outside the Lake sources ({}/), so Lake never builds it: use {}", show(&path), show(&src), show(&right)))
+}
+
+/// The stray model or proof folders (see `stray`), folder-relative.
+pub fn strays(root: &Path) -> Vec<String> {
+    let (specs, proofs) = layout(root);
+    let bases: Vec<PathBuf> = [Some(root.to_path_buf()), lake_dir(root)].into_iter().flatten().collect();
+    let mut out: Vec<String> = bases
+        .iter()
+        .flat_map(|b| [b.join(specs), b.join(proofs)])
+        .filter(|d| d.is_dir())
+        .filter_map(|d| d.strip_prefix(root).ok().map(|p| p.to_string_lossy().replace('\\', "/")))
+        .filter(|rel| stray(root, rel).is_some())
+        .collect();
+    out.sort();
+    out.dedup();
+    out
 }
 
 /// Where the Lake project's Lean sources are: formalmind.toml's `lean.sources`, else the lakefile's `srcDir` in the
@@ -695,6 +761,46 @@ mod tests {
         assert!(super::refresh(Some(&m(2, "30")), &m(2, "2")).unwrap().contains("code changed"), "a changed body");
         assert!(super::refresh(Some(&m(2, "30")), &m(3, "30")).unwrap().contains("1 more"));
         assert_eq!(super::refresh(Some(&m(3, "30")), &m(2, "2")), None, "never fewer functions than the file has");
+    }
+
+    #[test]
+    fn the_swarm_builds_only_against_the_configured_sources() {
+        let root = std::env::temp_dir().join(format!("fm-stray-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        // Async Swap before its root lakefile: the Lake project in validation/lean, found there rather than set up anew.
+        let lean = root.join("validation/lean");
+        std::fs::create_dir_all(lean.join("Generated")).unwrap();
+        std::fs::write(lean.join("lakefile.toml"), "name = \"p\"\ndefaultTargets = [\"Generated\", \"Refinement\"]\n[[lean_lib]]\nname = \"Generated\"\n").unwrap();
+        assert_eq!(super::lake_dir(&root), Some(lean.clone()));
+        assert_eq!(super::lean_src(&root), Some(lean.clone()));
+        // Then: a root lakefile with srcDir, and stale copies of the models and proofs next to it.
+        std::fs::write(root.join("lakefile.toml"), "name = \"p\"\nsrcDir = \"validation/lean\"\ndefaultTargets = [\"Generated\", \"Refinement\"]\n").unwrap();
+        std::fs::write(root.join(super::CONFIG), "[lean]\nproject = \".\"\nsources = \"validation/lean\"\n").unwrap();
+        std::fs::create_dir_all(root.join("Generated")).unwrap();
+        std::fs::create_dir_all(root.join("Refinement/Swarm")).unwrap();
+        std::fs::write(root.join("Generated/AsyncSwap.lean"), "-- stale").unwrap();
+        assert_eq!(super::lake_dir(&root), Some(root.clone()));
+        assert_eq!(super::lean_src(&root), Some(lean.clone()));
+        let why = super::stray(&root, "Generated/AsyncSwap.lean").expect("the root copy is stray");
+        assert!(why.contains("use validation/lean/Generated/AsyncSwap.lean"), "{why}");
+        assert!(super::stray(&root, "./Refinement/Swarm/AsyncFillerTradeFee.lean").is_some());
+        assert_eq!(super::stray(&root, "validation/lean/Generated/AsyncSwap.lean"), None);
+        assert_eq!(super::stray(&root, "src/AsyncSwap.sol"), None);
+        assert_eq!(super::strays(&root), ["Generated", "Refinement"]);
+        // The agents' tools refuse the copies: reading, writing and checking happen against what Lake builds.
+        let rt = tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap();
+        for (tool, args) in [
+            ("read_file", json!({ "path": "Generated/AsyncSwap.lean" })),
+            ("write_file", json!({ "path": "Refinement/Swarm/AsyncFillerTradeFee.lean", "content": "x" })),
+            ("run", json!({ "command": "lake env lean Refinement/Swarm/AsyncFillerTradeFee.lean" })),
+        ] {
+            let out = rt.block_on(crate::executor::call_tool(&root, tool, &args));
+            assert!(out.starts_with("error:") && out.contains("outside the Lake sources"), "{tool}: {out}");
+        }
+        assert!(!root.join("Refinement/Swarm/AsyncFillerTradeFee.lean").exists());
+        // The model is written where Lake reads it.
+        assert_eq!(super::layout(&root).0, "Generated");
+        let _ = std::fs::remove_dir_all(&root);
     }
 
     #[test]

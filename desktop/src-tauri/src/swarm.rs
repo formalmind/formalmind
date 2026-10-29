@@ -605,6 +605,29 @@ The maintainer follows your work in the chat and sees only what you write, so ne
 
 /// The assistant's switch from answering to working: a session started with a message answers it and stops, unless
 /// the maintainer asked for work.
+fn reopen_tool() -> Value {
+    json!({ "name": "reopen", "description": "When the maintainer asks to prove functions again (their code changed, a proof is wrong or too weak): reopens those plan items in .formal/plan.md, proved or blocked, so the prover takes them in turn, and the session goes on with the plan after your answer. Name each function by its Lean def as the plan lists it (e.g. `AsyncSwap.useNonce`).", "input_schema": { "type": "object", "properties": { "defs": { "type": "array", "items": { "type": "string" } } }, "required": ["defs"] } })
+}
+
+/// Reopens the plan items for these defs (proved or blocked): (reopened, not in the plan).
+fn reopen(root: &Path, defs: &[String]) -> (Vec<String>, Vec<String>) {
+    let plan = read_plan(root);
+    let (mut done, mut unknown) = (vec![], vec![]);
+    for d in defs {
+        let d = d.trim().trim_matches('`');
+        match plan.iter().find(|i| i.text.split('`').nth(1) == Some(d)) {
+            Some(i) => {
+                if i.mark != " " {
+                    set_mark(root, i.index, ' ');
+                }
+                done.push(d.to_string());
+            }
+            None => unknown.push(d.to_string()),
+        }
+    }
+    (done, unknown)
+}
+
 fn start_work_tool() -> Value {
     json!({ "name": "start_work", "description": "Only when the maintainer asks the swarm to do work (prove the plan or the functions left, review, carry on): after your answer, the session goes on with the plan instead of stopping. Not for a question, an explanation or an audit you do yourself in the chat.", "input_schema": { "type": "object", "properties": {}, "required": [] } })
 }
@@ -663,6 +686,7 @@ fn tools(role: &str) -> Value {
         t.push(crate::statements::formalize_tool());
         t.push(crate::statements::confirm_tool());
         t.push(start_work_tool());
+        t.push(reopen_tool());
     }
     if role == "prover" {
         t.push(json!({ "name": "record_property", "description": "Once your proof checks, write the notes that go into Formal Mind's report for this property (audit/formal-mind.audit.json). The reviewer checks them against the Solidity and your proof before they count. Call it again to replace them.", "input_schema": s(json!({
@@ -1036,6 +1060,20 @@ impl Turn<'_> {
                     self.emit("result", role, item, r.into());
                     r.into()
                 }
+                "reopen" => {
+                    let defs: Vec<String> = input["defs"].as_array().into_iter().flatten().filter_map(|d| d.as_str().map(String::from)).collect();
+                    self.emit("tool", role, item, format!("reopen {}", defs.join(", ")));
+                    let (done, unknown) = reopen(&root, &defs);
+                    if !done.is_empty() {
+                        self.swarm.work.store(true, Ordering::SeqCst);
+                    }
+                    let mut r = if done.is_empty() { "nothing reopened".to_string() } else { format!("reopened {}; after your answer, the swarm proves them", done.join(", ")) };
+                    if !unknown.is_empty() {
+                        r.push_str(&format!("; not in the plan: {}", unknown.join(", ")));
+                    }
+                    self.emit("result", role, item, r.clone());
+                    r
+                }
                 "report_bug" => {
                     self.emit("tool", role, item, format!("report_bug {shown}"));
                     let r = self.report_bug(&root, input, role, item).await;
@@ -1049,7 +1087,7 @@ impl Turn<'_> {
                 // The swarm keeps .formal/ (it ticks plan items only after the check and the review), whichever agent
                 // asks: an assistant once marked a whole plan proved by writing plan.md, past the reviewer.
                 "write_file" if inside(&root, input["path"].as_str().unwrap_or("")).is_ok_and(|p| p.starts_with(root.join(".formal"))) => {
-                    "error: .formal/ is the swarm's; it ticks a plan item once its proof checks and the reviewer approves it".to_string()
+                    "error: .formal/ is the swarm's; it ticks a plan item once its proof checks and the reviewer approves it (reopen puts items back in the plan)".to_string()
                 }
                 _ => {
                     if name == "write_file" {
@@ -1566,6 +1604,9 @@ async fn sync_plan(turn: &Turn<'_>, root: &Path) -> usize {
     for r in &ctx.regenerated {
         turn.emit("result", "planner", "plan", r.clone());
     }
+    for d in crate::swarm_ctx::strays(root) {
+        turn.emit("result", "planner", "plan", format!("{d}: a copy outside the Lake sources that Lake never builds; the agents can't read or check it, and it can go"));
+    }
     // Lean checks the proofs again when the sources changed since the last check (a changed model among them).
     let reopened = match crate::ledger::build(root, true, false).await {
         Ok(ledger) => {
@@ -1795,7 +1836,9 @@ async fn run_swarm(turn: &Turn<'_>) -> String {
                 let _ = &resume_note;
                 let added = sync_plan(turn, &root).await;
                 let after = read_plan(&root);
-                if added == 0 && after.iter().all(|i| i.mark != " ") {
+                // A message that came in meanwhile is answered first: it may ask for more work.
+                let waiting = with_queue(&turn.queue, |q| q.jobs.iter().any(|j| j.kind == "answer" && j.state == "queued"));
+                if added == 0 && !waiting && after.iter().all(|i| i.mark != " ") {
                     with_queue(&turn.queue, |q| if let Some(j) = q.jobs.iter_mut().find(|j| j.id == job.id) { j.state = "done".into(); });
                     return if after.is_empty() { "failed: formal-ast found no function in scope (no script under script/ deploys or calls the contracts)".into() } else { format!("done: every function in scope is proved or blocked ({} items)", after.len()) };
                 }
@@ -2105,18 +2148,22 @@ pub fn swarm_start(app: AppHandle, swarms: State<'_, Swarms>, request: SwarmRequ
         // The session's title: the focus it was given (the latest start's focus wins).
         turn.emit("start", "swarm", "", request.goal.clone().unwrap_or_default());
         turn.emit("status", "swarm", "", "resuming".into());
-        let outcome = run_swarm(&turn).await;
-        turn.emit("done", "swarm", "", outcome);
         let k = key(&request.folder, &id);
-        release(&k);
-        let left = {
+        let left = loop {
+            let outcome = run_swarm(&turn).await;
             let swarms = app.state::<Swarms>();
             let mut map = swarms.0.lock().unwrap();
+            // A message sent as the run finished (swarm_say holds the same lock) is answered, not left in the queue.
+            if !swarm.stop.load(Ordering::SeqCst) && answer_waiting(&swarm.queue) {
+                continue;
+            }
+            turn.emit("done", "swarm", "", outcome);
+            release(&k);
             map.remove(&k);
             if !map.keys().any(|other| other.starts_with(&key(&request.folder, ""))) {
                 release_folder(Path::new(&request.folder));
             }
-            map.len()
+            break map.len();
         };
         broadcast_running(&app);
         // Quit (⌘Q) while this was working: the last session to finish closes the app.
@@ -2165,19 +2212,25 @@ pub fn swarm_triage(folder: String, path: String, session: Option<String>) -> Re
     Ok(())
 }
 
+/// A message to the swarm waits in this queue.
+fn answer_waiting(queue: &Path) -> bool {
+    with_queue(queue, |q| q.jobs.iter().any(|j| j.kind == "answer" && j.state == "queued"))
+}
+
 /// A message to the swarm: queued as an "answer" job (on disk, so a quit can't lose it), answered before the next turn.
 /// It is a `you` event in the session too, so the chat shows it wherever it was sent from (here or through the MCP).
 #[tauri::command]
 pub fn swarm_say(app: AppHandle, swarms: State<'_, Swarms>, folder: String, run: String, text: String) -> Result<(), String> {
-    let (qf, spent) = {
+    // Queued under the swarms' lock, so a run that is finishing either sees the message or is already gone.
+    let spent = {
         let map = swarms.0.lock().unwrap();
         let s = map.get(&key(&folder, &run)).ok_or("The swarm isn't running")?;
+        with_queue(&s.queue, |q| {
+            enqueue(q, "answer", 0, &text, 1, "");
+        });
         let spent = *s.spent.lock().unwrap();
-        (s.queue.clone(), spent)
+        spent
     };
-    with_queue(&qf, |q| {
-        enqueue(q, "answer", 0, &text, 1, "");
-    });
     emit_event(&app, SwarmEvent { folder, run, kind: "you", role: "you".into(), item: String::new(), text, spent, at: now_ms() as u64 });
     Ok(())
 }
@@ -2722,6 +2775,71 @@ mod tests {
         assert_eq!(gone.len(), 1, "only the checked item that is no longer proved: {gone:?}");
         assert_eq!((gone[0].0, gone[0].1.as_str()), (1, "Pool.fee"));
         assert!(gone[0].2.contains("lapsed"));
+    }
+
+    #[test]
+    fn a_message_can_reopen_proved_functions() {
+        let root = std::env::temp_dir().join(format!("fm-reopen-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(root.join(".formal")).unwrap();
+        std::fs::write(plan_path(&root), "# Plan\n\n- [x] `AsyncSwap.useNonce` — AsyncSwap\n- [!] `AsyncFiller.fill` — AsyncFiller\n- [x] `AsyncSwap.key` — AsyncSwap\n").unwrap();
+        let (done, unknown) = reopen(&root, &["AsyncSwap.useNonce".into(), "`AsyncFiller.fill`".into(), "AsyncSwap.gone".into()]);
+        assert_eq!(done, ["AsyncSwap.useNonce", "AsyncFiller.fill"]);
+        assert_eq!(unknown, ["AsyncSwap.gone"]);
+        let marks: Vec<String> = read_plan(&root).into_iter().map(|i| i.mark).collect();
+        assert_eq!(marks, [" ", " ", "x"]);
+        // A message queued as the run finishes keeps the session going until it is answered.
+        let qf = queue_file(&root, "swarm");
+        assert!(!answer_waiting(&qf));
+        with_queue(&qf, |q| enqueue(q, "answer", 0, "reopen the changed functions", 1, ""));
+        assert!(answer_waiting(&qf));
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    /// On a real folder, what a fresh run's planner does before any agent: the AST's items added, checked items whose
+    /// code changed reopened, stray model copies named, and the Lake sources the proofs build in.
+    /// `PROBE=<folder> cargo test --lib swarm::tests::plan_probe -- --ignored --nocapture`
+    #[tokio::test(flavor = "current_thread")]
+    #[ignore]
+    async fn plan_probe() {
+        let root = PathBuf::from(std::env::var("PROBE").unwrap());
+        crate::swarm_ctx::ensure_config(&root);
+        let ctx = crate::swarm_ctx::context(&root);
+        println!("LAKE {:?} SOURCES {:?}", crate::swarm_ctx::lake_dir(&root), crate::swarm_ctx::lean_src(&root));
+        for p in &ctx.problems {
+            println!("PROBLEM {p}");
+        }
+        for r in &ctx.regenerated {
+            println!("REGENERATED {r}");
+        }
+        let text = std::fs::read_to_string(plan_path(&root)).unwrap_or_default();
+        let missing = ctx.missing_items(&text);
+        if !missing.is_empty() {
+            std::fs::write(plan_path(&root), format!("{}\n{}\n", text.trim_end(), missing.join("\n"))).unwrap();
+        }
+        println!("ADDED {}", missing.len());
+        for d in crate::swarm_ctx::strays(&root) {
+            println!("STRAY {d}");
+        }
+        let mut ledger = crate::ledger::build(&root, true, false).await.unwrap();
+        // BASELINE=1: the reviewer approves what only waits on it, and those items are ticked (a converged run).
+        if std::env::var("BASELINE").is_ok() {
+            for i in read_plan(&root) {
+                let def = i.text.split('`').nth(1).unwrap_or("");
+                let e = ledger["entries"].as_array().unwrap().iter().find(|e| e["lean"] == def).cloned().unwrap_or_default();
+                if e["notYet"].as_array().is_some_and(|r| r.len() == 1 && r[0].as_str().is_some_and(|w| w.contains("not reviewed"))) {
+                    crate::ledger::approve(&root, &i.text, "baseline");
+                    set_mark(&root, i.index, 'x');
+                }
+            }
+            ledger = crate::ledger::build(&root, true, false).await.unwrap();
+        }
+        let gone = lapsed(&read_plan(&root), &ledger);
+        for (index, def, why) in &gone {
+            set_mark(&root, *index, ' ');
+            println!("REOPENED {index} {def}: {why}");
+        }
+        println!("PROVED {} of {}; OPEN {}", ledger["proved"], ledger["functions"], read_plan(&root).iter().filter(|i| i.mark == " ").count());
     }
 
     #[test]
