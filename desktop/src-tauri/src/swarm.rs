@@ -953,20 +953,22 @@ impl Turn<'_> {
     /// A tool call from the agent, run and counted in the turn's health record.
     async fn tool(&self, role: &str, item: &str, name: &str, input: &Value, out: &mut Outcome) -> String {
         // A pause cuts through a tool the agent is waiting on (a background build, a long run) instead of waiting for it.
-        let stop = &self.swarm.stop;
-        let stopped = async {
-            while !stop.load(Ordering::SeqCst) {
-                tokio::time::sleep(Duration::from_millis(300)).await;
-            }
-        };
         let answer = tokio::select! {
             a = self.run_tool(role, item, name, input, out) => a,
-            _ = stopped => "stopped: the swarm was paused; this call didn't finish".to_string(),
+            _ = self.stopped() => "stopped: the swarm was paused; this call didn't finish".to_string(),
         };
         if let Some(h) = self.health.lock().unwrap().as_mut() {
             h.tool(name, input, &answer);
         }
         answer
+    }
+
+    /// Resolves once the session is stopped: every wait of an agent's turn (a model call, Codex or Claude Code
+    /// thinking, a tool) races it, so Stop ends the turn within a moment instead of after the current step.
+    async fn stopped(&self) {
+        while !self.swarm.stop.load(Ordering::SeqCst) {
+            tokio::time::sleep(Duration::from_millis(300)).await;
+        }
     }
 
     async fn run_tool(&self, role: &str, item: &str, name: &str, input: &Value, out: &mut Outcome) -> String {
@@ -1152,6 +1154,7 @@ impl Turn<'_> {
                 return Ok(out);
             }
             tokio::select! {
+                _ = self.stopped() => continue,
                 call = bridge.calls.recv() => {
                     let Some(call) = call else { continue };
                     match rpc(&call.msg, &tools, &instructions) {
@@ -1256,6 +1259,7 @@ impl Turn<'_> {
                 return Ok(out);
             }
             tokio::select! {
+                _ = self.stopped() => continue,
                 call = bridge.calls.recv() => {
                     let Some(call) = call else { continue };
                     match rpc(&call.msg, &tools, &instructions) {
@@ -1417,7 +1421,11 @@ impl Turn<'_> {
             // retried once, instead of pausing the swarm on a job that would fail the same way on every resume.
             let mut retried = false;
             let reply = loop {
-                let (status, reply) = self.call(&key, &base, &self.body(role, &goal, &messages, None)).await?;
+                let body = self.body(role, &goal, &messages, None);
+                let (status, reply) = tokio::select! {
+                    r = self.call(&key, &base, &body) => r?,
+                    _ = self.stopped() => return Ok(out),
+                };
                 let message = reply["error"]["message"].as_str().unwrap_or("The model call failed").to_string();
                 let full = if status < 300 { reply["stop_reason"] == "model_context_window_exceeded" } else { too_long(status, &message) };
                 if status < 300 && !full {
