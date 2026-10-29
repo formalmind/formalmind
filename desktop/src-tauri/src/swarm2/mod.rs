@@ -3,8 +3,12 @@
 
 #![allow(dead_code)]
 
+pub mod audit;
 pub mod events;
+pub mod executor;
 pub mod fsguard;
 pub mod lake;
+pub mod ledger;
 pub mod plan;
 pub mod queue;
+pub mod tools;
