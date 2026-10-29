@@ -1620,7 +1620,8 @@ function ProjectHeader({ project, group, state }: { project: SwarmProject; group
 	);
 }
 
-const MOVE = "transition-transform duration-700 [transition-timing-function:cubic-bezier(0.22,1,0.36,1)] motion-reduce:transition-none";
+// Agents and cards jump to their place: no gliding.
+const MOVE = "";
 
 /** Every role's cursor stays at full strength; the turn pill says who is working. */
 /** `onTalk` makes the name pill a button that opens a chat with this agent. */
@@ -1648,7 +1649,7 @@ export function SwarmCursor({ role, x, y, say, turn, thinking, where, onWhereEnt
 		<div
 			data-cursor={role}
 			className={`pointer-events-none absolute left-0 top-0 z-20 ${MOVE}`}
-			style={{ transform: `translate(${x}px, ${y}px)`, transitionProperty: "transform", transitionDelay: `${delay}ms` }}
+			style={{ transform: `translate(${x}px, ${y}px)` }}
 		>
 			<div className="relative">
 			<svg width="28" height="28" viewBox="0 0 24 24" className="absolute -left-2 -top-[5px] drop-shadow-sm" aria-hidden>
@@ -1750,7 +1751,6 @@ function BoardCard({ card, x, y, hidden, href, onEnter, onLeave, onOpen, onMeasu
 				transform: `translate(${x}px, ${y}px)`,
 				opacity: hidden ? 0 : 1,
 				pointerEvents: hidden ? "none" : undefined,
-				transitionProperty: "transform, opacity, border-color",
 			}}
 		>
 			<div className="flex items-center gap-1.5 text-[12px]">
