@@ -3,6 +3,7 @@
 //! with settings in ~/.formalmind (local.rs), and the local executor that runs agent turns here (executor.rs).
 
 mod agent;
+mod core;
 mod analysis;
 mod answerer;
 mod ast;
