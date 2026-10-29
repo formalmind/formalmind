@@ -125,7 +125,7 @@ fn spawn_task(folder: &str, command: &str) -> Result<usize, String> {
     let folder_s = folder.to_string();
     let task_tx = tx.clone();
     let handle = tauri::async_runtime::spawn(async move {
-        let out = crate::executor::run_command(std::path::Path::new(&folder_s), &what).await.unwrap_or_else(|e| format!("error: {e}"));
+        let out = crate::swarm2::lake::run(std::path::Path::new(&folder_s), &what).await.unwrap_or_else(|e| format!("error: {e}"));
         let _ = tx.send(Some(out));
     });
     if let Some(t) = tasks().lock().unwrap().get_mut(folder).and_then(|l| l.get_mut(id - 1)) {

@@ -301,40 +301,50 @@ impl Engine {
     /// B21: an audit report to read, queued as a `triage` job in the session (a running one takes it next).
     pub fn triage(&self, folder: &str, path: &str, session: Option<&str>) -> Result<(), String> {
         self.world.allowed(folder)?;
-        let root = PathBuf::from(folder);
-        let p = super::fsguard::inside(&root, path)?;
-        if !p.is_file() {
-            return Err(format!("{path} isn't a file"));
-        }
-        let ext = p.extension().and_then(|e| e.to_str()).unwrap_or("").to_ascii_lowercase();
-        if !["pdf", "md", "markdown", "txt"].contains(&ext.as_str()) {
-            return Err("Reports are PDF, Markdown or text files".into());
-        }
-        let qf = queue::queue_path(&root, &queue::session_id(session));
-        Queue::update(&qf, |q| q.enqueue(NewJob { text: path.into(), attempt: 1, ..NewJob::new(queue::Kind::Triage) })).map_err(|e| e.to_string())?;
-        Ok(())
+        queue_triage(folder, path, session)
     }
 
     /// B22: a proof written outside the app (the MCP), queued for review on the plan item naming `function`.
     pub fn submit_proof(&self, folder: &str, function: &str, path: &str, notes: Option<&str>, session: Option<&str>) -> Result<serde_json::Value, String> {
         self.world.allowed(folder)?;
-        let root = PathBuf::from(folder);
-        super::fsguard::inside(&root, path)?;
-        let items = super::plan::read(&root);
-        let Some(item) = super::plan::find_def(&items, function) else {
-            return Err(format!("No plan item names `{function}`; the plan names each function by its Lean def (see the work map)"));
-        };
-        let summary = format!("Written by an agent outside the app, through Formal Mind's MCP, in {path}.\n\n{}", notes.unwrap_or_default().trim());
-        let qf = queue::queue_path(&root, &queue::session_id(session));
-        let job = Queue::update(&qf, |q| {
-            q.enqueue(NewJob { item: item.index, text: item.text.clone(), attempt: 1, notes: summary, files: vec![path.into()], ..NewJob::new(queue::Kind::Review) })
-        })
-        .map_err(|e| e.to_string())?;
-        Ok(serde_json::json!({ "item": item.index, "job": job, "queued": "review" }))
+        queue_review(folder, function, path, notes, session)
     }
 
     /// Whether any session runs, in any folder (⌘Q).
     pub fn any_running(&self) -> bool {
         !self.sessions.lock().unwrap().is_empty()
     }
+}
+
+/// B21 after the folder guard: the report checked and queued as a `triage` job.
+pub fn queue_triage(folder: &str, path: &str, session: Option<&str>) -> Result<(), String> {
+    let root = PathBuf::from(folder);
+    let p = super::fsguard::inside(&root, path)?;
+    if !p.is_file() {
+        return Err(format!("{path} isn't a file"));
+    }
+    let ext = p.extension().and_then(|e| e.to_str()).unwrap_or("").to_ascii_lowercase();
+    if !["pdf", "md", "markdown", "txt"].contains(&ext.as_str()) {
+        return Err("Reports are PDF, Markdown or text files".into());
+    }
+    let qf = queue::queue_path(&root, &queue::session_id(session));
+    Queue::update(&qf, |q| q.enqueue(NewJob { text: path.into(), attempt: 1, ..NewJob::new(queue::Kind::Triage) })).map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+/// B22 after the folder guard: queued for review on the plan item naming `function`.
+pub fn queue_review(folder: &str, function: &str, path: &str, notes: Option<&str>, session: Option<&str>) -> Result<serde_json::Value, String> {
+    let root = PathBuf::from(folder);
+    super::fsguard::inside(&root, path)?;
+    let items = super::plan::read(&root);
+    let Some(item) = super::plan::find_def(&items, function) else {
+        return Err(format!("No plan item names `{function}`; the plan names each function by its Lean def (see the work map)"));
+    };
+    let summary = format!("Written by an agent outside the app, through Formal Mind's MCP, in {path}.\n\n{}", notes.unwrap_or_default().trim());
+    let qf = queue::queue_path(&root, &queue::session_id(session));
+    let job = Queue::update(&qf, |q| {
+        q.enqueue(NewJob { item: item.index, text: item.text.clone(), attempt: 1, notes: summary, files: vec![path.into()], ..NewJob::new(queue::Kind::Review) })
+    })
+    .map_err(|e| e.to_string())?;
+    Ok(serde_json::json!({ "item": item.index, "job": job, "queued": "review" }))
 }

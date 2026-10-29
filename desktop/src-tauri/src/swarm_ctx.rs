@@ -105,46 +105,6 @@ fn nested_lake(root: &Path) -> Option<PathBuf> {
     None
 }
 
-/// Whether a folder-relative path is a copy of the models or proofs outside the Lake sources: `Generated/AsyncSwap.lean`
-/// at the root when Lake reads `validation/lean/Generated/`. Lake never builds such a copy, so an agent reading, writing
-/// or checking it proves against a stale model; the error names the file Lake builds.
-pub fn stray(root: &Path, rel: &str) -> Option<String> {
-    let src = lean_src(root)?;
-    let lake = lake_dir(root)?;
-    let rel = Path::new(rel).strip_prefix(root).unwrap_or(Path::new(rel));
-    let rel = rel.strip_prefix("./").unwrap_or(rel);
-    let path = root.join(rel);
-    if path.starts_with(&src) {
-        return None;
-    }
-    let (specs, proofs) = layout(root);
-    // The library folders, as they'd sit in the Lake project's own folder or the folder's root.
-    let first = [&lake, &root.to_path_buf()].into_iter().find_map(|base| {
-        let r = path.strip_prefix(base).ok()?;
-        let top = r.components().next()?.as_os_str().to_string_lossy().to_string();
-        [specs, proofs].contains(&top.as_str()).then(|| r.to_path_buf())
-    })?;
-    let right = src.join(&first);
-    let show = |p: &Path| p.strip_prefix(root).unwrap_or(p).to_string_lossy().replace('\\', "/");
-    Some(format!("{} is outside the Lake sources ({}/), so Lake never builds it: use {}", show(&path), show(&src), show(&right)))
-}
-
-/// The stray model or proof folders (see `stray`), folder-relative.
-pub fn strays(root: &Path) -> Vec<String> {
-    let (specs, proofs) = layout(root);
-    let bases: Vec<PathBuf> = [Some(root.to_path_buf()), lake_dir(root)].into_iter().flatten().collect();
-    let mut out: Vec<String> = bases
-        .iter()
-        .flat_map(|b| [b.join(specs), b.join(proofs)])
-        .filter(|d| d.is_dir())
-        .filter_map(|d| d.strip_prefix(root).ok().map(|p| p.to_string_lossy().replace('\\', "/")))
-        .filter(|rel| stray(root, rel).is_some())
-        .collect();
-    out.sort();
-    out.dedup();
-    out
-}
-
 /// Where the Lake project's Lean sources are: formalmind.toml's `lean.sources`, else the lakefile's `srcDir` in the
 /// Lake project (Async Swap's `srcDir = "validation/lean"`), else the Lake project itself. `Generated/` and
 /// `Refinement/` live here, and module names are relative to it.
@@ -533,7 +493,7 @@ Check it with `lake build {proofs}.{functions}.{module}` (lake runs in {lake_rel
             s.push_str(&format!("\n### Its generated def\n\n```lean\n{}\n```\n", d.trim_end()));
         }
         if let Some(sl) = c.slices.get(u.name()) {
-            s.push_str(&format!("\n### Its slice (from the AST)\n\n{}\n", crate::executor::clip(sl.clone())));
+            s.push_str(&format!("\n### Its slice (from the AST)\n\n{}\n", crate::swarm2::lake::clip(sl.clone())));
         }
         let earlier = archived_proofs(root, &lean);
         if !earlier.is_empty() {
@@ -781,28 +741,13 @@ mod tests {
         std::fs::write(root.join("Generated/AsyncSwap.lean"), "-- stale").unwrap();
         assert_eq!(super::lake_dir(&root), Some(root.clone()));
         assert_eq!(super::lean_src(&root), Some(lean.clone()));
-        let why = super::stray(&root, "Generated/AsyncSwap.lean").expect("the root copy is stray");
+        let why = crate::swarm2::fsguard::stray(&root, "Generated/AsyncSwap.lean").expect("the root copy is stray");
         assert!(why.contains("use validation/lean/Generated/AsyncSwap.lean"), "{why}");
-        assert!(super::stray(&root, "./Refinement/Swarm/AsyncFillerTradeFee.lean").is_some());
-        assert_eq!(super::stray(&root, "validation/lean/Generated/AsyncSwap.lean"), None);
-        assert_eq!(super::stray(&root, "src/AsyncSwap.sol"), None);
-        assert_eq!(super::strays(&root), ["Generated", "Refinement"]);
-        // The agents' tools refuse the copies: reading, writing and checking happen against what Lake builds.
-        let rt = tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap();
-        for (tool, args) in [
-            ("read_file", json!({ "path": "Generated/AsyncSwap.lean" })),
-            ("write_file", json!({ "path": "Refinement/Swarm/AsyncFillerTradeFee.lean", "content": "x" })),
-            ("run", json!({ "command": "lake env lean Refinement/Swarm/AsyncFillerTradeFee.lean" })),
-        ] {
-            let out = rt.block_on(crate::executor::call_tool(&root, tool, &args));
-            assert!(out.starts_with("error:") && out.contains("outside the Lake sources"), "{tool}: {out}");
-        }
-        assert!(!root.join("Refinement/Swarm/AsyncFillerTradeFee.lean").exists());
-        // A search finds the def Lake builds, not its stale copy.
-        std::fs::write(lean.join("Generated/AsyncSwap.lean"), "def AsyncFiller.tradeFee := 1\n").unwrap();
-        std::fs::write(root.join("Generated/AsyncSwap.lean"), "def AsyncFiller.tradeFee := 0\n").unwrap();
-        let hits = rt.block_on(crate::executor::call_tool(&root, "search", &json!({ "pattern": "def AsyncFiller.tradeFee" })));
-        assert_eq!(hits.trim(), "validation/lean/Generated/AsyncSwap.lean:1: def AsyncFiller.tradeFee := 1");
+        assert!(crate::swarm2::fsguard::stray(&root, "./Refinement/Swarm/AsyncFillerTradeFee.lean").is_some());
+        assert_eq!(crate::swarm2::fsguard::stray(&root, "validation/lean/Generated/AsyncSwap.lean"), None);
+        assert_eq!(crate::swarm2::fsguard::stray(&root, "src/AsyncSwap.sol"), None);
+        assert_eq!(crate::swarm2::fsguard::strays(&root), ["Generated", "Refinement"]);
+        // The agents' tools refusing the copies is swarm2's (fsguard, tools: B27).
         // The model is written where Lake reads it.
         assert_eq!(super::layout(&root).0, "Generated");
         let _ = std::fs::remove_dir_all(&root);
@@ -1040,29 +985,6 @@ pub fn record_internal_finding(root: &Path, id: &str, input: &Value, poc: &str) 
     update_internal(root, |doc| upsert(doc, "findings", f))
 }
 
-/// A property the reviewer approved, in Formal Mind's audit file: `P-<plan item>`, the function, what holds and under
-/// which assumptions (the reviewer's words), the theorems that prove it and the proof's files.
-pub fn record_property(root: &Path, item: usize, item_text: &str, files: &[String], input: &Value) -> Result<String, String> {
-    let statement = input["statement"].as_str().unwrap_or("").trim();
-    if statement.is_empty() {
-        return Err("statement is required: what the proof establishes".into());
-    }
-    let assumptions = input["assumptions"].as_str().unwrap_or("").trim();
-    let description = if assumptions.is_empty() { statement.to_string() } else { format!("{statement}\n\n**Assumptions.** {assumptions}") };
-    let mut p = json!({
-        "id": format!("P-{item:02}"),
-        "title": item_text.split('`').nth(1).unwrap_or(item_text).to_string(),
-        "status": "verified",
-        "description": description,
-        "theorems": input["theorems"].as_array().into_iter().flatten().filter_map(|t| t.as_str()).map(|t| json!({ "name": t })).collect::<Vec<_>>(),
-        "files": files,
-    });
-    if let Some(c) = regex::Regex::new(r"\(((?:src|contracts)/[^):\s]+):(\d+)\)").expect("valid regex").captures(item_text) {
-        p["locations"] = json!([{ "file": &c[1], "line": c[2].parse::<u64>().unwrap_or(0) }]);
-    }
-    update_internal(root, |doc| upsert(doc, "properties", p))
-}
-
 /// A proved statement (.formal/statements.md) in Formal Mind's audit file: `P-S01`, titled by the maintainer's words.
 pub fn record_statement_property(root: &Path, id: &str, title: &str, files: &[String], input: &Value) -> Result<String, String> {
     let statement = input["statement"].as_str().unwrap_or("").trim();
@@ -1096,10 +1018,10 @@ mod internal_tests {
         let (id, _) = file_finding(&root, &bug, "test/formal/F.t.sol", "exit 0").unwrap();
         let item = "`Router.swap` — Router (src/Router.sol:113): payable";
         let p = json!({ "statement": "It reverts unless the caller owns the order.", "assumptions": "`ext.get` returns what `ext.set` wrote.", "theorems": ["swap_owner"] });
-        record_property(&root, 4, item, &["formal/Refinement/Swarm/RouterSwap.lean".into()], &p).unwrap();
+        crate::swarm2::audit::record_property(&root, 4, item, &["formal/Refinement/Swarm/RouterSwap.lean".into()], &p).unwrap();
         // Approving again replaces it.
-        record_property(&root, 4, item, &[], &p).unwrap();
-        assert!(record_property(&root, 5, item, &[], &json!({})).is_err());
+        crate::swarm2::audit::record_property(&root, 4, item, &[], &p).unwrap();
+        assert!(crate::swarm2::audit::record_property(&root, 5, item, &[], &json!({})).is_err());
         let doc: Value = serde_json::from_str(&std::fs::read_to_string(internal_path(&root)).unwrap()).unwrap();
         assert_eq!((doc["kind"].as_str(), doc["findings"][0]["id"].as_str()), (Some("internal"), Some(id.as_str())));
         let f = &doc["findings"][0];

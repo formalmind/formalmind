@@ -791,11 +791,3 @@ fn b40_tools_that_dont_connect_are_retried_then_pause() {
     assert_eq!(b.script.roles().len(), 3);
     assert_eq!(b.done(), vec!["paused: the agent's tools didn't connect (failed)"]);
 }
-
-#[test]
-fn the_prompts_are_swarm_rs_word_for_word() {
-    let ours = include_str!("prompts.rs");
-    let theirs = include_str!("../../swarm.rs");
-    let body = ours.split_once("pub fn system(role: &str, folder: &str, goal: &str) -> String {").unwrap().1;
-    assert!(theirs.contains(body.trim_end()), "prompts.rs's system() must equal swarm.rs::system");
-}

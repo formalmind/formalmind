@@ -1,404 +1,165 @@
-//! A swarm that runs on this machine, on one local folder, until the plan is proven, the budget runs out, or you stop
-//! it. Planner → prover → reviewer, one item at a time, with the state in the folder's `.formal/` (plan.md, queue.json,
-//! runs/). The plan comes from formal-ast (the scripts' entry points, the units, what the Proofs page doesn't show as proved);
-//! proofs go into the folder's Lake project against the generated model and must pass `lake build` and the Proofs page's
-//! coverage before review; findings land in the audit index Bugs reads (see swarm_ctx). Files, `lake` and `forge` stay
-//! here; only the model calls leave: through
-//! formal.team's metered Claude proxy (charged to your credits as `local/<folder>` with the agent and item), straight
-//! to Anthropic with your own key, or through Claude Code on your own Claude plan (claude_code.rs) or Codex on your own
-//! ChatGPT plan (codex.rs).
+//! The swarm's Tauri commands (SPEC.md §1.1), over the rebuilt core in `swarm2`: sessions run in its [`Engine`]
+//! (managed as app state), and the reads come from its modules (plan, queue, events, Lake, the folder guard). The
+//! names, arguments, return shapes and error strings are the ones the UI and the MCP already use.
+//!
+//! Also here: the keychain's keys (Anthropic, OpenAI, the session token), shared with the folder agent (agent.rs).
 
-use crate::executor::{call_tool, clip, inside};
 use crate::local;
-use serde::{Deserialize, Serialize};
+use crate::swarm2::events;
+use crate::swarm2::fsguard;
+use crate::swarm2::lake;
+use crate::swarm2::plan::{self, Mark};
+use crate::swarm2::queue::{self, Queue};
+pub use crate::swarm2::session::{Engine, SwarmRequest};
+use serde::Serialize;
 use serde_json::{json, Value};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex};
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
-use tauri::{AppHandle, Emitter, Manager, State};
+use std::sync::Arc;
+use std::time::Duration;
+use tauri::{AppHandle, Manager, State};
 
-const DEFAULT_MODEL: &str = "claude-opus-5-5";
-/// Tool steps per agent turn; proofs take more than plans and reviews.
-const MAX_STEPS: usize = 40;
-const PROVER_STEPS: usize = 90;
-const MAX_ATTEMPTS: usize = 3;
+/// The app's sessions: one [`Engine`], managed by Tauri.
+pub type Swarms = Arc<Engine>;
 
-pub struct Swarm {
-    stop: AtomicBool,
-    /// This session's queue file.
-    queue: PathBuf,
-    /// Where the run's log lives and what it has spent, so quitting can record the pause.
-    folder: String,
-    spent: Mutex<f64>,
-    /// The spending cap, raised from the chat's header while the swarm runs.
-    budget: Mutex<f64>,
-    /// Set by the Context panel's Compact now: the working agent compacts before its next step.
-    compact_now: AtomicBool,
-    /// The plan's work goes on once the queued jobs are done: from the start, unless the session was started only for
-    /// them (a message to answer, a report to read); the assistant's start_work turns it on when you ask for work.
-    work: AtomicBool,
+/// The app's engine.
+pub fn engine(app: &AppHandle) -> Arc<Engine> {
+    app.state::<Swarms>().inner().clone()
 }
 
-/// The running swarms, one per session: several can run at once, in one folder or several. Keyed by `key(folder, run)`.
-#[derive(Default)]
-pub struct Swarms(Mutex<HashMap<String, Arc<Swarm>>>);
-
-/// Set by ⌘Q while agents are working: the window and Dock icon are gone, and the app quits when the last session ends.
-pub static QUIT_WHEN_DONE: AtomicBool = AtomicBool::new(false);
-
-/// Whether any session is running, in any folder.
-pub fn any_running(app: &AppHandle) -> bool {
-    !app.state::<Swarms>().0.lock().unwrap().is_empty()
+/// The folder guard of the `[added]` commands.
+fn added(folder: &str) -> Result<(), String> {
+    if local::read()?.allows(folder) { Ok(()) } else { Err("Add the folder first".into()) }
 }
 
-/// A running session's key: the same session id ("swarm", the default) exists in every folder.
-fn key(folder: &str, run: &str) -> String {
-    format!("{folder}\n{run}")
+// ---- keys (keychain service `team.formal.desktop`) ----
+
+const SERVICE: &str = "team.formal.desktop";
+
+fn entry(account: &str) -> Result<keyring::Entry, String> {
+    keyring::Entry::new(SERVICE, account).map_err(|e| e.to_string())
 }
 
-/// Plan items a session is working on, so another session in the same folder picks a different one: (folder, item) →
-/// the session's key.
-static CLAIMS: Mutex<Vec<(String, usize, String)>> = Mutex::new(Vec::new());
-
-fn claimed_by_other(folder: &str, item: usize, me: &str) -> bool {
-    CLAIMS.lock().unwrap().iter().any(|(f, i, k)| f == folder && *i == item && k != me)
+/// Saves a key (trimmed); empty deletes it.
+fn key_set(account: &str, key: &str) -> Result<(), String> {
+    let entry = entry(account)?;
+    if key.trim().is_empty() {
+        return match entry.delete_credential() {
+            Ok(()) | Err(keyring::Error::NoEntry) => Ok(()),
+            Err(e) => Err(e.to_string()),
+        };
+    }
+    entry.set_password(key.trim()).map_err(|e| e.to_string())
 }
 
-fn claim(folder: &str, item: usize, me: &str) {
-    let mut c = CLAIMS.lock().unwrap();
-    c.retain(|(_, _, k)| k != me);
-    c.push((folder.to_string(), item, me.to_string()));
-}
-
-fn release(me: &str) {
-    CLAIMS.lock().unwrap().retain(|(_, _, k)| k != me);
-}
-
-#[derive(Deserialize)]
-pub struct SwarmRequest {
-    pub folder: String,
-    /// What to focus on; empty means the whole codebase.
-    pub goal: Option<String>,
-    pub budget_usd: f64,
-    /// formal.team (or a local Worker) and the desktop session token, from the app.
-    pub api_base: String,
-    /// "claude-code" (your Claude plan), "codex" (your ChatGPT plan), "anthropic" or "openai" (your own key from the keychain); "formal"
-    /// (formal.team's metered route) still works for accounts with credits but is no longer offered.
-    pub provider: Option<String>,
-    /// claude-opus-5-5 (default), claude-sonnet-5-5 or claude-haiku-5-5.
-    pub model: Option<String>,
-    /// The session to continue: "swarm" (the folder's default) unless you made another with +.
-    pub session: Option<String>,
-    /// Only the jobs already queued (e.g. reading an audit report), then stop, instead of going on to the plan.
-    pub only_queued: Option<bool>,
-}
-
-fn anthropic_entry() -> Result<keyring::Entry, String> {
-    keyring::Entry::new("team.formal.desktop", "anthropic").map_err(|e| e.to_string())
-}
-
-fn openai_entry() -> Result<keyring::Entry, String> {
-    keyring::Entry::new("team.formal.desktop", "openai").map_err(|e| e.to_string())
+fn key_get(account: &str) -> Option<String> {
+    entry(account).ok()?.get_password().ok()
 }
 
 /// Saves your OpenAI API key in the keychain (empty clears it).
 #[tauri::command]
 pub fn openai_key_set(key: String) -> Result<(), String> {
-    let entry = openai_entry()?;
-    if key.trim().is_empty() {
-        return match entry.delete_credential() {
-            Ok(()) | Err(keyring::Error::NoEntry) => Ok(()),
-            Err(e) => Err(e.to_string()),
-        };
-    }
-    entry.set_password(key.trim()).map_err(|e| e.to_string())
+    key_set("openai", &key)
 }
 
 #[tauri::command]
 pub fn openai_key_status() -> bool {
-    openai_entry().and_then(|e| e.get_password().map_err(|e| e.to_string())).is_ok()
+    key_get("openai").is_some()
 }
 
 /// Saves your Anthropic API key in the keychain (empty clears it).
 #[tauri::command]
 pub fn anthropic_key_set(key: String) -> Result<(), String> {
-    let entry = anthropic_entry()?;
-    if key.trim().is_empty() {
-        return match entry.delete_credential() {
-            Ok(()) | Err(keyring::Error::NoEntry) => Ok(()),
-            Err(e) => Err(e.to_string()),
-        };
-    }
-    entry.set_password(key.trim()).map_err(|e| e.to_string())
+    key_set("anthropic", &key)
 }
 
 #[tauri::command]
 pub fn anthropic_key_status() -> bool {
-    anthropic_entry().and_then(|e| e.get_password().map_err(|e| e.to_string())).is_ok()
+    key_get("anthropic").is_some()
 }
 
-#[derive(Serialize, Clone)]
-struct SwarmEvent {
-    /// The folder it runs in: sessions in other folders send events too.
-    folder: String,
-    run: String,
-    /// "start" | "status" | "say" | "tool" | "result" | "you" | "bug" | "plan" | "done"
-    kind: &'static str,
-    role: String,
-    item: String,
-    text: String,
-    spent: f64,
-    /// When it happened (ms since the epoch): the chat times each tool step from its call to its result.
-    at: u64,
+/// The Anthropic key saved in the keychain, if any.
+pub(crate) fn anthropic_key() -> Option<String> {
+    key_get("anthropic")
 }
 
-/// An event to the app (the `swarm` event; the relay passes it on to the MCP) and to the session's log,
-/// .formal/runs/<run>.jsonl.
-/// An event of a running session, from outside its Turn, with the
-/// session's spend so the chat's header doesn't jump.
-pub(crate) fn emit_as(app: &AppHandle, folder: &str, run: &str, kind: &'static str, role: &str, item: &str, text: String) {
-    let spent = app.state::<Swarms>().0.lock().unwrap().get(&key(folder, run)).map(|s| *s.spent.lock().unwrap()).unwrap_or(0.0);
-    emit_event(app, SwarmEvent { folder: folder.into(), run: run.into(), kind, role: role.into(), item: item.into(), text, spent, at: now_ms() as u64 });
+fn openai_key() -> Option<String> {
+    key_get("openai")
 }
 
-/// `.formal/run.lock`: the process id of the app whose swarm works in the folder. Sessions in one app share a folder;
-/// two apps (two installs, a dev build) would write the same queue and proofs, so a second one is refused.
-fn run_lock(root: &Path) -> PathBuf {
-    root.join(".formal").join("run.lock")
-}
-
-/// Whether a process with this id is running (a crashed app's lock is stale).
-fn alive(pid: u32) -> bool {
-    #[cfg(unix)]
-    return std::process::Command::new("kill").args(["-0", &pid.to_string()]).stderr(std::process::Stdio::null()).status().is_ok_and(|s| s.success());
-    #[cfg(not(unix))]
-    return std::process::Command::new("tasklist").args(["/FI", &format!("PID eq {pid}"), "/NH"]).output().is_ok_and(|o| String::from_utf8_lossy(&o.stdout).contains(&pid.to_string()));
-}
-
-/// Takes the folder for this app, unless another running app has it.
-fn claim_folder(root: &Path) -> Result<(), String> {
-    let me = std::process::id();
-    let holder = std::fs::read_to_string(run_lock(root)).ok().and_then(|t| t.trim().parse::<u32>().ok());
-    if let Some(pid) = holder.filter(|p| *p != me && alive(*p)) {
-        return Err(format!("Another Formal Mind (process {pid}) is running this folder's swarm; pause it there first"));
-    }
-    let _ = std::fs::create_dir_all(root.join(".formal"));
-    std::fs::write(run_lock(root), me.to_string()).map_err(|e| format!(".formal/run.lock: {e}"))
-}
-
-/// Gives the folder back when this app's last session in it ends.
-fn release_folder(root: &Path) {
-    if std::fs::read_to_string(run_lock(root)).ok().and_then(|t| t.trim().parse::<u32>().ok()) == Some(std::process::id()) {
-        let _ = std::fs::remove_file(run_lock(root));
-    }
-}
-
-/// The sessions running now, by folder, sent to every window as `swarm-running` whenever one starts or ends, by any
-/// route (the folder page, an agent through the MCP, a quit). The pages and the relay take this as the
-/// truth instead of working it out from the events.
-fn broadcast_running(app: &AppHandle) {
-    let mut by_folder: HashMap<String, Vec<String>> = HashMap::new();
-    for k in app.state::<Swarms>().0.lock().unwrap().keys() {
-        if let Some((folder, run)) = k.split_once('\n') {
-            by_folder.entry(folder.to_string()).or_default().push(run.to_string());
-        }
-    }
-    let _ = app.emit("swarm-running", by_folder);
-}
-
-fn emit_event(app: &AppHandle, ev: SwarmEvent) {
-    let log = runs_dir(&ev.folder);
-    let _ = std::fs::create_dir_all(&log);
-    if let Ok(line) = serde_json::to_string(&ev) {
-        use std::io::Write;
-        let _ = std::fs::OpenOptions::new().create(true).append(true).open(log.join(format!("{}.jsonl", ev.run))).and_then(|mut f| writeln!(f, "{line}"));
-    }
-    let _ = app.emit("swarm", ev);
-}
-
+/// The desktop session token (formal.team's routes).
 pub(crate) fn token() -> Result<String, String> {
-    keyring::Entry::new("team.formal.desktop", "session")
-        .and_then(|e| e.get_password())
-        .map_err(|_| "Sign in to Formal Mind first".to_string())
+    key_get("session").ok_or_else(|| "Sign in to Formal Mind first".to_string())
 }
 
-fn now_ms() -> u128 {
-    SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_millis()
-}
-
-/// Dollars for one call at the model's list price (input, output, cache reads per million; writes 1.25x input).
-fn cost(model: &str, usage: &Value) -> f64 {
-    let (inp, out, read) = match model {
-        "gpt-5-mini" => (0.25, 2.0, 0.025),
-        m if m.starts_with("gpt-5") => (1.25, 10.0, 0.125),
-        m if m.contains("haiku") => (0.1, 0.5, 0.01),
-        m if m.contains("sonnet") => (2.0, 10.0, 0.2),
-        _ => (4.0, 20.0, 0.2),
-    };
-    let one = |u: &Value| {
-        let n = |k: &str| u[k].as_f64().unwrap_or(0.0);
-        (n("input_tokens") * inp + n("cache_creation_input_tokens") * inp * 1.25 + n("cache_read_input_tokens") * read + n("output_tokens") * out) / 1e6
-    };
-    // A compaction call reports its tokens in `usage.iterations` and zeros at the top level; when the iterations list
-    // the message itself, they are the whole bill.
-    let iterations = usage["iterations"].as_array().cloned().unwrap_or_default();
-    let listed = iterations.iter().any(|i| i["type"] == "message");
-    iterations.iter().map(one).sum::<f64>() + if listed { 0.0 } else { one(usage) }
-}
-
-// ---- context: how full each agent's window is, and compaction ----
-//
-// Every reply's usage says how much of the window the conversation takes. Past COMPACT_AT of it, the older steps are
-// summarized by the API's on-demand compaction (beta compact-2026-09-04): the summary is a signed `compaction` block
-// that goes first in `messages` in place of the steps it covers, and the last KEEP_STEPS steps follow it word for word
-// (their thinking stays valid because the cut falls at the reply to a request already sent). The task (and the
-// report a triage job attaches) is restated after the kept steps, since a summary can't carry a document.
-
-const COMPACTION_BETA: &str = "compact-2026-09-04";
-const COMPACT_AT: f64 = 0.75;
-const KEEP_STEPS: usize = 3;
-
-/// The context window of the models the swarm uses (Opus, Sonnet and Haiku 5.5 all take 1M tokens; GPT-5 400k).
-fn context_window(model: &str) -> u64 {
-    if model.starts_with("gpt-") { 400_000 } else { 1_000_000 }
-}
-
-/// Where a conversation is compacted, in tokens: COMPACT_AT of the model's window. Codex is told this too, since with
-/// the user's config ignored it has no limit for a model it doesn't know and its thread only grows.
-pub(crate) fn compact_limit(model: &str) -> u64 {
-    (context_window(model) as f64 * COMPACT_AT) as u64
-}
-
-/// Tokens the next request will carry: this reply's whole input (cached or not) plus the reply itself.
-fn context_used(usage: &Value) -> u64 {
-    ["input_tokens", "cache_creation_input_tokens", "cache_read_input_tokens", "output_tokens"].iter().map(|k| usage[*k].as_u64().unwrap_or(0)).sum()
-}
-
-/// Whether a failed call failed because the conversation no longer fits.
-fn too_long(status: u16, message: &str) -> bool {
-    let m = message.to_ascii_lowercase();
-    status == 413 || (status == 400 && (m.contains("too long") || m.contains("context window") || m.contains("maximum context")))
-}
-
-fn has_compaction(messages: &[Value]) -> bool {
-    messages.iter().any(|m| m["content"].as_array().is_some_and(|c| c.iter().any(|b| b["type"] == "compaction")))
-}
-
-/// Where to cut the conversation: the summary covers `messages[..cut]` and `messages[cut..]` is kept. A cut falls on
-/// an assistant reply whose request ended at `cut` (a user turn), so each tool call stays with its result and the kept
-/// steps directly follow what was summarized. Keeps up to `keep` steps; None when there are none to keep (summarize all).
-fn compact_cut(messages: &[Value], keep: usize) -> Option<usize> {
-    let cuts: Vec<usize> = (2..messages.len()).filter(|&i| messages[i]["role"] == "assistant" && messages[i - 1]["role"] == "user").collect();
-    match cuts.len() {
-        0 => None,
-        n => Some(cuts[n.saturating_sub(keep.max(1))]),
-    }
-}
-
-/// A shorter range to summarize when `messages[..cut]` is itself too long for the summarizer: the cut about halfway.
-fn earlier_cut(messages: &[Value], cut: usize) -> Option<usize> {
-    (2..cut / 2 + 1).rev().find(|&i| messages[i]["role"] == "assistant" && messages[i - 1]["role"] == "user")
-}
-
-/// The conversation after compaction: the summary first, the kept steps unchanged, then the task restated on the last
-/// user turn (which hasn't been answered yet, so adding to it edits nothing the model has seen reply to).
-fn splice(messages: &[Value], cut: usize, summary: Value, task: &Value) -> Vec<Value> {
-    let mut out = vec![json!({ "role": "assistant", "content": summary })];
-    out.extend(messages[cut.min(messages.len())..].iter().cloned());
-    let mut restated = vec![json!({ "type": "text", "text": "The earlier steps of this job were summarized above. Your task, as first given:" })];
-    match task {
-        Value::Array(blocks) => restated.extend(blocks.iter().cloned()),
-        Value::String(s) => restated.push(json!({ "type": "text", "text": s })),
-        other => restated.push(json!({ "type": "text", "text": other.to_string() })),
-    }
-    match out.last_mut() {
-        Some(last) if last["role"] == "user" => {
-            let mut content = match last["content"].take() {
-                Value::Array(c) => c,
-                Value::String(s) => vec![json!({ "type": "text", "text": s })],
-                _ => vec![],
-            };
-            content.extend(restated);
-            last["content"] = Value::Array(content);
+pub(crate) fn base64(bytes: &[u8]) -> String {
+    const T: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    let mut out = String::with_capacity(bytes.len().div_ceil(3) * 4);
+    for c in bytes.chunks(3) {
+        let n = (c[0] as u32) << 16 | (*c.get(1).unwrap_or(&0) as u32) << 8 | *c.get(2).unwrap_or(&0) as u32;
+        for i in 0..4 {
+            out.push(if i <= c.len() { T[(n >> (18 - 6 * i)) as usize & 63] as char } else { '=' });
         }
-        _ => out.push(json!({ "role": "user", "content": restated })),
     }
     out
 }
 
-const SUMMARY_INSTRUCTIONS: &str = "Summarize this agent's work so far for the agent itself, which continues the job from your summary and the few most recent steps that follow it. Keep: the task and the plan item or report it is about; every file written or changed and what it now holds; the commands run and their results (which `lake build` or `forge test` runs passed or failed, and the errors that matter); findings recorded or bugs reported, with their IDs and statuses; what was tried and didn't work; and what is left to do next. Be specific: names of defs, theorems, lemmas, files, line numbers. Do not call tools; respond with the summary text only.";
+// ---- sessions: the Engine ----
 
-fn model_of(req: &SwarmRequest) -> &str {
-    if req.provider.as_deref() == Some("codex") {
-        return req.model.as_deref().filter(|m| crate::codex::MODELS.contains(m)).unwrap_or(crate::codex::MODELS[0]);
-    }
-    if req.provider.as_deref() == Some("openai") {
-        return req.model.as_deref().filter(|m| crate::openai::MODELS.contains(m)).unwrap_or(crate::openai::MODELS[0]);
-    }
-    match req.model.as_deref() {
-        Some(m @ ("claude-opus-5-5" | "claude-sonnet-5-5" | "claude-haiku-5-5")) => m,
-        _ => DEFAULT_MODEL,
-    }
+/// B1: starts (or resumes) a session; returns its id.
+#[tauri::command]
+pub fn swarm_start(swarms: State<'_, Swarms>, request: SwarmRequest) -> Result<String, String> {
+    swarms.start(request)
 }
 
-// ---- the plan: .formal/plan.md, a checklist ----
-
-#[derive(Clone, Serialize)]
-pub struct PlanItem {
-    pub index: usize,
-    /// " " todo, "x" proven, "!" blocked
-    pub mark: String,
-    pub text: String,
+/// B5: Stop (never fails).
+#[tauri::command]
+pub fn swarm_stop(swarms: State<'_, Swarms>, folder: String, run: String) {
+    swarms.stop(&folder, &run)
 }
 
-fn plan_path(root: &Path) -> PathBuf {
-    root.join(".formal").join("plan.md")
+/// B20: a message to a running session.
+#[tauri::command]
+pub fn swarm_say(swarms: State<'_, Swarms>, folder: String, run: String, text: String) -> Result<(), String> {
+    swarms.say(&folder, &run, &text)
 }
 
-fn read_plan(root: &Path) -> Vec<PlanItem> {
-    let text = std::fs::read_to_string(plan_path(root)).unwrap_or_default();
-    text.lines()
-        .filter_map(|l| {
-            let t = l.trim_start();
-            let rest = t.strip_prefix("- [")?;
-            let mark = rest.chars().next()?;
-            let body = rest.get(2..)?.trim().to_string();
-            Some((mark.to_string(), body))
-        })
-        .enumerate()
-        .map(|(index, (mark, text))| PlanItem { index: index + 1, mark: if mark == "X" { "x".into() } else { mark }, text })
-        .collect()
+/// B10: a running session's cap.
+#[tauri::command]
+pub fn swarm_set_budget(swarms: State<'_, Swarms>, folder: String, run: String, usd: f64) -> Result<(), String> {
+    swarms.set_budget(&folder, &run, usd)
 }
 
-fn set_mark(root: &Path, index: usize, mark: char) {
-    let path = plan_path(root);
-    let Ok(text) = std::fs::read_to_string(&path) else { return };
-    let mut n = 0;
-    let out: Vec<String> = text
-        .lines()
-        .map(|l| {
-            let t = l.trim_start();
-            if t.starts_with("- [") && t.len() > 4 {
-                n += 1;
-                if n == index {
-                    let indent = &l[..l.len() - t.len()];
-                    return format!("{indent}- [{mark}]{}", &t[5..]);
-                }
-            }
-            l.to_string()
-        })
-        .collect();
-    let _ = std::fs::write(&path, out.join("\n") + "\n");
+/// B37: Compact now.
+#[tauri::command]
+pub fn swarm_compact(swarms: State<'_, Swarms>, folder: String, run: String) -> Result<(), String> {
+    swarms.compact(&folder, &run)
 }
+
+/// The sessions running in this folder.
+#[tauri::command]
+pub fn swarm_running(swarms: State<'_, Swarms>, folder: String) -> Vec<String> {
+    swarms.running(&folder)
+}
+
+/// B21: an audit report to read, queued as a `triage` job.
+#[tauri::command(async)]
+pub fn swarm_triage(swarms: State<'_, Swarms>, folder: String, path: String, session: Option<String>) -> Result<(), String> {
+    swarms.triage(&folder, &path, session.as_deref())
+}
+
+/// B22: a proof written outside the app, queued for the reviewer.
+#[tauri::command]
+pub fn swarm_submit_proof(swarms: State<'_, Swarms>, folder: String, function: String, path: String, notes: Option<String>, session: Option<String>) -> Result<Value, String> {
+    swarms.submit_proof(&folder, &function, &path, notes.as_deref(), session.as_deref())
+}
+
+// ---- reads ----
 
 #[tauri::command(async)]
-pub fn swarm_plan(folder: String) -> Result<Vec<PlanItem>, String> {
-    if !local::read()?.allows(&folder) {
-        return Err("Add the folder first".into());
-    }
-    Ok(read_plan(Path::new(&folder)))
+pub fn swarm_plan(folder: String) -> Result<Vec<plan::PlanItem>, String> {
+    added(&folder)?;
+    Ok(plan::read(Path::new(&folder)))
 }
 
 #[derive(Serialize)]
@@ -411,9 +172,7 @@ pub struct Bug {
 /// The bugs agents have reported in this folder, newest first.
 #[tauri::command(async)]
 pub fn swarm_bugs(folder: String) -> Result<Vec<Bug>, String> {
-    if !local::read()?.allows(&folder) {
-        return Err("Add the folder first".into());
-    }
+    added(&folder)?;
     let dir = Path::new(&folder).join(".formal").join("bugs");
     let mut bugs: Vec<Bug> = std::fs::read_dir(&dir)
         .map(|it| {
@@ -430,1109 +189,27 @@ pub fn swarm_bugs(folder: String) -> Result<Vec<Bug>, String> {
     Ok(bugs)
 }
 
-
-/// A Claude Code turn stopped because the swarm's tools (its `formalmind` MCP bridge) didn't connect.
-const NO_TOOLS: &str = "the agent's tools didn't connect";
-
-// ---- the durable queue: .formal/queue.json ----
-//
-// Every unit of work is a job: plan, prove item N, review item N, answer the maintainer. A job is marked running before
-// its agent starts and done (with what it wrote and said) when it ends, and the file is rewritten after each change. If
-// the app quits mid-job, the next start finds it still running and resumes it — told what it had already written — so
-// finished work is never redone and nothing you sent is lost. Spend is kept here too, as the session's running total.
-
-#[derive(Serialize, Deserialize, Clone, Default)]
-struct Job {
-    id: u64,
-    /// "plan" | "prove" | "review" | "answer"
-    kind: String,
-    #[serde(default)]
-    item: usize,
-    /// The plan item's text, or the maintainer's message.
-    #[serde(default)]
-    text: String,
-    /// "queued" | "running" | "done"
-    state: String,
-    #[serde(default)]
-    attempt: usize,
-    /// The reviewer's notes for a retry, or the prover's summary for a review.
-    #[serde(default)]
-    notes: String,
-    #[serde(default)]
-    files: Vec<String>,
-    #[serde(default)]
-    summary: String,
-    /// "approve" | "changes" | "bug" | ""
-    #[serde(default)]
-    result: String,
-    /// A review's property notes for the report, as the prover wrote them (statement, assumptions, theorems).
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    property: Option<Value>,
-    /// For an obligation of a statement (.formal/statements.md): its id; `item` is then the obligation's number in it.
-    #[serde(default, skip_serializing_if = "String::is_empty")]
-    statement: String,
-}
-
-#[derive(Serialize, Deserialize, Default)]
-struct Queue {
-    #[serde(default)]
-    next_id: u64,
-    #[serde(default)]
-    jobs: Vec<Job>,
-    /// Dollars spent by this folder's swarm, across every start.
-    #[serde(default)]
-    spent: f64,
-}
-
-/// One writer at a time for every folder's queue (the loop and swarm_say both touch it).
-static QUEUE_LOCK: Mutex<()> = Mutex::new(());
-
-/// The queue file for a session: the folder's default session keeps .formal/queue.json; ones you add get their own.
-fn queue_file(root: &Path, session: &str) -> PathBuf {
-    if session == "swarm" { root.join(".formal").join("queue.json") } else { root.join(".formal").join("queues").join(format!("{session}.json")) }
-}
-
-fn load_queue(qf: &Path) -> Queue {
-    std::fs::read_to_string(qf).ok().and_then(|t| serde_json::from_str(&t).ok()).unwrap_or_default()
-}
-
-fn save_queue(qf: &Path, q: &Queue) {
-    let _ = std::fs::create_dir_all(qf.parent().unwrap_or(qf));
-    let tmp = qf.with_extension("json.tmp");
-    if std::fs::write(&tmp, serde_json::to_string_pretty(q).unwrap_or_default()).is_ok() {
-        let _ = std::fs::rename(&tmp, qf);
-    }
-}
-
-/// Load, change and save a queue file under the lock; returns what `f` returns.
-fn with_queue<T>(qf: &Path, f: impl FnOnce(&mut Queue) -> T) -> T {
-    let _guard = QUEUE_LOCK.lock().unwrap_or_else(|e| e.into_inner());
-    let mut q = load_queue(qf);
-    let out = f(&mut q);
-    save_queue(qf, &q);
-    out
-}
-
-fn session_of(req: &SwarmRequest) -> String {
-    req.session.clone().filter(|s| !s.is_empty() && s.chars().all(|c| c.is_ascii_alphanumeric() || c == '-')).unwrap_or_else(|| "swarm".into())
-}
-
-fn enqueue(q: &mut Queue, kind: &str, item: usize, text: &str, attempt: usize, notes: &str) -> u64 {
-    // A new queue numbers its jobs from now, not from 1: a job's Claude Code conversation is kept by its number outside
-    // the folder, so after .formal/ is deleted a fresh job 1 would otherwise resume an old job 1's conversation.
-    if q.next_id == 0 {
-        q.next_id = SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0);
-    }
-    q.next_id += 1;
-    let id = q.next_id;
-    q.jobs.push(Job { id, kind: kind.into(), item, text: text.into(), state: "queued".into(), attempt, notes: notes.into(), ..Default::default() });
-    id
-}
-
-/// A job's conversation. Job ids count per session's queue, so another session's are under its name (the default
-/// session's stay where they always were); otherwise a new session's job 1 would resume the main session's job 1.
-fn transcript_path(root: &Path, run: &str, job: u64) -> PathBuf {
-    let dir = root.join(".formal").join("jobs");
-    if run == "swarm" { dir.join(format!("{job}.json")) } else { dir.join(run).join(format!("{job}.json")) }
-}
-
-/// Everything the model and the tools said in one job, exactly as sent and received (thinking blocks included).
-fn load_transcript(root: &Path, run: &str, job: u64) -> Option<Vec<Value>> {
-    std::fs::read_to_string(transcript_path(root, run, job)).ok().and_then(|t| serde_json::from_str(&t).ok())
-}
-
-fn save_transcript(root: &Path, run: &str, job: u64, messages: &[Value]) {
-    let path = transcript_path(root, run, job);
-    let _ = std::fs::create_dir_all(path.parent().unwrap_or(root));
-    let tmp = path.with_extension("json.tmp");
-    if std::fs::write(&tmp, serde_json::to_string(messages).unwrap_or_default()).is_ok() {
-        let _ = std::fs::rename(&tmp, path);
-    }
-}
-
-/// The queue as the app sees it: jobs not done yet, oldest first, and the session's spend.
-#[tauri::command(async)]
-pub fn swarm_queue(folder: String) -> Result<Value, String> {
-    swarm_queue_of(folder, None, false)
-}
-
-/// A session's queue (the folder's main one by default): its open jobs, and with `done`, each finished one's result
-/// (approve, changes, bug) and its agent's summary: a reviewer's reasons, a prover's account.
-pub fn swarm_queue_of(folder: String, run: Option<String>, done: bool) -> Result<Value, String> {
-    if !local::read()?.allows(&folder) {
-        return Err("Add the folder first".into());
-    }
-    let run = run.filter(|r| !r.is_empty() && r.chars().all(|c| c.is_ascii_alphanumeric() || c == '-')).unwrap_or_else(|| "swarm".into());
-    let q = load_queue(&queue_file(Path::new(&folder), &run));
-    let open: Vec<Value> = q.jobs.iter().filter(|j| j.state != "done").map(|j| json!({ "id": j.id, "kind": j.kind, "item": j.item, "state": j.state, "attempt": j.attempt })).collect();
-    let mut out = json!({ "run": run, "open": open, "spent": q.spent, "done": q.jobs.iter().filter(|j| j.state == "done").count() });
-    if done {
-        out["finished"] = json!(q
-            .jobs
-            .iter()
-            .filter(|j| j.state == "done")
-            .map(|j| json!({ "id": j.id, "kind": j.kind, "item": j.item, "attempt": j.attempt, "result": j.result, "summary": j.summary.chars().take(4000).collect::<String>(), "files": j.files }))
-            .collect::<Vec<_>>());
-    }
-    Ok(out)
-}
-
-// ---- roles ----
-
-fn system(role: &str, folder: &str, goal: &str) -> String {
-    let root = Path::new(folder);
-    let lake = crate::swarm_ctx::lake_dir(root).map(|d| d.strip_prefix(root).map(|p| p.to_string_lossy().to_string()).unwrap_or_default()).map(|d| if d.is_empty() { ".".to_string() } else { d });
-    // Where Lake reads the sources (the lakefile's srcDir), which can differ from where it runs.
-    let src = crate::swarm_ctx::lean_src(root).map(|d| d.strip_prefix(root).map(|p| p.to_string_lossy().to_string()).unwrap_or_default()).map(|d| if d.is_empty() { ".".to_string() } else { d }).unwrap_or_default();
-    // The folder's own names for the two libraries (Specs/ and Proofs/, or Generated/ and Refinement/ in older projects).
-    let (specs, proofs) = crate::swarm_ctx::layout(root);
-    let lean = match &lake {
-        Some(d) => format!("Lean proofs live in the folder's Lake project, {d}/ (its lakefile says which libraries `lake build` builds; `lake` always runs there). The model of each entry contract is generated by formal-ast from solc's AST into {src}/{specs}/<Contract>.lean (Lake's sources; proofs go under {src}/{proofs}/): prove things about those defs, never a hand-written model of the Solidity. Mathlib is already built in {d}/.lake; never run `lake update` or edit the lakefile's requires."),
-        None => "There is no Lake project yet; the swarm sets up formal/ (Specs/ for the generated models, Proofs/ for the proofs) when it next reads the folder.".to_string(),
-    };
-    let common = format!(
-        "You are the formalmind {role}, one agent of a small swarm verifying the Ethereum smart contracts in a local folder ({folder}). \
-Paths are relative to that folder. Tools run here, on the maintainer's machine. What you know about the Solidity comes from formal-ast, which reads solc's AST: `functions` lists every function in scope (the contracts the Foundry scripts deploy or call, with their bases), each with its Lean def, place and status on the Proofs page; `function` gives one function's slice (its guards, the storage it reads and writes, the state it touches, its code and its callees' code). Don't list or grep the Solidity sources. The other tools: read_file (numbered line ranges; for Lean files and the test setup a PoC needs), search (regex over the Lean project's .lean files, for lemmas), find (files by name, fuzzy), write_file, run (only lake/forge, no shell), report_bug. Proofs must be pure Lean: no #eval or IO. \
-The shared state is .formal/: plan.md is the checklist (`- [ ]` todo, `- [x]` proven, `- [!]` blocked or a bug). {lean} \
-Never leave `sorry`, `admit`, `native_decide` or new axioms. \
-If you find a real bug (a reachable violation of an intended property, loss of funds, broken accounting, access control), first write a Foundry PoC test under test/formal/ (e.g. test/formal/RouterMatchBook.t.sol, reusing the repo's test setup under test/) whose test passes by demonstrating the exploit, run it with `forge test --match-path <file>`, then call report_bug with that path: it is filed in audit/README.md as an open finding. \
-The maintainer follows your work in the chat and sees only what you write, so never make a tool call without a note first: before every call, say in a sentence or two what you are doing, why (what you expect to learn or establish) and how (which def, lemma, tactic or test). After a result, say what it told you: which theorem or property you are on and what it means for the contract, the goal Lean shows, the key error in a line, and how you will fix it; when you change approach, say why. No filler. End with one short paragraph saying what you did and what's next.{}",
-        if goal.is_empty() { String::new() } else { format!("\n\nThe maintainer's focus: {goal}") }
-    );
-    let job = match role {
-        "prover" => "Take the plan item you're given and prove it against the generated def named in your task: read the def in the model and the function's slice (call `function` for any callee you need), state the property as a theorem that names the def fully qualified, prove it, and check with `lake build <Module>`. When it checks, call record_property with the notes for Formal Mind's report: what the proof establishes (third person, what holds), its assumptions and the theorems' names. Reuse the project's existing lemmas (search the Lake project for simp lemmas about the monad). If the property is false, that's a bug: show it with a Foundry PoC and call report_bug, with its scenario, impact and recommendation written as an audit report states them. Address the reviewer's notes if there are any. Explain the mathematics as you go, as a mathematician would to a colleague: state the property formally (the invariant, pre- and postcondition, or implication, e.g. `totalSupplyShares = Σ supplyShares`), name the proof strategy (induction on the call sequence, case split on the guard, rewriting with a lemma, contradiction, monotonicity, a tautology the simp set closes) and why it applies, and when Lean's goal changes, say what the remaining goal means in plain logic.",
-        "auditor" => "You are turning an audit report (attached, or in your task) into the standard audit format (formalmind.audit/v1) that the app shows on its Bugs page. First call record_report once with the report's facts: its title, the auditing firm, the authors, the date (YYYY-MM-DD), the commit and repository it reviewed, the files in scope, and a two-sentence summary. Then call record_finding once per finding, in the report's order, for every finding it lists including informational and gas ones: the report's own ID (H-01, M-2, L-03…; number them F-01, F-02… when it has none), the title, the severity as the report rates it, the full description (the report's words, cleaned of page headers and footers), its impact, its recommendation, the team's response if the report gives one, the locations (repository paths like src/PoolManager.sol with the line when given), the page it starts on, and the status the report gave (reportStatus). Then check the current code for each finding and set `status`: fixed (the issue is gone; say what changed in evidence and name the test that covers it), works as expected (intended, or invalid for this code; say why), acknowledged (accepted, as the report or code says), or open (still there). Use `functions`, `function`, read_file and `forge test --match-path …` for that. Don't fix code or write tests. End with one line: how many findings, and how many of each status.",
-        "reviewer" => "Review the prover's work on the plan item: does the Lean statement really say what the Solidity does (read the def in the generated model and the function's slice, in your task), is it about the generated def rather than a restatement, does it check, is there any sorry/admit/axiom? Then call verdict exactly once: approve, or changes with concrete notes. Check the prover's notes for the report too (in your task): does the statement say exactly what the theorems prove about the Solidity, no more, are the assumptions complete, and is it written as a report states a property (third person, what holds, never \"no bug found\")? When you approve, they go into Formal Mind's audit file; pass `statement`, `assumptions` or `theorems` only to correct them, or to write them if the prover gave none. Do not edit proofs yourself. If you spot a real bug in the contract, say so in your notes; the prover writes the PoC.",
-        _ => "The maintainer wrote to the swarm. Answer them directly and briefly, using the tools to look things up. If they ask for a change of focus or a new property, update .formal/plan.md accordingly.",
-    };
-    // Auditing checklists added on this computer (Settings → Skills), for the roles they apply to.
-    format!("{common}\n\n{job}{}", crate::skills::prompt_note(role))
-}
-
-/// The assistant's switch from answering to working: a session started with a message answers it and stops, unless
-/// the maintainer asked for work.
-fn reopen_tool() -> Value {
-    json!({ "name": "reopen", "description": "When the maintainer asks to prove functions again (their code changed, a proof is wrong or too weak): reopens those plan items in .formal/plan.md, proved or blocked, so the prover takes them in turn, and the session goes on with the plan after your answer. Name each function by its Lean def as the plan lists it (e.g. `AsyncSwap.useNonce`).", "input_schema": { "type": "object", "properties": { "defs": { "type": "array", "items": { "type": "string" } } }, "required": ["defs"] } })
-}
-
-/// Reopens the plan items for these defs (proved or blocked): (reopened, not in the plan).
-fn reopen(root: &Path, defs: &[String]) -> (Vec<String>, Vec<String>) {
-    let plan = read_plan(root);
-    let (mut done, mut unknown) = (vec![], vec![]);
-    for d in defs {
-        let d = d.trim().trim_matches('`');
-        match plan.iter().find(|i| i.text.split('`').nth(1) == Some(d)) {
-            Some(i) => {
-                if i.mark != " " {
-                    set_mark(root, i.index, ' ');
-                }
-                done.push(d.to_string());
-            }
-            None => unknown.push(d.to_string()),
-        }
-    }
-    (done, unknown)
-}
-
-fn start_work_tool() -> Value {
-    json!({ "name": "start_work", "description": "Only when the maintainer asks the swarm to do work (prove the plan or the functions left, review, carry on): after your answer, the session goes on with the plan instead of stopping. Not for a question, an explanation or an audit you do yourself in the chat.", "input_schema": { "type": "object", "properties": {}, "required": [] } })
-}
-
-/// report_bug's schema (also served to Claude Code by claude_code.rs).
-pub(crate) fn report_bug_tool() -> Value {
-    let s = |props: Value, req: Vec<&str>| json!({ "type": "object", "properties": props, "required": req, "additionalProperties": false });
-    json!({ "name": "report_bug", "description": "Report a real bug in the contracts, with its Foundry PoC (already written and passing). The swarm runs the PoC, files the finding in audit/README.md (status Open), audit/formal-mind-swarm.md and Formal Mind's audit file (audit/formal-mind.audit.json, which its report is generated from), and moves on to the next item. Write the title, scenario, impact and recommendation as an audit report states a finding: third person, no process talk.", "input_schema": s(json!({
-            "title": { "type": "string" }, "severity": { "type": "string", "enum": ["critical", "high", "medium", "low"] },
-            "location": { "type": "string", "description": "file:line" }, "scenario": { "type": "string", "description": "What's wrong and the concrete steps that exploit it, as an audit report describes a finding" },
-            "impact": { "type": "string", "description": "What an attacker gains or users lose, as a report states it" },
-            "recommendation": { "type": "string", "description": "How to fix it" },
-            "poc": { "type": "string", "description": "The PoC test file under test/, e.g. test/formal/RouterMatchBook.t.sol" },
-            "evidence": { "type": "string", "description": "Anything else: the Lean counterexample, the property it breaks" } }), vec!["title", "severity", "location", "scenario", "poc"]) })
-}
-
-fn tools(role: &str) -> Value {
-    let s = |props: Value, req: Vec<&str>| json!({ "type": "object", "properties": props, "required": req, "additionalProperties": false });
-    let mut t = vec![
-        json!({ "name": "functions", "description": "Every function in scope, from formal-ast (solc's AST): the contracts the Foundry scripts deploy or call and their bases, each function with its Lean def, place, footprint and status on the Proofs page.", "input_schema": s(json!({}), vec![]) }),
-        json!({ "name": "function", "description": "One function's slice from formal-ast: its guards, the storage it reads and writes, the state declarations it touches, its code and its callees' code. By name (`Contract.fn`) or Lean def.", "input_schema": s(json!({ "name": { "type": "string" } }), vec!["name"]) }),
-        json!({ "name": "read_file", "description": "Read a text file in the folder (Lean files, the generated model, the test setup a PoC needs). Long files come back in numbered slices: pass start_line and end_line (up to 300 lines at a time).", "input_schema": s(json!({ "path": { "type": "string" }, "start_line": { "type": "integer" }, "end_line": { "type": "integer" } }), vec!["path"]) }),
-        json!({ "name": "search", "description": "Find lines matching a regex in the Lean project's .lean files (path:line: text), e.g. simp lemmas about the monad.", "input_schema": s(json!({ "pattern": { "type": "string" } }), vec!["pattern"]) }),
-        json!({ "name": "find", "description": "Find files by name or path, fuzzy (typos and gaps are fine, e.g. `refinement conservation` or `WP.lean`), best match first. Skips dependencies, build output and .lake.", "input_schema": s(json!({ "query": { "type": "string" } }), vec!["query"]) }),
-        json!({ "name": "run", "description": "Run `lake build`, `lake env lean <file>`, `lake exe cache get`, `lake init|new <Name>`, `forge build` or `forge test [args]` in the folder. Returns exit code and output.", "input_schema": s(json!({ "command": { "type": "string" } }), vec!["command"]) }),
-    ];
-    if role == "auditor" {
-        t.push(json!({ "name": "record_report", "description": "Record the report's own facts in its standard audit file (formalmind.audit/v1, next to the report). Call once, first.", "input_schema": s(json!({
-            "title": { "type": "string" }, "auditor": { "type": "string", "description": "The auditing firm or person" },
-            "authors": { "type": "array", "items": { "type": "string" } }, "date": { "type": "string", "description": "YYYY-MM-DD" },
-            "commit": { "type": "string" }, "repository": { "type": "string" },
-            "scope": { "type": "array", "items": { "type": "string" }, "description": "Files in scope, as repository paths" },
-            "summary": { "type": "string" } }), vec!["title"]) }));
-        t.push(json!({ "name": "record_finding", "description": "Record one of the report's findings in its standard audit file, with its status in the current code. Calling it again with the same id replaces that finding.", "input_schema": s(json!({
-            "id": { "type": "string", "description": "The report's own ID, e.g. H-01" },
-            "title": { "type": "string" },
-            "severity": { "type": "string", "enum": ["critical", "high", "medium", "low", "informational", "gas"] },
-            "status": { "type": "string", "enum": ["fixed", "works as expected", "acknowledged", "open"], "description": "Where it stands in the current code" },
-            "reportStatus": { "type": "string", "description": "The status the report itself gave, e.g. Fixed in PR #123, Acknowledged" },
-            "locations": { "type": "array", "items": { "type": "object", "properties": { "file": { "type": "string" }, "line": { "type": "integer" } }, "required": ["file"], "additionalProperties": false } },
-            "description": { "type": "string" }, "impact": { "type": "string" }, "recommendation": { "type": "string" },
-            "response": { "type": "string", "description": "The team's response in the report" },
-            "evidence": { "type": "string", "description": "Why this status: what changed (file:line) and the test that covers it, or why it is intended" },
-            "tests": { "type": "array", "items": { "type": "string" } },
-            "page": { "type": "integer" } }), vec!["id", "title", "severity", "status", "description"]) }));
-    }
-    if role != "reviewer" && role != "auditor" {
-        t.push(report_bug_tool());
-        t.push(json!({ "name": "write_file", "description": "Create or overwrite a file in the folder.", "input_schema": s(json!({ "path": { "type": "string" }, "content": { "type": "string" } }), vec!["path", "content"]) }));
-    }
-    if role != "auditor" {
-        t.extend(crate::analysis::tools());
-    }
-    // The assistant formalizes statements and relays the maintainer's answers about them.
-    if role == "assistant" {
-        t.push(crate::statements::formalize_tool());
-        t.push(crate::statements::confirm_tool());
-        t.push(start_work_tool());
-        t.push(reopen_tool());
-    }
-    if role == "prover" {
-        t.push(json!({ "name": "record_property", "description": "Once your proof checks, write the notes that go into Formal Mind's report for this property (audit/formal-mind.audit.json). The reviewer checks them against the Solidity and your proof before they count. Call it again to replace them.", "input_schema": s(json!({
-            "statement": { "type": "string", "description": "What the proof establishes about the function, as an audit report states a verified property: third person, present tense, what holds (e.g. \"`Router.swap` reverts unless the caller owns the order; on success it writes only …\"). Markdown; a bulleted list of what each theorem says is fine. No first person, no build, plan or next-step talk, and never a statement of what wasn't found." },
-            "assumptions": { "type": "string", "description": "What the proof takes as given (e.g. black-box helpers that don't change storage), stated plainly; empty if none" },
-            "theorems": { "type": "array", "items": { "type": "string" }, "description": "The names of the theorems that prove it" } }), vec!["statement", "theorems"]) }));
-    }
-    if role == "reviewer" {
-        t.push(json!({ "name": "verdict", "description": "Your decision on the plan item. Approving records the prover's property notes in Formal Mind's audit file (audit/formal-mind.audit.json), which its report is generated from. Pass statement, assumptions or theorems only to correct them (or to write them if the prover gave none).", "input_schema": s(json!({
-            "decision": { "type": "string", "enum": ["approve", "changes"] },
-            "notes": { "type": "string" },
-            "statement": { "type": "string", "description": "Approve only, to correct or supply the prover's notes: what the proof establishes about the function, as a report states a verified property: third person, present tense, what holds (e.g. \"`Router.swap` reverts unless the caller owns the order; on success it writes only …\"). Markdown; a bulleted list of the theorems' meanings is fine. No first person, no build or plan talk, and never a statement of what wasn't found." },
-            "assumptions": { "type": "string", "description": "Approve only: what the proof takes as given (e.g. black-box helpers that don't change storage), stated plainly; empty if none" },
-            "theorems": { "type": "array", "items": { "type": "string" }, "description": "Approve only: the names of the theorems that prove it" } }), vec!["decision"]) }));
-    }
-    Value::Array(t)
-}
-
-/// What a turn ended with, besides its text.
-#[derive(Default)]
-struct Outcome {
-    summary: String,
-    /// Files the agent wrote this turn (the proof, a PoC), folder-relative.
-    files: Vec<String>,
-    verdict: Option<(bool, String)>,
-    /// What an approving reviewer said holds (statement, assumptions, theorems), for Formal Mind's audit file.
-    property: Option<Value>,
-    bug: Option<String>,
-    /// A formalize job's answer, checked against formal-ast.
-    formalized: Option<crate::statements::Formalized>,
-}
-
-struct Turn<'a> {
-    app: &'a AppHandle,
-    run: &'a str,
-    req: &'a SwarmRequest,
-    swarm: &'a Swarm,
-    client: reqwest::Client,
-    /// The queue job the current agent turn is working on; its file writes are recorded as they happen.
-    job: Mutex<Option<u64>>,
-    /// This session's queue file.
-    queue: PathBuf,
-    /// formal-ast's view of the folder for the current job (read again at each job, and after a proof).
-    ctx: Mutex<Option<Arc<crate::swarm_ctx::Context>>>,
-    /// The current agent turn's health record (crate::health), written when the turn ends.
-    health: Mutex<Option<crate::health::Turn>>,
-}
-
-impl Turn<'_> {
-    /// The folder through formal-ast; `fresh` reads it again (theorems change as provers write).
-    async fn context(&self, fresh: bool) -> Arc<crate::swarm_ctx::Context> {
-        if !fresh {
-            if let Some(c) = self.ctx.lock().unwrap().clone() {
-                return c;
-            }
-        }
-        let c = Arc::new(read_context(Path::new(&self.req.folder)).await);
-        *self.ctx.lock().unwrap() = Some(c.clone());
-        c
-    }
-
-    fn emit(&self, kind: &'static str, role: &str, item: &str, text: String) {
-        let spent = *self.swarm.spent.lock().unwrap();
-        emit_event(self.app, SwarmEvent { folder: self.req.folder.clone(), run: self.run.into(), kind, role: role.into(), item: item.into(), text, spent, at: now_ms() as u64 });
-    }
-
-    async fn session(&self, role: &str, item: &str) -> Result<(String, String), String> {
-        model_access(&self.client, &self.req.folder, &self.req.api_base, self.req.provider.as_deref(), self.run, role, item).await
-    }
-
-    /// A finding needs its PoC: a test under test/ that exists and that the swarm runs before filing it in the
-    /// audit index.
-    async fn report_bug(&self, root: &Path, input: &Value, role: &str, item: &str) -> Result<(String, String), String> {
-        file_bug(self.app, &self.req.folder, self.run, root, input, role, item).await
-    }
-}
-
-/// Runs a bug's PoC and files it: audit/README.md, the swarm's findings report, and its line in .formal/findings.sarif.
-pub(crate) async fn file_bug(app: &AppHandle, folder: &str, run: &str, root: &Path, input: &Value, role: &str, item: &str) -> Result<(String, String), String> {
-    let emit = |kind: &'static str, text: String| emit_as(app, folder, run, kind, role, item, text);
-    let poc = input["poc"].as_str().unwrap_or("").trim().trim_start_matches("./").to_string();
-    if !poc.starts_with("test/") || !poc.ends_with(".sol") {
-        return Err("poc must be a Foundry test file under test/ (e.g. test/formal/X.t.sol); write it first".into());
-    }
-    if !inside(root, &poc)?.exists() {
-        return Err(format!("{poc} doesn't exist; write the PoC test first"));
-    }
-    emit("status", format!("running the PoC {poc}"));
-    let forge = crate::executor::run_command(root, &format!("forge test --match-path {poc}")).await.unwrap_or_else(|e| e);
-    if forge.starts_with("exit ") && !forge.starts_with("exit 0") && forge.contains("Compiler run failed") {
-        return Err(format!("the PoC doesn't compile:\n{}", clip(forge)));
-    }
-    let tail: String = { let l: Vec<&str> = forge.lines().collect(); l[l.len().saturating_sub(40)..].join("\n") };
-    let (id, file) = crate::swarm_ctx::file_finding(root, input, &poc, &tail)?;
-    // On its line in the maintainer's editor too (solidity-language-server reads .formal/findings.sarif).
-    if let Some((src, line)) = crate::analysis::location(input["location"].as_str().unwrap_or("")) {
-        let severity = input["severity"].as_str().unwrap_or("medium");
-        let level = match severity {
-            "critical" | "high" => "error",
-            "medium" => "warning",
-            _ => "note",
-        };
-        let title = input["title"].as_str().unwrap_or("bug");
-        let props = json!({ "id": id, "severity": severity, "poc": poc, "by": role, "scenario": input["scenario"], "impact": input["impact"], "recommendation": input["recommendation"] });
-        if let Err(e) = crate::analysis::sarif_add(root, "formal-mind/finding", level, &src, line, format!("{id} ({severity}): {title}. PoC: {poc}"), props) {
-            eprintln!("findings.sarif: {e}");
-        }
-    }
-    emit("bug", format!("{id} {} — {poc}", input["title"].as_str().unwrap_or("bug")));
-    Ok((id, file))
-}
-
-/// A key and base URL for one model call: your own Anthropic key, or a formal.team session billed to your credits.
-async fn model_access(client: &reqwest::Client, folder_path: &str, api_base: &str, provider: Option<&str>, run: &str, role: &str, item: &str) -> Result<(String, String), String> {
-        if provider == Some("anthropic") {
-            let key = anthropic_entry()?.get_password().map_err(|_| "Add your Anthropic key first".to_string())?;
-            return Ok((key, "https://api.anthropic.com".into()));
-        }
-        if provider == Some("claude-code") {
-            return Err("Claude Code runs this on your Claude plan, not through a key".into());
-        }
-        if provider == Some("codex") {
-            return Err("Codex runs this on your ChatGPT plan, not through a key".into());
-        }
-        if provider == Some("openai") {
-            let key = openai_entry()?.get_password().map_err(|_| "Add your OpenAI key first".to_string())?;
-            return Ok((key, "https://api.openai.com".into()));
-        }
-        let folder = Path::new(folder_path).file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default();
-        let res = client
-            .post(format!("{api_base}/api/desktop/model-session"))
-            .bearer_auth(token()?)
-            .json(&json!({ "folder": folder, "run": run, "role": role, "ref": item }))
-            .send()
-            .await
-            .map_err(|e| e.to_string())?;
-        let status = res.status();
-        let body: Value = res.json().await.unwrap_or(json!({}));
-        if !status.is_success() {
-            return Err(body["error"].as_str().unwrap_or("formal.team refused the model session").to_string());
-        }
-        Ok((body["key"].as_str().unwrap_or("").to_string(), body["base_url"].as_str().unwrap_or("").to_string()))
-}
-
-impl Turn<'_> {
-    /// A Messages request for this agent: the step itself, or (with `compaction`) the summary of `messages`.
-    fn body(&self, role: &str, goal: &str, messages: &[Value], compaction: Option<Value>) -> Value {
-        let mut body = json!({
-            "model": model_of(self.req), "max_tokens": 16000, "system": system(role, &self.req.folder, goal),
-            "messages": messages, "tools": tools(role),
-            // Automatic prompt caching: the stable prefix (system, tools, history) is read back cheaply each step.
-            "cache_control": { "type": "ephemeral" },
-            "output_config": { "effort": if role == "prover" { "high" } else { "medium" } },
-        });
-        if let Some(c) = compaction {
-            body["compaction"] = c;
-        }
-        body
-    }
-
-    /// POST /v1/messages; the compaction beta goes along when the request asks for a summary or carries one.
-    async fn call(&self, key: &str, base: &str, body: &Value) -> Result<(u16, Value), String> {
-        if self.req.provider.as_deref() == Some("openai") {
-            let res = self.client.post(format!("{base}/v1/chat/completions")).bearer_auth(key).json(&crate::openai::request(body)).send().await.map_err(|e| e.to_string())?;
-            let status = res.status().as_u16();
-            let reply: Value = res.json().await.map_err(|e| e.to_string())?;
-            return Ok((status, crate::openai::reply(&reply, body.get("compaction").is_some())));
-        }
-        let mut req = self.client.post(format!("{base}/v1/messages")).header("x-api-key", key).header("anthropic-version", "2023-06-01");
-        if body.get("compaction").is_some() || body["messages"].as_array().is_some_and(|m| has_compaction(m)) {
-            req = req.header("anthropic-beta", COMPACTION_BETA);
-        }
-        let res = req.json(body).send().await.map_err(|e| e.to_string())?;
-        let status = res.status().as_u16();
-        let reply: Value = res.json().await.map_err(|e| e.to_string())?;
-        Ok((status, reply))
-    }
-
-    /// The fixed parts of a turn run by Claude Code or Codex, for the Context panel: the CLI reports only the total, and
-    /// there is no key to count with, so each part is estimated from its text (about four characters a token).
-    fn estimate(&self, role: &str, goal: &str, task: &Value) -> (u64, u64, u64) {
-        let tokens = |chars: usize| (chars as u64).div_ceil(4);
-        let task_text = match task {
-            Value::String(t) => t.len(),
-            Value::Array(parts) => parts.iter().filter_map(|p| p["text"].as_str()).map(str::len).sum(),
-            other => other.to_string().len(),
-        };
-        (tokens(system(role, &self.req.folder, goal).len()), tokens(tools(role).to_string().len()), tokens(task_text))
-    }
-
-    /// What the fixed parts of every request in this turn take, for the Context panel: the system prompt, the tool
-    /// definitions and the task (with any attached report), counted by /v1/messages/count_tokens (free, not metered)
-    /// as differences of three counts. Zeros where a count fails; the panel then shows them as messages.
-    async fn measure(&self, key: &str, base: &str, role: &str, goal: &str, task: &Value) -> (u64, u64, u64) {
-        let count = |body: Value| async move { self.count(key, base, &body).await };
-        let model = model_of(self.req);
-        let sys = system(role, &self.req.folder, goal);
-        let probe = json!([{ "role": "user", "content": "." }]);
-        let Some(with_system) = count(json!({ "model": model, "system": sys, "messages": probe })).await else { return (0, 0, 0) };
-        let with_tools = count(json!({ "model": model, "system": sys, "tools": tools(role), "messages": probe })).await.unwrap_or(with_system);
-        let with_task = count(json!({ "model": model, "system": sys, "tools": tools(role), "messages": [{ "role": "user", "content": task }] })).await.unwrap_or(with_tools);
-        (with_system, with_tools.saturating_sub(with_system), with_task.saturating_sub(with_tools))
-    }
-
-    /// /v1/messages/count_tokens for a request body (free, not metered); None when the count fails.
-    async fn count(&self, key: &str, base: &str, body: &Value) -> Option<u64> {
-        // OpenAI has no free token count; the Context card fills in from the replies' usage instead.
-        if self.req.provider.as_deref() == Some("openai") {
-            return None;
-        }
-        let mut req = self.client.post(format!("{base}/v1/messages/count_tokens")).header("x-api-key", key).header("anthropic-version", "2023-06-01");
-        if body["messages"].as_array().is_some_and(|m| has_compaction(m)) {
-            req = req.header("anthropic-beta", COMPACTION_BETA);
-        }
-        let res = req.json(body).send().await.ok()?;
-        if !res.status().is_success() {
-            return None;
-        }
-        res.json::<Value>().await.ok()?["input_tokens"].as_u64()
-    }
-
-    /// Adds a call's cost to the session's spend.
-    fn charge(&self, usage: &Value) {
-        let total = {
-            let mut spent = self.swarm.spent.lock().unwrap();
-            *spent += cost(model_of(self.req), usage);
-            *spent
-        };
-        with_queue(&self.queue, |q| q.spent = total);
-    }
-
-    /// Summarizes the older steps of `messages` in place (see `compact_cut` and `splice`). When even those don't fit
-    /// the summarizer, a shorter, earlier range is summarized; the next steps compact the rest.
-    #[allow(clippy::too_many_arguments)]
-    async fn compact(&self, key: &str, base: &str, role: &str, item: &str, goal: &str, messages: &mut Vec<Value>, task: &Value) -> Result<(), String> {
-        let mut cut = compact_cut(messages, KEEP_STEPS).unwrap_or(messages.len());
-        for _ in 0..4 {
-            self.emit("status", role, item, format!("compacting: summarizing {cut} of {} messages", messages.len()));
-            let compaction = json!({ "type": "summarize", "instructions": SUMMARY_INSTRUCTIONS });
-            let (status, reply) = self.call(key, base, &self.body(role, goal, &messages[..cut], Some(compaction))).await?;
-            let message = reply["error"]["message"].as_str().unwrap_or("the compaction call failed").to_string();
-            if status < 300 {
-                self.charge(&reply["usage"]);
-            }
-            let stop = reply["stop_reason"].as_str().unwrap_or("");
-            if status < 300 && stop == "compaction" {
-                let kept = messages.len() - cut;
-                *messages = splice(messages, cut, reply["content"].clone(), task);
-                // Shown in the chat's tool trace.
-                self.emit("tool", role, item, format!("compact: the earlier steps summarized, the last {kept} messages kept"));
-                return Ok(());
-            }
-            let full = if status < 300 { stop == "model_context_window_exceeded" } else { too_long(status, &message) };
-            if !full {
-                return Err(if status < 300 { format!("no summary came back ({stop})") } else { message });
-            }
-            cut = earlier_cut(messages, cut).ok_or("the conversation is too long to summarize")?;
-        }
-        Err("the conversation is too long to summarize".into())
-    }
-
-    /// One tool call of an agent's turn, on the API or over Claude Code's MCP: the result the agent reads, with what it
-    /// recorded (files written, notes, a verdict, a bug) kept in `out`.
-    /// A tool call from the agent, run and counted in the turn's health record.
-    async fn tool(&self, role: &str, item: &str, name: &str, input: &Value, out: &mut Outcome) -> String {
-        // A pause cuts through a tool the agent is waiting on (a background build, a long run) instead of waiting for it.
-        let answer = tokio::select! {
-            a = self.run_tool(role, item, name, input, out) => a,
-            _ = self.stopped() => "stopped: the swarm was paused; this call didn't finish".to_string(),
-        };
-        if let Some(h) = self.health.lock().unwrap().as_mut() {
-            h.tool(name, input, &answer);
-        }
-        answer
-    }
-
-    /// Resolves once the session is stopped: every wait of an agent's turn (a model call, Codex or Claude Code
-    /// thinking, a tool) races it, so Stop ends the turn within a moment instead of after the current step.
-    async fn stopped(&self) {
-        while !self.swarm.stop.load(Ordering::SeqCst) {
-            tokio::time::sleep(Duration::from_millis(300)).await;
-        }
-    }
-
-    async fn run_tool(&self, role: &str, item: &str, name: &str, input: &Value, out: &mut Outcome) -> String {
-        let root = PathBuf::from(&self.req.folder);
-        let shown = input.as_object().map(|o| o.values().filter_map(Value::as_str).map(|v| v.chars().take(90).collect::<String>()).collect::<Vec<_>>().join(" ")).unwrap_or_default();
-        match name {
-                "record_property" => {
-                    if input["statement"].as_str().is_none_or(|t| t.trim().is_empty()) {
-                        "error: statement is required: what the proof establishes, as the report states it".to_string()
-                    } else {
-                        out.property = Some(input.clone());
-                        self.emit("tool", role, item, "record_property".into());
-                        "recorded; the reviewer checks it against the Solidity and your proof".to_string()
-                    }
-                }
-                "formalize_result" => {
-                    let ctx = self.context(false).await;
-                    match crate::statements::derive(&ctx, input) {
-                        Ok(f) => {
-                            self.emit("tool", role, item, format!("formalize_result {} · {} functions", f.kind, f.obligations.len()));
-                            let r = if f.asks() { format!("recorded: {} functions; the maintainer is asked whether it means what they meant", f.obligations.len()) } else { format!("recorded as {}; the swarm doesn't prove those yet", f.kind) };
-                            out.formalized = Some(f);
-                            r
-                        }
-                        Err(e) => format!("error: {e}"),
-                    }
-                }
-                "confirm_statement" => {
-                    let r = crate::statements::confirm_tool_call(&self.req.folder, input);
-                    self.emit("tool", role, item, format!("confirm_statement {shown}"));
-                    r
-                }
-                "verdict" => {
-                    let ok = input["decision"].as_str() == Some("approve");
-                    out.verdict = Some((ok, input["notes"].as_str().unwrap_or("").to_string()));
-                    out.property = ok.then(|| input.clone());
-                    self.emit("tool", role, item, format!("verdict {}", if ok { "approve" } else { "changes" }));
-                    "recorded".to_string()
-                }
-                // The Solidity comes from formal-ast, not from the files.
-                "functions" | "function" => {
-                    self.emit("tool", role, item, format!("{name} {shown}"));
-                    let ctx = self.context(false).await;
-                    let r = if name == "functions" {
-                        ctx.functions()
-                    } else {
-                        let n = input["name"].as_str().unwrap_or("");
-                        ctx.slice(n).unwrap_or_else(|| format!("error: no function {n} in scope; `functions` lists them"))
-                    };
-                    self.emit("result", role, item, r.chars().take(500).collect());
-                    r
-                }
-                "search" => {
-                    self.emit("tool", role, item, format!("search {shown}"));
-                    let lake = crate::swarm_ctx::lake_dir(&root).map(|d| d.strip_prefix(&root).map(|p| p.to_string_lossy().to_string()).unwrap_or_default()).unwrap_or_default();
-                    let r = crate::executor::search_in(&root, input["pattern"].as_str().unwrap_or(""), &lake, &[".lean"]).unwrap_or_else(|e| format!("error: {e}"));
-                    self.emit("result", role, item, r.chars().take(500).collect());
-                    r
-                }
-                "find" => {
-                    self.emit("tool", role, item, format!("find {shown}"));
-                    let r = crate::file_search::find(&root, input["query"].as_str().unwrap_or(""), 30).unwrap_or_else(|e| format!("error: {e}"));
-                    self.emit("result", role, item, r.chars().take(500).collect());
-                    r
-                }
-                n if crate::analysis::is_tool(n) => {
-                    self.emit("tool", role, item, format!("{name} {shown}"));
-                    let r = crate::analysis::call(&self.req.folder, role, name, input).await;
-                    self.emit("result", role, item, r.chars().take(500).collect());
-                    r
-                }
-                "record_report" => {
-                    let job = *self.job.lock().unwrap();
-                    let report = with_queue(&self.queue, |q| q.jobs.iter().find(|j| Some(j.id) == job).map(|j| j.text.clone())).unwrap_or_default();
-                    self.emit("tool", role, item, format!("record_report {}", input["title"].as_str().unwrap_or("")));
-                    crate::swarm_ctx::record_report(&root, &report, input).map(|p| format!("recorded in {p}")).unwrap_or_else(|e| format!("error: {e}"))
-                }
-                "record_finding" => {
-                    // The report is the job's text: its path in the folder.
-                    let job = *self.job.lock().unwrap();
-                    let report = with_queue(&self.queue, |q| q.jobs.iter().find(|j| Some(j.id) == job).map(|j| j.text.clone())).unwrap_or_default();
-                    let r = crate::swarm_ctx::record_finding_json(&root, &report, input);
-                    let label = format!("{} {} · {}", input["id"].as_str().unwrap_or(""), input["title"].as_str().unwrap_or(""), input["status"].as_str().unwrap_or(""));
-                    self.emit("tool", role, item, format!("record_finding {label}"));
-                    r.map(|idx| format!("recorded in {idx}")).unwrap_or_else(|e| format!("error: {e}"))
-                }
-                "start_work" => {
-                    self.emit("tool", role, item, "start_work".into());
-                    let was = self.swarm.work.swap(true, Ordering::SeqCst);
-                    let r = if was { "the swarm is already working on the plan" } else { "after your answer, the swarm works on the plan (the prover first), as the maintainer asked" };
-                    self.emit("result", role, item, r.into());
-                    r.into()
-                }
-                "reopen" => {
-                    let defs: Vec<String> = input["defs"].as_array().into_iter().flatten().filter_map(|d| d.as_str().map(String::from)).collect();
-                    self.emit("tool", role, item, format!("reopen {}", defs.join(", ")));
-                    let (done, unknown) = reopen(&root, &defs);
-                    if !done.is_empty() {
-                        self.swarm.work.store(true, Ordering::SeqCst);
-                    }
-                    let mut r = if done.is_empty() { "nothing reopened".to_string() } else { format!("reopened {}; after your answer, the swarm proves them", done.join(", ")) };
-                    if !unknown.is_empty() {
-                        r.push_str(&format!("; not in the plan: {}", unknown.join(", ")));
-                    }
-                    self.emit("result", role, item, r.clone());
-                    r
-                }
-                "report_bug" => {
-                    self.emit("tool", role, item, format!("report_bug {shown}"));
-                    let r = self.report_bug(&root, input, role, item).await;
-                    if let Ok((id, _)) = &r {
-                        out.bug = Some(format!("{id} {}", input["title"].as_str().unwrap_or("bug")));
-                    }
-                    let r = r.map(|(id, file)| format!("filed as {id} in audit/README.md (open) and {file}; the swarm marks this item and moves on")).unwrap_or_else(|e| format!("error: {e}"));
-                    self.emit("result", role, item, r.clone());
-                    r
-                }
-                // The swarm keeps .formal/ (it ticks plan items only after the check and the review), whichever agent
-                // asks: an assistant once marked a whole plan proved by writing plan.md, past the reviewer.
-                "write_file" if inside(&root, input["path"].as_str().unwrap_or("")).is_ok_and(|p| p.starts_with(root.join(".formal"))) => {
-                    "error: .formal/ is the swarm's; it ticks a plan item once its proof checks and the reviewer approves it (reopen puts items back in the plan)".to_string()
-                }
-                _ => {
-                    if name == "write_file" {
-                        let path = input["path"].as_str().unwrap_or("").trim_start_matches("./").to_string();
-                        if !path.is_empty() && !path.starts_with(".formal/") && !out.files.contains(&path) {
-                            out.files.push(path.clone());
-                            // Recorded now, so a quit mid-turn still knows what was written.
-                            if let Some(job) = *self.job.lock().unwrap() {
-                                with_queue(&self.queue, |q| {
-                                    if let Some(j) = q.jobs.iter_mut().find(|j| j.id == job) {
-                                        if !j.files.contains(&path) {
-                                            j.files.push(path.clone());
-                                        }
-                                    }
-                                });
-                            }
-                        }
-                    }
-                    if name == "write_file" {
-                        // The chat shows the write as a diff against what was there (the agent's reply stays short).
-                        let path = input["path"].as_str().unwrap_or("").trim_start_matches("./").to_string();
-                        self.emit("tool", role, item, format!("write_file {path}"));
-                        let before = std::fs::read_to_string(root.join(&path)).unwrap_or_default();
-                        let r = call_tool(&root, name, input).await;
-                        let after = std::fs::read_to_string(root.join(&path)).unwrap_or_default();
-                        let diff = similar::TextDiff::from_lines(&before, &after).unified_diff().context_radius(3).header(&format!("a/{path}"), &format!("b/{path}")).to_string();
-                        let shown_diff: String = diff.chars().take(20_000).collect();
-                        self.emit("result", role, item, if diff.is_empty() { r.clone() } else { format!("{r}\n```diff\n{shown_diff}```") });
-                        return r;
-                    }
-                    self.emit("tool", role, item, format!("{name} {shown}"));
-                    let r = call_tool(&root, name, input).await;
-                    self.emit("result", role, item, r.chars().take(500).collect());
-                    r
-                }
-        }
-    }
-
-    /// One agent turn on Claude Code, with your Claude plan: the same system prompt, tools and task as on the API, and
-    /// the same tool code answering them (over MCP, through `claude_code::Bridge`); Claude Code runs the loop. Nothing
-    /// is charged to the session's spend; your plan's usage limits apply instead, and hitting one pauses the swarm
-    /// with the job still running, so the next start resumes the conversation.
-    async fn agent_on_claude_code(&self, role: &str, item: &str, task: Value) -> Result<Outcome, String> {
-        use crate::claude_code::{bridge, events_of, result_of, rpc, start_role, tool_reply, Rpc};
-        let goal = self.req.goal.clone().unwrap_or_default();
-        let job = self.job.lock().unwrap().unwrap_or(0);
-        let tools = crate::claude_code::mcp_tools(tools(role).as_array().cloned().unwrap_or_default());
-        let instructions = format!("Formal Mind's tools for the {role}, run by the app in the folder.");
-        let mut bridge = bridge()?;
-        let model = model_of(self.req);
-        let mut cc = start_role(&self.req.folder, self.run, job, &system(role, &self.req.folder, &goal), &task, model, &bridge)?;
-        let mut out = Outcome::default();
-        self.emit("status", role, item, format!("{role} is working on Claude Code{}", if cc.resumed { ", resuming its conversation" } else { "" }));
-        let window = context_window(model);
-        let (sys_tokens, tool_tokens, task_tokens) = self.estimate(role, &goal, &task);
-        let compact_at = (window as f64 * COMPACT_AT) as u64;
-        let mut result: Option<Result<String, String>> = None;
-        let mut last_used = 0;
-        loop {
-            if self.swarm.stop.load(Ordering::SeqCst) {
-                let _ = cc.child.kill().await;
-                return Ok(out);
-            }
-            tokio::select! {
-                _ = self.stopped() => continue,
-                call = bridge.calls.recv() => {
-                    let Some(call) = call else { continue };
-                    match rpc(&call.msg, &tools, &instructions) {
-                        Rpc::Reply(r) => call.answer(r),
-                        Rpc::Tool { id, name, args } => {
-                            let text = self.tool(role, item, &name, &args, &mut out).await;
-                            call.answer(Some(tool_reply(id, &clip(text))));
-                        }
-                    }
-                }
-                line = cc.lines.next_line() => {
-                    let Ok(Some(line)) = line else { break };
-                    cc.log(&line);
-                    let Ok(v) = serde_json::from_str::<Value>(&line) else { continue };
-                    match v["type"].as_str() {
-                        // It must work in the folder: anywhere else, lake and forge would run in the wrong place.
-                        Some("system") if v["subtype"] == "init" => {
-                            let cwd = v["cwd"].as_str().and_then(|p| std::fs::canonicalize(p).ok());
-                            if cwd.as_deref() != Some(cc.root.as_path()) {
-                                let _ = cc.child.kill().await;
-                                return Err(format!("Claude Code started in {}, not the folder {}", v["cwd"].as_str().unwrap_or("?"), cc.root.display()));
-                            }
-                            // Without its tools the agent can only write tool calls out as text that nothing runs (a
-                            // reviewer did that 321 times, then asked for changes it never checked). Stop the turn instead.
-                            let tools = v["mcp_servers"].as_array().and_then(|a| a.iter().find(|m| m["name"] == "formalmind")).and_then(|m| m["status"].as_str()).unwrap_or("missing");
-                            if let Some(h) = self.health.lock().unwrap().as_mut() {
-                                h.tools = Some(tools.to_string());
-                            }
-                            if tools != "connected" {
-                                let _ = cc.child.kill().await;
-                                return Err(format!("{NO_TOOLS} (Claude Code reported them {tools})"));
-                            }
-                            for (kind, text) in events_of(&v) {
-                                self.emit(kind, role, item, text);
-                            }
-                        }
-                        // Its words; the tool calls and results are emitted by `tool` as it runs them.
-                        Some("assistant") => {
-                            cc.started(job);
-                            for (kind, text) in events_of(&v) {
-                                if kind == "say" {
-                                    if let Some(h) = self.health.lock().unwrap().as_mut() {
-                                        h.said(&text);
-                                    }
-                                    out.summary = text.clone();
-                                    self.emit("say", role, item, text);
-                                }
-                            }
-                            // Each content block of a reply comes as its own line with the reply's usage.
-                            let used = context_used(&v["message"]["usage"]);
-                            if used > 0 && used != last_used {
-                                last_used = used;
-                                if let Some(h) = self.health.lock().unwrap().as_mut() {
-                                    h.tokens = h.tokens.max(used);
-                                }
-                                self.emit("context", role, item, json!({ "used": used, "window": window, "compact_at": compact_at, "system": sys_tokens, "tools": tool_tokens, "task": task_tokens, "estimated": true }).to_string());
-                            }
-                        }
-                        Some("result") => result = Some(result_of(&v)),
-                        _ => {}
-                    }
-                }
-            }
-        }
-        let status = cc.child.wait().await.map_err(|e| e.to_string())?;
-        match result {
-            Some(Ok(text)) => {
-                if !text.is_empty() {
-                    out.summary = text;
-                }
-                Ok(out)
-            }
-            // A usage limit or an API error: the job stays running, and the next start resumes it.
-            Some(Err(e)) => Err(e),
-            None => Err(format!("Claude Code exited with {status}: {}", cc.stderr_tail())),
-        }
-    }
-
-    /// One agent turn on Codex, with your ChatGPT plan: as on Claude Code, the same system prompt, tools and task as on
-    /// the API, the tools answered over the same Bridge, and Codex running the loop. Nothing is charged to the session's
-    /// spend; your plan's usage limits apply, and hitting one pauses the swarm with the job's thread kept to resume.
-    async fn agent_on_codex(&self, role: &str, item: &str, task: Value) -> Result<Outcome, String> {
-        use crate::claude_code::{bridge, rpc, tool_reply, Rpc};
-        use crate::codex::{context_used, failure_of, said, start_role};
-        let goal = self.req.goal.clone().unwrap_or_default();
-        let job = self.job.lock().unwrap().unwrap_or(0);
-        let tools = crate::claude_code::mcp_tools(tools(role).as_array().cloned().unwrap_or_default());
-        let instructions = format!("Formal Mind's tools for the {role}, run by the app in the folder.");
-        let mut bridge = bridge()?;
-        let model = model_of(self.req);
-        let mut cx = start_role(&self.req.folder, self.run, job, &system(role, &self.req.folder, &goal), &task, model, &bridge)?;
-        let mut out = Outcome::default();
-        self.emit("status", role, item, format!("{role} is working on Codex{}", if cx.resumed { ", resuming its thread" } else { "" }));
-        let window = context_window(model);
-        let (sys_tokens, tool_tokens, task_tokens) = self.estimate(role, &goal, &task);
-        let compact_at = (window as f64 * COMPACT_AT) as u64;
-        let mut failed: Option<String> = None;
-        let mut finished = false;
-        loop {
-            if self.swarm.stop.load(Ordering::SeqCst) {
-                let _ = cx.child.kill().await;
-                return Ok(out);
-            }
-            tokio::select! {
-                _ = self.stopped() => continue,
-                call = bridge.calls.recv() => {
-                    let Some(call) = call else { continue };
-                    match rpc(&call.msg, &tools, &instructions) {
-                        Rpc::Reply(r) => call.answer(r),
-                        Rpc::Tool { id, name, args } => {
-                            let text = self.tool(role, item, &name, &args, &mut out).await;
-                            call.answer(Some(tool_reply(id, &clip(text))));
-                        }
-                    }
-                }
-                line = cx.lines.next_line() => {
-                    let Ok(Some(line)) = line else { break };
-                    cx.log(&line);
-                    let Ok(v) = serde_json::from_str::<Value>(&line) else { continue };
-                    // A thread starts only once its required tools connected (Codex refuses to start without them).
-                    if v["type"] == "thread.started" {
-                        if let Some(h) = self.health.lock().unwrap().as_mut() {
-                            h.tools = Some("connected".into());
-                        }
-                        cx.started(job, v["thread_id"].as_str().unwrap_or(""));
-                        self.emit("status", role, item, format!("Codex · {model} · your ChatGPT plan · in {}", self.req.folder));
-                    }
-                    // Its words; the tool calls and results are emitted by `tool` as it runs them.
-                    if let Some(text) = said(&v) {
-                        if let Some(h) = self.health.lock().unwrap().as_mut() {
-                            h.said(&text);
-                        }
-                        out.summary = text.clone();
-                        self.emit("say", role, item, text);
-                    }
-                    let used = context_used(&v);
-                    if used > 0 {
-                        finished = true;
-                        if let Some(h) = self.health.lock().unwrap().as_mut() {
-                            h.tokens = h.tokens.max(used);
-                        }
-                        self.emit("context", role, item, json!({ "used": used, "window": window, "compact_at": compact_at, "system": sys_tokens, "tools": tool_tokens, "task": task_tokens, "estimated": true }).to_string());
-                    }
-                    if let Some(e) = failure_of(&v) {
-                        failed = Some(e);
-                    }
-                }
-            }
-        }
-        let status = cx.child.wait().await.map_err(|e| e.to_string())?;
-        match failed {
-            // A usage limit or an API error: the job stays running, and the next start resumes it.
-            Some(e) => Err(e),
-            None if finished || status.success() => Ok(out),
-            None => {
-                let why = cx.stderr_tail();
-                // Its tools didn't connect: the same as Claude Code's, so the turn is tried again before pausing.
-                Err(if why.contains("required MCP servers failed") { format!("{NO_TOOLS} (Codex couldn't connect them)") } else { format!("Codex exited with {status}: {why}") })
-            }
-        }
-    }
-
-    /// One agent turn, on Claude Code, Codex or the API, with its health record (crate::health): written when the turn ends,
-    /// and anything that looks wrong said in the session. A Claude Code turn whose tools didn't connect is stopped
-    /// before the agent works, then tried twice more before the swarm pauses.
-    async fn agent(&self, role: &str, item: &str, task: impl Into<Value>) -> Result<Outcome, String> {
-        let task: Value = task.into();
-        let on_claude_code = self.req.provider.as_deref() == Some("claude-code");
-        let on_codex = self.req.provider.as_deref() == Some("codex");
-        let mut tries = 0;
-        loop {
-            let job = self.job.lock().unwrap().unwrap_or(0);
-            *self.health.lock().unwrap() = Some(crate::health::Turn::new(&self.req.folder, self.run, job, role, item, self.req.provider.as_deref().unwrap_or("formal"), model_of(self.req)));
-            let result = if on_claude_code {
-                self.agent_on_claude_code(role, item, task.clone()).await
-            } else if on_codex {
-                self.agent_on_codex(role, item, task.clone()).await
-            } else {
-                self.agent_api(role, item, task.clone()).await
-            };
-            let paused = self.swarm.stop.load(Ordering::SeqCst);
-            if let Some(h) = self.health.lock().unwrap().take() {
-                let (ended, error) = match &result {
-                    Ok(_) if paused => ("paused", None),
-                    Ok(_) => ("done", None),
-                    Err(e) => ("error", Some(e.as_str())),
-                };
-                for a in h.finish(ended, error) {
-                    self.emit("error", role, item, format!("health: the {role}'s turn on item {item}: {a}"));
-                }
-            }
-            match result {
-                Err(e) if (on_claude_code || on_codex) && e.starts_with(NO_TOOLS) && tries < 2 => {
-                    tries += 1;
-                    self.emit("status", role, item, format!("{e}; starting the turn again"));
-                    tokio::time::sleep(Duration::from_secs(3 * tries)).await;
-                }
-                other => return other,
-            }
-        }
-    }
-
-    /// One agent turn on the API: a tool loop against the model until it stops calling tools.
-    async fn agent_api(&self, role: &str, item: &str, task: Value) -> Result<Outcome, String> {
-        let root = PathBuf::from(&self.req.folder);
-        let (key, base) = self.session(role, item).await?;
-        let goal = self.req.goal.clone().unwrap_or_default();
-        // The whole conversation is kept on disk (.formal/jobs/<job>.json) after every step, so a job interrupted by a
-        // quit continues the same conversation instead of starting over.
-        let job = *self.job.lock().unwrap();
-        let saved = job.and_then(|j| load_transcript(&root, self.run, j));
-        let mut messages = match saved {
-            Some(mut m) if !m.is_empty() => {
-                // A reply whose tool calls never got results (the app quit mid-step) is dropped; the model redoes that step.
-                if m.last().map(|x| x["role"] == "assistant").unwrap_or(false) {
-                    m.pop();
-                }
-                m.push(json!({ "role": "user", "content": "The app quit and this job is being resumed. Carry on from where you were; don't redo finished work." }));
-                m
-            }
-            _ => vec![json!({ "role": "user", "content": task.clone() })],
-        };
-        let keep = |m: &Vec<Value>| {
-            if let Some(j) = job {
-                save_transcript(&root, self.run, j, m);
-            }
-        };
-        keep(&messages);
-        let mut out = Outcome::default();
-        self.emit("status", role, item, format!("{role} is working"));
-        let steps = match role {
-            "prover" => PROVER_STEPS,
-            _ => MAX_STEPS,
-        };
-        let window = context_window(model_of(self.req));
-        // What the last reply said the conversation takes; unknown (0) after a resume. Each step's reply sets it.
-        let mut used: u64 = 0;
-        let compact_at = (window as f64 * COMPACT_AT) as u64;
-        let (sys_tokens, tool_tokens, task_tokens) = self.measure(&key, &base, role, &goal, &task).await;
-        // How full this agent's window is and what fills it, for the Context card and panel: after every model call,
-        // and after a compaction (counted, since no reply has said yet).
-        let context = |used: u64| json!({ "used": used, "window": window, "compact_at": compact_at, "system": sys_tokens, "tools": tool_tokens, "task": task_tokens }).to_string();
-
-        for step in 1..=steps {
-            if self.swarm.stop.load(Ordering::SeqCst) {
-                return Ok(out);
-            }
-            // Compact now does nothing on a conversation that is just the task.
-            if used >= compact_at || (self.swarm.compact_now.swap(false, Ordering::SeqCst) && messages.len() > 2) {
-                // Not fatal: if no summary comes back, the step runs as is and a too-long call compacts below.
-                match self.compact(&key, &base, role, item, &goal, &mut messages, &task).await {
-                    Ok(()) => {
-                        if let Some(n) = self.count(&key, &base, &json!({ "model": model_of(self.req), "system": system(role, &self.req.folder, &goal), "tools": tools(role), "messages": messages })).await {
-                            self.emit("context", role, item, context(n));
-                        }
-                    }
-                    Err(e) => self.emit("tool", role, item, format!("compact: no summary yet ({e})")),
-                }
-                keep(&messages);
-            }
-            // A heartbeat before each model call, which can take minutes: the board and the plan card show it.
-            self.emit("status", role, item, format!("step {step}: thinking"));
-            // A conversation that no longer fits (a long job, a resumed one, a large report) is compacted and the step
-            // retried once, instead of pausing the swarm on a job that would fail the same way on every resume.
-            let mut retried = false;
-            let reply = loop {
-                let body = self.body(role, &goal, &messages, None);
-                let (status, reply) = tokio::select! {
-                    r = self.call(&key, &base, &body) => r?,
-                    _ = self.stopped() => return Ok(out),
-                };
-                let message = reply["error"]["message"].as_str().unwrap_or("The model call failed").to_string();
-                let full = if status < 300 { reply["stop_reason"] == "model_context_window_exceeded" } else { too_long(status, &message) };
-                if status < 300 && !full {
-                    break reply;
-                }
-                if status < 300 {
-                    self.charge(&reply["usage"]);
-                }
-                if !full || retried {
-                    return Err(if full { "the conversation is still too long after compacting it".into() } else { message });
-                }
-                retried = true;
-                self.emit("status", role, item, "the conversation no longer fits the context window: compacting it".into());
-                self.compact(&key, &base, role, item, &goal, &mut messages, &task).await?;
-                keep(&messages);
-                if let Some(n) = self.count(&key, &base, &json!({ "model": model_of(self.req), "system": system(role, &self.req.folder, &goal), "tools": tools(role), "messages": messages })).await {
-                    self.emit("context", role, item, context(n));
-                }
-            };
-            self.charge(&reply["usage"]);
-            used = context_used(&reply["usage"]);
-            self.emit("context", role, item, context(used));
-            let content = reply["content"].clone();
-            messages.push(json!({ "role": "assistant", "content": content }));
-            keep(&messages);
-            let mut results = vec![];
-            for block in content.as_array().cloned().unwrap_or_default() {
-                match block["type"].as_str() {
-                    Some("text") => {
-                        let text = block["text"].as_str().unwrap_or("").to_string();
-                        if !text.trim().is_empty() {
-                            out.summary = text.clone();
-                            self.emit("say", role, item, text);
-                        }
-                    }
-                    Some("tool_use") => {
-                        let result = self.tool(role, item, block["name"].as_str().unwrap_or(""), &block["input"], &mut out).await;
-                        results.push(json!({ "type": "tool_result", "tool_use_id": block["id"], "content": clip(result) }));
-                    }
-                    _ => {}
-                }
-            }
-            if results.is_empty() || reply["stop_reason"].as_str() != Some("tool_use") {
-                return Ok(out);
-            }
-            messages.push(json!({ "role": "user", "content": results }));
-            keep(&messages);
-        }
-        Ok(out)
-    }
-}
-
-/// The property notes that go into the report: the prover's, with each field the reviewer gave replacing it.
-fn merge_property(prover: Option<&Value>, reviewer: Option<&Value>) -> Option<Value> {
-    let mut p = prover.cloned().unwrap_or_else(|| json!({}));
-    for k in ["statement", "assumptions", "theorems"] {
-        let given = reviewer.map(|r| &r[k]).filter(|v| v.as_str().is_some_and(|s| !s.trim().is_empty()) || v.as_array().is_some_and(|a| !a.is_empty()));
-        if let Some(v) = given {
-            p[k] = v.clone();
-        }
-    }
-    p["statement"].as_str().is_some_and(|s| !s.trim().is_empty()).then_some(p)
-}
-
-/// .formal/proofs.json: for each proven plan item, the files that prove it and the prover's summary.
-fn proofs_path(root: &Path) -> PathBuf {
-    root.join(".formal").join("proofs.json")
-}
-
-fn record_proof(root: &Path, index: usize, text: &str, files: Vec<String>, summary: &str) {
-    let mut all: Value = std::fs::read_to_string(proofs_path(root)).ok().and_then(|t| serde_json::from_str(&t).ok()).unwrap_or(json!({}));
-    all[index.to_string()] = json!({ "item": text, "files": files, "summary": summary, "at": now_ms().to_string() });
-    let _ = std::fs::write(proofs_path(root), serde_json::to_string_pretty(&all).unwrap_or_default());
-}
-
-/// What proves each plan item, by item number.
+/// What proves each plan item, by item number (`.formal/proofs.json`).
 #[tauri::command(async)]
 pub fn swarm_proofs(folder: String) -> Result<Value, String> {
-    if !local::read()?.allows(&folder) {
-        return Err("Add the folder first".into());
-    }
-    Ok(std::fs::read_to_string(proofs_path(Path::new(&folder))).ok().and_then(|t| serde_json::from_str(&t).ok()).unwrap_or(json!({})))
+    added(&folder)?;
+    let path = Path::new(&folder).join(".formal").join("proofs.json");
+    Ok(std::fs::read_to_string(path).ok().and_then(|t| serde_json::from_str(&t).ok()).unwrap_or(json!({})))
 }
 
 /// A text file in an added folder, for viewing a proof or a PoC.
 #[tauri::command(async)]
 pub fn folder_read(folder: String, path: String) -> Result<String, String> {
-    if !local::read()?.allows(&folder) {
-        return Err("Add the folder first".into());
-    }
-    let p = inside(Path::new(&folder), &path)?;
+    added(&folder)?;
+    let p = fsguard::inside(Path::new(&folder), &path)?;
     std::fs::read_to_string(p).map_err(|e| e.to_string())
 }
 
-/// An image in the folder as a `data:` URL, for Markdown previews (up to 8 MB).
+/// An image (or a PDF) in the folder as a `data:` URL.
 #[tauri::command(async)]
 pub fn folder_image(folder: String, path: String) -> Result<String, String> {
-    if !local::read()?.allows(&folder) {
-        return Err("Add the folder first".into());
-    }
-    let p = inside(Path::new(&folder), &path)?;
+    added(&folder)?;
+    let p = fsguard::inside(Path::new(&folder), &path)?;
     let ext = p.extension().and_then(|e| e.to_str()).unwrap_or("").to_ascii_lowercase();
     let mime = match ext.as_str() {
         "png" => "image/png",
@@ -1542,7 +219,6 @@ pub fn folder_image(folder: String, path: String) -> Result<String, String> {
         "svg" => "image/svg+xml",
         "avif" => "image/avif",
         "ico" => "image/x-icon",
-        // PDFs too: the Code tab shows them in the web view's own PDF viewer.
         "pdf" => "application/pdf",
         _ => return Err("Not an image or a PDF".into()),
     };
@@ -1553,905 +229,67 @@ pub fn folder_image(folder: String, path: String) -> Result<String, String> {
     Ok(format!("data:{mime};base64,{}", base64(&bytes)))
 }
 
-pub(crate) fn base64(bytes: &[u8]) -> String {
-    const T: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
-    let mut out = String::with_capacity(bytes.len().div_ceil(3) * 4);
-    for c in bytes.chunks(3) {
-        let n = (c[0] as u32) << 16 | (*c.get(1).unwrap_or(&0) as u32) << 8 | *c.get(2).unwrap_or(&0) as u32;
-        for i in 0..4 {
-            out.push(if i <= c.len() { T[(n >> (18 - 6 * i)) as usize & 63] as char } else { '=' });
-        }
-    }
-    out
-}
-
-/// formal-ast's view of the folder, off the async runtime (solc runs here).
-async fn read_context(root: &Path) -> crate::swarm_ctx::Context {
-    let root = root.to_path_buf();
-    tauri::async_runtime::spawn_blocking(move || crate::swarm_ctx::context(&root)).await.unwrap_or_default()
-}
-
-/// The plan's checked items whose function the ledger no longer counts as proved (its code changed since the proof,
-/// or Lean no longer checks it), as (index, def, why): a tick is a fact the ledger derives, not a mark that stays.
-fn lapsed(plan: &[PlanItem], ledger: &Value) -> Vec<(usize, String, String)> {
-    let entries = ledger["entries"].as_array().cloned().unwrap_or_default();
-    plan.iter()
-        .filter(|i| i.mark == "x")
-        .filter_map(|i| {
-            let def = i.text.split('`').nth(1)?;
-            let e = entries.iter().find(|e| e["lean"] == def)?;
-            (e["status"] != "proved").then(|| {
-                let why = e["notYet"].as_array().and_then(|r| r.first()).and_then(Value::as_str).unwrap_or("not proved");
-                (i.index, def.to_string(), why.to_string())
-            })
-        })
-        .collect()
-}
-
-/// Writes the AST's plan items that .formal/plan.md doesn't have yet (one per function in scope; ones the Proofs page
-/// already shows as proved come checked), and reopens checked items the ledger no longer counts as proved. The
-/// planner's turn, without a model: returns how many items were added or reopened.
-async fn sync_plan(turn: &Turn<'_>, root: &Path) -> usize {
-    turn.emit("status", "planner", "plan", "planner is working".into());
-    turn.emit("status", "planner", "plan", "reading the contracts' AST (formal-ast)".into());
-    let ctx = turn.context(true).await;
-    let path = plan_path(root);
-    let text = std::fs::read_to_string(&path).unwrap_or_default();
-    let missing = ctx.missing_items(&text);
-    turn.emit("tool", "planner", "plan", format!("functions: {} in scope across {}", ctx.units().len(), ctx.contracts.iter().map(|c| c.name.as_str()).collect::<Vec<_>>().join(", ")));
-    if !missing.is_empty() {
-        let mut out = if text.trim().is_empty() {
-            "# Plan\n\nOne item per function in scope, from formal-ast: the contracts the Foundry scripts deploy or call, with their bases; the scripts' calls first, then the internal and library functions the model has a def for. `- [x]` is proved on the Proofs page, `- [!]` blocked or a finding.\n\n".to_string()
-        } else {
-            text.trim_end().to_string() + "\n"
-        };
-        for l in &missing {
-            out.push_str(l);
-            out.push('\n');
-        }
-        let _ = std::fs::create_dir_all(path.parent().unwrap_or(root));
-        let _ = std::fs::write(&path, out);
-    }
-    for p in &ctx.problems {
-        turn.emit("result", "planner", "plan", format!("couldn't read {p}"));
-    }
-    for r in &ctx.regenerated {
-        turn.emit("result", "planner", "plan", r.clone());
-    }
-    for d in crate::swarm_ctx::strays(root) {
-        turn.emit("result", "planner", "plan", format!("{d}: a copy outside the Lake sources that Lake never builds; the agents can't read or check it, and it can go"));
-    }
-    // Lean checks the proofs again when the sources changed since the last check (a changed model among them).
-    let reopened = match crate::ledger::build(root, true, false).await {
-        Ok(ledger) => {
-            let gone = lapsed(&read_plan(root), &ledger);
-            for (index, def, why) in &gone {
-                set_mark(root, *index, ' ');
-                turn.emit("result", "planner", &index.to_string(), format!("reopened `{def}`: {why}"));
-            }
-            gone.len()
-        }
-        Err(e) => {
-            turn.emit("result", "planner", "plan", format!("couldn't check the proofs against the current code ({e}); checked items stay as they are"));
-            0
-        }
-    };
-    turn.emit(
-        "plan",
-        "planner",
-        "plan",
-        match (missing.len(), reopened) {
-            (0, 0) => "the plan has every function in scope".into(),
-            (m, 0) => format!("{m} items from the AST"),
-            (0, r) => format!("{r} proved items reopened: their code changed or Lean no longer checks them"),
-            (m, r) => format!("{m} items from the AST; {r} proved items reopened"),
-        },
-    );
-    missing.len() + reopened
-}
-
-/// Where an item's proof belongs, folder-relative, when a file is there: a statement's obligation in
-/// `Proofs/InformalSpecs/<id>/`, a plan item in `Proofs/Functions/`.
-fn expected_proof(root: &Path, statement: Option<&str>, text: &str) -> Option<String> {
-    let src = crate::swarm_ctx::lean_src(root)?;
-    let lean = crate::statements::def_of(text)?;
-    let path = match statement {
-        Some(id) => src.join(crate::statements::proof_file(id, lean, &crate::swarm_ctx::informal_dir(root))),
-        None => {
-            let (contract, function) = lean.split_once('.')?;
-            root.join(proof_file_for(root, contract, function))
-        }
-    };
-    path.is_file().then(|| path.strip_prefix(root).ok().map(|p| p.to_string_lossy().replace('\\', "/"))).flatten()
-}
-
-/// `lake build` of the modules these Lean files are (folder-relative paths under the Lake sources), or of the whole
-/// project when none of them is a module there.
-fn build_command(root: &Path, files: &[&String]) -> String {
-    let Some(src) = crate::swarm_ctx::lean_src(root) else { return "lake build".into() };
-    let modules: Vec<String> = files
-        .iter()
-        .filter_map(|f| root.join(f.as_str()).strip_prefix(&src).ok().map(|p| p.to_string_lossy().replace('\\', "/")))
-        .filter_map(|p| p.strip_suffix(".lean").map(|m| m.replace('/', ".")))
-        .filter(|m| !m.is_empty() && m.split('.').all(|part| !part.is_empty() && part.chars().all(|c| c.is_alphanumeric() || c == '_')))
-        .collect();
-    if modules.is_empty() { "lake build".into() } else { format!("lake build {}", modules.join(" ")) }
-}
-
-/// The swarm's own check of a prover's work: the Lean files it wrote don't cheat, `lake build` passes, and (when the
-/// item names a def of the model) the Proofs page's coverage counts that def as proved. Returns the theorems that prove it.
-async fn check_proof(turn: &Turn<'_>, root: &Path, id: &str, text: &str, files: &[String]) -> Result<Vec<String>, String> {
-    let lean: Vec<&String> = files.iter().filter(|f| f.ends_with(".lean")).collect();
-    if lean.is_empty() {
-        return Err("No Lean file was written for this item; write the proof with write_file.".into());
-    }
-    for f in &lean {
-        let body = inside(root, f).and_then(|p| std::fs::read_to_string(p).map_err(|e| e.to_string())).unwrap_or_default();
-        if let Some(w) = crate::swarm_ctx::cheats(&body) {
-            return Err(format!("{f} uses `{w}`; proofs here can't."));
-        }
-    }
-    if crate::swarm_ctx::lake_dir(root).is_none() {
-        return Ok(vec![]);
-    }
-    // Only the modules this item wrote (and what they import): another agent's unfinished proof elsewhere in the project
-    // doesn't fail this one.
-    let command = build_command(root, &lean);
-    turn.emit("status", "prover", id, format!("checking: {command}"));
-    let build = call_tool(root, "run", &json!({ "command": command })).await;
-    turn.emit("result", "prover", id, build.lines().filter(|l| l.starts_with("exit") || l.contains("error")).take(12).collect::<Vec<_>>().join("\n"));
-    if !build.starts_with("exit 0") {
-        let errors: Vec<&str> = build.lines().filter(|l| l.contains("error")).take(40).collect();
-        return Err(format!("`lake build` failed:\n{}", if errors.is_empty() { clip(build.clone()) } else { errors.join("\n") }));
-    }
-    let ctx = turn.context(true).await;
-    let Some(u) = ctx.target(text) else {
-        return Ok(vec![]);
-    };
-    let lean = u.lean().to_string();
-    turn.emit("status", "prover", id, format!("checking: the Proofs page's coverage of {lean}"));
-    match u.func {
-        Some(f) if f.proved => {
-            turn.emit("result", "prover", id, format!("{lean} is proved on the Proofs page: {}", f.theorems.join("; ")));
-            Ok(f.theorems.clone())
-        }
-        _ => Err(format!("`lake build` passes, but no theorem without sorry names `{lean}`, so the Proofs page still shows {} as not proved. State the theorem about `{lean}` itself, spelled fully qualified.", u.name())),
-    }
-}
-
-/// The loop, driven by the queue: resume an interrupted job, answer the maintainer, then plan, prove and review one item
-/// at a time. Works continuously; only the budget (raisable while it runs) or Stop ends it.
-async fn run_swarm(turn: &Turn<'_>) -> String {
-    let root = PathBuf::from(&turn.req.folder);
-    let _ = std::fs::create_dir_all(root.join(".formal"));
-    // Where the proofs live, written down once for every tool that reads them (formalmind.toml).
-    crate::swarm_ctx::ensure_config(&root);
-    // The plan follows the AST: every function in scope that it doesn't list yet is added at each start, once your
-    // messages are answered (a question needs no AST; the assistant reads it only through its tools).
-    let mut planned = false;
-    loop {
-        if turn.swarm.stop.load(Ordering::SeqCst) {
-            return "paused: resume anytime, the queue carries on".into();
-        }
-        let spent = *turn.swarm.spent.lock().unwrap();
-        let budget = *turn.swarm.budget.lock().unwrap();
-        // On Claude Code or Codex your plan pays and nothing is metered, so the cap (on credits or a key) doesn't stop
-        // it; the plan's own usage limit pauses it instead.
-        if spent >= budget && !matches!(turn.req.provider.as_deref(), Some("claude-code" | "codex")) {
-            // A start below what's already spent is held at the spend: name the cap that was asked for.
-            let cap = if turn.req.budget_usd < budget { turn.req.budget_usd } else { budget };
-            return format!("budget reached (${spent:.2} spent of ${cap:.2}); raise it and resume to carry on");
-        }
-
-        if !planned && !with_queue(&turn.queue, |q| q.jobs.iter().any(|j| j.kind == "answer" && (j.state == "queued" || j.state == "running"))) {
-            sync_plan(turn, &root).await;
-            planned = true;
-        }
-
-        // A run for queued work (a report to read, a statement you added or confirmed) also takes the statements
-        // waiting for the swarm, then stops.
-        let statement_work = crate::statements::awaiting_formalize(&root).is_some() || crate::statements::next_obligation(&root, read_plan(&root).iter().all(|i| i.mark != " " && i.mark != "~")).is_some();
-        if !turn.swarm.work.load(Ordering::SeqCst) && !statement_work && with_queue(&turn.queue, |q| !q.jobs.iter().any(|j| j.state == "running" || j.state == "queued")) {
-            return "done: the queued work is finished".into();
-        }
-        // Next job: an interrupted one first, then your messages, then the rest in order; derive one if the queue is empty.
-        // A plan item another session in this folder is working on is left to it.
-        let me = key(&turn.req.folder, turn.run);
-        let free = |j: &Job| !matches!(j.kind.as_str(), "prove" | "review") || !j.statement.is_empty() || !claimed_by_other(&turn.req.folder, j.item, &me);
-        let formalize = crate::statements::awaiting_formalize(&root).map(|s| s.id);
-        let obligation = crate::statements::next_obligation(&root, read_plan(&root).iter().all(|i| i.mark != " " && i.mark != "~"));
-        let next = with_queue(&turn.queue, |q| {
-            let pick = q.jobs.iter().position(|j| j.state == "running" && free(j))
-                .or_else(|| q.jobs.iter().position(|j| j.state == "queued" && j.kind == "answer"))
-                .or_else(|| q.jobs.iter().position(|j| j.state == "queued" && free(j)));
-            let idx = match pick {
-                Some(i) => i,
-                // A statement the maintainer is waiting on comes before the plan (not in a bug search).
-                None if formalize.is_some() => {
-                    enqueue(q, "formalize", 0, formalize.as_deref().unwrap_or(""), 1, "");
-                    q.jobs.len() - 1
-                }
-                // Then a confirmed statement's next function, through the same prove → check → review turn as a plan item.
-                None if obligation.is_some() => {
-                    let (st, n) = obligation.clone().expect("an obligation");
-                    let tries = q.jobs.iter().filter(|j| j.kind == "prove" && j.statement == st.id && j.item == n).count();
-                    enqueue(q, "prove", n, &st.obligations[n - 1].text, tries + 1, "");
-                    q.jobs.last_mut().expect("the job just queued").statement = st.id.clone();
-                    let _ = crate::statements::set_obligation(&root, &st.id, n, '~');
-                    q.jobs.len() - 1
-                }
-                None => {
-                    let plan = read_plan(&root);
-                    let open: Vec<_> = plan.iter().filter(|i| i.mark == " ").collect();
-                    match open.iter().find(|i| !claimed_by_other(&turn.req.folder, i.index, &me)) {
-                        Some(item) => {
-                            let tries = q.jobs.iter().filter(|j| j.kind == "prove" && j.item == item.index).count();
-                            enqueue(q, "prove", item.index, &item.text, tries + 1, "");
-                        }
-                        // What's left of the plan is being worked in other sessions.
-                        None if !open.is_empty() => return None,
-                        None => {
-                            enqueue(q, "plan", 0, "", 1, "");
-                        }
-                    }
-                    q.jobs.len() - 1
-                }
-            };
-            let resumed = q.jobs[idx].state == "running";
-            q.jobs[idx].state = "running".into();
-            Some((q.jobs[idx].clone(), resumed))
-        });
-        let Some((job, resumed)) = next else {
-            return "done: the rest of the plan is being worked in another session".into();
-        };
-        if matches!(job.kind.as_str(), "prove" | "review") && job.statement.is_empty() {
-            claim(&turn.req.folder, job.item, &me);
-        }
-        *turn.job.lock().unwrap() = Some(job.id);
-        // An obligation is S-01.2 in the chat and the events; a plan item its number.
-        let id = if job.statement.is_empty() { job.item.to_string() } else { format!("{}.{}", job.statement, job.item) };
-        let statement = (!job.statement.is_empty()).then(|| crate::statements::load(&root).ok()?.into_iter().find(|s| s.id == job.statement && job.item >= 1 && job.item <= s.obligations.len())).flatten();
-        let lib = crate::swarm_ctx::lean_src(&root).map(|d| d.strip_prefix(&root).map(|p| p.to_string_lossy().to_string()).unwrap_or_default()).filter(|d| !d.is_empty()).unwrap_or_else(|| ".".into());
-        let resume_note = if resumed {
-            format!(
-                "\n\nThis job was interrupted (the app quit) and is being resumed. {}Continue from where it stopped; don't redo work that is already there.",
-                if job.files.is_empty() { String::new() } else { format!("Files already written for it: {}. ", job.files.join(", ")) }
-            )
-        } else {
-            String::new()
-        };
-
-        let outcome = match job.kind.as_str() {
-            "answer" => turn.agent("assistant", "you", format!("The maintainer says:\n\n{}{}{resume_note}", job.text, crate::statements::waiting_note(&root))).await,
-            // A statement in plain words: what it claims about the code, and the functions it would be proved for.
-            "formalize" => match crate::statements::load(&root).ok().and_then(|all| all.into_iter().find(|s| s.id == job.text)) {
-                Some(st) => {
-                    turn.emit("status", "assistant", &job.text, format!("formalizing {}", st.id));
-                    turn.agent("assistant", &job.text, format!("{}{resume_note}", crate::statements::formalize_task(&st))).await
-                }
-                None => Ok(Outcome { summary: format!("{} isn't in .formal/statements.md any more", job.text), ..Default::default() }),
-            },
-            // An audit report to read: a PDF goes to the model as a document; Markdown and text as text.
-            "triage" => {
-                let report = job.text.clone();
-                turn.emit("status", "auditor", "report", format!("reading {report}"));
-                let task = format!("The audit report {report} is attached. Record it and every finding it lists in the standard format, each with its status in the current code.{resume_note}");
-                let content = match inside(&root, &report).and_then(|p| std::fs::read(&p).map_err(|e| e.to_string())) {
-                    Ok(bytes) if report.to_ascii_lowercase().ends_with(".pdf") => json!([
-                        { "type": "document", "source": { "type": "base64", "media_type": "application/pdf", "data": base64(&bytes) }, "title": report },
-                        { "type": "text", "text": task }
-                    ]),
-                    Ok(bytes) => json!(format!("The audit report {report}:\n\n{}\n\n{task}", String::from_utf8_lossy(&bytes))),
-                    Err(e) => json!(format!("The report {report} can't be read ({e}). Say so and stop.")),
-                };
-                turn.agent("auditor", "report", content).await
-            }
-            "plan" => {
-                let _ = &resume_note;
-                let added = sync_plan(turn, &root).await;
-                let after = read_plan(&root);
-                // A message that came in meanwhile is answered first: it may ask for more work.
-                let waiting = with_queue(&turn.queue, |q| q.jobs.iter().any(|j| j.kind == "answer" && j.state == "queued"));
-                if added == 0 && !waiting && after.iter().all(|i| i.mark != " ") {
-                    with_queue(&turn.queue, |q| if let Some(j) = q.jobs.iter_mut().find(|j| j.id == job.id) { j.state = "done".into(); });
-                    return if after.is_empty() { "failed: formal-ast found no function in scope (no script under script/ deploys or calls the contracts)".into() } else { format!("done: every function in scope is proved or blocked ({} items)", after.len()) };
-                }
-                Ok(Outcome { summary: format!("{added} items from the AST"), ..Default::default() })
-            }
-            "prove" | "review" if !job.statement.is_empty() && statement.is_none() => Ok(Outcome { summary: format!("{id} isn't in .formal/statements.md any more"), ..Default::default() }),
-            "prove" => {
-                turn.emit("status", "prover", &id, "reading the item's def and slice (formal-ast)".into());
-                let brief = turn.context(true).await.brief(&job.text, crate::swarm_ctx::lake_dir(&root).as_deref(), &root);
-                let mut task = match &statement {
-                    Some(st) => format!("{}\n\nThe function: {}\n\n{brief}", crate::statements::obligation_task(st, job.item, &lib, &crate::swarm_ctx::informal_dir(&root)), job.text),
-                    None => format!("Plan item {id}: {}\n\n{brief}", job.text),
-                };
-                if !job.notes.is_empty() {
-                    task.push_str(&format!("\n\nThe last attempt was sent back:\n{}", job.notes));
-                }
-                turn.agent("prover", &id, format!("{task}{resume_note}")).await
-            }
-            _ => {
-                let files = if job.files.is_empty() { String::new() } else { format!("\nFiles: {}", job.files.join(", ")) };
-                let brief = turn.context(false).await.brief(&job.text, crate::swarm_ctx::lake_dir(&root).as_deref(), &root);
-                let notes = match &job.property {
-                    Some(p) => format!(
-                        "\n\nThe prover's notes for the report (check them; correct them in your verdict if they're wrong):\nStatement: {}\nAssumptions: {}\nTheorems: {}",
-                        p["statement"].as_str().unwrap_or(""),
-                        p["assumptions"].as_str().filter(|a| !a.is_empty()).unwrap_or("none"),
-                        p["theorems"].as_array().map(|t| t.iter().filter_map(|x| x.as_str()).collect::<Vec<_>>().join(", ")).unwrap_or_default()
-                    ),
-                    None => "\n\nThe prover wrote no notes for the report: if you approve, give statement, assumptions and theorems.".into(),
-                };
-                let head = match &statement {
-                    Some(st) => format!("{}\n\nThe function: {}", crate::statements::review_task(st, job.item), job.text),
-                    None => format!("Plan item {id}: {}", job.text),
-                };
-                turn.agent("reviewer", &id, format!("{head}\n\nThe prover says:\n{}{notes}{files}\n\n{brief}{resume_note}", job.notes)).await
-            }
-        };
-        *turn.job.lock().unwrap() = None;
-        let out = match outcome {
-            Ok(o) => o,
-            // The job stays running in the queue, so the next start picks it up.
-            Err(e) => return format!("paused: {e}"),
-        };
-        if turn.swarm.stop.load(Ordering::SeqCst) && out.summary.is_empty() {
-            return "paused: resume anytime, the queue carries on".into();
-        }
-
-        // A proof goes to review only once it checks: no cheats, `lake build` passes, and the Proofs page's coverage shows the
-        // item's def as proved. Otherwise the prover gets the output back (or the item is blocked after the last try).
-        let mut gate: Option<String> = None;
-        let mut proved_by: Vec<String> = vec![];
-        let mut theorem_type: Option<String> = None;
-        if job.kind == "prove" && out.bug.is_none() && !turn.swarm.stop.load(Ordering::SeqCst) {
-            let files = with_queue(&turn.queue, |q| q.jobs.iter().find(|j| j.id == job.id).map(|j| j.files.clone()).unwrap_or_default());
-            let mut all = files.clone();
-            all.extend(out.files.iter().cloned());
-            // A proof already in place from an earlier try is checked where it is, though this turn didn't rewrite it.
-            if !all.iter().any(|f| f.ends_with(".lean")) {
-                if let Some(path) = expected_proof(&root, statement.as_ref().map(|s| s.id.as_str()), &job.text) {
-                    all.push(path);
-                }
-            }
-            match check_proof(turn, &root, &id, &job.text, &all).await {
-                Ok(by) => proved_by = by,
-                Err(e) => gate = Some(e),
-            }
-            // An obligation's theorem, by name: there, without sorry, about the def; its type goes to the reviewer.
-            if let (None, Some(st)) = (&gate, &statement) {
-                let lean = crate::statements::def_of(&job.text).unwrap_or("").to_string();
-                turn.emit("status", "prover", &id, format!("checking: the theorem {}", crate::statements::theorem_name(&st.id, &lean)));
-                match crate::statements::check_theorem(&root, &st.id, &lean).await {
-                    Ok(ty) => {
-                        turn.emit("result", "prover", &id, ty.chars().take(500).collect());
-                        theorem_type = Some(ty);
-                    }
-                    Err(e) => gate = Some(e),
-                }
-            }
-        }
-        let mut statement_proved: Option<String> = None;
-
-        // Finish the job and queue what follows from it.
-        with_queue(&turn.queue, |q| {
-            let Some(j) = q.jobs.iter_mut().find(|j| j.id == job.id) else { return };
-            j.state = "done".into();
-            j.summary = out.summary.clone();
-            // An approval is recorded on the review itself, like "changes" and "bug" are.
-            if job.kind == "review" && out.bug.is_none() && matches!(out.verdict, Some((true, _))) {
-                j.result = "approve".into();
-            }
-            for f in &out.files {
-                if !j.files.contains(f) {
-                    j.files.push(f.clone());
-                }
-            }
-            let files = j.files.clone();
-            // A plan item's mark, or an obligation's (and with it its statement's).
-            let mark = |m: char| {
-                if job.statement.is_empty() {
-                    set_mark(&root, job.item, m);
-                } else if let Err(e) = crate::statements::set_obligation(&root, &job.statement, job.item, m) {
-                    eprintln!("statements: {e}");
-                }
-            };
-            let follow = |q: &mut Queue, id: u64| {
-                if let Some(r) = q.jobs.iter_mut().find(|r| r.id == id) {
-                    r.statement = job.statement.clone();
-                }
-            };
-            match job.kind.as_str() {
-                "prove" | "review" if !job.statement.is_empty() && statement.is_none() => {}
-                "prove" if out.bug.is_some() => {
-                    j.result = "bug".into();
-                    mark('!');
-                }
-                "prove" if gate.is_some() => {
-                    j.result = "changes".into();
-                    let notes = format!("The swarm's check failed:\n{}", gate.clone().unwrap_or_default());
-                    if job.attempt >= MAX_ATTEMPTS {
-                        mark('!');
-                    } else {
-                        let id = enqueue(q, "prove", job.item, &job.text, job.attempt + 1, &notes);
-                        follow(q, id);
-                        if let Some(r) = q.jobs.iter_mut().find(|r| r.id == id) {
-                            r.files = files;
-                        }
-                    }
-                }
-                "prove" => {
-                    let mut summary = if proved_by.is_empty() { out.summary.clone() } else { format!("{}\n\nChecked by the swarm: `lake build` passes; the Proofs page counts it as proved by {}.", out.summary, proved_by.join("; ")) };
-                    if let (Some(ty), Some(st)) = (&theorem_type, &statement) {
-                        let name = crate::statements::theorem_name(&st.id, crate::statements::def_of(&job.text).unwrap_or(""));
-                        summary.push_str(&format!("\n\n`{name}` has no sorry (#print axioms). Its type, as Lean reports it:\n```lean\n{ty}\n```"));
-                    }
-                    let id = enqueue(q, "review", job.item, &job.text, job.attempt, &summary);
-                    follow(q, id);
-                    if let Some(r) = q.jobs.iter_mut().find(|r| r.id == id) {
-                        r.files = files;
-                        r.property = out.property.clone();
-                    }
-                }
-                "review" => match (&out.bug, &out.verdict) {
-                    (Some(_), _) => {
-                        mark('!');
-                    }
-                    // An obligation approved: what proved it is kept, and a statement whose every function is proved goes
-                    // into the audit file as one property.
-                    (None, Some((true, _))) if !job.statement.is_empty() => {
-                        let name = crate::statements::theorem_name(&job.statement, crate::statements::def_of(&job.text).unwrap_or(""));
-                        crate::statements::record_obligation(&root, &job.statement, job.item, &name, &files, merge_property(job.property.as_ref(), out.property.as_ref()).as_ref());
-                        match crate::statements::set_obligation(&root, &job.statement, job.item, 'x') {
-                            Ok('x') => {
-                                if let Err(e) = crate::statements::record_property(&root, &job.statement) {
-                                    eprintln!("record_property: {e}");
-                                }
-                                statement_proved = Some(job.statement.clone());
-                                crate::publish::after_approval(&root, &format!("statement {} proved", job.statement));
-                            }
-                            Ok(_) => {}
-                            Err(e) => eprintln!("statements: {e}"),
-                        }
-                    }
-                    (None, Some((true, _))) => {
-                        mark('x');
-                        // The ledger keeps the approval for this def and these theorems as they are now.
-                        crate::ledger::approve(&root, &job.text, &out.summary);
-                        crate::publish::after_approval(&root, &format!("proved {}", job.text));
-                        // The prover's notes, with what the reviewer corrected.
-                        if let Some(p) = merge_property(job.property.as_ref(), out.property.as_ref()) {
-                            if let Err(e) = crate::swarm_ctx::record_property(&root, job.item, &job.text, &files, &p) {
-                                eprintln!("record_property: {e}");
-                            }
-                        }
-                        record_proof(&root, job.item, &job.text, files, &job.notes);
-                    }
-                    (None, verdict) => {
-                        let notes = verdict.as_ref().map(|v| v.1.clone()).unwrap_or_else(|| "The reviewer gave no verdict; make the proof's statement and check obvious.".into());
-                        if job.attempt >= MAX_ATTEMPTS {
-                            mark('!');
-                        } else {
-                            let id = enqueue(q, "prove", job.item, &job.text, job.attempt + 1, &notes);
-                            follow(q, id);
-                        }
-                    }
-                },
-                _ => {}
-            }
-        });
-        // A formalized statement: its obligations under it, and the question (with drafted replies) in the chat.
-        if job.kind == "formalize" {
-            let sid = job.text.clone();
-            let still = crate::statements::load(&root).unwrap_or_default().into_iter().any(|s| s.id == sid);
-            match &out.formalized {
-                _ if !still => {}
-                Some(f) => {
-                    if let Err(e) = crate::statements::record(&root, &sid, f) {
-                        eprintln!("statements: {e}");
-                    }
-                    if f.asks() {
-                        turn.emit("ask", "assistant", &sid, crate::statements::ask_text(&sid, f));
-                        if crate::answerer::on() {
-                            let (folder, sid) = (turn.req.folder.clone(), sid.clone());
-                            tauri::async_runtime::spawn(async move {
-                                match crate::answerer::answer(&folder, &sid).await {
-                                    Ok(what) => eprintln!("answerer: {what}"),
-                                    Err(e) => eprintln!("answerer: {e}"),
-                                }
-                            });
-                        }
-                    } else {
-                        turn.emit("plan", "assistant", &sid, format!("{sid}: a {} statement; the swarm doesn't prove those yet", f.kind));
-                    }
-                }
-                None => {
-                    let _ = crate::statements::record_failure(&root, &sid, &out.summary);
-                    turn.emit("plan", "assistant", &sid, format!("{sid}: couldn't formalize it; reword it or name the function"));
-                }
-            }
-        }
-        if let Some(sid) = &statement_proved {
-            turn.emit("plan", "reviewer", sid, format!("{sid} proved: every function it is about, in the audit file as P-{}", sid.replace('-', "")));
-        }
-        match (job.kind.as_str(), &out.bug, &out.verdict) {
-            ("prove" | "review", Some(_), _) => turn.emit("plan", &job.kind, &id, format!("item {id}: bug reported, moving on")),
-            ("review", None, Some((true, _))) => turn.emit("plan", "reviewer", &id, format!("item {id} proven")),
-            ("review", None, _) if job.attempt >= MAX_ATTEMPTS => turn.emit("plan", "reviewer", &id, format!("item {id} blocked after {MAX_ATTEMPTS} attempts")),
-            ("prove", None, _) if gate.is_some() && job.attempt >= MAX_ATTEMPTS => turn.emit("plan", "prover", &id, format!("item {id} blocked: the proof didn't check after {MAX_ATTEMPTS} attempts")),
-            ("prove", None, _) if gate.is_some() => turn.emit("plan", "prover", &id, format!("item {id}: the check failed, back to the prover")),
-            ("prove", None, _) => turn.emit("plan", "prover", &id, format!("item {id} checks; to review")),
-            ("triage", _, _) => turn.emit("plan", "auditor", "report", format!("read {}: its findings are in Bugs", job.text)),
-            _ => {}
-        }
-    }
-}
-
-/// Earlier versions kept one log per start (runs/local-*.jsonl). Join them, oldest first, into the single session, move
-/// the originals to runs/archive/, and carry their spend into the queue's total.
-fn merge_old_sessions(root: &Path) {
-    let dir = runs_dir(&root.to_string_lossy());
-    let mut old: Vec<PathBuf> = std::fs::read_dir(&dir)
-        .map(|it| it.flatten().map(|e| e.path()).filter(|p| p.file_name().map(|n| n.to_string_lossy().starts_with("local-") && n.to_string_lossy().ends_with(".jsonl")).unwrap_or(false)).collect())
-        .unwrap_or_default();
-    if old.is_empty() {
-        return;
-    }
-    old.sort();
-    let mut merged = std::fs::read_to_string(dir.join("swarm.jsonl")).unwrap_or_default();
-    let mut carried = 0.0;
-    let archive = dir.join("archive");
-    let _ = std::fs::create_dir_all(&archive);
-    for p in &old {
-        let text = std::fs::read_to_string(p).unwrap_or_default();
-        carried += text.lines().last().and_then(|l| serde_json::from_str::<Value>(l).ok()).and_then(|v| v["spent"].as_f64()).unwrap_or(0.0);
-        // Re-stamp each line as the one session.
-        for line in text.lines() {
-            if let Ok(mut v) = serde_json::from_str::<Value>(line) {
-                v["run"] = json!("swarm");
-                merged.push_str(&v.to_string());
-                merged.push('\n');
-            }
-        }
-        let _ = std::fs::rename(p, archive.join(p.file_name().unwrap_or_default()));
-    }
-    let _ = std::fs::write(dir.join("swarm.jsonl"), merged);
-    with_queue(&queue_file(root, "swarm"), |q| q.spent += carried);
-}
-
-#[tauri::command]
-pub fn swarm_start(app: AppHandle, swarms: State<'_, Swarms>, request: SwarmRequest) -> Result<String, String> {
-    if !local::read()?.allows(&request.folder) {
-        return Err("Add the folder first".into());
-    }
-    if request.provider.as_deref() == Some("anthropic") {
-        anthropic_entry()?.get_password().map_err(|_| "Add your Anthropic key first".to_string())?;
-    } else if request.provider.as_deref() == Some("openai") {
-        openai_entry()?.get_password().map_err(|_| "Add your OpenAI key first".to_string())?;
-    } else if request.provider.as_deref() == Some("claude-code") {
-        crate::claude_code::signed_in()?;
-    } else if request.provider.as_deref() == Some("codex") {
-        crate::codex::signed_in()?;
-    } else {
-        token()?;
-    }
-    // Each session is one swarm with its own queue and log (.formal/runs/<run>.jsonl); other sessions, here or in other
-    // folders, can run at the same time.
-    let run = session_of(&request);
-    if swarms.0.lock().unwrap().contains_key(&key(&request.folder, &run)) {
-        return Err("This session is already running".into());
-    }
-    claim_folder(Path::new(&request.folder))?;
-    merge_old_sessions(Path::new(&request.folder));
-    let qf = queue_file(Path::new(&request.folder), &run);
-    let spent = load_queue(&qf).spent;
-    // What you typed before starting is a message too: the assistant answers it first (as with one sent while it runs).
-    if let Some(text) = request.goal.as_deref().map(str::trim).filter(|t| !t.is_empty()) {
-        with_queue(&qf, |q| {
-            enqueue(q, "answer", 0, text, 1, "");
-        });
-    }
-    let swarm = Arc::new(Swarm { stop: AtomicBool::new(false), folder: request.folder.clone(), queue: qf.clone(), spent: Mutex::new(spent), budget: Mutex::new(request.budget_usd.max(spent)), compact_now: AtomicBool::new(false), work: AtomicBool::new(!request.only_queued.unwrap_or(false)) });
-    swarms.0.lock().unwrap().insert(key(&request.folder, &run), swarm.clone());
-    broadcast_running(&app);
-    let id = run.clone();
-    tauri::async_runtime::spawn(async move {
-        let client = reqwest::Client::builder().timeout(Duration::from_secs(600)).build().unwrap_or_default();
-        let turn = Turn { app: &app, run: &id, req: &request, swarm: &swarm, client, job: Mutex::new(None), queue: swarm.queue.clone(), ctx: Mutex::new(None), health: Mutex::new(None) };
-        // The session's title: the focus it was given (the latest start's focus wins).
-        turn.emit("start", "swarm", "", request.goal.clone().unwrap_or_default());
-        turn.emit("status", "swarm", "", "resuming".into());
-        let k = key(&request.folder, &id);
-        let left = loop {
-            let outcome = run_swarm(&turn).await;
-            let swarms = app.state::<Swarms>();
-            let mut map = swarms.0.lock().unwrap();
-            // A message sent as the run finished (swarm_say holds the same lock) is answered, not left in the queue.
-            if !swarm.stop.load(Ordering::SeqCst) && answer_waiting(&swarm.queue) {
-                continue;
-            }
-            turn.emit("done", "swarm", "", outcome);
-            release(&k);
-            map.remove(&k);
-            if !map.keys().any(|other| other.starts_with(&key(&request.folder, ""))) {
-                release_folder(Path::new(&request.folder));
-            }
-            break map.len();
-        };
-        broadcast_running(&app);
-        // Quit (⌘Q) while this was working: the last session to finish closes the app.
-        if left == 0 && QUIT_WHEN_DONE.load(Ordering::SeqCst) {
-            app.exit(0);
-        }
-    });
-    Ok(run)
-}
-
-#[tauri::command]
-pub fn swarm_stop(swarms: State<'_, Swarms>, folder: String, run: String) {
-    let map = swarms.0.lock().unwrap();
-    if let Some(s) = map.get(&key(&folder, &run)) {
-        s.stop.store(true, Ordering::SeqCst);
-    }
-    // The folder's background tasks (a long lean or forge run, coverage) stop with the last session working in it.
-    let prefix = key(&folder, "");
-    let others = map.iter().any(|(k, s)| k.starts_with(&prefix) && *k != key(&folder, &run) && !s.stop.load(Ordering::SeqCst));
-    if !others {
-        crate::analysis::cancel_tasks(&folder);
-    }
-}
-
-/// An audit report to read (a PDF, Markdown or text file in the folder): queued as a "triage" job in the session, so a
-/// running swarm picks it up next and a stopped one reads it when it starts. The auditor records each finding, with its
-/// status in the current code, in the README.md next to the report.
+/// The queue as the app sees it: jobs not done yet, and the session's spend.
 #[tauri::command(async)]
-pub fn swarm_triage(folder: String, path: String, session: Option<String>) -> Result<(), String> {
-    if !local::read()?.allows(&folder) {
-        return Err("Add the folder first".into());
+pub fn swarm_queue(folder: String) -> Result<Value, String> {
+    swarm_queue_of(folder, None, false)
+}
+
+/// A session's queue (the default session's unless `run`), and with `done`, each finished job's result and summary.
+pub fn swarm_queue_of(folder: String, run: Option<String>, done: bool) -> Result<Value, String> {
+    added(&folder)?;
+    let run = queue::session_id(run.as_deref());
+    let q = Queue::load(&queue::queue_path(Path::new(&folder), &run));
+    let finished = |j: &&queue::Job| j.state == queue::State::Done;
+    let open: Vec<Value> = q.jobs.iter().filter(|j| !finished(j)).map(|j| json!({ "id": j.id, "kind": j.kind, "item": j.item, "state": j.state, "attempt": j.attempt })).collect();
+    let mut out = json!({ "run": run, "open": open, "spent": q.spent, "done": q.jobs.iter().filter(finished).count() });
+    if done {
+        out["finished"] = json!(q
+            .jobs
+            .iter()
+            .filter(finished)
+            .map(|j| json!({ "id": j.id, "kind": j.kind, "item": j.item, "attempt": j.attempt, "result": j.result, "summary": j.summary.chars().take(4000).collect::<String>(), "files": j.files }))
+            .collect::<Vec<_>>());
     }
-    let root = PathBuf::from(&folder);
-    let p = inside(&root, &path)?;
-    if !p.is_file() {
-        return Err(format!("{path} isn't a file"));
-    }
-    let ext = p.extension().and_then(|e| e.to_str()).unwrap_or("").to_ascii_lowercase();
-    if !["pdf", "md", "markdown", "txt"].contains(&ext.as_str()) {
-        return Err("Reports are PDF, Markdown or text files".into());
-    }
-    let qf = queue_file(&root, session.as_deref().unwrap_or("swarm"));
-    with_queue(&qf, |q| {
-        enqueue(q, "triage", 0, &path, 1, "");
-    });
-    Ok(())
-}
-
-/// A message to the swarm waits in this queue.
-fn answer_waiting(queue: &Path) -> bool {
-    with_queue(queue, |q| q.jobs.iter().any(|j| j.kind == "answer" && j.state == "queued"))
-}
-
-/// A message to the swarm: queued as an "answer" job (on disk, so a quit can't lose it), answered before the next turn.
-/// It is a `you` event in the session too, so the chat shows it wherever it was sent from (here or through the MCP).
-#[tauri::command]
-pub fn swarm_say(app: AppHandle, swarms: State<'_, Swarms>, folder: String, run: String, text: String) -> Result<(), String> {
-    // Queued under the swarms' lock, so a run that is finishing either sees the message or is already gone.
-    let spent = {
-        let map = swarms.0.lock().unwrap();
-        let s = map.get(&key(&folder, &run)).ok_or("The swarm isn't running")?;
-        with_queue(&s.queue, |q| {
-            enqueue(q, "answer", 0, &text, 1, "");
-        });
-        let spent = *s.spent.lock().unwrap();
-        spent
-    };
-    emit_event(&app, SwarmEvent { folder, run, kind: "you", role: "you".into(), item: String::new(), text, spent, at: now_ms() as u64 });
-    Ok(())
-}
-
-#[derive(Serialize)]
-pub struct Session {
-    pub run: String,
-    /// The focus the session was started with, or "" when none was given.
-    pub title: String,
-    /// The last line's text when the run finished ("done …", "bug found …"), else "".
-    pub outcome: String,
-    pub spent: f64,
-    pub events: usize,
-    /// When it last changed (ms since the epoch): the list runs newest first.
-    pub at: u64,
-}
-
-fn runs_dir(folder: &str) -> PathBuf {
-    Path::new(folder).join(".formal").join("runs")
-}
-
-/// Past swarm sessions in this folder, newest first (from .formal/runs/*.jsonl).
-#[tauri::command(async)]
-pub fn swarm_sessions(folder: String) -> Result<Vec<Session>, String> {
-    if !local::read()?.allows(&folder) {
-        return Err("Add the folder first".into());
-    }
-    let mut out: Vec<Session> = std::fs::read_dir(runs_dir(&folder))
-        .map(|it| {
-            it.flatten()
-                .filter_map(|e| {
-                    let name = e.file_name().to_string_lossy().to_string();
-                    let run = name.strip_suffix(".jsonl")?.to_string();
-                    let text = std::fs::read_to_string(e.path()).ok()?;
-                    let last: Value = text.lines().last().and_then(|l| serde_json::from_str(l).ok()).unwrap_or(json!({}));
-                    // A name you gave it (`<run>.title`, from Rename), else the focus it was started with, else your first
-                    // message in it, as a short name.
-                    let named = std::fs::read_to_string(e.path().with_extension("title")).ok().map(|t| t.trim().to_string()).filter(|t| !t.is_empty());
-                    let first = |kind: &str| text.lines().filter_map(|l| serde_json::from_str::<Value>(l).ok()).find(|e| e["kind"] == kind && e["text"].as_str().is_some_and(|t| !t.trim().is_empty())).and_then(|e| e["text"].as_str().map(String::from));
-                    let title = named.or_else(|| first("start")).or_else(|| first("you").map(|t| short_name(&t))).unwrap_or_default();
-                    let outcome = if last["kind"] == "done" { last["text"].as_str().unwrap_or("").to_string() } else { String::new() };
-                    let at = e.metadata().and_then(|m| m.modified()).ok().and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok()).map_or(0, |d| d.as_millis() as u64);
-                    Some(Session { run, title, outcome, spent: last["spent"].as_f64().unwrap_or(0.0), events: text.lines().count(), at })
-                })
-                .collect()
-        })
-        .unwrap_or_default();
-    // Newest first, so the latest chat is the one that opens (by id, "swarm" would sort above every `s-…`).
-    out.sort_by(|a, b| b.at.cmp(&a.at).then_with(|| b.run.cmp(&a.run)));
     Ok(out)
 }
 
-/// A chat's name from a message: its first line, cut at a word to about 60 characters.
-fn short_name(text: &str) -> String {
-    let line = text.trim().lines().next().unwrap_or("").trim();
-    if line.chars().count() <= 60 {
-        return line.to_string();
-    }
-    let cut: String = line.chars().take(60).collect();
-    format!("{}…", cut.rsplit_once(' ').map(|(a, _)| a).unwrap_or(&cut).trim_end_matches([',', '.', ';', ':']))
+/// B47: past sessions in this folder, newest first.
+#[tauri::command(async)]
+pub fn swarm_sessions(folder: String) -> Result<Vec<events::Session>, String> {
+    added(&folder)?;
+    Ok(events::sessions(Path::new(&folder)))
 }
 
-/// Renames a session (the chat's name): kept beside its log as `<run>.title`; an empty name goes back to the default.
+/// B47: renames a session.
 #[tauri::command]
 pub fn swarm_rename(folder: String, run: String, title: String) -> Result<(), String> {
-    if !local::read()?.allows(&folder) {
-        return Err("Add the folder first".into());
-    }
-    if run.is_empty() || !run.chars().all(|c| c.is_ascii_alphanumeric() || c == '-') {
-        return Err("Bad session id".into());
-    }
-    let path = runs_dir(&folder).join(format!("{run}.title"));
-    let title: String = title.trim().chars().filter(|c| !c.is_control()).take(120).collect();
-    if title.is_empty() {
-        let _ = std::fs::remove_file(path);
-        return Ok(());
-    }
-    std::fs::create_dir_all(runs_dir(&folder)).map_err(|e| e.to_string())?;
-    std::fs::write(path, title).map_err(|e| e.to_string())
+    added(&folder)?;
+    events::rename(Path::new(&folder), &run, &title)
 }
 
-/// One session's events, oldest first.
+/// B45: one session's events, oldest first.
 #[tauri::command(async)]
 pub fn swarm_history(folder: String, run: String) -> Result<Vec<Value>, String> {
-    if !local::read()?.allows(&folder) {
-        return Err("Add the folder first".into());
-    }
-    if !run.chars().all(|c| c.is_ascii_alphanumeric() || c == '-') {
-        return Err("Bad session id".into());
-    }
-    let text = std::fs::read_to_string(runs_dir(&folder).join(format!("{run}.jsonl"))).map_err(|e| e.to_string())?;
-    Ok(history_of(&text))
-}
-
-/// The tool steps (and status lines) a session's history keeps: the latest ones; its messages are all kept.
-const HISTORY_STEPS: usize = 600;
-/// How much of one event's text the chat is sent (a tool's output can be megabytes; the chat shows its start).
-const HISTORY_TEXT: usize = 8_000;
-
-/// What the chat shows of a session's log, so opening a long session stays fast: every message, the latest
-/// HISTORY_STEPS tool calls, results, statuses and context counts, and each text cut to HISTORY_TEXT bytes.
-fn history_of(text: &str) -> Vec<Value> {
-    let noise = |v: &Value| matches!(v["kind"].as_str(), Some("tool" | "result" | "status" | "context"));
-    let mut keep = HISTORY_STEPS;
-    let mut out: Vec<Value> = text
-        .lines()
-        .rev()
-        .filter_map(|l| serde_json::from_str::<Value>(l).ok())
-        .filter(|v| {
-            if !noise(v) {
-                return true;
-            }
-            if keep == 0 {
-                return false;
-            }
-            keep -= 1;
-            true
-        })
-        .map(|mut v| {
-            if let Some(t) = v["text"].as_str().filter(|t| t.len() > HISTORY_TEXT) {
-                let mut cut = HISTORY_TEXT;
-                while !t.is_char_boundary(cut) {
-                    cut -= 1;
-                }
-                v["text"] = json!(format!("{}\n…", &t[..cut]));
-            }
-            v
-        })
-        .collect();
-    out.reverse();
-    out
-}
-
-/// The app is quitting: stop every swarm and record the pause in its session, so Resume picks up from the plan.
-pub fn pause_all(app: &AppHandle) {
-    let swarms = app.state::<Swarms>();
-    for (k, s) in swarms.0.lock().unwrap().iter() {
-        s.stop.store(true, Ordering::SeqCst);
-        let run = k.rsplit('\n').next().unwrap_or(k);
-        let ev = SwarmEvent { folder: s.folder.clone(), run: run.to_string(), kind: "done", role: "swarm".into(), item: String::new(), text: "paused: the app quit. Resume to carry on from the plan.".into(), spent: *s.spent.lock().unwrap(), at: now_ms() as u64 };
-        if let Ok(line) = serde_json::to_string(&ev) {
-            use std::io::Write;
-            let _ = std::fs::OpenOptions::new().append(true).open(runs_dir(&s.folder).join(format!("{run}.jsonl"))).and_then(|mut f| writeln!(f, "{line}"));
-        }
-    }
-}
-
-/// Raises (or lowers) a running swarm's spending cap.
-#[tauri::command]
-pub fn swarm_set_budget(swarms: State<'_, Swarms>, folder: String, run: String, usd: f64) -> Result<(), String> {
-    let map = swarms.0.lock().unwrap();
-    let s = map.get(&key(&folder, &run)).ok_or("The swarm isn't running")?;
-    *s.budget.lock().unwrap() = usd.max(0.0);
-    Ok(())
-}
-
-/// Compacts the working agent's conversation before its next step (the Context panel's Compact now).
-#[tauri::command]
-pub fn swarm_compact(swarms: State<'_, Swarms>, folder: String, run: String) -> Result<(), String> {
-    let map = swarms.0.lock().unwrap();
-    let s = map.get(&key(&folder, &run)).ok_or("The swarm isn't running")?;
-    s.compact_now.store(true, Ordering::SeqCst);
-    Ok(())
-}
-
-/// The sessions running in this folder (so the page can reattach after a reload, and mark them in the sessions menu).
-#[tauri::command]
-pub fn swarm_running(swarms: State<'_, Swarms>, folder: String) -> Vec<String> {
-    let prefix = key(&folder, "");
-    swarms.0.lock().unwrap().keys().filter_map(|k| k.strip_prefix(&prefix).map(String::from)).collect()
+    added(&folder)?;
+    events::history(Path::new(&folder), &run)
 }
 
 // ---- work from outside the app: an agent through the MCP (lib/mac-ops.ts) ----
-//
-// The same loop as the swarm's own provers: the work map says what's covered and what's left, the brief is what a
-// prover gets, the check is the swarm's (no cheats, `lake build`, the Proofs page's coverage), and a submitted proof
-// goes to the swarm's reviewer like any other.
 
-/// The plan item that names this Lean def (`Router.matchBook`), as (index, mark, text).
-fn plan_item_for(root: &Path, lean: &str) -> Option<PlanItem> {
-    let named = format!("`{lean}`");
-    read_plan(root).into_iter().find(|p| p.text.contains(&named))
+fn rel(root: &Path, p: &Path) -> Option<String> {
+    p.strip_prefix(root).ok().map(|p| p.to_string_lossy().replace('\\', "/"))
 }
 
-/// Where the swarm's prover writes a function's proof, folder-relative: `formal/Proofs/Functions/<Contract><Fn>.lean`.
-fn proof_file_for(root: &Path, contract: &str, function: &str) -> String {
-    let lake = crate::swarm_ctx::lean_src(root).unwrap_or_else(|| root.join("formal"));
-    let lib = lake.strip_prefix(root).map(|p| p.to_string_lossy().replace('\\', "/")).unwrap_or_default();
-    let cap = crate::swarm_ctx::name_part(function.rsplit('.').next().unwrap_or(""), true);
-    let (proofs, functions) = (crate::swarm_ctx::layout(root).1, crate::swarm_ctx::functions_dir(root));
-    format!("{}{proofs}/{functions}/{contract}{cap}.lean", if lib.is_empty() { String::new() } else { format!("{lib}/") })
-}
-
-
-/// What's covered and what's left, as one JSON map: every in-scope contract's functions with their status on the
-/// Proofs page (proved, has_sorry, in_lean, not_modeled), the Lean def a theorem must name, the generated model, where
-/// the proof goes, the theorems with file and line, the plan item, and the scripts that call it; then the totals and
-/// the open items to take next (the ones scripts call first).
+/// What's covered and what's left (B53).
 #[tauri::command(async)]
 pub fn swarm_work_map(folder: String) -> Result<Value, String> {
-    if !local::read()?.allows(&folder) {
-        return Err("Add the folder first".into());
-    }
+    added(&folder)?;
     let root = PathBuf::from(&folder);
     let ctx = crate::swarm_ctx::context_with(&root, false);
-    let lake = crate::swarm_ctx::lake_dir(&root).and_then(|d| d.strip_prefix(&root).ok().map(|p| p.to_string_lossy().replace('\\', "/")));
-    let sources = crate::swarm_ctx::lean_src(&root).and_then(|d| d.strip_prefix(&root).ok().map(|p| p.to_string_lossy().replace('\\', "/")));
+    let lake = lake::lake_dir(&root).and_then(|d| rel(&root, &d));
+    let sources = lake::lean_src(&root).and_then(|d| rel(&root, &d));
+    let items = plan::read(&root);
     let mut totals: HashMap<&str, usize> = HashMap::new();
     let mut next: Vec<Value> = vec![];
     let contracts: Vec<Value> = ctx
@@ -2472,8 +310,8 @@ pub fn swarm_work_map(folder: String) -> Result<Value, String> {
                         "in_lean"
                     };
                     *totals.entry(status).or_default() += 1;
-                    let item = plan_item_for(&root, &f.lean);
-                    let proof = proof_file_for(&root, &c.name, &f.name);
+                    let item = plan::find_def(&items, &f.lean);
+                    let proof = lake::proof_file(&root, &c.name, &f.name);
                     let row = json!({
                         "function": f.name,
                         "lean": f.lean,
@@ -2481,10 +319,10 @@ pub fn swarm_work_map(folder: String) -> Result<Value, String> {
                         "why": f.why,
                         "theorems": f.theorems,
                         "proofFile": proof,
-                        "plan": item.as_ref().map(|p| json!({ "item": p.index, "mark": p.mark })),
+                        "plan": item.map(|p| json!({ "item": p.index, "mark": p.mark })),
                         "scripts": f.scripts,
                     });
-                    if matches!(status, "in_lean" | "has_sorry") && item.as_ref().is_none_or(|p| p.mark != "!") {
+                    if matches!(status, "in_lean" | "has_sorry") && item.is_none_or(|p| p.mark != Mark::Blocked) {
                         next.push(json!({ "function": f.name, "lean": f.lean, "status": status, "proofFile": row["proofFile"], "calledByScripts": !f.scripts.is_empty() }));
                     }
                     row
@@ -2494,14 +332,13 @@ pub fn swarm_work_map(folder: String) -> Result<Value, String> {
         })
         .collect();
     next.sort_by_key(|n| n["calledByScripts"] != true);
-    let plan = read_plan(&root);
-    let count = |m: &str| plan.iter().filter(|p| p.mark == m).count();
+    let count = |m: Mark| items.iter().filter(|p| p.mark == m).count();
     Ok(json!({
         "folder": folder,
         "lake": lake,
         "sources": sources,
         "totals": { "proved": totals.get("proved").copied().unwrap_or(0), "hasSorry": totals.get("has_sorry").copied().unwrap_or(0), "inLean": totals.get("in_lean").copied().unwrap_or(0), "notModeled": totals.get("not_modeled").copied().unwrap_or(0) },
-        "plan": { "items": plan.len(), "proved": count("x"), "blocked": count("!"), "open": count(" ") },
+        "plan": { "items": items.len(), "proved": count(Mark::Proved), "blocked": count(Mark::Blocked), "open": count(Mark::Open) },
         "next": next.into_iter().take(25).collect::<Vec<_>>(),
         "contracts": contracts,
         "problems": ctx.problems,
@@ -2509,51 +346,48 @@ pub fn swarm_work_map(folder: String) -> Result<Value, String> {
     }))
 }
 
-/// What the swarm's prover gets for a function: its Lean def, the generated model, its slice, and where to write.
+/// What the swarm's prover gets for a function.
 #[tauri::command(async)]
 pub fn swarm_brief(folder: String, function: String) -> Result<String, String> {
-    if !local::read()?.allows(&folder) {
-        return Err("Add the folder first".into());
-    }
+    added(&folder)?;
     let root = PathBuf::from(&folder);
     let ctx = crate::swarm_ctx::context_with(&root, false);
-    let text = plan_item_for(&root, &function).map(|p| p.text).unwrap_or_else(|| format!("`{function}`"));
-    let lake = crate::swarm_ctx::lake_dir(&root);
-    Ok(ctx.brief(&text, lake.as_deref(), &root))
+    let items = plan::read(&root);
+    let text = plan::find_def(&items, &function).map(|p| p.text.clone()).unwrap_or_else(|| format!("`{function}`"));
+    Ok(ctx.brief(&text, lake::lake_dir(&root).as_deref(), &root))
 }
 
-/// A proof written outside the app, checked as the swarm checks its prover's: it's written (when `content` is given)
-/// under the Lake project's `Refinement/`, then no `sorry`/`admit`/axiom/`native_decide`, `lake build`, and which
-/// functions the Proofs page now counts as proved by a theorem in it.
+/// A proof written outside the app, checked as the swarm checks its prover's: no cheats, `lake build` of its module,
+/// and which functions the Proofs page now counts as proved by it.
 #[tauri::command(async)]
 pub async fn swarm_check_proof(folder: String, path: String, content: Option<String>) -> Result<Value, String> {
-    if !local::read()?.allows(&folder) {
-        return Err("Add the folder first".into());
-    }
+    added(&folder)?;
     let root = PathBuf::from(&folder);
-    let Some(lake) = crate::swarm_ctx::lean_src(&root) else {
+    let Some(src) = lake::lean_src(&root) else {
         return Err("This folder has no Lake project yet; start the swarm once and its first prover sets one up in formal/".into());
     };
-    let file = inside(&root, &path)?;
+    let file = fsguard::inside(&root, &path)?;
     let proofs = crate::swarm_ctx::layout(&root).1;
-    if !path.ends_with(".lean") || !file.starts_with(lake.join(proofs)) {
-        return Err(format!("Proofs go under {}/{proofs}/ as .lean files", lake.strip_prefix(&root).unwrap_or(&lake).display()));
+    if !path.ends_with(".lean") || !file.starts_with(src.join(proofs)) {
+        return Err(format!("Proofs go under {}/{proofs}/ as .lean files", src.strip_prefix(&root).unwrap_or(&src).display()));
     }
     if let Some(text) = &content {
-        std::fs::create_dir_all(file.parent().unwrap_or(&lake)).and_then(|_| std::fs::write(&file, text)).map_err(|e| e.to_string())?;
+        std::fs::create_dir_all(file.parent().unwrap_or(&src)).and_then(|_| std::fs::write(&file, text)).map_err(|e| e.to_string())?;
     }
     let body = std::fs::read_to_string(&file).map_err(|e| format!("{path}: {e}"))?;
     if let Some(w) = crate::swarm_ctx::cheats(&body) {
         return Ok(json!({ "ok": false, "path": path, "check": format!("{path} uses `{w}`; proofs here can't.") }));
     }
     // The model first: a def formal-ast can now translate has to be in the file Lake builds before a proof can name it.
-    let regenerated = crate::swarm_ctx::context(&root).regenerated;
-    let build = call_tool(&root, "run", &json!({ "command": build_command(&root, &[&path]) })).await;
+    let r = root.clone();
+    let regenerated = tauri::async_runtime::spawn_blocking(move || crate::swarm_ctx::context(&r).regenerated).await.unwrap_or_default();
+    let build = lake::run(&root, &lake::build_command(&root, &[&path])).await.unwrap_or_else(|e| format!("error: {e}"));
     if !build.starts_with("exit 0") {
-        let errors: Vec<&str> = build.lines().filter(|l| l.contains("error")).take(40).collect();
-        return Ok(json!({ "ok": false, "path": path, "regenerated": regenerated, "check": "lake build failed", "errors": if errors.is_empty() { vec![clip(build.clone())] } else { errors.iter().map(|e| e.to_string()).collect() } }));
+        let errors: Vec<String> = build.lines().filter(|l| l.contains("error")).take(40).map(String::from).collect();
+        return Ok(json!({ "ok": false, "path": path, "regenerated": regenerated, "check": "lake build failed", "errors": if errors.is_empty() { vec![lake::clip(build.clone())] } else { errors } }));
     }
-    let ctx = crate::swarm_ctx::context(&root);
+    let r = root.clone();
+    let ctx = tauri::async_runtime::spawn_blocking(move || crate::swarm_ctx::context(&r)).await.unwrap_or_default();
     let proves: Vec<Value> = ctx
         .contracts
         .iter()
@@ -2564,353 +398,67 @@ pub async fn swarm_check_proof(folder: String, path: String, content: Option<Str
     Ok(json!({ "ok": true, "path": path, "check": "lake build passes, no cheats", "proves": proves, "regenerated": regenerated }))
 }
 
-/// Rewrites each generated model formal-ast now translates more of (a def a prover needs that the file on disk left
-/// opaque), in the Lake project's sources. Returns what was rewritten.
+/// B34: rewrites each generated model formal-ast now translates more of. Returns what was rewritten.
 #[tauri::command(async)]
 pub fn swarm_refresh_model(folder: String) -> Result<Vec<String>, String> {
-    if !local::read()?.allows(&folder) {
-        return Err("Add the folder first".into());
-    }
+    added(&folder)?;
     Ok(crate::swarm_ctx::context(&PathBuf::from(&folder)).regenerated)
 }
 
-/// Sends a proof written outside the app to the swarm's reviewer, queued like its own prover's work: the reviewer checks
-/// the statement against the Solidity and approves it (the item is proved and goes into the audit file) or asks for
-/// changes. Start (or resume) the swarm for the review to run.
-#[tauri::command]
-pub fn swarm_submit_proof(folder: String, function: String, path: String, notes: Option<String>, session: Option<String>) -> Result<Value, String> {
-    if !local::read()?.allows(&folder) {
-        return Err("Add the folder first".into());
-    }
-    let root = PathBuf::from(&folder);
-    inside(&root, &path)?;
-    let Some(item) = plan_item_for(&root, &function) else {
-        return Err(format!("No plan item names `{function}`; the plan names each function by its Lean def (see the work map)"));
-    };
-    let summary = format!("Written by an agent outside the app, through Formal Mind's MCP, in {path}.\n\n{}", notes.unwrap_or_default().trim());
-    let qf = queue_file(&root, session.as_deref().unwrap_or("swarm"));
-    let id = with_queue(&qf, |q| {
-        let id = enqueue(q, "review", item.index, &item.text, 1, &summary);
-        if let Some(j) = q.jobs.iter_mut().find(|j| j.id == id) {
-            j.files = vec![path.clone()];
-        }
-        id
-    });
-    Ok(json!({ "item": item.index, "job": id, "queued": "review" }))
+/// B31: the ledger, Lean rerun only when the sources changed (or with `force`), as the loop builds it.
+pub async fn ledger(root: &Path, check: bool, force: bool) -> Result<Value, String> {
+    let r = root.to_path_buf();
+    crate::swarm2::ledger::build(root, check, force, move |cmd: String| {
+        let r = r.clone();
+        async move { lake::run(&r, &cmd).await.unwrap_or_else(|e| e) }
+    })
+    .await
 }
 
-#[cfg(test)]
-mod tests {
-
-    #[test]
-    fn one_app_per_folder() {
-        let root = std::env::temp_dir().join(format!("fm-lock-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&root);
-        // Ours: taken again freely, given back.
-        assert!(claim_folder(&root).is_ok());
-        assert!(claim_folder(&root).is_ok());
-        release_folder(&root);
-        assert!(!run_lock(&root).exists());
-        // A live other app (this test's parent process) holds it: refused.
-        let parent = std::os::unix::process::parent_id();
-        std::fs::write(run_lock(&root), parent.to_string()).unwrap();
-        assert!(claim_folder(&root).is_err());
-        // A dead one's lock is stale.
-        std::fs::write(run_lock(&root), "4000000").unwrap();
-        assert!(claim_folder(&root).is_ok());
-        let _ = std::fs::remove_dir_all(&root);
-    }
-
-    use super::*;
-
-    #[test]
-    fn a_claimed_item_is_left_to_its_session() {
-        let (a, b) = (key("/f-claims", "swarm"), key("/f-claims", "s-1"));
-        claim("/f-claims", 7, &a);
-        assert!(claimed_by_other("/f-claims", 7, &b));
-        assert!(!claimed_by_other("/f-claims", 7, &a));
-        assert!(!claimed_by_other("/other", 7, &b));
-        claim("/f-claims", 8, &a);
-        assert!(!claimed_by_other("/f-claims", 7, &b), "a session holds one item at a time");
-        release(&a);
-        assert!(!claimed_by_other("/f-claims", 8, &b));
-    }
-
-    #[test]
-    fn queue_and_transcripts_survive_a_restart() {
-        let root = std::env::temp_dir().join(format!("fm-queue-{}", std::process::id()));
-        std::fs::create_dir_all(root.join(".formal")).unwrap();
-        let qf = queue_file(&root, "swarm");
-        let id = with_queue(&qf, |q| {
-            let id = enqueue(q, "prove", 3, "item three", 1, "");
-            q.jobs[0].state = "running".into();
-            q.spent = 1.25;
-            id
-        });
-        // Reloaded from disk, as after a quit: the job is still running and the spend kept.
-        let q = load_queue(&qf);
-        assert_eq!((q.jobs[0].state.as_str(), q.jobs[0].id, q.spent), ("running", id, 1.25));
-        save_transcript(&root, "swarm", id, &[json!({"role": "user", "content": "go"}), json!({"role": "assistant", "content": [{"type": "tool_use"}]})]);
-        assert_eq!(load_transcript(&root, "swarm", id).unwrap().len(), 2);
-        // Another session's job with the same id is its own conversation.
-        assert!(load_transcript(&root, "s-1", id).is_none());
-        std::fs::remove_dir_all(root).unwrap();
-    }
-
-    /// A job's conversation: the task (a report attached), then `steps` replies each calling a tool and its result.
-    fn conversation(steps: usize) -> (Value, Vec<Value>) {
-        let task = json!([
-            { "type": "document", "source": { "type": "base64", "media_type": "application/pdf", "data": "JVBERi0=" }, "title": "audit/report.pdf" },
-            { "type": "text", "text": "Record every finding." }
-        ]);
-        let mut m = vec![json!({ "role": "user", "content": task.clone() })];
-        for s in 0..steps {
-            m.push(json!({ "role": "assistant", "content": [
-                { "type": "thinking", "thinking": "", "signature": format!("sig{s}") },
-                { "type": "tool_use", "id": format!("t{s}"), "name": "functions", "input": {} }
-            ] }));
-            m.push(json!({ "role": "user", "content": [{ "type": "tool_result", "tool_use_id": format!("t{s}"), "content": format!("result {s}") }] }));
-        }
-        (task, m)
-    }
-
-    /// Every tool_use is answered by a tool_result in the next message, and every tool_result answers one.
-    fn pairs_valid(m: &[Value]) -> bool {
-        let ids = |v: &Value, ty: &str, key: &str| -> Vec<String> {
-            v["content"].as_array().map(|c| c.iter().filter(|b| b["type"] == ty).map(|b| b[key].as_str().unwrap_or("").to_string()).collect()).unwrap_or_default()
-        };
-        (0..m.len()).all(|i| {
-            let uses = ids(&m[i], "tool_use", "id");
-            let answered = m.get(i + 1).map(|n| ids(n, "tool_result", "tool_use_id")).unwrap_or_default();
-            let results = ids(&m[i], "tool_result", "tool_use_id");
-            let asked = if i == 0 { vec![] } else { ids(&m[i - 1], "tool_use", "id") };
-            uses.iter().all(|u| answered.contains(u)) && results.iter().all(|r| asked.contains(r))
-        })
-    }
-
-    #[test]
-    fn compaction_keeps_head_and_tail_with_valid_pairs() {
-        let (task, m) = conversation(10);
-        let cut = compact_cut(&m, KEEP_STEPS).unwrap();
-        // The cut is the reply to a request that ended on a user turn, KEEP_STEPS steps from the end.
-        assert_eq!(m[cut]["role"], "assistant");
-        assert_eq!(m[cut - 1]["role"], "user");
-        assert_eq!(m.len() - cut, 2 * KEEP_STEPS);
-        assert!(pairs_valid(&m[..cut]));
-
-        let summary = json!([{ "type": "compaction", "content": "Summary.", "signature": "s" }]);
-        let out = splice(&m, cut, summary.clone(), &task);
-        assert!(pairs_valid(&out));
-        // The summary first, as an assistant message of its own.
-        assert_eq!(out[0], json!({ "role": "assistant", "content": summary }));
-        assert!(has_compaction(&out));
-        // The kept steps follow it unchanged, thinking blocks included.
-        assert_eq!(&out[1..out.len() - 1], &m[cut..m.len() - 1]);
-        // The last user turn keeps its tool results first, then the task (with its document) restated.
-        let last = out.last().unwrap()["content"].as_array().unwrap().clone();
-        assert_eq!(last[0], m.last().unwrap()["content"][0]);
-        assert_eq!(last[0]["type"], "tool_result");
-        assert_eq!(&last[last.len() - 2..], task.as_array().unwrap().as_slice());
-        assert_eq!(out.len(), 1 + 2 * KEEP_STEPS);
-    }
-
-    #[test]
-    fn compaction_of_a_short_or_resumed_job() {
-        // Fewer steps than KEEP_STEPS: the first step is summarized, the rest kept; one step alone is summarized whole.
-        assert_eq!(compact_cut(&conversation(2).1, KEEP_STEPS), Some(3));
-        assert_eq!(compact_cut(&conversation(1).1, KEEP_STEPS), None);
-        // Nothing to keep: the whole conversation is summarized and the task restated as a new user turn.
-        let task = json!("Prove item 3.");
-        let only = vec![json!({ "role": "user", "content": "Prove item 3." })];
-        assert_eq!(compact_cut(&only, KEEP_STEPS), None);
-        let out = splice(&only, only.len(), json!([{ "type": "compaction", "content": "S", "signature": "s" }]), &task);
-        assert_eq!(out.len(), 2);
-        assert_eq!(out[1]["role"], "user");
-        assert_eq!(out[1]["content"][1]["text"], "Prove item 3.");
-        // A resumed job ends with the quit note (a string); the task joins it as blocks.
-        let (task, mut m) = conversation(6);
-        m.push(json!({ "role": "user", "content": "The app quit and this job is being resumed." }));
-        let cut = compact_cut(&m, KEEP_STEPS).unwrap();
-        let out = splice(&m, cut, json!([{ "type": "compaction", "content": "S", "signature": "s" }]), &task);
-        assert!(pairs_valid(&out));
-        assert_eq!(out.last().unwrap()["content"][0]["text"], "The app quit and this job is being resumed.");
-        // Compacting again: the old summary is inside the new range, never kept in front of it.
-        let again = compact_cut(&out, 1).unwrap();
-        assert!(again > 0 && out[again]["role"] == "assistant");
-        // A range too long for the summarizer halves, still on a valid cut.
-        let (_, m) = conversation(20);
-        let half = earlier_cut(&m, m.len()).unwrap();
-        assert!(half <= m.len() / 2 && m[half]["role"] == "assistant" && m[half - 1]["role"] == "user");
-        assert!(pairs_valid(&m[..half]));
-    }
-
-    #[test]
-    fn usage_counts_the_window_and_compaction_cost() {
-        let u = json!({ "input_tokens": 10, "cache_creation_input_tokens": 200, "cache_read_input_tokens": 3000, "output_tokens": 40 });
-        assert_eq!(context_used(&u), 3250);
-        // A compaction call: zeros at the top level, the cost in iterations.
-        let c = json!({ "input_tokens": 0, "output_tokens": 0, "iterations": [{ "type": "compaction", "input_tokens": 1_000_000, "output_tokens": 0 }] });
-        assert!((cost("claude-opus-5-5", &c) - 4.0).abs() < 1e-9);
-        assert!(too_long(400, "prompt is too long: 1200000 tokens > 1000000 maximum"));
-        assert!(!too_long(400, "messages.1: tool_use ids must be unique"));
-    }
-
-    #[test]
-    fn old_sessions_merge_into_one() {
-        let root = std::env::temp_dir().join(format!("fm-merge-{}", std::process::id()));
-        let runs = root.join(".formal").join("runs");
-        std::fs::create_dir_all(&runs).unwrap();
-        std::fs::write(runs.join("local-1.jsonl"), "{\"run\":\"local-1\",\"kind\":\"say\",\"spent\":1.0}\n").unwrap();
-        std::fs::write(runs.join("local-2.jsonl"), "{\"run\":\"local-2\",\"kind\":\"say\",\"spent\":2.5}\n").unwrap();
-        merge_old_sessions(&root);
-        let merged = std::fs::read_to_string(runs.join("swarm.jsonl")).unwrap();
-        assert_eq!(merged.lines().count(), 2);
-        assert!(merged.lines().all(|l| l.contains("\"run\":\"swarm\"")));
-        assert!(runs.join("archive").join("local-1.jsonl").exists());
-        assert_eq!(load_queue(&queue_file(&root, "swarm")).spent, 3.5);
-        std::fs::remove_dir_all(root).unwrap();
-    }
-
-    #[test]
-    fn changed_functions_are_reopened() {
-        let plan = vec![
-            PlanItem { index: 1, mark: "x".into(), text: "`Pool.fee` (Pool.sol)".into() },
-            PlanItem { index: 2, mark: "x".into(), text: "`Pool.swap` (Pool.sol)".into() },
-            PlanItem { index: 3, mark: " ".into(), text: "`Pool.new` (Pool.sol)".into() },
-            PlanItem { index: 4, mark: "!".into(), text: "`Pool.bug` (Pool.sol)".into() },
-        ];
-        let ledger = json!({ "entries": [
-            { "lean": "Pool.fee", "status": "pending", "notYet": ["the reviewer's approval: lapsed: the def or a theorem changed since it was approved"] },
-            { "lean": "Pool.swap", "status": "proved", "notYet": [] },
-            { "lean": "Pool.new", "status": "unproved", "notYet": ["no theorem"] },
-            { "lean": "Pool.bug", "status": "unproved", "notYet": ["no theorem"] },
-        ] });
-        let gone = lapsed(&plan, &ledger);
-        assert_eq!(gone.len(), 1, "only the checked item that is no longer proved: {gone:?}");
-        assert_eq!((gone[0].0, gone[0].1.as_str()), (1, "Pool.fee"));
-        assert!(gone[0].2.contains("lapsed"));
-    }
-
-    #[test]
-    fn codex_compacts_where_the_api_route_does() {
-        assert_eq!(compact_limit("gpt-6-astra"), 300_000);
-        assert_eq!(compact_limit("claude-opus-5-5"), 750_000);
-    }
-
-    #[test]
-    fn a_message_can_reopen_proved_functions() {
-        let root = std::env::temp_dir().join(format!("fm-reopen-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&root);
-        std::fs::create_dir_all(root.join(".formal")).unwrap();
-        std::fs::write(plan_path(&root), "# Plan\n\n- [x] `AsyncSwap.useNonce` — AsyncSwap\n- [!] `AsyncFiller.fill` — AsyncFiller\n- [x] `AsyncSwap.key` — AsyncSwap\n").unwrap();
-        let (done, unknown) = reopen(&root, &["AsyncSwap.useNonce".into(), "`AsyncFiller.fill`".into(), "AsyncSwap.gone".into()]);
-        assert_eq!(done, ["AsyncSwap.useNonce", "AsyncFiller.fill"]);
-        assert_eq!(unknown, ["AsyncSwap.gone"]);
-        let marks: Vec<String> = read_plan(&root).into_iter().map(|i| i.mark).collect();
-        assert_eq!(marks, [" ", " ", "x"]);
-        // A message queued as the run finishes keeps the session going until it is answered.
-        let qf = queue_file(&root, "swarm");
-        assert!(!answer_waiting(&qf));
-        with_queue(&qf, |q| enqueue(q, "answer", 0, "reopen the changed functions", 1, ""));
-        assert!(answer_waiting(&qf));
-        std::fs::remove_dir_all(root).unwrap();
-    }
-
-    /// On a real folder, what a fresh run's planner does before any agent: the AST's items added, checked items whose
-    /// code changed reopened, stray model copies named, and the Lake sources the proofs build in.
-    /// `PROBE=<folder> cargo test --lib swarm::tests::plan_probe -- --ignored --nocapture`
-    #[tokio::test(flavor = "current_thread")]
-    #[ignore]
-    async fn plan_probe() {
-        let root = PathBuf::from(std::env::var("PROBE").unwrap());
-        crate::swarm_ctx::ensure_config(&root);
-        let ctx = crate::swarm_ctx::context(&root);
-        println!("LAKE {:?} SOURCES {:?}", crate::swarm_ctx::lake_dir(&root), crate::swarm_ctx::lean_src(&root));
-        for p in &ctx.problems {
-            println!("PROBLEM {p}");
-        }
-        for r in &ctx.regenerated {
-            println!("REGENERATED {r}");
-        }
-        let text = std::fs::read_to_string(plan_path(&root)).unwrap_or_default();
-        let missing = ctx.missing_items(&text);
-        if !missing.is_empty() {
-            std::fs::write(plan_path(&root), format!("{}\n{}\n", text.trim_end(), missing.join("\n"))).unwrap();
-        }
-        println!("ADDED {}", missing.len());
-        for d in crate::swarm_ctx::strays(&root) {
-            println!("STRAY {d}");
-        }
-        let mut ledger = crate::ledger::build(&root, true, false).await.unwrap();
-        // BASELINE=1: the reviewer approves what only waits on it, and those items are ticked (a converged run).
-        if std::env::var("BASELINE").is_ok() {
-            for i in read_plan(&root) {
-                let def = i.text.split('`').nth(1).unwrap_or("");
-                let e = ledger["entries"].as_array().unwrap().iter().find(|e| e["lean"] == def).cloned().unwrap_or_default();
-                if e["notYet"].as_array().is_some_and(|r| r.len() == 1 && r[0].as_str().is_some_and(|w| w.contains("not reviewed"))) {
-                    crate::ledger::approve(&root, &i.text, "baseline");
-                    set_mark(&root, i.index, 'x');
-                }
-            }
-            ledger = crate::ledger::build(&root, true, false).await.unwrap();
-        }
-        let gone = lapsed(&read_plan(&root), &ledger);
-        for (index, def, why) in &gone {
-            set_mark(&root, *index, ' ');
-            println!("REOPENED {index} {def}: {why}");
-        }
-        println!("PROVED {} of {}; OPEN {}", ledger["proved"], ledger["functions"], read_plan(&root).iter().filter(|i| i.mark == " ").count());
-    }
-
-    #[test]
-    fn chats_are_named_from_a_message() {
-        assert_eq!(short_name("Focus on liquidations next.\nAnd more."), "Focus on liquidations next.");
-        let long = short_name("Check that every function that writes the oracle reverts unless the owner calls it, then prove it");
-        assert!(long.ends_with('…') && long.chars().count() <= 61, "{long}");
-    }
-
-    #[test]
-    fn long_histories_are_cut_to_what_the_chat_shows() {
-        let mut log = String::new();
-        for i in 0..2000 {
-            log.push_str(&json!({ "kind": "tool", "text": format!("run {i}") }).to_string());
-            log.push('\n');
-        }
-        log.push_str(&json!({ "kind": "say", "text": "x".repeat(20_000) }).to_string());
-        log.push('\n');
-        let h = history_of(&log);
-        assert_eq!(h.iter().filter(|v| v["kind"] == "tool").count(), HISTORY_STEPS, "the latest steps only");
-        assert_eq!(h[0]["text"], "run 1400", "in order, oldest kept first");
-        assert!(h.last().unwrap()["text"].as_str().unwrap().len() < 8_100, "long text cut");
-    }
-
-    #[test]
-        fn plan_round_trip() {
-        let root = std::env::temp_dir().join(format!("fm-plan-{}", std::process::id()));
-        std::fs::create_dir_all(root.join(".formal")).unwrap();
-        std::fs::write(plan_path(&root), "# Plan\n\n- [ ] first (a.sol)\n- [x] second\n  - [ ] third\n").unwrap();
-        let p = read_plan(&root);
-        assert_eq!(p.len(), 3);
-        assert_eq!((p[0].mark.as_str(), p[0].text.as_str()), (" ", "first (a.sol)"));
-        set_mark(&root, 3, 'x');
-        set_mark(&root, 1, '!');
-        let p = read_plan(&root);
-        assert_eq!(p.iter().map(|i| i.mark.as_str()).collect::<Vec<_>>(), vec!["!", "x", "x"]);
-        assert!(std::fs::read_to_string(plan_path(&root)).unwrap().contains("  - [x] third"));
-        std::fs::remove_dir_all(root).unwrap();
-    }
+#[tauri::command(async)]
+pub async fn swarm_ledger(folder: String, check: Option<bool>, force: Option<bool>) -> Result<Value, String> {
+    added(&folder)?;
+    ledger(Path::new(&folder), check.unwrap_or(true), force.unwrap_or(false)).await
 }
+
+// ---- the chat's suggested reply ----
 
 const SUGGEST_SYSTEM: &str = "You draft the user's next message to a swarm of agents (planner, prover, reviewer) proving a codebase correct. Reply to what the agents last asked or reported, as the user, in one to three plain sentences. Output only the message.";
+
+/// A key and base URL for one model call: your own key, or a formal.team session billed to your credits.
+async fn model_access(client: &reqwest::Client, folder_path: &str, api_base: &str, provider: Option<&str>, run: &str, role: &str, item: &str) -> Result<(String, String), String> {
+    match provider {
+        Some("anthropic") => return Ok((anthropic_key().ok_or("Add your Anthropic key first")?, "https://api.anthropic.com".into())),
+        Some("openai") => return Ok((openai_key().ok_or("Add your OpenAI key first")?, "https://api.openai.com".into())),
+        Some("claude-code") => return Err("Claude Code runs this on your Claude plan, not through a key".into()),
+        Some("codex") => return Err("Codex runs this on your ChatGPT plan, not through a key".into()),
+        _ => {}
+    }
+    let folder = Path::new(folder_path).file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default();
+    let res = client
+        .post(format!("{api_base}/api/desktop/model-session"))
+        .bearer_auth(token()?)
+        .json(&json!({ "folder": folder, "run": run, "role": role, "ref": item }))
+        .send()
+        .await
+        .map_err(|e| e.to_string())?;
+    let status = res.status();
+    let body: Value = res.json().await.unwrap_or(json!({}));
+    if !status.is_success() {
+        return Err(body["error"].as_str().unwrap_or("formal.team refused the model session").to_string());
+    }
+    Ok((body["key"].as_str().unwrap_or("").to_string(), body["base_url"].as_str().unwrap_or("").to_string()))
+}
 
 /// Drafts what you might say next in the swarm chat, from its recent lines; you edit or send it yourself.
 #[tauri::command]
 pub async fn swarm_suggest(folder: String, api_base: String, provider: Option<String>, run: String, transcript: String) -> Result<String, String> {
+    let ask = format!("The chat so far:\n{transcript}\n\nDraft my next message.");
     if provider.as_deref() == Some("claude-code") {
-        return crate::claude_code::ask(&folder, SUGGEST_SYSTEM, &format!("The chat so far:\n{transcript}\n\nDraft my next message."), "claude-haiku-5-5").await;
+        return crate::claude_code::ask(&folder, SUGGEST_SYSTEM, &ask, "claude-haiku-5-5").await;
     }
     if provider.as_deref() == Some("codex") {
-        return crate::codex::ask(&folder, SUGGEST_SYSTEM, &format!("The chat so far:\n{transcript}\n\nDraft my next message."), "gpt-5.6-luna").await;
+        return crate::codex::ask(&folder, SUGGEST_SYSTEM, &ask, "gpt-5.6-luna").await;
     }
     let client = reqwest::Client::builder().timeout(Duration::from_secs(60)).build().unwrap_or_default();
     let (key, base) = model_access(&client, &folder, &api_base, provider.as_deref(), &run, "assistant", "suggest").await?;
@@ -2918,7 +466,7 @@ pub async fn swarm_suggest(folder: String, api_base: String, provider: Option<St
     let mut body = json!({
         "model": "claude-haiku-5-5", "max_tokens": 400,
         "system": SUGGEST_SYSTEM,
-        "messages": [{ "role": "user", "content": format!("The chat so far:\n{transcript}\n\nDraft my next message.") }],
+        "messages": [{ "role": "user", "content": ask }],
     });
     let res = if openai {
         body["model"] = json!("gpt-5-mini");
@@ -2936,85 +484,57 @@ pub async fn swarm_suggest(folder: String, api_base: String, provider: Option<St
     Ok(reply["content"].as_array().into_iter().flatten().filter_map(|b| b["text"].as_str()).collect::<Vec<_>>().join("").trim().to_string())
 }
 
-#[cfg(test)]
-mod property_tests {
-    use super::merge_property;
-    use serde_json::json;
+// ---- the app's life: dev autostart (B13), quit (B11) ----
 
-    #[test]
-    fn the_reviewer_corrects_the_provers_notes() {
-        let prover = json!({ "statement": "It reverts unless the owner calls.", "assumptions": "none", "theorems": ["a", "b"] });
-        let reviewer = json!({ "decision": "approve", "statement": "It reverts unless the order's owner calls.", "assumptions": "", "theorems": [] });
-        let p = merge_property(Some(&prover), Some(&reviewer)).unwrap();
-        assert_eq!(p["statement"], "It reverts unless the order's owner calls.");
-        assert_eq!(p["theorems"], json!(["a", "b"]));
-        assert_eq!(merge_property(Some(&prover), None).unwrap()["statement"], "It reverts unless the owner calls.");
-        assert!(merge_property(None, Some(&json!({ "decision": "approve" }))).is_none());
-    }
+/// B13: debug builds only. `FM_SWARM_AUTOSTART=<added folder>` starts its session at launch, as Start does, with
+/// `FM_SWARM_GOAL`, `FM_SWARM_BUDGET` (default 10), `FM_SWARM_PROVIDER`, `FM_SWARM_MODEL`, `FM_SWARM_SESSION`,
+/// `FM_SWARM_ONLY_QUEUED` (`1`) and `FM_API_BASE`.
+#[cfg_attr(not(debug_assertions), allow(dead_code))]
+pub fn autostart_request(env: impl Fn(&str) -> Option<String>) -> Option<SwarmRequest> {
+    let folder = env("FM_SWARM_AUTOSTART")?;
+    let env = |k: &str| env(k).filter(|v| !v.is_empty());
+    Some(SwarmRequest {
+        folder,
+        goal: env("FM_SWARM_GOAL"),
+        budget_usd: env("FM_SWARM_BUDGET").and_then(|v| v.parse().ok()).unwrap_or(10.0),
+        api_base: env("FM_API_BASE").unwrap_or_else(|| "https://formal.team".into()),
+        provider: env("FM_SWARM_PROVIDER"),
+        model: env("FM_SWARM_MODEL"),
+        session: env("FM_SWARM_SESSION"),
+        only_queued: env("FM_SWARM_ONLY_QUEUED").map(|v| v == "1"),
+    })
 }
 
-/// The commands the MCP drives (lib/mac-ops.ts), on a real folder with a `.lifecycle-test` file:
-/// `FM_LIFECYCLE_FOLDER=<folder> cargo test --lib lifecycle -- --ignored`. desktop/scripts/lifecycle.sh tests the app.
+/// Whether any session is running, in any folder (⌘Q).
+pub fn any_running(app: &AppHandle) -> bool {
+    engine(app).any_running()
+}
+
+/// B11: the app is quitting: every session stops and its log records the pause.
+pub fn pause_all(app: &AppHandle) {
+    engine(app).pause_all()
+}
+
 #[cfg(test)]
-mod lifecycle {
-    use std::path::Path;
+mod tests {
+    use super::*;
 
-    fn folder() -> String {
-        let f = std::env::var("FM_LIFECYCLE_FOLDER").expect("FM_LIFECYCLE_FOLDER: a folder with a .lifecycle-test file");
-        assert!(Path::new(&f).join(".lifecycle-test").exists(), "{f} has no .lifecycle-test file");
-        f
-    }
-
-    #[tokio::test(flavor = "current_thread")]
-    #[ignore]
-    async fn remote_ops() {
-        let f = folder();
-        // refresh_model: the models are in the Lake sources.
-        super::swarm_refresh_model(f.clone()).unwrap();
-        // work_map: every in-scope function, with a status and where its proof goes.
-        let map = super::swarm_work_map(f.clone()).unwrap();
-        let fns: Vec<serde_json::Value> = map["contracts"].as_array().unwrap().iter().flat_map(|c| c["functions"].as_array().cloned().unwrap_or_default()).collect();
-        assert!(!fns.is_empty(), "{map}");
-        assert!(fns.iter().all(|x| ["proved", "has_sorry", "in_lean", "not_modeled"].contains(&x["status"].as_str().unwrap_or(""))), "{map}");
-        let target = fns.iter().find(|x| x["status"] != "not_modeled").expect("a modeled function");
-        let def = target["lean"].as_str().unwrap().to_string();
-        let sources = map["sources"].as_str().unwrap_or(".").to_string();
-        assert!(target["proofFile"].as_str().unwrap().starts_with(&format!("{sources}/Refinement/Swarm/")), "{target}");
-        // brief: the prover's brief, pointing at the Lake sources.
-        let brief = super::swarm_brief(f.clone(), def.clone()).unwrap();
-        assert!(brief.contains(&def) && brief.contains(&format!("{sources}/Refinement/Swarm/")), "{brief}");
-        // check_proof: a sound file builds; a sorry is refused; a path outside Refinement/ is refused.
-        let path = format!("{sources}/Refinement/Swarm/LifecycleProbe.lean");
-        let good = super::swarm_check_proof(f.clone(), path.clone(), Some("theorem lifecycle_probe : 1 + 1 = 2 := rfl\n".into())).await.unwrap();
-        let bad = super::swarm_check_proof(f.clone(), path.clone(), Some("theorem lifecycle_probe : 1 = 2 := sorry\n".into())).await.unwrap();
-        let outside = super::swarm_check_proof(f.clone(), format!("{sources}/Generated/LifecycleProbe.lean"), Some(String::new())).await;
-        let _ = std::fs::remove_file(Path::new(&f).join(&path));
-        assert_eq!(good["ok"], true, "{good}");
-        assert_eq!(bad["ok"], false, "{bad}");
-        assert!(outside.is_err());
-        // health: reads the log back for the folder.
-        let h = crate::health::swarm_health(Some(f.clone()), Some(10)).unwrap();
-        assert!(h["turns"].is_number() && h["healthy"].is_boolean(), "{h}");
+    #[test]
+    fn b13_autostart_reads_the_environment() {
+        let vars: HashMap<&str, &str> = [("FM_SWARM_AUTOSTART", "/f"), ("FM_SWARM_BUDGET", "2.5"), ("FM_SWARM_ONLY_QUEUED", "1"), ("FM_SWARM_GOAL", "")].into();
+        let r = autostart_request(|k| vars.get(k).map(|v| v.to_string())).unwrap();
+        assert_eq!((r.folder.as_str(), r.budget_usd, r.only_queued, r.goal), ("/f", 2.5, Some(true), None));
+        assert_eq!(r.api_base, "https://formal.team");
+        assert!(autostart_request(|_| None).is_none());
+        let r = autostart_request(|k| (k == "FM_SWARM_AUTOSTART").then(|| "/f".into())).unwrap();
+        assert_eq!((r.budget_usd, r.only_queued, r.session), (10.0, None, None));
     }
 
     #[test]
-    fn a_proof_is_checked_by_building_its_own_modules() {
-        let base = std::env::temp_dir().join(format!("fm-build-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&base);
-        crate::swarm_ctx::scaffold(&base).unwrap();
-        let (a, b, bad) = ("formal/Proofs/Functions/WETH9Deposit.lean".to_string(), "formal/Proofs/InformalSpecs/S01/WETH9Fallback.lean".to_string(), "formal/Proofs/InformalSpecs/S01/WETH9«».lean".to_string());
-        assert_eq!(super::build_command(&base, &[&a, &b]), "lake build Proofs.Functions.WETH9Deposit Proofs.InformalSpecs.S01.WETH9Fallback");
-        assert_eq!(super::build_command(&base, &[&bad]), "lake build");
-        let item = "`WETH9.«»` — WETH9 (src/WETH9.sol:31): if it holds before a successful call, it holds after";
-        assert_eq!(super::expected_proof(&base, Some("S-01"), item), None);
-        std::fs::create_dir_all(base.join("formal/Proofs/InformalSpecs/S01")).unwrap();
-        std::fs::write(base.join("formal/Proofs/InformalSpecs/S01/WETH9Fallback.lean"), "").unwrap();
-        assert_eq!(super::expected_proof(&base, Some("S-01"), item).as_deref(), Some("formal/Proofs/InformalSpecs/S01/WETH9Fallback.lean"));
-        let _ = std::fs::remove_dir_all(&base);
+    fn base64_matches_the_standard_alphabet() {
+        assert_eq!(base64(b""), "");
+        assert_eq!(base64(b"f"), "Zg==");
+        assert_eq!(base64(b"fo"), "Zm8=");
+        assert_eq!(base64(b"foobar"), "Zm9vYmFy");
     }
-}
-
-/// The Anthropic key saved in the keychain, if any.
-pub(crate) fn anthropic_key() -> Option<String> {
-    anthropic_entry().ok()?.get_password().ok()
 }

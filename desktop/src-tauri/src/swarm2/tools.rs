@@ -354,8 +354,64 @@ pub fn with_diff(result: &str, rel: &str, before: &str, after: &str) -> String {
 
 /// The executor's `list_files`: the folder's files (dependencies and build output skipped), stray copies left out.
 pub fn list_files(root: &Path, dir: &str) -> Result<String, String> {
-    let all = crate::executor::list_files(root, dir)?;
+    let all = walk_files(root, dir)?;
     Ok(all.lines().filter(|f| fsguard::visible(root, f)).collect::<Vec<_>>().join("\n"))
+}
+
+/// Every file under `dir` (at most 2000; dependencies and build output skipped), sorted, clipped.
+fn walk_files(root: &Path, dir: &str) -> Result<String, String> {
+    let start = fsguard::inside(root, if dir.is_empty() { "." } else { dir })?;
+    // Dependencies (lib/ for git submodules, dependencies/ for Soldeer) and build output.
+    let skip = [".git", "node_modules", "lib", "dependencies", "out", "cache", "broadcast", "target", ".lake", "dist", ".formal"];
+    let mut files = vec![];
+    let mut stack = vec![start];
+    while let Some(d) = stack.pop() {
+        let Ok(entries) = std::fs::read_dir(&d) else { continue };
+        for e in entries.flatten() {
+            let name = e.file_name().to_string_lossy().to_string();
+            let p = e.path();
+            if e.file_type().map(|t| t.is_dir()).unwrap_or(false) {
+                if !skip.contains(&name.as_str()) {
+                    stack.push(p);
+                }
+            } else if let Ok(rel) = p.strip_prefix(root) {
+                files.push(rel.to_string_lossy().replace('\\', "/"));
+            }
+            if files.len() >= 2000 {
+                break;
+            }
+        }
+    }
+    files.sort();
+    Ok(lake::clip(files.join("\n")))
+}
+
+/// Lines matching a regex in the files under `dir` with one of `exts`, as `path:line: text`: fff's index first, a
+/// plain walk if the folder can't be indexed.
+fn search_in(root: &Path, pattern: &str, dir: &str, exts: &[&str]) -> Result<String, String> {
+    match crate::file_search::grep(root, pattern, dir, exts) {
+        Err(e) if !e.starts_with("bad pattern") => walk_search(root, pattern, dir, exts),
+        r => r,
+    }
+}
+
+fn walk_search(root: &Path, pattern: &str, dir: &str, exts: &[&str]) -> Result<String, String> {
+    let re = regex::Regex::new(pattern).map_err(|e| format!("bad pattern: {e}"))?;
+    let files = walk_files(root, if dir.is_empty() { "." } else { dir })?;
+    let mut hits = vec![];
+    for f in files.lines().filter(|f| exts.iter().any(|x| f.ends_with(x))) {
+        let Ok(text) = std::fs::read_to_string(root.join(f)) else { continue };
+        for (i, line) in text.lines().enumerate() {
+            if re.is_match(line) {
+                hits.push(format!("{f}:{}: {}", i + 1, line.trim().chars().take(200).collect::<String>()));
+                if hits.len() >= 200 {
+                    hits.push("… (200 matches shown)".into());
+                    return Ok(hits.join("\n"));
+                }
+            }
+        }
+    }
+    Ok(if hits.is_empty() { "no matches".into() } else { hits.join("\n") })
 }
 
 /// Drops hits (`path:line: text` or bare paths) in stray copies (B27).
@@ -367,7 +423,7 @@ fn visible_lines(root: &Path, hits: &str, none: &str) -> String {
 /// B27: regex over the Lake project's `.lean` files, `path:line: text`, at most 200 hits, strays left out.
 pub fn search(root: &Path, pattern: &str) -> Result<String, String> {
     let dir = lake::lake_dir(root).map(|d| fsguard::show(root, &d)).unwrap_or_default();
-    let hits = crate::executor::search_in(root, pattern, &dir, &[".lean"])?;
+    let hits = search_in(root, pattern, &dir, &[".lean"])?;
     Ok(visible_lines(root, &hits, "no matches"))
 }
 
@@ -511,24 +567,6 @@ mod tests {
         assert_eq!(names_of(&schemas("reviewer")), expect(&[analysis.as_slice(), &["verdict"]].concat()));
         assert_eq!(names_of(&schemas("auditor")), expect(&["record_report", "record_finding"]));
 
-        assert_eq!(report_bug_schema(), crate::swarm::report_bug_tool());
-        let src = include_str!("../swarm.rs");
-        let start = src.find("fn reopen_tool()").unwrap();
-        let end = src[start..].find("/// What a turn ended with").unwrap() + start;
-        let old = &src[start..end];
-        for role in ROLES {
-            for t in schemas(role).as_array().unwrap() {
-                let name = t["name"].as_str().unwrap();
-                if crate::analysis::is_tool(name) || ["formalize_result", "confirm_statement", "report_bug"].contains(&name) {
-                    continue;
-                }
-                let mut all = vec![];
-                strings(t, &mut all);
-                for s in all {
-                    assert!(old.contains(&format!("\"{s}\"")), "{role}.{name}: {s:?} isn't in swarm.rs::tools");
-                }
-            }
-        }
         // Stable across calls (the bridge advertises them per turn).
         for role in ROLES {
             assert_eq!(serde_json::to_string(&schemas(role)).unwrap(), serde_json::to_string(&schemas(role)).unwrap());
