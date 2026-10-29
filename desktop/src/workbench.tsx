@@ -244,6 +244,8 @@ function FileView({ folder, file, toggle }: { folder: string; file: string | nul
 // Screens and blocks carry their own demo data; most components need theirs passed in.
 const modules = import.meta.glob<Record<string, unknown>>(["../../packages/ui/screens/*.tsx", "../../packages/ui/blocks/*.tsx", "../../packages/ui/components/*.tsx"]);
 const KINDS = ["screens", "blocks", "components"];
+// Sample data for the ones that need it: packages/ui/formalmind/demos/<kind>--<name>.tsx, each a default export.
+const demos = import.meta.glob<{ default: () => ReactNode }>("../../packages/ui/formalmind/demos/*.tsx");
 const nameOf = (path: string) => path.split("/").slice(-2).join("/").replace(/\.tsx$/, "");
 const rank = (n: string) => KINDS.indexOf(n.split("/")[0]);
 const pascal = (name: string) => name.split("/").pop()!.replace(/-clean$/, "").replace(/(^|-)(\w)/g, (_, __, c: string) => c.toUpperCase());
@@ -254,6 +256,8 @@ function ComponentViewer() {
 	const [picked, setPicked] = useState(() => (names.includes(localStorage.getItem("fm:viewer-pick") ?? "") ? localStorage.getItem("fm:viewer-pick")! : names[0]) ?? "");
 	useEffect(() => localStorage.setItem("fm:viewer-pick", picked), [picked]);
 	const Shown = useMemo(() => {
+		const demo = demos[`../../packages/ui/formalmind/demos/${picked.replace("/", "--")}.tsx`];
+		if (demo) return lazy(demo);
 		const load = modules[`../../packages/ui/${picked}.tsx`];
 		if (!load) return null;
 		return lazy(async () => {
