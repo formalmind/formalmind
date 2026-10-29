@@ -1002,13 +1002,6 @@ export function SwarmCanvas({ state, fill = false, contain = false, title, actio
 		const t = setTimeout(() => setSharp(target), 160);
 		return () => clearTimeout(t);
 	}, [target, sharp]);
-	// The lanes fade in once, when the board first shows; after that no entrance animation on the board plays again
-	// (WebKit restarts them when the zoom changes).
-	const [entered, setEntered] = useState(false);
-	useEffect(() => {
-		const t = setTimeout(() => setEntered(true), 900);
-		return () => clearTimeout(t);
-	}, []);
 
 	// The demo always has the assistant follow you; in the app it's opt-in (it can get in the way), remembered here.
 	const [followPref, setFollowPref] = useState(() => {
@@ -1231,7 +1224,8 @@ export function SwarmCanvas({ state, fill = false, contain = false, title, actio
 				}}
 			>
 				<div
-					className={`absolute left-0 top-0 origin-top-left ${entered ? "[&_.animate-in]:![animation:none]" : ""}`}
+					// The board shows at once: no entrance animation on it (WebKit would also restart them when the zoom changes).
+					className="absolute left-0 top-0 origin-top-left [&_.animate-in]:![animation:none]"
 					style={{
 						width: W,
 						height: boardH,
@@ -1344,7 +1338,7 @@ export function SwarmCanvas({ state, fill = false, contain = false, title, actio
 							{LANES.map((lane) => (
 								<div
 									key={lane.key}
-									className={`absolute rounded-lg border border-dashed bg-muted/40 ${entered ? "" : "animate-in fade-in-0 duration-700"}`}
+									className="absolute rounded-lg border border-dashed bg-muted/40"
 									style={{ left: laneX(lane.key), top: groupY(group) + LANE_TOP, width: LANE_W, height: LANE_BOTTOM - LANE_TOP }}
 								>
 									<div className="flex items-center justify-between px-3 pt-2.5 font-mono text-[12px] font-medium text-muted-foreground">
