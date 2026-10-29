@@ -128,9 +128,13 @@ pub(crate) fn list_files(root: &Path, dir: &str) -> Result<String, String> {
 /// Lines matching a regex in the folder's text files (Solidity, Lean, Markdown, TOML), as path:line: text.
 fn search(root: &Path, pattern: &str, dir: &str) -> Result<String, String> {
     // Stray copies of the models or proofs (see `in_sources`) are left out: a hit there is a def Lake never builds.
-    search_in(root, pattern, dir, &[".sol", ".lean", ".md", ".toml"]).map(|hits| {
-        hits.lines().filter(|l| l.split(':').next().is_none_or(|f| crate::swarm_ctx::stray(root, f).is_none())).collect::<Vec<_>>().join("\n")
-    })
+    search_in(root, pattern, dir, &[".sol", ".lean", ".md", ".toml"]).map(|hits| drop_strays(root, &hits))
+}
+
+/// Search or find results (one `path` or `path:line: text` per line) without the ones in stray copies of the models or
+/// proofs (see `in_sources`): a hit there is a def or a proof Lake never builds.
+pub(crate) fn drop_strays(root: &Path, hits: &str) -> String {
+    hits.lines().filter(|l| l.split(':').next().is_none_or(|f| crate::swarm_ctx::stray(root, f).is_none())).collect::<Vec<_>>().join("\n")
 }
 
 /// Lines matching a regex in the files under `dir` with one of `exts`, as path:line: text.
@@ -194,7 +198,7 @@ pub(crate) async fn call_tool(root: &Path, name: &str, args: &Value) -> String {
             }
         }),
         "search" => search(root, &s("pattern"), &s("dir")),
-        "find" => crate::file_search::find(root, &s("query"), 30),
+        "find" => crate::file_search::find(root, &s("query"), 30).map(|h| drop_strays(root, &h)),
         "write_file" => in_sources(root, &s("path")).and_then(|p| {
             if let Some(parent) = p.parent() {
                 std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;

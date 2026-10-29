@@ -803,6 +803,9 @@ mod tests {
         std::fs::write(root.join("Generated/AsyncSwap.lean"), "def AsyncFiller.tradeFee := 0\n").unwrap();
         let hits = rt.block_on(crate::executor::call_tool(&root, "search", &json!({ "pattern": "def AsyncFiller.tradeFee" })));
         assert_eq!(hits.trim(), "validation/lean/Generated/AsyncSwap.lean:1: def AsyncFiller.tradeFee := 1");
+        // find and the swarm's own search leave the copies out too.
+        let found = crate::executor::drop_strays(&root, "Refinement/Swarm/AsyncSwapMulDiv.lean\nvalidation/lean/Generated/AsyncSwap.lean\nGenerated/AsyncSwap.lean:1: def x");
+        assert_eq!(found, "validation/lean/Generated/AsyncSwap.lean");
         // The model is written where Lake reads it.
         assert_eq!(super::layout(&root).0, "Generated");
         let _ = std::fs::remove_dir_all(&root);

@@ -468,6 +468,9 @@ struct Job {
     /// A review's property notes for the report, as the prover wrote them (statement, assumptions, theorems).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     property: Option<Value>,
+    /// The reviewer's verdict call, kept as soon as it is made: a quit before the turn ends doesn't lose it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    verdict: Option<Value>,
     /// For an obligation of a statement (.formal/statements.md): its id; `item` is then the obligation's number in it.
     #[serde(default, skip_serializing_if = "String::is_empty")]
     statement: String,
@@ -1008,10 +1011,16 @@ impl Turn<'_> {
                     r
                 }
                 "verdict" => {
-                    let ok = input["decision"].as_str() == Some("approve");
-                    out.verdict = Some((ok, input["notes"].as_str().unwrap_or("").to_string()));
-                    out.property = ok.then(|| input.clone());
+                    restore_verdict(out, input);
+                    let ok = matches!(out.verdict, Some((true, _)));
                     self.emit("tool", role, item, format!("verdict {}", if ok { "approve" } else { "changes" }));
+                    if let Some(job) = *self.job.lock().unwrap() {
+                        with_queue(&self.queue, |q| {
+                            if let Some(j) = q.jobs.iter_mut().find(|j| j.id == job) {
+                                j.verdict = Some(input.clone());
+                            }
+                        });
+                    }
                     "recorded".to_string()
                 }
                 // The Solidity comes from formal-ast, not from the files.
@@ -1030,13 +1039,13 @@ impl Turn<'_> {
                 "search" => {
                     self.emit("tool", role, item, format!("search {shown}"));
                     let lake = crate::swarm_ctx::lake_dir(&root).map(|d| d.strip_prefix(&root).map(|p| p.to_string_lossy().to_string()).unwrap_or_default()).unwrap_or_default();
-                    let r = crate::executor::search_in(&root, input["pattern"].as_str().unwrap_or(""), &lake, &[".lean"]).unwrap_or_else(|e| format!("error: {e}"));
+                    let r = crate::executor::search_in(&root, input["pattern"].as_str().unwrap_or(""), &lake, &[".lean"]).map(|h| crate::executor::drop_strays(&root, &h)).unwrap_or_else(|e| format!("error: {e}"));
                     self.emit("result", role, item, r.chars().take(500).collect());
                     r
                 }
                 "find" => {
                     self.emit("tool", role, item, format!("find {shown}"));
-                    let r = crate::file_search::find(&root, input["query"].as_str().unwrap_or(""), 30).unwrap_or_else(|e| format!("error: {e}"));
+                    let r = crate::file_search::find(&root, input["query"].as_str().unwrap_or(""), 30).map(|h| crate::executor::drop_strays(&root, &h)).unwrap_or_else(|e| format!("error: {e}"));
                     self.emit("result", role, item, r.chars().take(500).collect());
                     r
                 }
@@ -1891,12 +1900,19 @@ async fn run_swarm(turn: &Turn<'_>) -> String {
             }
         };
         *turn.job.lock().unwrap() = None;
-        let out = match outcome {
+        let mut out = match outcome {
             Ok(o) => o,
             // The job stays running in the queue, so the next start picks it up.
             Err(e) => return format!("paused: {e}"),
         };
-        if turn.swarm.stop.load(Ordering::SeqCst) && out.summary.is_empty() {
+        // A verdict given before a quit or a pause counts, though the turn that gave it didn't end.
+        if out.verdict.is_none() {
+            if let Some(v) = with_queue(&turn.queue, |q| q.jobs.iter().find(|j| j.id == job.id).and_then(|j| j.verdict.clone())) {
+                restore_verdict(&mut out, &v);
+            }
+        }
+        // A turn cut short by Stop stays queued unless it reached its result (a verdict, a bug): resuming finishes it.
+        if turn.swarm.stop.load(Ordering::SeqCst) && out.verdict.is_none() && out.bug.is_none() {
             return "paused: resume anytime, the queue carries on".into();
         }
 
@@ -2224,6 +2240,13 @@ pub fn swarm_triage(folder: String, path: String, session: Option<String>) -> Re
         enqueue(q, "triage", 0, &path, 1, "");
     });
     Ok(())
+}
+
+/// A verdict call's input (decision, notes and the report's notes) as the turn's outcome.
+fn restore_verdict(out: &mut Outcome, input: &Value) {
+    let ok = input["decision"].as_str() == Some("approve");
+    out.verdict = Some((ok, input["notes"].as_str().unwrap_or("").to_string()));
+    out.property = ok.then(|| input.clone());
 }
 
 /// A message to the swarm waits in this queue.
@@ -2789,6 +2812,31 @@ mod tests {
         assert_eq!(gone.len(), 1, "only the checked item that is no longer proved: {gone:?}");
         assert_eq!((gone[0].0, gone[0].1.as_str()), (1, "Pool.fee"));
         assert!(gone[0].2.contains("lapsed"));
+    }
+
+    #[test]
+    fn a_verdict_survives_a_quit() {
+        let root = std::env::temp_dir().join(format!("fm-verdict-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(root.join(".formal")).unwrap();
+        let qf = queue_file(&root, "swarm");
+        // The reviewer approved; the app quit before its turn ended. The queue on disk still has the verdict.
+        let id = with_queue(&qf, |q| {
+            enqueue(q, "review", 1, "`AsyncSwap.asyncOrderInfo`", 1, "");
+            let j = q.jobs.last_mut().unwrap();
+            j.state = "running".into();
+            j.verdict = Some(json!({ "decision": "approve", "notes": "matches the slice", "statement": "It returns the stored amounts." }));
+            j.id
+        });
+        let saved = with_queue(&qf, |q| q.jobs.iter().find(|j| j.id == id).and_then(|j| j.verdict.clone())).expect("kept on disk");
+        let mut out = Outcome::default();
+        restore_verdict(&mut out, &saved);
+        assert_eq!(out.verdict, Some((true, "matches the slice".to_string())));
+        assert_eq!(out.property.unwrap()["statement"], "It returns the stored amounts.");
+        let mut changes = Outcome::default();
+        restore_verdict(&mut changes, &json!({ "decision": "changes", "notes": "too weak" }));
+        assert!(matches!(changes.verdict, Some((false, _))) && changes.property.is_none());
+        std::fs::remove_dir_all(root).unwrap();
     }
 
     #[test]
