@@ -18,7 +18,7 @@ function describe(path: string): { title: string; icon: LucideIcon } {
 	const [pathname, search = ""] = path.split("?");
 	if (pathname === "/usage") return { title: "Usage", icon: Gauge };
 	if (pathname === "/settings") return { title: "Settings", icon: Settings };
-	if (pathname === "/agent") return { title: "Agent", icon: Sparkles };
+	if (pathname === "/components") return { title: "Components", icon: Sparkles };
 	if (pathname === "/local") {
 		const folder = new URLSearchParams(search).get("path") ?? "";
 		return { title: folder.split(/[\\/]/).filter(Boolean).pop() ?? "Folder", icon: HardDrive };
@@ -205,7 +205,7 @@ export function TabBar() {
 			<button type="button" onClick={() => window.dispatchEvent(new Event("fm:refresh"))} title="Refresh" className="grid size-7 shrink-0 place-items-center rounded-md text-muted-foreground hover:bg-sidebar-accent hover:text-foreground">
 				<RefreshCw className="size-4" />
 			</button>
-			<button type="button" onClick={() => navigate("/agent")} title="Agent: change Formal Mind itself" className="grid size-7 shrink-0 place-items-center rounded-md text-muted-foreground hover:bg-sidebar-accent hover:text-foreground">
+			<button type="button" onClick={() => navigate("/components")} title="Components" className="grid size-7 shrink-0 place-items-center rounded-md text-muted-foreground hover:bg-sidebar-accent hover:text-foreground">
 				<Sparkles className="size-4" />
 			</button>
 			<button type="button" onClick={() => navigate("/settings")} title="Settings" className="grid size-7 shrink-0 place-items-center rounded-md text-muted-foreground hover:bg-sidebar-accent hover:text-foreground">

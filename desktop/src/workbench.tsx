@@ -342,18 +342,11 @@ class Caught extends Component<{ children: ReactNode }, { error: string | null }
 	}
 }
 
-/** The page at /agent: the project's files or chats beside the chat. */
-export function AgentPage() {
+/** The page at /components: AffectUI's list and every piece on one scrolling page. */
+export function ComponentsPage() {
 	return (
-		<WorkbenchProvider>
-			<div className="flex h-full min-h-0">
-				<aside className="flex w-64 shrink-0 flex-col border-r pt-2">
-					<WorkbenchSide />
-				</aside>
-				<div className="min-w-0 flex-1">
-					<Workbench />
-				</div>
-			</div>
-		</WorkbenchProvider>
+		<div className="h-full min-h-0 text-[13px]">
+			<ComponentViewer />
+		</div>
 	);
 }

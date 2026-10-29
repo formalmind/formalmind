@@ -17,7 +17,7 @@ import { apiBase, clearToken, exchangeCode, loadToken, syncSettings } from "./ap
 import { LocalFolderPage, LocalFolders, useFolders, useRepoSource } from "./local";
 import { onboarded, SetupSteps, SignInStep } from "./onboarding";
 import { SettingsPage } from "./settings";
-import { AgentPage } from "./workbench";
+import { ComponentsPage } from "./workbench";
 import { TabBar } from "./tabs";
 import { UpdateNotice } from "./update";
 
@@ -57,7 +57,7 @@ function Shell({ user }: { user: User }) {
 								<Route path="/projects/:owner/:name/file" element={<ProjectFilePage />} />
 								<Route path="/local" element={<LocalFolderPage />} />
 								<Route path="/settings" element={<SettingsPage />} />
-								<Route path="/agent" element={<AgentPage />} />
+								<Route path="/components" element={<ComponentsPage />} />
 								{/* Other pages come over from the web app as the desktop app grows. */}
 								<Route path="*" element={<Navigate to="/" replace />} />
 							</Routes>
