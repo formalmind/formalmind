@@ -8,7 +8,7 @@ import { HomeEmpty } from "@/components/home-empty";
 import { useResizable } from "./resize-handle";
 import { Component, Suspense, createContext, lazy, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 
-/** The new version (SPEC.md B64, B65): one project, a copy of Formal Mind itself in ~/.formalmind/formalmind. The
+/** The agent page (SPEC.md B64, B65): one project, a copy of Formal Mind itself in ~/.formalmind/formalmind. The
  * sidebar shows its files or the chats; the page is a chat with the agent that reads and writes those files, with
  * AffectUI's components in a half screen beside it. */
 
@@ -121,7 +121,7 @@ export function WorkbenchSide() {
 	// Anything picked here shows on the project page, so from Settings it goes back there.
 	const navigate = useNavigate();
 	const { pathname } = useLocation();
-	const home = () => pathname !== "/" && navigate("/");
+	const home = () => pathname !== "/agent" && navigate("/agent");
 	const setLeft = (k: "files" | "chats") => (w.setLeft(k), home());
 	const setFile = (f: string) => (w.setFile(f), home());
 	const setChatId = (id: string | null) => (w.setChatId(id), home());
@@ -320,4 +320,20 @@ class Caught extends Component<{ children: ReactNode }, { error: string | null }
 	render() {
 		return this.state.error ? <p className="text-destructive">{this.state.error}</p> : this.props.children;
 	}
+}
+
+/** The page at /agent: the project's files or chats beside the chat. */
+export function AgentPage() {
+	return (
+		<WorkbenchProvider>
+			<div className="flex h-full min-h-0">
+				<aside className="flex w-64 shrink-0 flex-col border-r pt-2">
+					<WorkbenchSide />
+				</aside>
+				<div className="min-w-0 flex-1">
+					<Workbench />
+				</div>
+			</div>
+		</WorkbenchProvider>
+	);
 }

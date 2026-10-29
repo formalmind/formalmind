@@ -1,15 +1,16 @@
 import { useEffect, useState } from "react";
 import { useLocation, useNavigate } from "react-router";
 import { listen } from "@tauri-apps/api/event";
-import { Gauge, HardDrive, Network, PanelLeft, Plus, Settings, X, type LucideIcon } from "lucide-react";
+import { Gauge, HardDrive, Network, PanelLeft, Plus, RefreshCw, Settings, Sparkles, X, type LucideIcon } from "lucide-react";
 import { NotificationCenter } from "@/components/notification-center";
-import { PANE_VIEWS } from "./pane-views";
-import { useProjectFolder } from "./workbench";
 import { useSidebar } from "@/components/ui/sidebar";
+import { PANE_VIEWS } from "./pane-views";
 
 type Tab = { id: string; path: string };
 
 const KEY = "fm:tabs";
+/** The folder last open in any tab: the title bar's views open it from pages that have no folder of their own. */
+const LAST_FOLDER = "fm:last-folder";
 const newId = () => Math.random().toString(36).slice(2, 10);
 
 /** What a tab shows for the page it's on. */
@@ -17,6 +18,7 @@ function describe(path: string): { title: string; icon: LucideIcon } {
 	const [pathname, search = ""] = path.split("?");
 	if (pathname === "/usage") return { title: "Usage", icon: Gauge };
 	if (pathname === "/settings") return { title: "Settings", icon: Settings };
+	if (pathname === "/agent") return { title: "Agent", icon: Sparkles };
 	if (pathname === "/local") {
 		const folder = new URLSearchParams(search).get("path") ?? "";
 		return { title: folder.split(/[\\/]/).filter(Boolean).pop() ?? "Folder", icon: HardDrive };
@@ -45,7 +47,6 @@ export function TabBar() {
 	const navigate = useNavigate();
 	const { toggleSidebar } = useSidebar();
 	const [state, setState] = useState(load);
-	const project = useProjectFolder();
 	const here = location.pathname + location.search;
 	// A page with its own tab group (a folder's modes and name) fills the slot; that group is then its tab, so the
 	// active tab isn't drawn a second time.
@@ -60,6 +61,24 @@ export function TabBar() {
 		return () => mo.disconnect();
 	}, []);
 
+	const [lastFolder, setLastFolder] = useState(() => {
+		try {
+			return localStorage.getItem(LAST_FOLDER) ?? "";
+		} catch {
+			return "";
+		}
+	});
+	const onFolder = location.pathname === "/local";
+	useEffect(() => {
+		const folder = onFolder ? new URLSearchParams(location.search).get("path") : null;
+		if (!folder) return;
+		setLastFolder(folder);
+		try {
+			localStorage.setItem(LAST_FOLDER, folder);
+		} catch {
+			/* only for this run */
+		}
+	}, [onFolder, location.search]);
 
 	// The page changed (sidebar link, in-page link): the active tab is now there.
 	useEffect(() => {
@@ -165,16 +184,16 @@ export function TabBar() {
 			</div>
 			{/* A page's own actions (a folder's pane views) sit left of refresh, settings and the bell. */}
 			<div id="fm-titlebar-actions" className="mr-1 flex shrink-0 items-center gap-0.5 empty:hidden" />
-			{/* The swarm's views of the project (its canvas, proofs, bugs, code); a folder page draws its own. */}
-			{location.pathname !== "/local" && project ? (
+			{/* Elsewhere (Settings, Home) the same views stay in their place, opening the last folder in that view. */}
+			{!onFolder && lastFolder ? (
 				<span className="mr-1 inline-flex shrink-0 items-center gap-0.5">
 					{PANE_VIEWS.map(({ id, label, icon: Icon }) => (
 						<button
 							key={id}
 							type="button"
-							title={label}
+							title={`${label} · ${lastFolder.split(/[\\/]/).filter(Boolean).pop() ?? ""}`}
 							aria-label={label}
-							onClick={() => navigate(`/local?path=${encodeURIComponent(project)}&mode=${id}`)}
+							onClick={() => navigate(`/local?path=${encodeURIComponent(lastFolder)}&mode=${id}`)}
 							className="inline-flex size-7 items-center justify-center rounded-md text-muted-foreground hover:bg-sidebar-accent hover:text-foreground"
 						>
 							<Icon className="size-4" />
@@ -182,6 +201,13 @@ export function TabBar() {
 					))}
 				</span>
 			) : null}
+			{/* Refresh, settings and the bell stay here on every page; the canvases leave them to the tab bar. */}
+			<button type="button" onClick={() => window.dispatchEvent(new Event("fm:refresh"))} title="Refresh" className="grid size-7 shrink-0 place-items-center rounded-md text-muted-foreground hover:bg-sidebar-accent hover:text-foreground">
+				<RefreshCw className="size-4" />
+			</button>
+			<button type="button" onClick={() => navigate("/agent")} title="Agent: change Formal Mind itself" className="grid size-7 shrink-0 place-items-center rounded-md text-muted-foreground hover:bg-sidebar-accent hover:text-foreground">
+				<Sparkles className="size-4" />
+			</button>
 			<button type="button" onClick={() => navigate("/settings")} title="Settings" className="grid size-7 shrink-0 place-items-center rounded-md text-muted-foreground hover:bg-sidebar-accent hover:text-foreground">
 				<Settings className="size-4" />
 			</button>
