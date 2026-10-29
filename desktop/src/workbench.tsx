@@ -3,6 +3,7 @@ import { homeDir, join } from "@tauri-apps/api/path";
 import { listen } from "@tauri-apps/api/event";
 import { FileTree } from "@/components/file-tree";
 import { TreeFolder } from "@/components/session-folder";
+import { useResizable } from "./resize-handle";
 import { Component, Suspense, createContext, lazy, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 
 /** The new version (SPEC.md B64, B65): one project, a copy of Formal Mind itself in ~/.formalmind/formalmind. The
@@ -146,6 +147,8 @@ export function Workbench() {
 	const [draft, setDraft] = useState("");
 	const [viewer, setViewer] = useState(() => localStorage.getItem("fm:viewer") === "1");
 	const end = useRef<HTMLDivElement>(null);
+	// The components half screen: its left edge drags.
+	const pane = useResizable("fm:viewer-width", Math.round(window.innerWidth / 2), 280, Math.max(320, window.innerWidth - 480), "left");
 	useEffect(() => end.current?.scrollIntoView({ block: "end" }), [lines]);
 	useEffect(() => localStorage.setItem("fm:viewer", viewer ? "1" : "0"), [viewer]);
 	const submit = () => {
@@ -198,7 +201,8 @@ export function Workbench() {
 				</div>
 			</section>}
 			{viewer ? (
-				<section className="w-1/2 min-w-0 shrink-0 border-l">
+				<section className="relative min-w-0 shrink-0 border-l" style={{ width: pane.size }}>
+					{pane.handle}
 					<ComponentViewer />
 				</section>
 			) : null}
@@ -237,6 +241,7 @@ const pascal = (name: string) => name.split("/").pop()!.replace(/-clean$/, "").r
 
 function ComponentViewer() {
 	const names = useMemo(() => Object.keys(modules).map(nameOf).sort((a, b) => rank(a) - rank(b) || a.localeCompare(b)), []);
+	const list = useResizable("fm:viewer-list", 192, 120, 400, "right");
 	const [picked, setPicked] = useState(() => (names.includes(localStorage.getItem("fm:viewer-pick") ?? "") ? localStorage.getItem("fm:viewer-pick")! : names[0]) ?? "");
 	useEffect(() => localStorage.setItem("fm:viewer-pick", picked), [picked]);
 	const Shown = useMemo(() => {
@@ -251,7 +256,8 @@ function ComponentViewer() {
 	if (!names.length) return <p className="p-4 text-muted-foreground">AffectUI isn't checked out: git submodule update --init packages/ui</p>;
 	return (
 		<div className="flex h-full min-h-0">
-			<nav className="w-48 shrink-0 overflow-auto border-r py-1">
+			<nav className="relative shrink-0 overflow-auto border-r py-1" style={{ width: list.size }}>
+				{list.handle}
 				{names.map((n) => (
 					<button key={n} type="button" onClick={() => setPicked(n)} className={`block w-full truncate px-3 py-0.5 text-left ${n === picked ? "text-foreground" : "text-muted-foreground hover:text-foreground"}`}>
 						{n}
