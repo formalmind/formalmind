@@ -265,6 +265,12 @@ fn context_window(model: &str) -> u64 {
     if model.starts_with("gpt-") { 400_000 } else { 1_000_000 }
 }
 
+/// Where a conversation is compacted, in tokens: COMPACT_AT of the model's window. Codex is told this too, since with
+/// the user's config ignored it has no limit for a model it doesn't know and its thread only grows.
+pub(crate) fn compact_limit(model: &str) -> u64 {
+    (context_window(model) as f64 * COMPACT_AT) as u64
+}
+
 /// Tokens the next request will carry: this reply's whole input (cached or not) plus the reply itself.
 fn context_used(usage: &Value) -> u64 {
     ["input_tokens", "cache_creation_input_tokens", "cache_read_input_tokens", "output_tokens"].iter().map(|k| usage[*k].as_u64().unwrap_or(0)).sum()
@@ -2783,6 +2789,12 @@ mod tests {
         assert_eq!(gone.len(), 1, "only the checked item that is no longer proved: {gone:?}");
         assert_eq!((gone[0].0, gone[0].1.as_str()), (1, "Pool.fee"));
         assert!(gone[0].2.contains("lapsed"));
+    }
+
+    #[test]
+    fn codex_compacts_where_the_api_route_does() {
+        assert_eq!(compact_limit("gpt-6-astra"), 300_000);
+        assert_eq!(compact_limit("claude-opus-5-5"), 750_000);
     }
 
     #[test]

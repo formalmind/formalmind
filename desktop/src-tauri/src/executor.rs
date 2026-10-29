@@ -127,7 +127,10 @@ pub(crate) fn list_files(root: &Path, dir: &str) -> Result<String, String> {
 
 /// Lines matching a regex in the folder's text files (Solidity, Lean, Markdown, TOML), as path:line: text.
 fn search(root: &Path, pattern: &str, dir: &str) -> Result<String, String> {
-    search_in(root, pattern, dir, &[".sol", ".lean", ".md", ".toml"])
+    // Stray copies of the models or proofs (see `in_sources`) are left out: a hit there is a def Lake never builds.
+    search_in(root, pattern, dir, &[".sol", ".lean", ".md", ".toml"]).map(|hits| {
+        hits.lines().filter(|l| l.split(':').next().is_none_or(|f| crate::swarm_ctx::stray(root, f).is_none())).collect::<Vec<_>>().join("\n")
+    })
 }
 
 /// Lines matching a regex in the files under `dir` with one of `exts`, as path:line: text.

@@ -151,6 +151,8 @@ pub fn start_role(folder: &str, run: &str, job: u64, system: &str, task: &Value,
         "mcp_servers.formalmind.default_tools_approval_mode=\"approve\"".into(),
         // `lake build` on a big model takes a while; the tool call waits for it.
         "mcp_servers.formalmind.tool_timeout_sec=7200".into(),
+        // Codex compacts its own thread past this, as the API route does; it has no limit for a model it doesn't know.
+        format!("model_auto_compact_token_limit={}", crate::swarm::compact_limit(model)),
     ];
     // Thinking effort from Settings (the chat's picker), read at each turn so a change applies to the next one.
     if let Some(e) = crate::local::read().ok().and_then(|c| c.settings.effort()) {
