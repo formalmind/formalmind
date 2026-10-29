@@ -25,7 +25,11 @@ A tick doesn't stay just because it was given once. When a contract's code chang
 and Lean checks the proofs again. Any checked function that no longer counts as proved goes back to `[ ]`, with the
 reason in the chat ("reopened `Pool.fee`: …"), and is proved again against the new code. Only theorems in the folder
 Lake builds count (formalmind.toml's `sources`, or the lakefile's `srcDir`). A stray copy of `Specs/` or
-`Proofs/` elsewhere in the repository proves nothing.
+`Proofs/` elsewhere in the repository proves nothing: the planner names it in the chat, and the agents can't read,
+write or check files in it. A Lake project in a subfolder (say `validation/lean/`) is found there.
+
+To have functions proved again yourself, say so in the chat ("reprove `AsyncSwap.useNonce`"): the swarm reopens those
+items and carries on with the plan, even when your message arrives as a run is finishing.
 
 ## One function, start to finish
 

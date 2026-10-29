@@ -55,7 +55,7 @@ function counts as proved only when all of these hold:
   text and of each theorem, so if either changes it lapses, and the function is reviewed again.
 
 Each theorem's `/-- … -/` comment is kept with it as the proof's explanation in words. Functions proved before the
-ledger existed show as "approved before the ledger" until they're reviewed again.
+ledger existed have no fingerprint of the code they proved, so they go back to the reviewer: the next run reopens them.
 
 ## Checking proofs yourself
 

@@ -29,6 +29,16 @@ pub(crate) fn inside(root: &Path, rel: &str) -> Result<PathBuf, String> {
     Ok(path)
 }
 
+/// A path inside the folder that isn't a stray copy of the models or proofs outside the Lake sources (see
+/// `swarm_ctx::stray`): the agents only ever see the model Lake builds.
+pub(crate) fn in_sources(root: &Path, rel: &str) -> Result<PathBuf, String> {
+    let path = inside(root, rel)?;
+    match crate::swarm_ctx::stray(root, rel) {
+        Some(why) => Err(why),
+        None => Ok(path),
+    }
+}
+
 pub(crate) fn clip(mut s: String) -> String {
     if s.len() > OUTPUT_LIMIT {
         let mut cut = OUTPUT_LIMIT / 2;
@@ -57,6 +67,9 @@ pub(crate) async fn run_command(root: &Path, command: &str) -> Result<String, St
         ["forge", "build" | "test", ..] => true,
         _ => false,
     };
+    if let ["lake", "env", "lean", file] = argv.as_slice() {
+        in_sources(root, file)?;
+    }
     if !allowed {
         return Err("Only `lake build`, `lake env lean <file>`, `lake exe cache get`, `lake init|new <Name>`, `forge build` and `forge test` may run.".into());
     }
@@ -163,7 +176,7 @@ pub(crate) async fn call_tool(root: &Path, name: &str, args: &Value) -> String {
     let result = match name {
         "list_files" => list_files(root, &s("dir")),
         // `@skills/…`: the auditing checklists added on this computer (skills.rs), outside the folder.
-        "read_file" => crate::skills::resolve(&s("path")).or_else(|| crate::skills::resolve_bare(root, &s("path"))).map(Ok).unwrap_or_else(|| inside(root, &s("path"))).and_then(|p| std::fs::read_to_string(p).map_err(|e| e.to_string())).map(|text| {
+        "read_file" => crate::skills::resolve(&s("path")).or_else(|| crate::skills::resolve_bare(root, &s("path"))).map(Ok).unwrap_or_else(|| in_sources(root, &s("path"))).and_then(|p| std::fs::read_to_string(p).map_err(|e| e.to_string())).map(|text| {
             let n = |k: &str| args.get(k).and_then(Value::as_u64).map(|v| v as usize);
             match (n("start_line"), n("end_line")) {
                 (None, None) if text.len() <= OUTPUT_LIMIT => text,
@@ -179,7 +192,7 @@ pub(crate) async fn call_tool(root: &Path, name: &str, args: &Value) -> String {
         }),
         "search" => search(root, &s("pattern"), &s("dir")),
         "find" => crate::file_search::find(root, &s("query"), 30),
-        "write_file" => inside(root, &s("path")).and_then(|p| {
+        "write_file" => in_sources(root, &s("path")).and_then(|p| {
             if let Some(parent) = p.parent() {
                 std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
             }
