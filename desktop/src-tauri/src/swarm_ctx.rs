@@ -798,6 +798,11 @@ mod tests {
             assert!(out.starts_with("error:") && out.contains("outside the Lake sources"), "{tool}: {out}");
         }
         assert!(!root.join("Refinement/Swarm/AsyncFillerTradeFee.lean").exists());
+        // A search finds the def Lake builds, not its stale copy.
+        std::fs::write(lean.join("Generated/AsyncSwap.lean"), "def AsyncFiller.tradeFee := 1\n").unwrap();
+        std::fs::write(root.join("Generated/AsyncSwap.lean"), "def AsyncFiller.tradeFee := 0\n").unwrap();
+        let hits = rt.block_on(crate::executor::call_tool(&root, "search", &json!({ "pattern": "def AsyncFiller.tradeFee" })));
+        assert_eq!(hits.trim(), "validation/lean/Generated/AsyncSwap.lean:1: def AsyncFiller.tradeFee := 1");
         // The model is written where Lake reads it.
         assert_eq!(super::layout(&root).0, "Generated");
         let _ = std::fs::remove_dir_all(&root);

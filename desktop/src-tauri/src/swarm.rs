@@ -265,6 +265,12 @@ fn context_window(model: &str) -> u64 {
     if model.starts_with("gpt-") { 400_000 } else { 1_000_000 }
 }
 
+/// Where a conversation is compacted, in tokens: COMPACT_AT of the model's window. Codex is told this too, since with
+/// the user's config ignored it has no limit for a model it doesn't know and its thread only grows.
+pub(crate) fn compact_limit(model: &str) -> u64 {
+    (context_window(model) as f64 * COMPACT_AT) as u64
+}
+
 /// Tokens the next request will carry: this reply's whole input (cached or not) plus the reply itself.
 fn context_used(usage: &Value) -> u64 {
     ["input_tokens", "cache_creation_input_tokens", "cache_read_input_tokens", "output_tokens"].iter().map(|k| usage[*k].as_u64().unwrap_or(0)).sum()
@@ -953,20 +959,22 @@ impl Turn<'_> {
     /// A tool call from the agent, run and counted in the turn's health record.
     async fn tool(&self, role: &str, item: &str, name: &str, input: &Value, out: &mut Outcome) -> String {
         // A pause cuts through a tool the agent is waiting on (a background build, a long run) instead of waiting for it.
-        let stop = &self.swarm.stop;
-        let stopped = async {
-            while !stop.load(Ordering::SeqCst) {
-                tokio::time::sleep(Duration::from_millis(300)).await;
-            }
-        };
         let answer = tokio::select! {
             a = self.run_tool(role, item, name, input, out) => a,
-            _ = stopped => "stopped: the swarm was paused; this call didn't finish".to_string(),
+            _ = self.stopped() => "stopped: the swarm was paused; this call didn't finish".to_string(),
         };
         if let Some(h) = self.health.lock().unwrap().as_mut() {
             h.tool(name, input, &answer);
         }
         answer
+    }
+
+    /// Resolves once the session is stopped: every wait of an agent's turn (a model call, Codex or Claude Code
+    /// thinking, a tool) races it, so Stop ends the turn within a moment instead of after the current step.
+    async fn stopped(&self) {
+        while !self.swarm.stop.load(Ordering::SeqCst) {
+            tokio::time::sleep(Duration::from_millis(300)).await;
+        }
     }
 
     async fn run_tool(&self, role: &str, item: &str, name: &str, input: &Value, out: &mut Outcome) -> String {
@@ -1152,6 +1160,7 @@ impl Turn<'_> {
                 return Ok(out);
             }
             tokio::select! {
+                _ = self.stopped() => continue,
                 call = bridge.calls.recv() => {
                     let Some(call) = call else { continue };
                     match rpc(&call.msg, &tools, &instructions) {
@@ -1256,6 +1265,7 @@ impl Turn<'_> {
                 return Ok(out);
             }
             tokio::select! {
+                _ = self.stopped() => continue,
                 call = bridge.calls.recv() => {
                     let Some(call) = call else { continue };
                     match rpc(&call.msg, &tools, &instructions) {
@@ -1417,7 +1427,11 @@ impl Turn<'_> {
             // retried once, instead of pausing the swarm on a job that would fail the same way on every resume.
             let mut retried = false;
             let reply = loop {
-                let (status, reply) = self.call(&key, &base, &self.body(role, &goal, &messages, None)).await?;
+                let body = self.body(role, &goal, &messages, None);
+                let (status, reply) = tokio::select! {
+                    r = self.call(&key, &base, &body) => r?,
+                    _ = self.stopped() => return Ok(out),
+                };
                 let message = reply["error"]["message"].as_str().unwrap_or("The model call failed").to_string();
                 let full = if status < 300 { reply["stop_reason"] == "model_context_window_exceeded" } else { too_long(status, &message) };
                 if status < 300 && !full {
@@ -2775,6 +2789,12 @@ mod tests {
         assert_eq!(gone.len(), 1, "only the checked item that is no longer proved: {gone:?}");
         assert_eq!((gone[0].0, gone[0].1.as_str()), (1, "Pool.fee"));
         assert!(gone[0].2.contains("lapsed"));
+    }
+
+    #[test]
+    fn codex_compacts_where_the_api_route_does() {
+        assert_eq!(compact_limit("gpt-6-astra"), 300_000);
+        assert_eq!(compact_limit("claude-opus-5-5"), 750_000);
     }
 
     #[test]
