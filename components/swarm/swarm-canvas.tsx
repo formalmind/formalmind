@@ -644,6 +644,8 @@ function cloneScene(scene: Scene): Scene {
  * `fill` makes the board fill its parent, scaled to fit both ways and centred, below a strip kept clear
  * for the pinned controls; otherwise it scales to the width. `title` and `actions` are pinned top-left and top-right.
  */
+const fit0 = { scale: 1, x: 0, y: 0, w: 0, h: 0 };
+
 export function SwarmCanvas({ state, fill = false, contain = false, title, actions, repo, onTalk, local = false, below, beside, side, pace = 1 }: {
 	state: SwarmState | null;
 	/** How fast the replay plays: 2 is twice as lively; 1 is the landing page's pace. */
@@ -678,7 +680,20 @@ export function SwarmCanvas({ state, fill = false, contain = false, title, actio
 		}
 	});
 	setLaneWidth(laneW);
-	const [fit, setFit] = useState({ scale: 1, x: 0, y: 0, w: 0, h: 0 });
+	// The app's canvas starts where you left it (its fit, zoom and pan, per repository) instead of jumping from a
+	// default, and keeps it until the frame changes size.
+	const viewKey = fill ? `fm:canvas:${repo ?? state?.repo ?? "local"}` : null;
+	const saved = useMemo(() => {
+		try {
+			return viewKey ? (JSON.parse(localStorage.getItem(viewKey) ?? "null") as { fit: typeof fit0; view: { k: number; x: number; y: number } } | null) : null;
+		} catch {
+			return null;
+		}
+		// eslint-disable-next-line react-hooks/exhaustive-deps
+	}, []);
+	const [fit, setFit] = useState(saved?.fit ?? fit0);
+	const fitNow = useRef(fit);
+	fitNow.current = fit;
 	const { scale } = fit;
 	// The panels grow with their text; the board grows with the tallest.
 	const [panelHs, setPanelHs] = useState([PANEL_H, PANEL_H, PANEL_H, PANEL_H]);
@@ -790,7 +805,15 @@ export function SwarmCanvas({ state, fill = false, contain = false, title, actio
 	const besideHeight = beside ? Math.min(960, Math.max(160, besideFitH ?? belowHeight)) : 0;
 	const boardH = below ? panelsEnd + BELOW_GAP + Math.max(belowHeight, besideHeight) + PAD : panelsEnd;
 	// In fill mode people can pan and zoom: `view` sits on top of the fitted placement.
-	const [view, setRawView] = useState({ k: 1, x: 0, y: 0 });
+	const [view, setRawView] = useState(saved?.view ?? { k: 1, x: 0, y: 0 });
+	useEffect(() => {
+		if (!viewKey || fit.w === 0) return;
+		try {
+			localStorage.setItem(viewKey, JSON.stringify({ fit, view }));
+		} catch {
+			/* not kept */
+		}
+	}, [viewKey, fit, view]);
 	// The canvas is unbounded: pan anywhere; the fit button in the zoom pill brings the board back.
 	const setView = (next: (v: { k: number; x: number; y: number }) => { k: number; x: number; y: number }) => setRawView(next);
 	const setViewRef = useRef(setView);
@@ -868,6 +891,9 @@ export function SwarmCanvas({ state, fill = false, contain = false, title, actio
 				return setFit({ scale: next, x: 0, y: 0, w: W * next, h: boardH * next });
 			}
 			if (!fill) return setFit({ scale: width / W, x: 0, y: 0, w: width, h: height });
+			// The frame is the size it was: keep the fit (cards measuring themselves would otherwise make it jitter).
+			const was = fitNow.current;
+			if (was.w > 0 && Math.abs(was.w - width) < 2 && Math.abs(was.h - height) < 2) return;
 			// Fitted to the default width, so lanes you widened stay wide and the board runs on to the right (pan to it).
 			const next = Math.min(width / 1200, (height - PINNED) / Math.min(boardH, FIT_H));
 			setFit({ scale: next, x: Math.max(0, (width - W * next) / 2), y: PINNED + Math.max(0, (height - PINNED - boardH * next) / 2), w: width, h: height });
