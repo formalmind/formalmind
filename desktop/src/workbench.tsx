@@ -36,6 +36,7 @@ function useWorkbenchState() {
 	const [chatId, setChatId] = useState<string | null>(null);
 	const [left, setLeft] = useState<"files" | "chats">("files");
 	const [busy, setBusy] = useState(false);
+	const [file, setFile] = useState<string | null>(null);
 	const lines = chats.find((c) => c.id === chatId)?.lines ?? [];
 	// Adds lines to the open chat, starting one (titled by its first message) when none is open.
 	const live = useRef(chatId);
@@ -95,7 +96,7 @@ function useWorkbenchState() {
 			.catch((e) => setLines((l) => [...l, { who: "error", text: String(e) }]))
 			.finally(() => setBusy(false));
 	};
-	return { folder, files, chats, chatId, setChatId, left, setLeft, busy, lines, send };
+	return { folder, files, file, setFile, chats, chatId, setChatId, left, setLeft, busy, lines, send };
 }
 
 const Ctx = createContext<ReturnType<typeof useWorkbenchState> | null>(null);
@@ -107,7 +108,7 @@ export function WorkbenchProvider({ children }: { children: ReactNode }) {
 
 /** The sidebar: the project's files, or its chats. */
 export function WorkbenchSide() {
-	const { folder, files, chats, chatId, setChatId, left, setLeft, busy } = useWorkbench();
+	const { folder, files, file, setFile, chats, chatId, setChatId, left, setLeft, busy } = useWorkbench();
 	return (
 		<div className="flex min-h-0 flex-1 flex-col text-[13px] group-data-[collapsible=icon]:hidden">
 			<div className="flex gap-3 px-3 py-1.5">
@@ -120,7 +121,7 @@ export function WorkbenchSide() {
 			{left === "files" ? (
 				<ul className="min-h-0 flex-1 overflow-auto px-2">
 					<TreeFolder name={folder.split(/[\\/]/).filter(Boolean).pop() ?? "formalmind"} title={folder} href="/" current>
-						<FileTree paths={files} storageKey={`fm:tree:${folder}`} onOpen={() => {}} />
+						<FileTree paths={files} selected={file} storageKey={`fm:tree:${folder}`} onOpen={setFile} />
 					</TreeFolder>
 				</ul>
 			) : (
@@ -141,7 +142,7 @@ export function WorkbenchSide() {
 
 /** The page: the chat and its input, and the components half screen. */
 export function Workbench() {
-	const { busy, lines, send } = useWorkbench();
+	const { busy, lines, send, left, folder, file } = useWorkbench();
 	const [draft, setDraft] = useState("");
 	const [viewer, setViewer] = useState(() => localStorage.getItem("fm:viewer") === "1");
 	const end = useRef<HTMLDivElement>(null);
@@ -153,14 +154,15 @@ export function Workbench() {
 		setDraft("");
 	};
 
+	const toggle = (
+		<button type="button" className="shrink-0 text-muted-foreground hover:text-foreground" onClick={() => setViewer((v) => !v)}>
+			{viewer ? "Hide components" : "Components"}
+		</button>
+	);
 	return (
 		<div className="flex h-full min-h-0 text-[13px]">
-			<section className="flex min-w-0 flex-1 flex-col">
-				<div className="flex justify-end border-b px-3 py-1.5">
-					<button type="button" className="text-muted-foreground hover:text-foreground" onClick={() => setViewer((v) => !v)}>
-						{viewer ? "Hide components" : "Components"}
-					</button>
-				</div>
+			{left === "files" ? <FileView folder={folder} file={file} toggle={toggle} /> : <section className="flex min-w-0 flex-1 flex-col">
+				<div className="flex justify-end border-b px-3 py-1.5">{toggle}</div>
 				<div className="min-h-0 flex-1 space-y-2 overflow-auto p-4">
 					{lines.map((l, i) => (
 						<div key={i} className={l.who === "you" ? "text-foreground" : l.who === "tool" ? "font-mono text-muted-foreground" : l.who === "error" ? "text-destructive" : "whitespace-pre-wrap text-foreground/80"}>
@@ -194,13 +196,34 @@ export function Workbench() {
 						</button>
 					)}
 				</div>
-			</section>
+			</section>}
 			{viewer ? (
 				<section className="w-1/2 min-w-0 shrink-0 border-l">
 					<ComponentViewer />
 				</section>
 			) : null}
 		</div>
+	);
+}
+
+/** The file picked in the sidebar's tree, as text; it reads again when the agent writes. */
+function FileView({ folder, file, toggle }: { folder: string; file: string | null; toggle: ReactNode }) {
+	const [text, setText] = useState("");
+	useEffect(() => {
+		if (!file) return;
+		const read = () => void invoke<string>("folder_read", { folder, path: file }).then(setText, (e) => setText(`Couldn't read ${file}: ${e}`));
+		read();
+		const off = listen<{ step: Step }>("agent", ({ payload }) => payload.step.kind === "tool" && read());
+		return () => void off.then((f) => f());
+	}, [folder, file]);
+	return (
+		<section className="flex min-w-0 flex-1 flex-col">
+			<div className="flex justify-between gap-3 border-b px-3 py-1.5">
+				<span className="truncate font-mono text-muted-foreground">{file ?? ""}</span>
+				{toggle}
+			</div>
+			{file ? <pre className="min-h-0 flex-1 overflow-auto p-4 font-mono text-[12px] leading-5">{text}</pre> : <div className="grid flex-1 place-items-center text-muted-foreground">Pick a file in the sidebar.</div>}
+		</section>
 	);
 }
 
