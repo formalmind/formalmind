@@ -2,6 +2,7 @@
 //! Today that's the sign-in token in the OS keychain, the formalmind:// deep link, and local folders
 //! with settings in ~/.formalmind (local.rs), and the local executor that runs agent turns here (executor.rs).
 
+mod agent;
 mod analysis;
 mod answerer;
 mod ast;
@@ -165,6 +166,8 @@ pub fn run() {
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
+            agent::agent_start,
+            agent::agent_stop,
             token_get,
             token_set,
             token_clear,

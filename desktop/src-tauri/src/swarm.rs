@@ -3013,3 +3013,8 @@ mod lifecycle {
         let _ = std::fs::remove_dir_all(&base);
     }
 }
+
+/// The Anthropic key saved in the keychain, if any.
+pub(crate) fn anthropic_key() -> Option<String> {
+    anthropic_entry().ok()?.get_password().ok()
+}

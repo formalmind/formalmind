@@ -14,7 +14,8 @@ import { WorkspaceContent } from "@/components/workspace-content";
 import type { SessionData } from "@/lib/session";
 import { apiBase, clearToken, exchangeCode, loadToken, syncSettings } from "./api";
 
-import { LocalFolderPage, LocalFolders, useFolders, useRepoSource } from "./local";
+import { LocalFolderPage, LocalFolders, recentFolders, useFolders, useRepoSource } from "./local";
+import { Workbench } from "./workbench";
 import { onboarded, SetupSteps, SignInStep } from "./onboarding";
 import { SettingsPage } from "./settings";
 import { TabBar } from "./tabs";
@@ -50,7 +51,7 @@ function Shell({ user }: { user: User }) {
 						<Suspense fallback={null}>
 							<Routes>
 								{/* Home is an empty screen with the next step. */}
-								<Route path="/" element={<DesktopHome />} />
+								<Route path="/" element={<Start />} />
 								<Route path="/usage" element={<UsagePage />} />
 								<Route path="/projects/:owner/:name" element={<ProjectHomePage />} />
 								<Route path="/projects/:owner/:name/file" element={<ProjectFilePage />} />
@@ -143,4 +144,11 @@ function AddLocalHost() {
 	const { add } = useFolders();
 	const navigate = useNavigate();
 	return <AddProjectHost onLocal={() => add().then((p) => p && navigate(`/local?path=${encodeURIComponent(p)}`))} />;
+}
+
+/** The first screen: the most recently opened folder's files and its agent; the add-a-folder step with none. */
+function Start() {
+	const { folders } = useFolders();
+	const folder = recentFolders(folders, 1)[0];
+	return folder ? <Workbench folder={folder} /> : <DesktopHome />;
 }
