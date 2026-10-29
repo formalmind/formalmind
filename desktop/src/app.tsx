@@ -13,6 +13,7 @@ import type { SessionData } from "@/lib/session";
 import { apiBase, clearToken, exchangeCode, loadToken, syncSettings } from "./api";
 
 import { Workbench, WorkbenchProvider, WorkbenchSide } from "./workbench";
+import { LocalFolderPage } from "./local";
 import { onboarded, SetupSteps, SignInStep } from "./onboarding";
 import { SettingsPage } from "./settings";
 import { TabBar } from "./tabs";
@@ -44,6 +45,7 @@ function Shell({ user }: { user: User }) {
 							<Routes>
 								{/* Home is the project's agent chat; its files and chats are in the sidebar. */}
 								<Route path="/" element={<Workbench />} />
+								<Route path="/local" element={<LocalFolderPage />} />
 								<Route path="/settings" element={<SettingsPage />} />
 								{/* Other pages come over from the web app as the desktop app grows. */}
 								<Route path="*" element={<Navigate to="/" replace />} />

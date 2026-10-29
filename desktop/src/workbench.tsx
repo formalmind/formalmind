@@ -101,6 +101,11 @@ function useWorkbenchState() {
 	return { folder, files, file, setFile, chats, chatId, setChatId, left, setLeft, busy, lines, send };
 }
 
+/** The project's folder (~/.formalmind/formalmind), once known. */
+export function useProjectFolder() {
+	return useContext(Ctx)?.folder ?? "";
+}
+
 const Ctx = createContext<ReturnType<typeof useWorkbenchState> | null>(null);
 const useWorkbench = () => useContext(Ctx)!;
 

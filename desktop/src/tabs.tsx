@@ -3,6 +3,8 @@ import { useLocation, useNavigate } from "react-router";
 import { listen } from "@tauri-apps/api/event";
 import { Gauge, HardDrive, Network, PanelLeft, Plus, Settings, X, type LucideIcon } from "lucide-react";
 import { NotificationCenter } from "@/components/notification-center";
+import { PANE_VIEWS } from "./pane-views";
+import { useProjectFolder } from "./workbench";
 import { useSidebar } from "@/components/ui/sidebar";
 
 type Tab = { id: string; path: string };
@@ -43,6 +45,7 @@ export function TabBar() {
 	const navigate = useNavigate();
 	const { toggleSidebar } = useSidebar();
 	const [state, setState] = useState(load);
+	const project = useProjectFolder();
 	const here = location.pathname + location.search;
 	// A page with its own tab group (a folder's modes and name) fills the slot; that group is then its tab, so the
 	// active tab isn't drawn a second time.
@@ -162,6 +165,23 @@ export function TabBar() {
 			</div>
 			{/* A page's own actions (a folder's pane views) sit left of refresh, settings and the bell. */}
 			<div id="fm-titlebar-actions" className="mr-1 flex shrink-0 items-center gap-0.5 empty:hidden" />
+			{/* The swarm's views of the project (its canvas, proofs, bugs, code); a folder page draws its own. */}
+			{location.pathname !== "/local" && project ? (
+				<span className="mr-1 inline-flex shrink-0 items-center gap-0.5">
+					{PANE_VIEWS.map(({ id, label, icon: Icon }) => (
+						<button
+							key={id}
+							type="button"
+							title={label}
+							aria-label={label}
+							onClick={() => navigate(`/local?path=${encodeURIComponent(project)}&mode=${id}`)}
+							className="inline-flex size-7 items-center justify-center rounded-md text-muted-foreground hover:bg-sidebar-accent hover:text-foreground"
+						>
+							<Icon className="size-4" />
+						</button>
+					))}
+				</span>
+			) : null}
 			<button type="button" onClick={() => navigate("/settings")} title="Settings" className="grid size-7 shrink-0 place-items-center rounded-md text-muted-foreground hover:bg-sidebar-accent hover:text-foreground">
 				<Settings className="size-4" />
 			</button>
