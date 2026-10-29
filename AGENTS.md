@@ -15,16 +15,11 @@ UI follows [DESIGN.md](DESIGN.md): tokens, type scale, layout patterns, the Mac 
 Proofs tab (`crates/formal-ast-wasm`, with solc-js in a Web Worker: `lib/ast/`). The wasm build is committed in
 `lib/formal-ast-wasm`: after changing either crate, run `bun run build:ast-wasm` and commit what it writes.
 
-## The UI package
+## The chat UI
 
-The chat's AffectUI components live in the public repository formalmind/affectui, mounted as the submodule
-`packages/ui` and imported as `@formalmind/ui/<name>` (Formal Mind's wrappers are in its `formalmind/`, MIT). The
-AffectUI files there are used under Formal Mind's AffectUI licence: public, but not open source, so don't copy them
-into this repository or elsewhere. Without the submodule (`git clone` without `--recursive`, CI), `@formalmind/ui/*`
-resolves to `desktop/src/ui-fallback/`, and the chat uses the app's own components: `lib/ui-package.ts` (Vite) and
-tsconfig's `paths` pick between the two. `git submodule update --init packages/ui` checks it out; after switching
-branches, run `git submodule update packages/ui` so builds use the recorded commit. Check both builds (with and
-without it) when you change a wrapper or its fallback.
+The swarm chat's composer, context card, reply actions and run card (with the Agents tree and the tool stack) are
+Formal Mind's own, in `desktop/src/chat-ui/`; the context graph is `components/context-dots.tsx`. They replaced
+AffectUI, which the app no longer uses: don't bring AffectUI code back.
 
 ## The docs
 

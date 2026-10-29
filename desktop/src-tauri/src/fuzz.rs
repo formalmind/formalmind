@@ -67,7 +67,7 @@ fn the_ledger_reads_any_lean_output_without_panicking() {
     for _ in 0..20_000 {
         let text = r.text();
         let def = r.pick(&defs);
-        let covers = crate::ledger::covers_for_test(&text, def);
+        let covers = crate::swarm2::ledger::covers(&text, def);
         // Coverage needs the statement to be about the def, and only names what it can show.
         if !text.contains(def) {
             assert!(covers.is_empty());
@@ -76,8 +76,8 @@ fn the_ledger_reads_any_lean_output_without_panicking() {
         if covers.contains(&"reverts") && !text.contains("wp (") {
             assert!(text.contains("Except.error"));
         }
-        let _ = crate::ledger::is_lean_error_for_test(&text);
-        assert_eq!(crate::ledger::hash(&text), crate::ledger::hash(&text));
+        let _ = crate::swarm2::ledger::is_lean_error(&text);
+        assert_eq!(crate::swarm2::ledger::hash(&text), crate::swarm2::ledger::hash(&text));
     }
 }
 
@@ -91,7 +91,7 @@ fn a_module_never_resolves_outside_the_lake_sources() {
     for _ in 0..20_000 {
         let n = 1 + r.next() % 5;
         let file: String = (0..n).map(|_| r.pick(&parts)).collect::<Vec<_>>().join("/");
-        if let Some(m) = crate::ledger::module_of_for_test(&src, root, &file, &libs) {
+        if let Some(m) = crate::swarm2::ledger::module_of(&src, root, &file, &libs) {
             assert!(!m.contains(".."), "{file} -> {m}");
             assert!(libs.contains(m.split('.').next().unwrap_or("")), "{file} -> {m}");
             assert!(std::path::Path::new(&file).components().filter(|c| matches!(c, std::path::Component::Normal(_))).last().is_some_and(|c| c.as_os_str().to_string_lossy().ends_with(".lean")), "{file}");

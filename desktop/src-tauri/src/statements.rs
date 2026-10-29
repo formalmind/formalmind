@@ -629,7 +629,7 @@ pub async fn check_theorem(root: &Path, id: &str, lean: &str) -> Result<String, 
     let path = root.join(&check);
     std::fs::create_dir_all(path.parent().unwrap_or(root)).map_err(|e| e.to_string())?;
     std::fs::write(&path, format!("import {module}\n#check @{name}\n#print axioms {name}\n")).map_err(|e| e.to_string())?;
-    let out = crate::executor::call_tool(root, "run", &json!({ "command": format!("lake env lean {check}") })).await;
+    let out = crate::swarm2::lake::run(root, &format!("lake env lean {check}")).await.unwrap_or_else(|e| format!("error: {e}"));
     if !out.starts_with("exit 0") {
         return Err(format!("Lean couldn't check `{name}`:\n{}", out.lines().skip(1).take(30).collect::<Vec<_>>().join("\n")));
     }
@@ -1022,20 +1022,20 @@ mod tests {
         let file = lake.join(proof_file("S-01", "Vault.setFee", "Refinement/Statements"));
         let write = |body: &str| std::fs::write(&file, format!("def Vault.setFee (owner sender fee : Nat) : Option Nat := if sender = owner then some fee else none\n\n{body}\n")).unwrap();
         write("theorem S01.Vault_setFee (owner sender fee : Nat) (h : sender ≠ owner) : Vault.setFee owner sender fee = none := by\n  simp [Vault.setFee, h]");
-        let build = crate::executor::call_tool(&d, "run", &json!({ "command": "lake build" })).await;
+        let build = crate::swarm2::lake::run(&d, "lake build").await.unwrap_or_else(|e| format!("error: {e}"));
         assert!(build.starts_with("exit 0"), "{build}");
         let ty = check_theorem(&d, "S-01", "Vault.setFee").await.unwrap();
         assert!(ty.contains("Vault.setFee owner sender fee = none"), "{ty}");
 
         write("theorem S01.Vault_setFee (owner sender fee : Nat) (h : sender ≠ owner) : Vault.setFee owner sender fee = none := by\n  sorry");
-        crate::executor::call_tool(&d, "run", &json!({ "command": "lake build" })).await;
+        crate::swarm2::lake::run(&d, "lake build").await.unwrap_or_else(|e| format!("error: {e}"));
         assert!(check_theorem(&d, "S-01", "Vault.setFee").await.unwrap_err().contains("sorry"));
 
         write("theorem S01.setFee (owner : Nat) : owner = owner := rfl");
         assert!(check_theorem(&d, "S-01", "Vault.setFee").await.unwrap_err().contains("has no `theorem S01.Vault_setFee`"));
 
         write("theorem S01.Vault_setFee (owner : Nat) : owner = owner := rfl");
-        crate::executor::call_tool(&d, "run", &json!({ "command": "lake build" })).await;
+        crate::swarm2::lake::run(&d, "lake build").await.unwrap_or_else(|e| format!("error: {e}"));
         assert!(check_theorem(&d, "S-01", "Vault.setFee").await.unwrap_err().contains("doesn't mention `Vault.setFee`"));
     }
 

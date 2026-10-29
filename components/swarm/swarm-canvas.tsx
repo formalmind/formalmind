@@ -1002,13 +1002,6 @@ export function SwarmCanvas({ state, fill = false, contain = false, title, actio
 		const t = setTimeout(() => setSharp(target), 160);
 		return () => clearTimeout(t);
 	}, [target, sharp]);
-	// The lanes fade in once, when the board first shows; after that no entrance animation on the board plays again
-	// (WebKit restarts them when the zoom changes).
-	const [entered, setEntered] = useState(false);
-	useEffect(() => {
-		const t = setTimeout(() => setEntered(true), 900);
-		return () => clearTimeout(t);
-	}, []);
 
 	// The demo always has the assistant follow you; in the app it's opt-in (it can get in the way), remembered here.
 	const [followPref, setFollowPref] = useState(() => {
@@ -1043,11 +1036,10 @@ export function SwarmCanvas({ state, fill = false, contain = false, title, actio
 			const el = assistantEl();
 			if (!el) return;
 			if (el.dataset.home === undefined) el.dataset.home = el.style.transform;
-			el.style.transition = "transform 150ms cubic-bezier(0.22, 1, 0.36, 1)";
 			el.style.transform = `translate(${x}px, ${y}px)`;
 		});
 	};
-	// Back to its own spot, on the cursors' usual glide.
+	// Back to its own spot.
 	const releaseAssistant = () => {
 		cancelAnimationFrame(companionFrame.current);
 		companionFrame.current = 0;
@@ -1231,7 +1223,8 @@ export function SwarmCanvas({ state, fill = false, contain = false, title, actio
 				}}
 			>
 				<div
-					className={`absolute left-0 top-0 origin-top-left ${entered ? "[&_.animate-in]:![animation:none]" : ""}`}
+					// The board shows at once: no entrance animation on it (WebKit would also restart them when the zoom changes).
+					className="absolute left-0 top-0 origin-top-left [&_.animate-in]:![animation:none]"
 					style={{
 						width: W,
 						height: boardH,
@@ -1344,7 +1337,7 @@ export function SwarmCanvas({ state, fill = false, contain = false, title, actio
 							{LANES.map((lane) => (
 								<div
 									key={lane.key}
-									className={`absolute rounded-lg border border-dashed bg-muted/40 ${entered ? "" : "animate-in fade-in-0 duration-700"}`}
+									className="absolute rounded-lg border border-dashed bg-muted/40"
 									style={{ left: laneX(lane.key), top: groupY(group) + LANE_TOP, width: LANE_W, height: LANE_BOTTOM - LANE_TOP }}
 								>
 									<div className="flex items-center justify-between px-3 pt-2.5 font-mono text-[12px] font-medium text-muted-foreground">
@@ -1436,7 +1429,7 @@ export function SwarmCanvas({ state, fill = false, contain = false, title, actio
 					aria-label={modal.card.title}
 					data-canvas-ui
 					// The island's look in the board's units: compact type and spacing, scaled with the board.
-					className="absolute z-40 flex max-h-[min(60vh,420px)] flex-col rounded-2xl border border-black/5 bg-background p-3 shadow-[0_12px_32px_-12px_rgba(0,0,0,0.28)] animate-in fade-in-0 duration-200 dark:border-white/10"
+					className="absolute z-40 flex max-h-[min(60vh,420px)] flex-col rounded-2xl border border-black/5 bg-background p-3 shadow-[0_12px_32px_-12px_rgba(0,0,0,0.28)] dark:border-white/10"
 					style={{
 						width: POPOVER_W,
 						left: modal.anchor.left,
@@ -1626,7 +1619,8 @@ function ProjectHeader({ project, group, state }: { project: SwarmProject; group
 	);
 }
 
-const MOVE = "transition-transform duration-700 [transition-timing-function:cubic-bezier(0.22,1,0.36,1)] motion-reduce:transition-none";
+// Agents and cards jump to their place: no gliding.
+const MOVE = "";
 
 /** Every role's cursor stays at full strength; the turn pill says who is working. */
 /** `onTalk` makes the name pill a button that opens a chat with this agent. */
@@ -1654,7 +1648,7 @@ export function SwarmCursor({ role, x, y, say, turn, thinking, where, onWhereEnt
 		<div
 			data-cursor={role}
 			className={`pointer-events-none absolute left-0 top-0 z-20 ${MOVE}`}
-			style={{ transform: `translate(${x}px, ${y}px)`, transitionProperty: "transform", transitionDelay: `${delay}ms` }}
+			style={{ transform: `translate(${x}px, ${y}px)` }}
 		>
 			<div className="relative">
 			<svg width="28" height="28" viewBox="0 0 24 24" className="absolute -left-2 -top-[5px] drop-shadow-sm" aria-hidden>
@@ -1683,7 +1677,7 @@ export function SwarmCursor({ role, x, y, say, turn, thinking, where, onWhereEnt
 					);
 				})()}
 				{say ? (
-					<span key={say} className="pointer-events-auto w-max max-w-[240px] cursor-default rounded-lg border bg-popover px-2.5 py-1.5 text-[13px] leading-snug text-popover-foreground shadow-md animate-in fade-in-0 zoom-in-95 duration-200">
+					<span key={say} className="pointer-events-auto w-max max-w-[240px] cursor-default rounded-lg border bg-popover px-2.5 py-1.5 text-[13px] leading-snug text-popover-foreground shadow-md">
 						{thinking ? <span className="fm-dots mr-1.5 inline-flex gap-[3px] align-middle" aria-hidden><i /><i /><i /></span> : null}
 						{say}
 						{until ? <> <Countdown to={until} /></> : null}
@@ -1756,7 +1750,6 @@ function BoardCard({ card, x, y, hidden, href, onEnter, onLeave, onOpen, onMeasu
 				transform: `translate(${x}px, ${y}px)`,
 				opacity: hidden ? 0 : 1,
 				pointerEvents: hidden ? "none" : undefined,
-				transitionProperty: "transform, opacity, border-color",
 			}}
 		>
 			<div className="flex items-center gap-1.5 text-[12px]">
@@ -1791,7 +1784,7 @@ export function ItemHoverCard({ item, repo, left, top, below, onEnter, onLeave }
 			role="tooltip"
 			onMouseEnter={onEnter}
 			onMouseLeave={onLeave}
-			className="absolute z-30 w-[320px] rounded-xl border bg-popover p-4 text-popover-foreground shadow-lg animate-in fade-in-0 zoom-in-95 duration-150"
+			className="absolute z-30 w-[320px] rounded-xl border bg-popover p-4 text-popover-foreground shadow-lg"
 			style={{ left, top, transform: below ? undefined : "translateY(-100%)" }}
 		>
 			<ItemPreview item={item} repo={repo} />
@@ -1850,7 +1843,7 @@ function TurnChip({ turn }: { turn: SwarmRole | null }) {
 	);
 }
 
-/** The job list with one pill that slides to the job in hand (transitions.dev tabs sliding). */
+/** The job list with one pill on the job in hand. */
 function DispatcherChip({ job }: { job: string | null }) {
 	const items = useRef(new Map<string, HTMLSpanElement>());
 	const [pill, setPill] = useState<{ x: number; w: number } | null>(null);
@@ -1871,7 +1864,6 @@ function DispatcherChip({ job }: { job: string | null }) {
 					transform: `translate(${pill?.x ?? 0}px, -50%)`,
 					left: 0,
 					opacity: pill ? 1 : 0,
-					transition: "transform var(--tabs-dur) var(--tabs-ease), width var(--tabs-dur) var(--tabs-ease), opacity var(--tabs-dur) var(--tabs-ease)",
 				}}
 			/>
 			<span className="font-medium" style={{ color: ROLE_COLORS.dispatcher }}>dispatcher</span>
@@ -1883,7 +1875,6 @@ function DispatcherChip({ job }: { job: string | null }) {
 							if (el) items.current.set(j, el);
 						}}
 						className={`relative rounded px-1.5 py-px ${job === j ? "text-background" : "text-muted-foreground"}`}
-						style={{ transition: "color var(--tabs-dur) var(--tabs-ease)" }}
 					>
 						{j}
 					</span>

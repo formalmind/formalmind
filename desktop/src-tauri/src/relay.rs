@@ -192,6 +192,8 @@ pub fn start(app: &AppHandle) {
             failures = 0;
             for cmd in body["commands"].as_array().into_iter().flatten() {
                 r.run(cmd).await;
+                // A command may have added or removed a folder: send the list now, not within the minute.
+                r.state_due.store(true, std::sync::atomic::Ordering::SeqCst);
             }
             after = body["last"].as_u64().unwrap_or(after);
         }

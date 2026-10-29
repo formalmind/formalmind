@@ -132,6 +132,8 @@ export function TabBar() {
 				add();
 			} else if (e.key === "w") {
 				e.preventDefault();
+				// The last tab stays: there's always one page open.
+				if (state.tabs.length < 2) return;
 				const active = state.tabs.find((t) => t.id === state.active);
 				if (active) close(active);
 			}
@@ -164,14 +166,14 @@ export function TabBar() {
 								<Icon className="size-3.5 shrink-0" />
 								<span className="truncate">{title}</span>
 							</button>
-							<button
+							{state.tabs.length > 1 ? <button
 								type="button"
 								onClick={() => close(tab)}
 								title="Close tab"
 								className={`grid size-5 shrink-0 place-items-center rounded hover:bg-muted ${active ? "opacity-60" : "opacity-0 group-hover:opacity-60"} hover:!opacity-100`}
 							>
 								<X className="size-3" />
-							</button>
+							</button> : null}
 						</div>
 					);
 				})}
