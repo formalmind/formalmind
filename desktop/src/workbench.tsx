@@ -1,6 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import { homeDir, join } from "@tauri-apps/api/path";
 import { listen } from "@tauri-apps/api/event";
+import { useLocation, useNavigate } from "react-router";
 import { FileTree } from "@/components/file-tree";
 import { TreeFolder } from "@/components/session-folder";
 import { useResizable } from "./resize-handle";
@@ -109,7 +110,15 @@ export function WorkbenchProvider({ children }: { children: ReactNode }) {
 
 /** The sidebar: the project's files, or its chats. */
 export function WorkbenchSide() {
-	const { folder, files, file, setFile, chats, chatId, setChatId, left, setLeft, busy } = useWorkbench();
+	const w = useWorkbench();
+	const { folder, files, file, chats, chatId, left, busy } = w;
+	// Anything picked here shows on the project page, so from Settings it goes back there.
+	const navigate = useNavigate();
+	const { pathname } = useLocation();
+	const home = () => pathname !== "/" && navigate("/");
+	const setLeft = (k: "files" | "chats") => (w.setLeft(k), home());
+	const setFile = (f: string) => (w.setFile(f), home());
+	const setChatId = (id: string | null) => (w.setChatId(id), home());
 	return (
 		<div className="flex min-h-0 flex-1 flex-col text-[13px] group-data-[collapsible=icon]:hidden">
 			<div className="flex gap-3 px-3 py-1.5">
