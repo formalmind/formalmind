@@ -277,11 +277,31 @@ function ComponentViewer() {
 					</button>
 				))}
 			</nav>
-			<div className="min-w-0 flex-1 overflow-auto p-4">
+			<Stage screen={picked.startsWith("screens/")}>
 				<Caught key={picked}>
 					<Suspense fallback={null}>{Shown ? <Shown /> : null}</Suspense>
 				</Caught>
-			</div>
+			</Stage>
+		</div>
+	);
+}
+
+/** Where a component is drawn. Screens are whole desktop pages that fold up below 900px, so they get a 1280×800
+ * canvas scaled down to the pane's width. */
+function Stage({ screen, children }: { screen: boolean; children: ReactNode }) {
+	const box = useRef<HTMLDivElement>(null);
+	const [width, setWidth] = useState(0);
+	useEffect(() => {
+		const el = box.current;
+		if (!el) return;
+		const ro = new ResizeObserver(() => setWidth(el.clientWidth));
+		ro.observe(el);
+		return () => ro.disconnect();
+	}, []);
+	const zoom = Math.min(1, Math.max(0.2, (width - 32) / 1280));
+	return (
+		<div ref={box} className="min-w-0 flex-1 overflow-auto p-4">
+			{screen ? <div style={{ width: 1280, height: 800, zoom }}>{children}</div> : children}
 		</div>
 	);
 }
