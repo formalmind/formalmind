@@ -11,4 +11,5 @@ pub mod lake;
 pub mod ledger;
 pub mod plan;
 pub mod queue;
+pub mod session;
 pub mod tools;

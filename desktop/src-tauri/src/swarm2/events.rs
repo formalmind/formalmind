@@ -161,7 +161,7 @@ impl Emitter for Recorder {
 }
 
 /// B44: logs the event to its session's jsonl, then sends it to the app.
-pub fn emit(to: &impl Emitter, ev: SwarmEvent) {
+pub fn emit<E: Emitter + ?Sized>(to: &E, ev: SwarmEvent) {
     log(&ev);
     to.swarm(&ev);
 }
