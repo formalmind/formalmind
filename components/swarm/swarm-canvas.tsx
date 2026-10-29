@@ -84,6 +84,8 @@ const PANEL_H = 136;
 const GROUP_H = LANE_BOTTOM;
 /** In fill mode the board fits this much of its height to the screen; taller boards (more projects) pan. */
 const FIT_H = 900;
+/** The tallest a notebook card grows before it scrolls inside. */
+const PANEL_MAX = 520;
 
 const PANEL_W = 368;
 const PANEL_GAP = 24;
@@ -1932,7 +1934,9 @@ function Panel({ index, title, repo, top = ONE.panelTop, onMeasure, count = 3, c
 			ref={ref}
 			data-component
 			className="absolute flex cursor-default flex-col rounded-lg border bg-background p-3 [overflow-wrap:anywhere]"
-			style={{ left: panelX(index, count), top, width: panelW(count), ...(grows ? { minHeight: PANEL_H } : { height: PANEL_H }) }}
+			// A card that grows hugs what it holds, up to PANEL_MAX (then it scrolls inside), so a long run's task list
+			// doesn't stretch it down the board.
+			style={{ left: panelX(index, count), top, width: panelW(count), ...(grows ? { minHeight: PANEL_H, maxHeight: PANEL_MAX } : { height: PANEL_H }) }}
 		>
 			{repo ? (
 				<a
@@ -1946,7 +1950,7 @@ function Panel({ index, title, repo, top = ONE.panelTop, onMeasure, count = 3, c
 			) : (
 				<p className="font-mono text-[12px] font-medium text-muted-foreground">{title}</p>
 			)}
-			<div className="mt-2 flex min-h-0 flex-1 flex-col">{children}</div>
+			<div className="mt-2 flex min-h-0 flex-1 flex-col overflow-y-auto">{children}</div>
 		</div>
 	);
 }
@@ -1974,6 +1978,8 @@ function LedgerPanel({ spend, budget = 5, costs, ...mode }: PanelMode & { spend:
 }
 
 function NotebookPanel({ notes, ...mode }: PanelMode & { notes: Note[] }) {
+	// What's left first, then what's done.
+	notes = [...notes.filter((n) => !n.done), ...notes.filter((n) => n.done)];
 	return (
 		<Panel index={1} title="#55 Swarm notebook" {...mode}>
 			<ul className="space-y-1 text-[13px]">
