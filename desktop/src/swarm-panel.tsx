@@ -2526,7 +2526,7 @@ export function SwarmPanel({ folder, name, scan, bridge, session, file: openPath
 			last = -1;
 		};
 		chatBlocks.forEach((b, i) => {
-			if ("e" in b && b.e.kind === "you") return close();
+			if ("e" in b && (b.e.kind === "you" || b.e.kind === "start")) return close();
 			if ("e" in b && b.e.kind === "say") {
 				texts.push(b.e.text);
 				last = i;
@@ -2589,7 +2589,8 @@ export function SwarmPanel({ folder, name, scan, bridge, session, file: openPath
 									onRetry={(role, item) => void start(item ? `Retry plan item ${item}: the ${role} failed on it.` : `Retry: the ${role} failed.`, true)}
 								/>
 						)
-					) : block.e.kind === "you" ? (
+					) : block.e.kind === "you" || block.e.kind === "start" ? (
+						// Your message (a session's opening one comes as its `start`).
 						<Message align="end">
 							<MessageContent>
 								{/* Your message: on the right, as wide as its text up to most of the chat, wrapping long words. */}
