@@ -1064,10 +1064,11 @@ export function SwarmCanvas({ state, fill = false, contain = false, title, actio
 			const el = assistantEl();
 			if (!el) return;
 			if (el.dataset.home === undefined) el.dataset.home = el.style.transform;
+			el.style.transition = "transform 150ms cubic-bezier(0.22, 1, 0.36, 1)";
 			el.style.transform = `translate(${x}px, ${y}px)`;
 		});
 	};
-	// Back to its own spot.
+	// Back to its own spot, on the cursors' usual glide.
 	const releaseAssistant = () => {
 		cancelAnimationFrame(companionFrame.current);
 		companionFrame.current = 0;
@@ -1649,6 +1650,8 @@ function ProjectHeader({ project, group, state }: { project: SwarmProject; group
 
 // Agents and cards jump to their place: no gliding.
 const MOVE = "";
+// Agents glide to their place, each a beat after the one before when they arrive together.
+const CURSOR_MOVE = "transition-transform duration-700 [transition-timing-function:cubic-bezier(0.22,1,0.36,1)] motion-reduce:transition-none";
 
 /** Every role's cursor stays at full strength; the turn pill says who is working. */
 /** `onTalk` makes the name pill a button that opens a chat with this agent. */
@@ -1675,8 +1678,8 @@ export function SwarmCursor({ role, x, y, say, turn, thinking, where, onWhereEnt
 	return (
 		<div
 			data-cursor={role}
-			className={`pointer-events-none absolute left-0 top-0 z-20 ${MOVE}`}
-			style={{ transform: `translate(${x}px, ${y}px)` }}
+			className={`pointer-events-none absolute left-0 top-0 z-20 ${CURSOR_MOVE}`}
+			style={{ transform: `translate(${x}px, ${y}px)`, transitionDelay: `${delay}ms` }}
 		>
 			<div className="relative">
 			<svg width="28" height="28" viewBox="0 0 24 24" className="absolute -left-2 -top-[5px] drop-shadow-sm" aria-hidden>
