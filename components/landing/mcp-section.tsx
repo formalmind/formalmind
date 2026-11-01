@@ -3,15 +3,15 @@ import { ArrowRight, Check, Copy } from "lucide-react";
 
 const SERVER = "https://formal.team/mcp/account";
 
-/** How to add the account server, per client (as in content/docs/agents.md). `code` is what Copy copies. */
+/** How to add the account server, per client (as in content/docs/agents.md). `code` is what Copy copies; the steps after are in the docs. */
 const CLIENTS = [
-	{ name: "Claude Code", code: `claude mcp add --transport http --scope user formalmind ${SERVER}`, note: "Then run /mcp in a session to sign in with GitHub." },
-	{ name: "Claude", code: SERVER, note: "Settings → Connectors → Add custom connector, with this URL." },
-	{ name: "ChatGPT", code: SERVER, note: "Settings → Connectors, turn on Developer mode (under Advanced), then Create a connector with this URL and OAuth." },
-	{ name: "Cursor", code: `{ "mcpServers": { "formalmind": { "url": "${SERVER}" } } }`, note: "Add it to ~/.cursor/mcp.json." },
+	{ name: "Claude Code", code: `claude mcp add --transport http --scope user formalmind ${SERVER}` },
+	{ name: "Claude", code: SERVER },
+	{ name: "ChatGPT", code: SERVER },
+	{ name: "Cursor", code: `{ "mcpServers": { "formalmind": { "url": "${SERVER}" } } }` },
 ];
 
-/** A tab per client, its command or URL with Copy, and the one step after it. */
+/** A tab per client, its command or URL with Copy. */
 function InstallBlock() {
 	const [active, setActive] = useState(0);
 	const [copied, setCopied] = useState(false);
@@ -47,7 +47,6 @@ function InstallBlock() {
 					{copied ? <Check className="size-3.5 text-emerald-600 dark:text-emerald-400" /> : <Copy className="size-3.5" />}
 				</button>
 			</div>
-			<p className="mt-2 text-center text-[13px] text-muted-foreground">{client.note} Turn on Settings → Remote control (MCP) in the Mac app.</p>
 		</div>
 	);
 }
