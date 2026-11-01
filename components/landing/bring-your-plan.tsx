@@ -2,7 +2,7 @@ import { useId } from "react";
 import { ArrowRight } from "lucide-react";
 
 /** One box: a name and a mono sublabel. `focal` draws it in ink, `dashed` marks the pay-per-token route. */
-function Node({ x, y, w, name, sub, focal = false, dashed = false }: { x: number; y: number; w: number; name: string; sub: string; focal?: boolean; dashed?: boolean }) {
+export function Node({ x, y, w, name, sub, focal = false, dashed = false }: { x: number; y: number; w: number; name: string; sub: string; focal?: boolean; dashed?: boolean }) {
 	return (
 		<g>
 			<rect x={x} y={y} width={w} height={56} rx={6} className={`fill-card ${focal ? "stroke-foreground" : "stroke-border"}`} strokeWidth={focal ? 1.5 : 1} strokeDasharray={dashed ? "5 4" : undefined} />
@@ -76,7 +76,7 @@ export function BringYourPlan() {
 				<p className="font-mono text-[11px] font-medium uppercase tracking-wider text-muted-foreground">Agentic</p>
 				<h2 className="mt-3 text-balance font-display text-4xl leading-[1.1] sm:text-5xl">Bring your own Claude Max or ChatGPT plan</h2>
 				<p className="mx-auto mt-4 max-w-[560px] text-balance text-[15px] leading-[22px] text-muted-foreground">
-					The swarm's agents run on the agentic CLI you've already signed in to, Claude Code or Codex, so your Claude Pro or Max plan, or your ChatGPT Plus or Pro plan, pays for them. Your files, lake and forge never leave your computer. An Anthropic or OpenAI key works too.
+					Run the agents on the Claude Code or Codex you already pay for. No API key needed.
 				</p>
 			</div>
 			<div className="mt-10 rounded-2xl border bg-muted/60 p-1.5">
