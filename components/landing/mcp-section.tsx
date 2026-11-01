@@ -1,6 +1,5 @@
 import { useId, useState } from "react";
 import { ArrowRight, Check, Copy } from "lucide-react";
-import { Node } from "./bring-your-plan";
 
 const SERVER = "https://formal.team/mcp/account";
 
@@ -43,7 +42,7 @@ function InstallBlock() {
 				))}
 			</div>
 			<div role="tabpanel" className="mt-2 flex items-center gap-2 rounded-lg border bg-muted/60 py-1.5 pl-3 pr-1.5">
-				<code className="min-w-0 flex-1 break-all py-1 text-left font-mono text-[12px] text-foreground">{client.code}</code>
+				<code className="min-w-0 flex-1 break-words py-1 text-left font-mono text-[12px] text-foreground">{client.code}</code>
 				<button type="button" onClick={copy} title="Copy" aria-label="Copy" className="grid size-7 shrink-0 place-items-center rounded-md text-muted-foreground hover:bg-background hover:text-foreground">
 					{copied ? <Check className="size-3.5 text-emerald-600 dark:text-emerald-400" /> : <Copy className="size-3.5" />}
 				</button>
@@ -53,16 +52,64 @@ function InstallBlock() {
 	);
 }
 
-/** Your own agent, through formal.team's account MCP server, reading and steering the app on your Mac. */
+/** Isometric projection: world x runs down-right, y down-left, z up. */
+const C = Math.cos(Math.PI / 6);
+const iso = (x: number, y: number, z = 0) => [(x - y) * C, (x + y) / 2 - z] as const;
+const pts = (list: [number, number, number][]) => list.map(([x, y, z]) => iso(x, y, z).join(",")).join(" ");
+
+/** A world-space orthogonal route at height z, its corners rounded (the projection is affine, so a Bezier stays one). */
+function isoRoute(route: [number, number][], z: number, r = 8) {
+	const points = route.filter((q, i) => i === 0 || q[0] !== route[i - 1][0] || q[1] !== route[i - 1][1]);
+	const p = (x: number, y: number) => iso(x, y, z).join(" ");
+	let d = `M${p(...points[0])}`;
+	for (let i = 1; i < points.length - 1; i++) {
+		const [ax, ay] = points[i - 1], [bx, by] = points[i], [cx, cy] = points[i + 1];
+		const into = Math.hypot(bx - ax, by - ay), out = Math.hypot(cx - bx, cy - by);
+		if ((bx - ax) * (cy - by) === (by - ay) * (cx - bx)) continue;
+		d += ` L${p(bx - ((bx - ax) / into) * r, by - ((by - ay) / into) * r)} Q${p(bx, by)} ${p(bx + ((cx - bx) / out) * r, by + ((cy - by) / out) * r)}`;
+	}
+	return `${d} L${p(...points[points.length - 1])}`;
+}
+
+/** Text lying flat on the plane at height z, reading along world x. */
+function Flat({ x, y, z, className, children }: { x: number; y: number; z: number; className: string; children: string }) {
+	const [X, Y] = iso(x, y, z);
+	return <text transform={`matrix(${C} 0.5 ${-C} 0.5 ${X} ${Y})`} className={className}>{children}</text>;
+}
+
+const H = 16;
+
+/** A raised slab: its top (a card), the two faces toward you, and its name and sublabel lying on the top. */
+function Slab({ x0, y0, x1, y1, name, sub, focal = false }: { x0: number; y0: number; x1: number; y1: number; name: string; sub: string; focal?: boolean }) {
+	const edge = focal ? "stroke-foreground" : "stroke-border";
+	const deep = y1 - y0 > 80;
+	return (
+		<g strokeLinejoin="round">
+			<polygon points={pts([[x1, y0, H], [x1, y1, H], [x1, y1, 0], [x1, y0, 0]])} className={`fill-border ${edge}`} />
+			<polygon points={pts([[x0, y1, H], [x1, y1, H], [x1, y1, 0], [x0, y1, 0]])} className={`fill-muted ${edge}`} />
+			<polygon points={pts([[x0, y0, H], [x1, y0, H], [x1, y1, H], [x0, y1, H]])} className={`fill-card ${edge}`} strokeWidth={focal ? 1.5 : 1} />
+			<Flat x={x0 + 16} y={y0 + (deep ? 40 : 26)} z={H} className="fill-foreground text-[15px] font-medium">{name}</Flat>
+			<Flat x={x0 + 16} y={y0 + (deep ? 64 : 46)} z={H} className="fill-muted-foreground font-mono text-[11px]">{sub}</Flat>
+		</g>
+	);
+}
+
+/** Another agent, through formal.team's account MCP server, reading and steering the app on your Mac: drawn in 3D. */
 function McpDiagram() {
 	const id = useId().replace(/[^a-zA-Z0-9_-]/g, "");
 	const ink = `${id}-ink`;
 	const soft = `${id}-soft`;
+	// The Mac's three slabs, along y; formal.team's routes fan out to their back edges.
+	const mac = [
+		{ y0: -58, y1: -2, name: "Read the folder", sub: "mac_get · plan, bugs, work map" },
+		{ y0: 22, y1: 78, name: "Steer the swarm", sub: "mac_do · start, pause, message" },
+		{ y0: 102, y1: 158, name: "Prove a function", sub: "check_proof · submit_proof", focal: true },
+	];
 	return (
-		<svg viewBox="0 0 768 288" role="img" aria-labelledby={`${id}-title ${id}-desc`} className="h-auto w-full">
-			<title id={`${id}-title`}>Your agent, through MCP</title>
+		<svg viewBox="-100 -30 910 556" role="img" aria-labelledby={`${id}-title ${id}-desc`} className="h-auto w-full">
+			<title id={`${id}-title`}>Another agent, through MCP</title>
 			<desc id={`${id}-desc`}>
-				Claude, ChatGPT or Cursor connects to formal.team's account MCP server, which relays to the Formal Mind app on your Mac: it reads a folder's plan, bugs and work map, steers the swarm, and checks and submits proofs.
+				Another Claude session, ChatGPT or Cursor connects to formal.team's account MCP server, which relays to the Formal Mind app on your Mac: it reads a folder's plan, bugs and work map, steers the swarm, and checks and submits proofs.
 			</desc>
 			<defs>
 				<marker id={ink} viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto">
@@ -73,26 +120,32 @@ function McpDiagram() {
 				</marker>
 			</defs>
 
-			{/* Your Mac: the app does the work, as if you'd clicked it there. */}
-			<rect x={460} y={24} width={304} height={248} rx={10} className="fill-muted/40 stroke-border" strokeDasharray="4 4" />
-			<text x={480} y={48} className="fill-muted-foreground font-mono text-[11px] uppercase tracking-wider">Your Mac</text>
-			<text x={4} y={48} className="fill-muted-foreground font-mono text-[11px] uppercase tracking-wider">Anywhere</text>
+			{/* Your Mac: a dashed plot on the ground the app's slabs stand on. */}
+			<polygon points={pts([[528, -82, 0], [840, -82, 0], [840, 208, 0], [528, 208, 0]])} className="fill-muted/40 stroke-border" strokeDasharray="4 4" />
+			<Flat x={568} y={196} z={0} className="fill-muted-foreground font-mono text-[11px] uppercase tracking-wider">Your Mac</Flat>
 
-			{/* Arrows before boxes. */}
-			<g fill="none" className="stroke-muted-foreground" strokeWidth={1.25}>
-				<path d="M200 156 H246" markerEnd={`url(#${soft})`} />
-				<path d="M416 142 H424 Q432 142 432 134 V96 Q432 88 440 88 H482" markerEnd={`url(#${soft})`} />
-				<path d="M416 156 H482" markerEnd={`url(#${soft})`} />
+			<Slab x0={0} y0={0} x1={200} y1={100} name="Another Claude session" sub="or ChatGPT · Cursor" />
+			<Slab x0={280} y0={0} x1={456} y1={100} name="formal.team" sub="/mcp/account · OAuth" />
+			{mac.map((m) => <Slab key={m.name} x0={568} y0={m.y0} x1={808} y1={m.y1} name={m.name} sub={m.sub} focal={m.focal} />)}
+
+			{/* Routes run across the slabs' tops, drawn last so they bridge the gaps. */}
+			<g fill="none" strokeWidth={1.25}>
+				<path d={isoRoute([[200, 50], [278, 50]], H)} className="stroke-muted-foreground" markerEnd={`url(#${soft})`} />
+				{mac.map((m, i) => {
+					const y = (m.y0 + m.y1) / 2;
+					const from = 36 + i * 14;
+					return (
+						<path
+							key={m.name}
+							d={isoRoute([[456, from], [504, from], [504, y], [566, y]], H)}
+							className={m.focal ? "stroke-foreground" : "stroke-muted-foreground"}
+							strokeWidth={m.focal ? 1.5 : 1.25}
+							markerEnd={`url(#${m.focal ? ink : soft})`}
+						/>
+					);
+				})}
 			</g>
-			<path d="M416 170 H424 Q432 170 432 178 V216 Q432 224 440 224 H482" fill="none" className="stroke-foreground" strokeWidth={1.5} markerEnd={`url(#${ink})`} />
-			<rect x={206} y={132} width={34} height={14} className="fill-background" />
-			<text x={223} y={143} textAnchor="middle" className="fill-muted-foreground font-mono text-[10px] uppercase tracking-wider">MCP</text>
-
-			<Node x={4} y={128} w={196} name="Your agent" sub="Claude · ChatGPT · Cursor" />
-			<Node x={248} y={128} w={168} name="formal.team" sub="/mcp/account · OAuth" />
-			<Node x={484} y={60} w={256} name="Read the folder" sub="mac_get · plan, bugs, work map" />
-			<Node x={484} y={128} w={256} name="Steer the swarm" sub="mac_do · start, pause, message" />
-			<Node x={484} y={196} w={256} name="Prove a function" sub="check_proof · submit_proof" focal />
+			<Flat x={222} y={40} z={H} className="fill-muted-foreground font-mono text-[10px] uppercase tracking-wider">MCP</Flat>
 		</svg>
 	);
 }
@@ -105,7 +158,7 @@ export function McpSection() {
 				<p className="font-mono text-[11px] font-medium uppercase tracking-wider text-muted-foreground">Remote control</p>
 				<h2 className="mt-3 text-balance font-display text-4xl leading-[1.1] sm:text-5xl">Built-in MCP server</h2>
 				<p className="mx-auto mt-4 max-w-[560px] text-balance text-[15px] leading-[22px] text-muted-foreground">
-					Connect Claude, ChatGPT or Cursor and let it steer the swarm on your Mac.
+					Control the app from another Claude session, or from ChatGPT or Cursor.
 				</p>
 			</div>
 			<div className="mt-10 rounded-2xl border bg-muted/60 p-1.5">
