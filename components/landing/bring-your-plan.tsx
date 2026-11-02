@@ -106,8 +106,8 @@ function RoutesDiagram() {
 			<text x={labelX + 10} y={labelY - 34} className="fill-muted-foreground font-mono text-[10px] uppercase tracking-wider">Model calls</text>
 
 			<Plate z={z3} label="Paid by" />
-			<Block x={COLUMNS[0]} z={z3 + plate} h={26} name="Claude Pro or Max" sub="Anthropic · your plan" focal />
-			<Block x={COLUMNS[1]} z={z3 + plate} h={26} name="ChatGPT Plus or Pro" sub="OpenAI · your plan" focal />
+			<Block x={COLUMNS[0]} z={z3 + plate} h={26} name="Claude Pro or Max" sub="Anthropic" focal />
+			<Block x={COLUMNS[1]} z={z3 + plate} h={26} name="ChatGPT Plus or Pro" sub="OpenAI" focal />
 			<Block x={COLUMNS[2]} z={z3 + plate} h={8} name="Anthropic or OpenAI" sub="billed per token" dashed />
 		</svg>
 	);
