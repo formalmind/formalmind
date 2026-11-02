@@ -58,9 +58,6 @@ export function McpSection() {
 			<div className="mx-auto max-w-2xl text-center">
 				<p className="font-mono text-[11px] font-medium uppercase tracking-wider text-muted-foreground">Remote control</p>
 				<h2 className="mt-3 text-balance font-display text-4xl leading-[1.1] sm:text-5xl">Built-in MCP server</h2>
-				<p className="mx-auto mt-4 max-w-[560px] text-balance text-[15px] leading-[22px] text-muted-foreground">
-					Control the app from another Claude session, or from ChatGPT or Cursor. Read the plan, bugs and proofs, steer the swarm, and submit proofs.
-				</p>
 			</div>
 			<InstallBlock />
 			<p className="mt-4 text-center text-sm">
