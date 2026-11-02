@@ -1,5 +1,4 @@
 import { useId } from "react";
-import { ArrowRight } from "lucide-react";
 
 /** One box: a name and a mono sublabel. `focal` draws it in ink, `dashed` marks the pay-per-token route. */
 export function Node({ x, y, w, name, sub, focal = false, dashed = false }: { x: number; y: number; w: number; name: string; sub: string; focal?: boolean; dashed?: boolean }) {
@@ -86,11 +85,6 @@ export function BringYourPlan() {
 					</div>
 				</div>
 			</div>
-			<p className="mt-4 text-center text-sm">
-				<a href="/docs/models" className="inline-flex items-center gap-1 text-muted-foreground underline-offset-4 hover:text-foreground hover:underline">
-					Models and costs <ArrowRight className="size-3.5" />
-				</a>
-			</p>
 		</section>
 	);
 }
