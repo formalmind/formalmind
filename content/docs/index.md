@@ -32,9 +32,8 @@ proof is about is generated from that same tree, so a proof is about the code yo
 
 ## Start here
 
-1. [Install the app](/install) and sign in.
-2. [Run it on a project](/first-run): add a Foundry project folder and start the swarm.
-3. Read about [the swarm](/swarm), [Statements](/statements) and [the Proofs page](/proofs) to steer it.
+1. [Install the app](/install), its tools, and add a Foundry project.
+2. [The swarm](/swarm), [Statements](/statements), [Proofs](/proofs): how the work runs and how to steer it.
 
 Agents can read every page of this guide as Markdown: add `.md` to its address, or see
 [llms.txt](https://docs.formal.team/llms.txt).
