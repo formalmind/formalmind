@@ -204,8 +204,8 @@ the model". It is never rounded up to proved.
   callee's behaviour (a token's `transfer` really moving balances) is an assumption, written as one. Reentrancy: an
   invariant is proved for calls that don't reenter unless the model's `Ext` allows it. That limit goes into the
   statement's assumptions automatically, so a proved invariant never hides it.
-- **SolidCore.** When the roadmap's SolidCore decision lands, the predicates move to its state type. The plain words
-  and the obligations stay the same.
+- **Stele.** When statements move to EquiVM's Stele specs (the roadmap's semantics of record), the predicates move to
+  the spec's state type. The plain words and the obligations stay the same.
 
 ## 6. Not in v1
 

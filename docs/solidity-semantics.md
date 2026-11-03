@@ -1,7 +1,8 @@
 # A formal semantics of Solidity for formal-ast (design)
 
-Status: draft for review. No code yet. Scope: what `crates/formal-ast` emits, how proofs are written
-against it, and how both are trusted.
+Status: superseded on 2026-11-03. Formal Mind adopted EquiVM as its semantics of record instead of SolidCore
+([bytecode-refinement.md](bytecode-refinement.md)). This draft stays as the record of why proofs broke and what was
+considered. Its scope was what `crates/formal-ast` emits, how proofs are written against it, and how both are trusted.
 
 ## Summary
 
