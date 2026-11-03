@@ -23,8 +23,8 @@ flowchart TB
 1. **Run EquiVM in the app.** A folder gets a `[bytecode]` section in `formalmind.toml` naming an EquiVM checkout
    (pinned commit) and the contract's artifacts (`creation.hex`, `runtime.hex`, ABI, solc version and flags). The app
    compiles the contract the way it is deployed and runs EquiVM's scaffold (`scripts/scaffold.py`,
-   `scripts/sol2stele.py`, `scripts/proof_skeleton.py`). EquiVM pins its own Lean (v4.29), so it stays a separate Lake
-   project.
+   `scripts/sol2stele.py`, `scripts/proof_skeleton.py`). Upstream EquiVM pins Lean v4.29, so the app needs our v4.35
+   port to share the swarm's toolchain ([the trial](#trial-feevault-on-lean-435-2026-11-03)).
 2. **Refinement as plan items.** One item per function: prove the bytecode of that function's dispatcher arm refines
    its Stele transition, with EquiVM's prompt (`Misc/prompt.md`) as the prover's skill on top of ours. The swarm
    keeps its loop (prove, `lake build`, review); the reviewer checks the Stele spec against the Solidity. The ledger
@@ -64,6 +64,76 @@ may rest on `native_decide` facts; every audit that cites them lists "Lean's com
 facts in the bytecode proofs" in its trusted base, with the count. Proofs about the source model and about Stele specs
 keep the strict rule: no `native_decide`.
 
+## Decision: EquiVM is the semantics of record (2026-11-03)
+
+Formal Mind doesn't build a new mathematical model, and the SolidCore plan in
+[solidity-semantics.md](solidity-semantics.md) is dropped. EquiVM supplies the EVM model, the Stele spec language, the
+refinement relation and the proof scaffolding; Formal Mind stays the loop around them.
+
+## Trial: FeeVault on Lean 4.35 (2026-11-03)
+
+The trial asked two things: can EquiVM move to the swarm's Lean version, and what does a real contract cost? Both ran
+on local branches of EquiVM and its EVMLean dependency (not pushed), from EquiVM `fc74a646` and EVMLean `fd4f5e6d6d`.
+
+**The port to v4.35.** These targets build:
+
+- `Ethereum` (EVMLean), `ABI`, `Stele` and `Reasoning`.
+- `Examples.ERC20.Correct` and `Examples.TinyImmutable.Correct`.
+- `Benchmarks.WETH9.Correct`.
+
+Most fixes were proof-script repairs, mainly `simpa` calls whose closing check got stricter. The one change to a
+definition is the rename of Batteries' `RBMap` and `RBSet` to their new `RBTree` namespace, which also touches names in
+the EVM semantics. Stele's semantics is unchanged. The package sets two compatibility options:
+`backward.isDefEq.respectTransparency = false` and `backward.defeqAttrib.useBackward = true`. The ERC20 and
+TinyImmutable theorems have the same axioms on both versions. WETH9's have the same counts, with 20 `native_decide`
+names differing only in their numeric suffix; the propositions behind those 20 weren't compared. The port cost about
+407k tokens and 3h16 on a shared machine.
+
+**The theorem.** Every function and the constructor of `src/FeeVault.sol`, about 50 lines of Solidity, built the way it
+was deployed (solc 0.8.26, 1,000 optimizer runs, cancun):
+
+```lean
+def feeVaultGasBound : GasBound := fun g => g.toNat < 2 ^ 44
+
+theorem feeVaultContractCorrect :
+    contractRefinementWF trivialStorageWF feeVaultGasBound config feeVaultCreationBytecode contract
+```
+
+A clean rebuild of the contract's directory takes 197 seconds, and the directory has no `sorry`, `admit` or `axiom`.
+`#print axioms` from a separate v4.35 project shows Lean's three standard axioms and 2,155 `native_decide` facts. The
+gas bound comes from the memory library, which needs offsets below 2^32; no real transaction reaches it.
+
+| Cost | |
+| --- | --- |
+| Hand-written proof lines | 4,647 (2,743, then 1,904 for `unlockCallback`) |
+| Tokens | About 1.64M across two stages |
+| `unlockCallback` and the capstone | 33 minutes |
+| Moving the v4.29 proofs to v4.35 | About 4 minutes, 35 changed lines |
+
+This is one small contract, so don't scale these numbers to larger contracts until a second one is measured.
+
+**Differential tests.** 425 generated calls and 10 hand-built `unlockCallback` calls, no disagreements. Generated
+`data` never makes `unlockCallback` succeed, so its only successful cases are 4 of the hand-built ones.
+
+**What the theorem doesn't say.**
+
+- Revert reasons are not compared, and neither are logs on success, so `FeesCollected` isn't verified. This comes from
+  `execResultsEquiv` in `Stele/Refine.lean`.
+- External calls are opaque: nothing is said about what the pool manager or the hook actually do.
+- Refinement isn't a safety property. Statements such as "only the owner can collect" still have to be proved on the
+  spec.
+
+**Before the port can be relied on, in order:**
+
+1. Run EVMLean's conformance tests on v4.35. They haven't run, so the EVM model has no fresh evidence on this version.
+2. Port the remaining `Examples` so `stele-difftest` builds. `finish_check.py` passes only with `--skip-difftest` until
+   then; the differential results above came through `lake env lean`. Most of `Benchmarks`, `Tests` and `Proofs` are
+   also unported.
+3. Check that new proofs importing EquiVM work with the compatibility options, and read the full `RBTree` rename diff.
+   Batteries plans to replace `RBTree` with `Std.TreeMap`, so that code will have to move again.
+4. Decide where the port lives: a fork under formalmind, or upstream. The bump hasn't been tested on v4.29 and hasn't
+   been raised with the authors.
+
 ## Huff contracts: v2-raff (planned 2026-10-28)
 
 asyncswap/v2-raff ports asyncswap/contracts to Huff, compiled with Huff Neo (`hnc`). Huff has no AST that formal-ast
@@ -91,7 +161,8 @@ on that spec holds for both. This is the equivalence v2-raff needs, and it uses 
    exists.
 3. **Refinement per function, smallest first.** FeeVault (the hook's vault, deployed from `src/generated/`), then the
    claims contracts, then Router and AsyncSwap. Hand-written Huff skips solc's checks and reuses stack slots, so
-   proofs may take longer than for solc output. FeeVault shows how much longer before the larger contracts start.
+   proofs may take longer than for solc output. FeeVault shows how much longer before the larger contracts start: the
+   solc build is the baseline ([the trial](#trial-feevault-on-lean-435-2026-11-03)), and the Huff build isn't proved.
 4. **Statements carry over.** Statements proved on the Stele spec hold for the Huff bytecode as soon as its
    refinement is proved.
 
@@ -105,6 +176,5 @@ licence, so neither can be vendored as it is. NethermindEth/Clear is non-commerc
 
 - Keep the formal-ast model as the fast first pass, and refinement as the stronger layer? Or move statements to Stele
   outright?
-- Lean versions: EquiVM is on v4.29, our projects on v4.35. Two Lake projects per folder, or follow EquiVM's pin.
 - Talk to the authors (the paper's contact is the corresponding author, Zoe Paraskevopoulou) about upstreaming our
   statements and the swarm loop as an EquiVM front end.

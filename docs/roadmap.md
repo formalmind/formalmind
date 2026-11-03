@@ -27,16 +27,18 @@ What Formal Mind is, the problem it solves and its focus: [README.md](../README.
   `Ext`), so a code change breaks them even when the property still holds (`docs/solidity-semantics.md` §1 on
   PR formalmind/formalmind#15).
 - **Since 0.1.41** the UI improved (keep it), and the Concolic hunter was built on `release/0.2` as a separate line.
+- **EquiVM runs on our Lean (2026-11-03).** A trial port moved EquiVM to Lean v4.35, and FeeVault's deployed bytecode
+  is proved to refine its Stele spec there, with no `sorry`. The port is on local branches, its conformance tests
+  haven't run, and the app doesn't use it yet ([bytecode-refinement.md](bytecode-refinement.md#trial-feevault-on-lean-435-2026-11-03)).
 
 ## Method
 
 1. **Specs chase `main`.** Each commit on the target's default branch gets its spec rebuilt, and the swarm repairs what
    broke. Work already done is cached: a proof is re-checked, not rewritten, when its function didn't change.
-2. **Model the whole language: SolidCore.** Paradigm's executable Lean semantics of Solidity
-   ([paradigmxyz/solidity-lean](https://github.com/paradigmxyz/solidity-lean)) becomes the semantics of record.
-   formal-ast emits its AST. Today's shallow model stays, linked to SolidCore per function, so the existing theorems
-   keep counting. The two-week spike on `AsyncSwap.setExecutor` decides whether we prove against SolidCore directly or
-   against our own small typed core checked against it.
+2. **EquiVM is the semantics of record; we don't build a new model.** Deployed bytecode is proved to refine a Stele
+   spec on EquiVM's EVM model, and our statements are proved on that spec (item 8). The SolidCore plan and its spike
+   on `AsyncSwap.setExecutor` are dropped. Today's shallow model stays until the app runs EquiVM, so the existing
+   theorems keep counting.
 3. **Tactics that survive edits.** `Std.WP` + `vcgen` with `@[spec]` lemmas per Solidity primitive and per function
    signature. Specs state what the function does to the protocol model, never its body. These spec lemmas become the
    shared lemma library.
@@ -66,12 +68,12 @@ What Formal Mind is, the problem it solves and its focus: [README.md](../README.
 
 | # | Question | Recommendation |
 | --- | --- | --- |
-| 1 | Run the SolidCore spike now, or keep the shallow model and let agents repair proofs after each change? | Run the spike first. It's two weeks, and it decides whether proofs can survive edits at all. |
+| 1 | Run the SolidCore spike now, or keep the shallow model and let agents repair proofs after each change? | Decided 2026-11-03: neither. The semantics of record is EquiVM, so the spike is dropped. |
 | 2 | Where do Async Swap's proofs live again? | In a proofs repository beside asyncswap/contracts that follows its commits, so contracts stay free to change. |
 | 3 | Concolic skill for the formal agents in 0.1.x, or only in 0.2? | Add it as an extra skill once 0.2 ships; the four published skills don't change. |
 | 4 | Bring back PR review comments? | Yes, opt-in. It's what outside teams see first. |
-| 5 | EquiVM's Stele spec as the semantics of record, beside or instead of SolidCore? | Start beside: link WETH9's statements to EquiVM's WETH9 benchmark first, then decide with SolidCore's spike. |
-| 6 | Prove Huff (v2-raff) with EquiVM, or build our own EVM layer on EVMYulLean? | EquiVM: it proves any bytecode refines a spec, so the Huff port is proved against its Solidity original's spec. Spike on FeeVault first. |
+| 5 | EquiVM's Stele spec as the semantics of record, beside or instead of SolidCore? | Decided 2026-11-03: instead of SolidCore. Link WETH9's statements to EquiVM's WETH9 benchmark first. |
+| 6 | Prove Huff (v2-raff) with EquiVM, or build our own EVM layer on EVMYulLean? | EquiVM: it proves any bytecode refines a spec, so the Huff port is proved against its Solidity original's spec. The solc FeeVault is proved; prove the Huff FeeVault against the same spec next. |
 
 ## Milestones
 
