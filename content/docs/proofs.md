@@ -19,6 +19,9 @@ ones, the ones not proved yet, or the ones not modeled.
 Select a function to see its Solidity, the Lean definition generated from it (**Lean4 spec**), and the theorems that
 prove it (**Lean4 proof**), each opened at its line.
 
+In the desktop app’s Vim mode, Lean files use your installed Neovim, with fallback syntax highlighting when your
+configuration has none. The Infoview follows the cursor and buffer edits to show the goals at the current position.
+
 ## Where the model comes from
 
 The Lean model is generated from the compiler's syntax tree, one file per contract in
