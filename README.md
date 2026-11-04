@@ -117,3 +117,16 @@ bun run dev:api   # API on :8787
 bun run dev       # web app on :3000
 bun run desktop:dev
 ```
+
+## License
+
+Formal Mind is free software under the [GNU Affero General Public License, version 3](LICENSE) (AGPL-3.0-only).
+Copyright (C) 2026 Asyncswap Labs, Inc.
+
+If you modify Formal Mind and let other people use it over a network, the AGPL requires you to offer them the
+corresponding source. The source for this repository is <https://github.com/formalmind/formalmind>.
+
+The license covers the code, not the name or logo: see [TRADEMARK.md](TRADEMARK.md). Contributions are accepted under
+the AGPL with a DCO sign-off; see [CONTRIBUTING.md](CONTRIBUTING.md).
+
+The `crates/formal-ast` and `crates/formal-ast-wasm` crates are MIT-licensed so they can be reused as building blocks.

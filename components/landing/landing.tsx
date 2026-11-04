@@ -34,6 +34,7 @@ const FOOTER = [
 		links: [
 			{ label: "Brand kit", href: "/brand/" },
 			{ label: "GitHub", href: "https://github.com/formalmind" },
+			{ label: "Source", href: "https://github.com/formalmind/formalmind" },
 			{ label: "Lean template", href: "https://github.com/formalmind/lean-template" },
 		],
 	},
@@ -42,6 +43,7 @@ const FOOTER = [
 		links: [
 			{ label: "Privacy", href: "/privacy/" },
 			{ label: "Terms", href: "/terms/" },
+			{ label: "License", href: "https://github.com/formalmind/formalmind/blob/main/LICENSE" },
 		],
 	},
 ];

@@ -2,6 +2,7 @@
 name = "formalmind-desktop"
 version = "0.2.27"
 description = "Formal Mind desktop app"
+license = "AGPL-3.0-only"
 edition = "2021"
 
 [lib]

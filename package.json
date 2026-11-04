@@ -2,6 +2,7 @@
   "name": "formalmindai",
   "version": "0.1.0",
   "private": true,
+  "license": "AGPL-3.0-only",
   "scripts": {
     "dev": "vite",
     "dev:api": "wrangler dev --port 8787",
