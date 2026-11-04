@@ -220,7 +220,6 @@ apart from the other audit reports.
 ## Platforms
 
 - **macOS**: one universal app (Apple Silicon and Intel), built and notarized by `scripts/release.sh` on a Mac.
-  `scripts/fetch-nvim.sh` merges Neovim's arm64 and x86_64 builds with `lipo` and signs them.
 - **Windows**: built on GitHub Actions (`.github/workflows/desktop-windows.yml`) from the release's tag once the Mac
   release is published, or by hand with *Run workflow* and a tag. It needs the repository secret
   `TAURI_SIGNING_PRIVATE_KEY` (the update key) for in-app updates. The installer isn't code-signed yet, so SmartScreen

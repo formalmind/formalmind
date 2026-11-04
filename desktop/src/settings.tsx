@@ -186,7 +186,7 @@ export function SettingsPage() {
 						<label className="flex items-center justify-between gap-4">
 							<span>
 								<span className="font-medium">Vim mode</span>
-								<span className="block text-xs text-muted-foreground">The Code tab runs Neovim (bundled with the app), with your own config from ~/.config/nvim if you have one.</span>
+								<span className="block text-xs text-muted-foreground">The Code tab runs Neovim (install it with `brew install neovim`), with your own config from ~/.config/nvim if you have one.</span>
 							</span>
 							<input type="checkbox" checked={vim} onChange={(e) => setVimMode(e.target.checked)} className="size-4" />
 						</label>

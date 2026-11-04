@@ -1,6 +1,6 @@
 //! The swarm agents' shared tools beyond formal-ast and Lean: tags on lines, statements, and forge commands in the
-//! background. What the swarm finds or suspects goes to `.formal/findings.sarif` ([`sarif_add`]), where
-//! solidity-language-server shows it on the line.
+//! background. What the swarm finds or suspects goes to `.formal/findings.sarif` ([`sarif_add`]), which editors that
+//! read SARIF show on the line.
 
 use serde_json::{json, Value};
 

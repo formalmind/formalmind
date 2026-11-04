@@ -1,5 +1,5 @@
-//! Terminals for the Code tab: a pseudo-terminal running the bundled Neovim (Vim mode) in a folder. Output streams to
-//! the webview (xterm.js) as `term:data`; keys and resizes come back as commands; `term:exit` when it ends.
+//! Terminals for the Code tab: a pseudo-terminal running Neovim (Vim mode) in a folder. Output streams to the webview
+//! (xterm.js) as `term:data`; keys and resizes come back as commands; `term:exit` when it ends.
 
 use portable_pty::{native_pty_system, Child, CommandBuilder, MasterPty, PtySize};
 use serde_json::json;
@@ -8,7 +8,7 @@ use std::io::{Read, Write};
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::{Mutex, OnceLock};
-use tauri::{AppHandle, Emitter, Manager};
+use tauri::{AppHandle, Emitter};
 
 struct Term {
     master: Box<dyn MasterPty + Send>,
@@ -21,15 +21,9 @@ fn terms() -> &'static Mutex<HashMap<u32, Term>> {
     T.get_or_init(Default::default)
 }
 
-/// The bundled nvim and its runtime (Resources/nvim), or one installed on the machine.
-fn nvim(app: &AppHandle) -> (PathBuf, Option<PathBuf>) {
-    if let Ok(res) = app.path().resource_dir() {
-        let bin = res.join("nvim/bin").join(crate::platform::exe("nvim"));
-        if bin.exists() {
-            return (bin, Some(res.join("nvim/share/nvim/runtime")));
-        }
-    }
-    (crate::platform::find_tool("nvim"), None)
+/// Neovim as installed on this machine (Homebrew, /usr/local/bin, or the PATH a shell would have).
+fn nvim() -> PathBuf {
+    crate::platform::find_tool("nvim")
 }
 
 /// Starts Neovim on a file (relative to the folder) in a terminal of this size; returns the terminal's id.
@@ -40,7 +34,7 @@ pub fn term_start(app: AppHandle, folder: String, path: Option<String>, line: Op
     }
     static NEXT: AtomicU32 = AtomicU32::new(1);
     let pair = native_pty_system().openpty(PtySize { rows: rows.max(2), cols: cols.max(10), pixel_width: 0, pixel_height: 0 }).map_err(|e| e.to_string())?;
-    let (bin, runtime) = nvim(&app);
+    let bin = nvim();
     let mut cmd = CommandBuilder::new(&bin);
     if let Some(l) = line {
         cmd.arg(format!("+{l}"));
@@ -54,10 +48,9 @@ pub fn term_start(app: AppHandle, folder: String, path: Option<String>, line: Op
     cmd.env("TERM", "xterm-256color");
     cmd.env("COLORTERM", "truecolor");
     cmd.env("LANG", std::env::var("LANG").unwrap_or_else(|_| "en_US.UTF-8".into()));
-    if let Some(rt) = runtime {
-        cmd.env("VIMRUNTIME", rt);
-    }
-    let child = pair.slave.spawn_command(cmd).map_err(|e| format!("Couldn't start Neovim ({}): {e}", bin.display()))?;
+    let child = pair.slave.spawn_command(cmd).map_err(|e| {
+        format!("Couldn't start Neovim ({}). Install it with `brew install neovim` (or from neovim.io), then try again: {e}", bin.display())
+    })?;
     drop(pair.slave);
     let mut reader = pair.master.try_clone_reader().map_err(|e| e.to_string())?;
     let writer = pair.master.take_writer().map_err(|e| e.to_string())?;

@@ -2099,7 +2099,7 @@ export function SwarmPanel({ folder, name, scan, bridge, session, file: openPath
 		window.addEventListener("keydown", on);
 		return () => window.removeEventListener("keydown", on);
 	}, []);
-	// Code navigation (solidity-language-server in the app): ⌘/Ctrl-click goes to the definition; resting on a
+	// Code navigation (`forge lsp` in the app): ⌘/Ctrl-click goes to the definition; resting on a
 	// symbol shows its hover.
 	const [hover, setHover] = useState<{ x: number; y: number; text: string } | null>(null);
 	const hoverTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -3407,7 +3407,7 @@ export function SwarmPanel({ folder, name, scan, bridge, session, file: openPath
 							{file.url ? (
 								<iframe src={file.url} title={file.path} className="h-full w-full border-0" />
 							) : vim && slot ? (
-								// The Mac app runs real Neovim (bundled); the web keeps the light cursor below.
+								// The Mac app runs real Neovim (installed on the machine); the web keeps the light cursor below.
 								<NvimTerminal bridge={bridge} folder={folder} path={file.path} line={markLine} />
 							) : jsonOk && !jsonRaw ? (
 								<JsonTree text={file.text} />

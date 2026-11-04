@@ -105,7 +105,7 @@ formal-ast, Lean and the Code tab:
 | `ast_slice` [added] | `folder, entry, function` | Markdown |
 | `ast_formal` [added] | `folder, entry` | Lean coverage JSON |
 | `ast_scripts` [added] | `folder` | script entries JSON |
-| `lsp_definition` | `folder, path, line, character` | `Location[]` (solidity-language-server; retries a few seconds while it indexes) |
+| `lsp_definition` | `folder, path, line, character` | `Location[]` (`forge lsp --stdio`; retries a few seconds while it indexes) |
 | `lsp_hover` | `folder, path, line, character` | `string \| null` |
 | `lean_open` | `folder, path` | `{text, version, project, toolchain}` |
 | `lean_sync` | `folder, path, text` | new version (i64) |
@@ -536,9 +536,9 @@ Each: **trigger → what happens → observable result**.
   adds the folder with GitHub on and starts the swarm → `{folder, branch, fork, run}`.
 - **B59 Updates.** The webview checks the updater on launch and every 6 h and offers Update (download, install,
   relaunch). Asset names and signature rules in `AGENTS.md` are part of the contract.
-- **B60 Neovim.** `term_start` runs the bundled `Resources/nvim/bin/nvim` (with `VIMRUNTIME`) or one on the machine,
-  in the added folder, `+line path`, in a PTY sized `max(cols,10)`×`max(rows,2)`, `TERM=xterm-256color`,
-  `COLORTERM=truecolor`; ids start at 1; output → `term:data` (base64), end → `term:exit`.
+- **B60 Neovim.** `term_start` runs the `nvim` installed on the machine (Foundry-style tool folders, Homebrew, then
+  PATH; the app no longer bundles one), in the added folder, `+line path`, in a PTY sized `max(cols,10)`×`max(rows,2)`,
+  `TERM=xterm-256color`, `COLORTERM=truecolor`; ids start at 1; output → `term:data` (base64), end → `term:exit`.
 - **B61 Lean pane.** One Lean server per Lake project; `lean_symbols`/`lean_goal` fail with `Buffer changed` when the
   version moved during the request; `lean_save` refuses if the file changed on disk; all servers stop on exit.
 - **B62 Menu.** Settings… (⌘, / Ctrl+,) shows the window and emits `fm:settings`; Quit Formal Mind (⌘Q) is ours (B11).
