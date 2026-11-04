@@ -4,6 +4,7 @@ import type { Bridge, Formal } from "./swarm-panel";
 import { fnStatus } from "./swarm-panel";
 import { useHighlightedCode } from "@/hooks/use-highlighted-code";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
+import { NvimTerminal, type LeanState, type NvimApi } from "./nvim-terminal";
 import { SpecificationCode } from "./specification-code";
 import { useResizable } from "./resize-handle";
 
@@ -79,7 +80,7 @@ function GoalCard({ goal, n, of }: { goal: string; n: number; of: number }) {
  * A Lean file in Code (the Mac app): an editor whose buffer goes to the project's `lake serve`, and beside it what Lean
  * says at the cursor, as its Infoview does: the goals, the file's messages, and the Solidity the theorem there is about.
  */
-export function ProofWorkspace({ folder, path, invoke, onOpenFile, initialLine = 1, formal }: { folder: string; path: string; invoke: Bridge["invoke"]; onOpenFile: (path: string, line?: number) => void; initialLine?: number; /** The last Solidity file's coverage: which of its functions the theorem at the cursor names. */ formal?: Formal | null }) {
+export function ProofWorkspace({ folder, path, invoke, onOpenFile, initialLine = 1, formal, vim = false, bridge }: { folder: string; path: string; invoke: Bridge["invoke"]; onOpenFile: (path: string, line?: number) => void; initialLine?: number; /** The last Solidity file's coverage: which of its functions the theorem at the cursor names. */ formal?: Formal | null; /** Vim mode: Neovim edits the file in place of the textarea; the Infoview stays beside it. */ vim?: boolean; bridge: Bridge }) {
 	const [opened, setOpened] = useState<Opened | null>(null);
 	const [text, setText] = useState("");
 	const [original, setOriginal] = useState("");
@@ -92,14 +93,16 @@ export function ProofWorkspace({ folder, path, invoke, onOpenFile, initialLine =
 	const [generation, setGeneration] = useState(0);
 	const [saving, setSaving] = useState(false);
 	const [savedAt, setSavedAt] = useState(0);
+	const [modified, setModified] = useState(false);
 	const [specs, setSpecs] = useState<Spec[]>([]);
 	const [specCode, setSpecCode] = useState<string | null>(null);
 	const [symbols, setSymbols] = useState<Symbol[]>([]);
 	const editor = useRef<HTMLTextAreaElement>(null);
 	const layer = useRef<HTMLPreElement>(null);
+	const nvim = useRef<NvimApi | null>(null);
 	const highlighted = useHighlightedCode(text, "lean");
 	const jumpTo = useRef<Position | null>({ line: Math.max(0, initialLine - 1), character: 0 });
-	const dirty = opened !== null && text !== original;
+	const dirty = vim ? modified : opened !== null && text !== original;
 	const current = synced?.text === text && state?.version === synced.version && state.diagnosticsVersion === synced.version;
 	const checking = !current || state?.processing === null || (state?.processing?.length ?? 0) > 0;
 	const diagnostics = useMemo(() => (current ? (state?.diagnostics ?? []) : []), [current, state]);
@@ -124,10 +127,12 @@ export function ProofWorkspace({ folder, path, invoke, onOpenFile, initialLine =
 		setGoal(null);
 		setError(null);
 		setSymbols([]);
+		setModified(false);
 		void enqueue(() => invoke<Opened>("lean_open", { folder, path })).then(
 			(data) => {
 				if (!active) return;
-				const draft = readDraft(key(folder, path));
+				// Neovim edits the file on disk; a draft belongs to the textarea and must not replace it.
+				const draft = vim ? null : readDraft(key(folder, path));
 				setOpened(data);
 				setText(draft?.text ?? data.text);
 				setOriginal(draft?.original ?? data.text);
@@ -139,7 +144,7 @@ export function ProofWorkspace({ folder, path, invoke, onOpenFile, initialLine =
 			active = false;
 			void enqueue(() => invoke("lean_close", { folder, path })).catch(() => {});
 		};
-	}, [folder, path, invoke, generation]);
+	}, [folder, path, invoke, generation, vim]);
 	// Edits go to Lean a moment after typing stops, each as the next version of the document.
 	useEffect(() => {
 		if (!opened || synced?.text === text) return;
@@ -213,14 +218,28 @@ export function ProofWorkspace({ folder, path, invoke, onOpenFile, initialLine =
 		};
 	}, [folder, path, opened, synced, checking, invoke]);
 	useEffect(() => {
-		if (opened && jumpTo.current && editor.current) {
+		if (opened && jumpTo.current && (vim || editor.current)) {
 			jump(jumpTo.current);
 			jumpTo.current = null;
 		}
 	}, [opened]);
 
+	/** Neovim's buffer and cursor for this file: where the textarea would be in Vim mode. */
+	function onLeanState(s: LeanState) {
+		const abs = s.path.replace(/\\/g, "/");
+		const rel = path.replace(/\\/g, "/");
+		if (abs !== rel && !abs.endsWith(`/${rel}`)) return;
+		setText((current) => (current === s.text ? current : s.text));
+		setModified(s.modified);
+		setPosition((p) => (p.line === s.line && p.character === s.character ? p : { line: s.line, character: s.character }));
+	}
+
 	function jump(p: Position) {
 		setPosition(p);
+		if (vim) {
+			nvim.current?.jump(p.line, p.character);
+			return;
+		}
 		const el = editor.current;
 		if (!el) return;
 		const offset = positionOffset(el.value, p);
@@ -337,65 +356,76 @@ export function ProofWorkspace({ folder, path, invoke, onOpenFile, initialLine =
 							</DropdownMenuContent>
 						</DropdownMenu>
 					) : null}
-					<button type="button" className={tool} disabled={!dirty || saving} onClick={() => void save()} title="Save (⌘S)">
-						<Save className="size-3" />
-						{saving ? "Saving" : "Save"}
-					</button>
-					<button type="button" className={tool} disabled={!dirty || saving} onClick={revert} title="Discard the draft and read the file again">
-						<Undo2 className="size-3" />
-						Revert
-					</button>
+					{!vim ? (
+						<>
+							<button type="button" className={tool} disabled={!dirty || saving} onClick={() => void save()} title="Save (⌘S)">
+								<Save className="size-3" />
+								{saving ? "Saving" : "Save"}
+							</button>
+							<button type="button" className={tool} disabled={!dirty || saving} onClick={revert} title="Discard the draft and read the file again">
+								<Undo2 className="size-3" />
+								Revert
+							</button>
+						</>
+					) : null}
 					<button type="button" className={tool} disabled={saving} onClick={() => void restart()} title={`Restart Lean${opened?.toolchain ? ` (${opened.toolchain.replace("leanprover/lean4:", "Lean ")})` : ""}`}>
 						<RotateCw className="size-3" />
 					</button>
 				</span>
 			</div>
 			<div className="flex min-h-0 flex-1">
-				{/* The editor: a textarea over the highlighted text, both on FileView's metrics (24px lines, numbers in 3rem). */}
+				{/* The editor: Neovim in Vim mode, else a textarea over the highlighted text, both on FileView's metrics
+				    (24px lines, numbers in 3rem). */}
 				<div className="relative min-w-0 flex-1 overflow-hidden">
-					<pre ref={layer} aria-hidden className="pointer-events-none absolute inset-0 m-0 overflow-hidden whitespace-pre py-2 font-mono text-[12.5px] leading-6" style={{ tabSize: 4 }}>
-						{lines.map((_, i) => (
-							<span key={i} className={`relative block pr-3 ${i === position.line ? "bg-muted/60" : ""}`}>
-								<span className={`mr-3 inline-block w-9 select-none text-right ${byLine.has(i) ? (byLine.get(i)!.some((d) => d.severity === 1) ? "text-red-600" : "text-amber-600") : "text-muted-foreground/60"}`}>{i + 1}</span>
-								<span>{highlighted[i] || " "}</span>
-								{byLine.get(i)?.map((d, k) => {
-									const end = d.range.end.line === i ? d.range.end.character : lines[i].length;
-									return <span key={k} className={`absolute top-[calc(1lh-3px)] h-[3px] ${d.severity === 1 ? "fm-squiggle-error" : "fm-squiggle-warning"}`} style={{ left: `calc(3rem + ${d.range.start.character}ch)`, width: `${Math.max(1, end - d.range.start.character)}ch` }} />;
-								})}
-							</span>
-						))}
-					</pre>
-					<textarea
-						ref={editor}
-						aria-label={`Edit ${path}`}
-						disabled={!opened || saving}
-						value={text}
-						spellCheck={false}
-						wrap="off"
-						className="absolute inset-0 h-full w-full resize-none bg-transparent py-2 pl-12 pr-3 font-mono text-[12.5px] leading-6 text-transparent caret-foreground outline-none selection:bg-sky-500/25"
-						style={{ tabSize: 4 }}
-						autoCapitalize="off"
-						autoCorrect="off"
-						onScroll={(e) => {
-							if (layer.current) {
-								layer.current.scrollTop = e.currentTarget.scrollTop;
-								layer.current.scrollLeft = e.currentTarget.scrollLeft;
-							}
-						}}
-						onChange={(e) => {
-							setText(e.target.value);
-							writeDraft(key(folder, path), e.target.value === original ? null : { text: e.target.value, original });
-							setPosition(cursorPosition(e.target.value, e.target.selectionStart));
-						}}
-						onSelect={(e) => setPosition(cursorPosition(e.currentTarget.value, e.currentTarget.selectionStart))}
-						onKeyDown={(e) => {
-							if ((e.metaKey || e.ctrlKey) && e.key === "s") {
-								e.preventDefault();
-								if (!saving && dirty) void save();
-							}
-						}}
-					/>
-					{!opened && !error ? <p className="absolute inset-x-0 top-10 text-center text-[12px] text-muted-foreground">Starting the project's Lean server and loading its imports…</p> : null}
+					{vim ? (
+						<NvimTerminal bridge={bridge} folder={folder} path={path} line={initialLine} onLean={onLeanState} apiRef={nvim} />
+					) : (
+						<>
+							<pre ref={layer} aria-hidden className="pointer-events-none absolute inset-0 m-0 overflow-hidden whitespace-pre py-2 font-mono text-[12.5px] leading-6" style={{ tabSize: 4 }}>
+								{lines.map((_, i) => (
+									<span key={i} className={`relative block pr-3 ${i === position.line ? "bg-muted/60" : ""}`}>
+										<span className={`mr-3 inline-block w-9 select-none text-right ${byLine.has(i) ? (byLine.get(i)!.some((d) => d.severity === 1) ? "text-red-600" : "text-amber-600") : "text-muted-foreground/60"}`}>{i + 1}</span>
+										<span>{highlighted[i] || " "}</span>
+										{byLine.get(i)?.map((d, k) => {
+											const end = d.range.end.line === i ? d.range.end.character : lines[i].length;
+											return <span key={k} className={`absolute top-[calc(1lh-3px)] h-[3px] ${d.severity === 1 ? "fm-squiggle-error" : "fm-squiggle-warning"}`} style={{ left: `calc(3rem + ${d.range.start.character}ch)`, width: `${Math.max(1, end - d.range.start.character)}ch` }} />;
+										})}
+									</span>
+								))}
+							</pre>
+							<textarea
+								ref={editor}
+								aria-label={`Edit ${path}`}
+								disabled={!opened || saving}
+								value={text}
+								spellCheck={false}
+								wrap="off"
+								className="absolute inset-0 h-full w-full resize-none bg-transparent py-2 pl-12 pr-3 font-mono text-[12.5px] leading-6 text-transparent caret-foreground outline-none selection:bg-sky-500/25"
+								style={{ tabSize: 4 }}
+								autoCapitalize="off"
+								autoCorrect="off"
+								onScroll={(e) => {
+									if (layer.current) {
+										layer.current.scrollTop = e.currentTarget.scrollTop;
+										layer.current.scrollLeft = e.currentTarget.scrollLeft;
+									}
+								}}
+								onChange={(e) => {
+									setText(e.target.value);
+									writeDraft(key(folder, path), e.target.value === original ? null : { text: e.target.value, original });
+									setPosition(cursorPosition(e.target.value, e.target.selectionStart));
+								}}
+								onSelect={(e) => setPosition(cursorPosition(e.currentTarget.value, e.currentTarget.selectionStart))}
+								onKeyDown={(e) => {
+									if ((e.metaKey || e.ctrlKey) && e.key === "s") {
+										e.preventDefault();
+										if (!saving && dirty) void save();
+									}
+								}}
+							/>
+							{!opened && !error ? <p className="absolute inset-x-0 top-10 text-center text-[12px] text-muted-foreground">Starting the project's Lean server and loading its imports…</p> : null}
+						</>
+					)}
 				</div>
 				<aside aria-label="Lean infoview" style={{ width: infoview.size }} className="relative flex max-w-[70%] shrink-0 flex-col border-l bg-background text-[12px]">
 					{infoview.handle}
@@ -427,7 +457,7 @@ export function ProofWorkspace({ folder, path, invoke, onOpenFile, initialLine =
 					) : null}
 					<p className={section}>{goals ? `Goals · ${goals.length}` : goal?.term ? "Expected type" : "Goals"}</p>
 					{goalError ? <p className="px-3 text-[11px] text-muted-foreground">{goalError}</p> : null}
-					{goals ? goals.length ? goals.map((g, i) => <GoalCard key={i} goal={g} n={i + 1} of={goals.length} />) : <p className="px-3 text-emerald-700 dark:text-emerald-400">No goals left here.</p> : null}
+					{goals ? goals.length ? goals.map((g, i) => <GoalCard key={i} goal={g} n={i + 1} of={goals.length} />) : <p className="px-3 text-emerald-700 dark:text-emerald-400">🎉 No goals left here.</p> : null}
 					{!goals && goal?.term ? <GoalCard goal={goal.term.goal} n={1} of={1} /> : null}
 					{!goals && !goal?.term && !goalError ? <p className="px-3 text-muted-foreground">{opened ? "Put the cursor inside a proof to see its goals." : "Waiting for Lean."}</p> : null}
 					<p className={section}>Messages · {checking ? "…" : diagnostics.length}</p>

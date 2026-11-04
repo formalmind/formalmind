@@ -3355,11 +3355,14 @@ export function SwarmPanel({ folder, name, scan, bridge, session, file: openPath
 									type="button"
 									onClick={() => {
 										setVimMode(!vim);
-										// Vim edits Lean in Neovim, so the Lean editor steps aside.
-										if (!vim && leanEditor) setProofsOn(false);
+										// Vim edits Lean in Neovim; keep Lean's goals beside it.
+										if (!vim && isTauri() && file?.path.endsWith(".lean")) {
+											store.set("fm:proofs", "1");
+											setProofsOn(true);
+										}
 									}}
 									aria-pressed={vim}
-									title={vim ? (slot ? "Vim mode is on: Neovim runs here. Turn it off" : "Vim keys are on. Turn them off") : slot ? "Open in Neovim (Vim mode)" : "Vim keys"}
+									title={vim ? (slot ? (proofsOn && file?.path.endsWith(".lean") ? "Vim mode is on: Neovim runs here, with Lean's goals beside it. Turn it off" : "Vim mode is on: Neovim runs here. Turn it off") : "Vim keys are on. Turn them off") : slot ? "Open in Neovim (Vim mode)" : "Vim keys"}
 									className={`inline-flex h-6 items-center rounded-md px-1.5 font-mono text-[11px] font-medium ${vim ? "bg-emerald-500/15 text-emerald-700 dark:text-emerald-400" : "text-muted-foreground hover:bg-muted hover:text-foreground"}`}
 								>
 									vim
@@ -3372,7 +3375,7 @@ export function SwarmPanel({ folder, name, scan, bridge, session, file: openPath
 											setProofsOn(!proofsOn);
 										}}
 										aria-pressed={proofsOn}
-										title={file.path.endsWith(".lean") ? (proofsOn ? "Lean editor with live goals is on. Show the plain file" : "Edit with Lean: live goals and messages") : proofsOn ? "Hide the Proofs rail" : "Show which functions are proved"}
+										title={file.path.endsWith(".lean") ? (proofsOn ? (vim ? "Neovim with live goals is on. Show the plain file" : "Lean editor with live goals is on. Show the plain file") : vim ? "Show Lean's goals beside Neovim" : "Edit with Lean: live goals and messages") : proofsOn ? "Hide the Proofs rail" : "Show which functions are proved"}
 										className={`inline-flex h-6 items-center gap-1 rounded-md px-1.5 text-[11px] font-medium ${proofsOn ? "bg-emerald-500/15 text-emerald-700 dark:text-emerald-400" : "text-muted-foreground hover:bg-muted hover:text-foreground"}`}
 									>
 										<ScanSearch className="size-3" />
@@ -3382,7 +3385,7 @@ export function SwarmPanel({ folder, name, scan, bridge, session, file: openPath
 								<CopyButton text={file.text} label="Copy the file" />
 							</span>
 						</div>
-						{leanEditor ? <ProofWorkspace key={`${folder}:${file.path}:${markLine ?? ""}`} folder={folder} path={file.path} invoke={invoke} initialLine={markLine ?? 1} onOpenFile={view} formal={lastFormal} /> : <div className="flex min-h-0 flex-1">
+						{leanEditor ? <ProofWorkspace key={vim ? `${folder}:${file.path}` : `${folder}:${file.path}:${markLine ?? ""}`} folder={folder} path={file.path} invoke={invoke} initialLine={markLine ?? 1} onOpenFile={view} formal={lastFormal} vim={vim} bridge={bridge} /> : <div className="flex min-h-0 flex-1">
 						<div
 							className={`min-w-0 min-h-0 flex-1 overflow-auto ${navigable(file.path) ? "[&_[data-code]]:cursor-text" : ""}`}
 							ref={codeBox}

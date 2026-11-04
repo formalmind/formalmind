@@ -1,19 +1,44 @@
 import { useEffect, useRef } from "react";
+import type { MutableRefObject } from "react";
 import { Terminal } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
 import "@xterm/xterm/css/xterm.css";
 import type { Bridge } from "./swarm-panel";
 import { reportError } from "@/lib/report-error";
 
+/** What Neovim says about a Lean buffer (src-tauri/src/term.rs writes it from the terminal's Lua setup). */
+export type LeanState = {
+	id: number;
+	/** The buffer's absolute path. */
+	path: string;
+	/** 0-based line and UTF-16 character, as the Lean server counts them. */
+	line: number;
+	character: number;
+	/** The same place as a 0-based byte column, as Neovim counts it. */
+	byte: number;
+	tick: number;
+	modified: boolean;
+	text: string;
+};
+
+/** The app's handle on a running terminal: open another file, or move the cursor from a goal or a message. */
+export type NvimApi = {
+	open: (path: string, line: number | null) => void;
+	jump: (line: number, character: number) => void;
+	focus: () => void;
+};
+
 /**
  * Vim mode in the Mac app: Neovim (installed on the machine) in a real terminal (a pseudo-terminal in
  * src-tauri/src/term.rs, drawn by xterm.js), so it looks and behaves exactly as in your own terminal — colours, cursor,
  * plugins, LSP. Opening another file sends `:edit`; when Neovim exits, any key starts it again.
  */
-export function NvimTerminal({ bridge, folder, path, line }: { bridge: Bridge; folder: string; path: string; line: number | null }) {
+export function NvimTerminal({ bridge, folder, path, line, onLean, apiRef }: { bridge: Bridge; folder: string; path: string; line: number | null; /** A Lean buffer's cursor and text, for the Infoview beside the terminal. */ onLean?: (state: LeanState) => void; /** The app's handle on the running terminal (jump from a goal or a message). */ apiRef?: MutableRefObject<NvimApi | null> }) {
 	const box = useRef<HTMLDivElement | null>(null);
-	const api = useRef<{ open: (path: string, line: number | null) => void } | null>(null);
+	const api = useRef<NvimApi | null>(null);
 	const first = useRef({ path, line });
+	const onLeanRef = useRef(onLean);
+	onLeanRef.current = onLean;
 
 	useEffect(() => {
 		const el = box.current;
@@ -55,12 +80,18 @@ export function NvimTerminal({ bridge, folder, path, line }: { bridge: Bridge; f
 			term.write(`\x1b[2m${what}Press any key to open Neovim${name ? ` on ${name}` : ""}.\x1b[0m`);
 		};
 		const decode = (b64: string) => Uint8Array.from(atob(b64), (c) => c.charCodeAt(0));
+		// Neovim's first Lean snapshot can beat the id term_start returns; keep it until the id is known.
+		let early: LeanState | null = null;
 		const start = (p: string | null, l: number | null) => {
 			ended = false;
 			void bridge.invoke<number>("term_start", { folder, path: p, line: l, cols: term.cols, rows: term.rows }).then(
 				(n) => {
 					if (disposed) void bridge.invoke("term_kill", { id: n });
-					else id = n;
+					else {
+						id = n;
+						if (early?.id === n) onLeanRef.current?.(early);
+						early = null;
+					}
 				},
 				(e) => {
 					term.write(`\r\n\x1b[31m${String(e)}\x1b[0m\r\n`);
@@ -77,6 +108,11 @@ export function NvimTerminal({ bridge, folder, path, line }: { bridge: Bridge; f
 			ended = true;
 			term.write("\r\n");
 			prompt("Neovim exited. ");
+		});
+		// A Lean buffer's cursor and text, for the Infoview beside the terminal.
+		const offLean = bridge.listen<LeanState>("term:lean", ({ payload }) => {
+			if (id === null) early = payload;
+			else if (payload.id === id) onLeanRef.current?.(payload);
 		});
 		const input = term.onData((data) => {
 			if (ended) {
@@ -95,6 +131,8 @@ export function NvimTerminal({ bridge, folder, path, line }: { bridge: Bridge; f
 
 		api.current = {
 			open: (p, l) => {
+				// The same file at another line: move the cursor, don't reload the buffer (it may be modified).
+				const same = first.current.path === p;
 				first.current = { path: p, line: l };
 				if (id === null) {
 					// Still waiting for a key: the prompt names the new file.
@@ -104,26 +142,51 @@ export function NvimTerminal({ bridge, folder, path, line }: { bridge: Bridge; f
 					}
 					return;
 				}
+				if (same) {
+					api.current?.jump((l ?? 1) - 1, 0);
+					return;
+				}
 				// Ctrl-\ Ctrl-N reaches normal mode from any mode (a bare Escape before ":" can read as Alt-:).
 				const arg = p.replace(/([ \\%#|"])/g, "\\$1");
 				void bridge.invoke("term_write", { id, data: `\x1c\x0e:edit ${l ? `+${l} ` : ""}${arg}\r` }).catch(() => undefined);
 			},
+			// A diagnostic or declaration picked in the Infoview: move Neovim's cursor there (Lean counts UTF-16
+			// characters, Neovim bytes, so the conversion happens in Neovim).
+			jump: (l, c) => {
+				first.current = { ...first.current, line: l + 1 };
+				term.focus();
+				if (id === null) return;
+				const data = `\x1c\x0e:lua local l,c=${Math.max(0, l)},${Math.max(0, c)}; local ok,b=pcall(vim.str_byteindex, vim.api.nvim_get_current_line(), c, true); vim.api.nvim_win_set_cursor(0,{l+1, ok and b or c}); vim.cmd("normal! zz")\r`;
+				void bridge.invoke("term_write", { id, data }).catch(() => undefined);
+			},
+			focus: () => term.focus(),
 		};
+		if (apiRef) apiRef.current = api.current;
+		// ⌘S belongs to the app, so xterm never sees it: save Neovim's buffer here instead.
+		const save = (e: KeyboardEvent) => {
+			if (!(e.metaKey || e.ctrlKey) || e.key.toLowerCase() !== "s" || !el.contains(document.activeElement)) return;
+			e.preventDefault();
+			if (id !== null) void bridge.invoke("term_write", { id, data: "\x1c\x0e:w\r" }).catch(() => undefined);
+		};
+		window.addEventListener("keydown", save);
 		prompt("");
 		term.focus();
 
 		return () => {
 			disposed = true;
+			if (apiRef?.current === api.current) apiRef.current = null;
 			api.current = null;
+			window.removeEventListener("keydown", save);
 			ro.disconnect();
 			input.dispose();
 			resize.dispose();
 			void offData.then((f) => f());
 			void offExit.then((f) => f());
+			void offLean.then((f) => f());
 			if (id !== null) void bridge.invoke("term_kill", { id });
 			term.dispose();
 		};
-	}, [bridge, folder]);
+	}, [bridge, folder, apiRef]);
 
 	// A file picked in the sidebar (or a link) opens in the running Neovim.
 	useEffect(() => {
