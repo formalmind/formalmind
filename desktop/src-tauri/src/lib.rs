@@ -2,6 +2,8 @@
 //! Today that's the sign-in token in the OS keychain, the formalmind:// deep link, and local folders
 //! with settings in ~/.formalmind (local.rs), and the local executor that runs agent turns here (executor.rs).
 
+mod agent;
+mod swarm2;
 mod analysis;
 mod answerer;
 mod ast;
@@ -10,12 +12,10 @@ mod codex;
 mod skills;
 mod control;
 mod diagnose;
-mod executor;
 mod file_search;
 #[cfg(test)]
 mod fuzz;
 mod health;
-mod ledger;
 mod swarm;
 mod swarm_ctx;
 mod local;
@@ -26,7 +26,6 @@ mod platform;
 mod publish;
 mod relay;
 mod statements;
-mod semantics;
 mod term;
 
 use keyring::Entry;
@@ -68,7 +67,7 @@ fn token_clear() -> Result<(), String> {
 /// The window back on screen (the Dock icon, a second launch, or a deep link), and the app back in the Dock if ⌘Q had
 /// sent it to work in the background.
 fn show(app: &AppHandle) {
-    if swarm::QUIT_WHEN_DONE.swap(false, std::sync::atomic::Ordering::SeqCst) {
+    if swarm::engine(app).quit_when_done.swap(false, std::sync::atomic::Ordering::SeqCst) {
         #[cfg(target_os = "macos")]
         let _ = app.set_activation_policy(tauri::ActivationPolicy::Regular);
     }
@@ -85,7 +84,7 @@ fn quit(app: &AppHandle) {
     if !swarm::any_running(app) {
         return app.exit(0);
     }
-    swarm::QUIT_WHEN_DONE.store(true, std::sync::atomic::Ordering::SeqCst);
+    swarm::engine(app).quit_when_done.store(true, std::sync::atomic::Ordering::SeqCst);
     if let Some(window) = app.get_webview_window("main") {
         let _ = window.hide();
     }
@@ -134,8 +133,9 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_process::init())
-        .manage(swarm::Swarms::default())
         .setup(|app| {
+            // The swarm's sessions (swarm2's Engine): every command, the control API and the relay share it.
+            app.manage::<swarm::Swarms>(swarm2::session::Engine::live(app.handle().clone()));
             // The relay (agents through the MCP) runs in the backend, whatever the window is doing.
             relay::start(app.handle());
             // Installed builds register formalmind:// from tauri.conf.json; this covers `tauri dev` on Windows/Linux.
@@ -145,19 +145,8 @@ pub fn run() {
             // Swarm page's Start does (FM_SWARM_BUDGET, FM_SWARM_MODEL, FM_SWARM_PROVIDER, FM_SWARM_GOAL,
             // FM_SWARM_SESSION), so a run can be driven without clicking.
             #[cfg(debug_assertions)]
-            if let Ok(folder) = std::env::var("FM_SWARM_AUTOSTART") {
-                let env = |k: &str| std::env::var(k).ok().filter(|v| !v.is_empty());
-                let request = swarm::SwarmRequest {
-                    folder,
-                    goal: env("FM_SWARM_GOAL"),
-                    budget_usd: env("FM_SWARM_BUDGET").and_then(|v| v.parse().ok()).unwrap_or(10.0),
-                    api_base: env("FM_API_BASE").unwrap_or_else(|| "https://formal.team".into()),
-                    provider: env("FM_SWARM_PROVIDER"),
-                    model: env("FM_SWARM_MODEL"),
-                    session: env("FM_SWARM_SESSION"),
-                    only_queued: env("FM_SWARM_ONLY_QUEUED").map(|v| v == "1"),
-                };
-                if let Err(e) = swarm::swarm_start(app.handle().clone(), app.state::<swarm::Swarms>(), request) {
+            if let Some(request) = swarm::autostart_request(|k| std::env::var(k).ok()) {
+                if let Err(e) = swarm::engine(app.handle()).start(request) {
                     eprintln!("FM_SWARM_AUTOSTART: {e}");
                 }
             }
@@ -165,6 +154,8 @@ pub fn run() {
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
+            agent::agent_start,
+            agent::agent_stop,
             token_get,
             token_set,
             token_clear,
@@ -181,8 +172,6 @@ pub fn run() {
             ast::ast_slice,
             ast::ast_formal,
             ast::ast_scripts,
-            semantics::semantics_run,
-            semantics::semantics_status,
             lsp::lsp_definition,
             lsp::lsp_hover,
             lean_lsp::lean_open,
@@ -210,7 +199,7 @@ pub fn run() {
             swarm::swarm_work_map,
             swarm::swarm_brief,
             swarm::swarm_check_proof,
-            swarm::swarm_submit_proof, swarm::swarm_refresh_model, health::swarm_health, ledger::swarm_ledger,
+            swarm::swarm_submit_proof, swarm::swarm_refresh_model, health::swarm_health, swarm::swarm_ledger,
             swarm::swarm_suggest,
             swarm::swarm_plan,
             swarm::swarm_bugs,
@@ -254,4 +243,31 @@ pub fn run() {
             tauri::RunEvent::Exit => lean_lsp::shutdown_all(),
             _ => {}
         });
+}
+
+#[cfg(test)]
+mod tests {
+    /// Every command in SPEC.md §1.1 is still registered in `generate_handler!` (by the same name).
+    #[test]
+    fn every_spec_command_is_registered() {
+        let spec = include_str!("../../SPEC.md");
+        let section = &spec[spec.find("### 1.1 Tauri commands").unwrap()..spec.find("### 1.2 Events").unwrap()];
+        let commands: Vec<&str> = section
+            .lines()
+            .filter_map(|l| l.strip_prefix("| `")?.split('`').next())
+            .collect();
+        assert_eq!(commands.len(), 75, "{commands:?}");
+        let src = include_str!("lib.rs");
+        let handler = &src[src.find("generate_handler![").unwrap()..];
+        let handler = &handler[..handler.find("])").unwrap()];
+        let registered: Vec<&str> = handler
+            .trim_start_matches("generate_handler![")
+            .split(',')
+            .map(|p| p.trim().rsplit("::").next().unwrap())
+            .filter(|n| !n.is_empty())
+            .collect();
+        for c in &commands {
+            assert!(registered.contains(c), "{c} isn't registered");
+        }
+    }
 }

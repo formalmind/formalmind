@@ -4,9 +4,9 @@
 //! a run starts; whoever asks only says what they want.
 
 use crate::local;
-use crate::swarm::{self, SwarmRequest, Swarms};
+use crate::swarm::{self, SwarmRequest};
 use serde_json::{json, Value};
-use tauri::{AppHandle, Manager};
+use tauri::AppHandle;
 
 /// What only the running app can do: run and steer sessions (they live in its process).
 /// The app implements it; tests use a fake that records what was asked, so every operation can be tested without a
@@ -17,23 +17,33 @@ pub trait Engine: Send + Sync {
     fn stop(&self, folder: &str, run: &str);
     fn say(&self, folder: &str, run: &str, text: &str) -> Result<(), String>;
     fn set_budget(&self, folder: &str, run: &str, usd: f64) -> Result<(), String>;
+    /// B21: a report queued for triage. The queue is on disk, so tests use the Engine's own.
+    fn triage(&self, folder: &str, path: &str, run: Option<&str>) -> Result<(), String>;
+    /// B22: a proof queued for review.
+    fn submit_proof(&self, folder: &str, function: &str, path: &str, notes: Option<&str>, run: Option<&str>) -> Result<Value, String>;
 }
 
 impl Engine for AppHandle {
     fn running(&self, folder: &str) -> Vec<String> {
-        swarm::swarm_running(self.state::<Swarms>(), folder.to_string())
+        swarm::engine(self).running(folder)
     }
     fn start(&self, request: SwarmRequest) -> Result<String, String> {
-        swarm::swarm_start(self.clone(), self.state::<Swarms>(), request)
+        swarm::engine(self).start(request)
     }
     fn stop(&self, folder: &str, run: &str) {
-        swarm::swarm_stop(self.state::<Swarms>(), folder.to_string(), run.to_string())
+        swarm::engine(self).stop(folder, run)
     }
     fn say(&self, folder: &str, run: &str, text: &str) -> Result<(), String> {
-        swarm::swarm_say(self.clone(), self.state::<Swarms>(), folder.to_string(), run.to_string(), text.to_string())
+        swarm::engine(self).say(folder, run, text)
     }
     fn set_budget(&self, folder: &str, run: &str, usd: f64) -> Result<(), String> {
-        swarm::swarm_set_budget(self.state::<Swarms>(), folder.to_string(), run.to_string(), usd)
+        swarm::engine(self).set_budget(folder, run, usd)
+    }
+    fn triage(&self, folder: &str, path: &str, run: Option<&str>) -> Result<(), String> {
+        swarm::engine(self).triage(folder, path, run)
+    }
+    fn submit_proof(&self, folder: &str, function: &str, path: &str, notes: Option<&str>, run: Option<&str>) -> Result<Value, String> {
+        swarm::engine(self).submit_proof(folder, function, path, notes, run)
     }
 }
 
@@ -119,6 +129,9 @@ pub fn work_queued<E: Engine + ?Sized>(app: &E, folder: &str) -> Result<Vec<Stri
     Ok(vec![start(app, folder, None, None, true, None)?])
 }
 
+/// Sessions listed per folder by `folders` (plus any running one without a log yet).
+pub const MAX_LISTED: usize = 12;
+
 /// The added folders and their sessions, newest first, with the ones running now marked.
 pub fn folders<E: Engine + ?Sized>(app: &E) -> Result<Value, String> {
     let config = local::read()?;
@@ -127,7 +140,7 @@ pub fn folders<E: Engine + ?Sized>(app: &E) -> Result<Value, String> {
         let sessions = swarm::swarm_sessions(path.clone()).unwrap_or_default();
         let running = app.running(&path);
         let repo = local::folder_repo(path.clone()).ok().flatten();
-        let mut listed: Vec<Value> = sessions.iter().take(12).map(|s| {
+        let mut listed: Vec<Value> = sessions.iter().take(MAX_LISTED).map(|s| {
             let mut v = serde_json::to_value(s).unwrap_or(json!({}));
             v["running"] = json!(running.iter().any(|r| Some(r.as_str()) == v["run"].as_str()));
             v
@@ -233,7 +246,7 @@ pub async fn dispatch<E: Engine + ?Sized>(app: &E, op: &str, folder: &str, a: &V
         "slice" => crate::ast::ast_slice(folder, need("entry")?, need("function")?).await.map(Value::String),
         "work_map" => swarm::swarm_work_map(folder),
         "brief" => swarm::swarm_brief(folder, need("function")?).map(Value::String),
-        "ledger" => crate::ledger::build(std::path::Path::new(&folder), a["check"].as_bool().unwrap_or(true), a["force"].as_bool().unwrap_or(false)).await,
+        "ledger" => swarm::ledger(std::path::Path::new(&folder), a["check"].as_bool().unwrap_or(true), a["force"].as_bool().unwrap_or(false)).await,
         "start" => {
             // With answer_only, the session answers its message (and what that queues) and stops.
             let run = start(app, &folder, opt("goal"), opt("run"), a["answer_only"].as_bool().unwrap_or(false), usd("budget"))?;
@@ -289,7 +302,7 @@ pub async fn dispatch<E: Engine + ?Sized>(app: &E, op: &str, folder: &str, a: &V
         "skill_add" => crate::skills::skills_add(need("id")?).await.map(|_| Value::Null),
         "skill_remove" => json_of(crate::skills::skills_remove(need("id")?)),
         "triage" => {
-            swarm::swarm_triage(folder.clone(), need("path")?, opt("run"))?;
+            app.triage(&folder, &need("path")?, opt("run").as_deref())?;
             Ok(json!({ "running": work_queued(app, &folder)? }))
         }
         "github" => {
@@ -300,7 +313,7 @@ pub async fn dispatch<E: Engine + ?Sized>(app: &E, op: &str, folder: &str, a: &V
         "refresh_model" => json_of(swarm::swarm_refresh_model(folder)).map(|r| json!({ "regenerated": r })),
         "check_proof" => swarm::swarm_check_proof(folder, need("path")?, opt("content")).await,
         "submit_proof" => {
-            let queued = swarm::swarm_submit_proof(folder.clone(), need("function")?, need("path")?, opt("notes"), opt("run"))?;
+            let queued = app.submit_proof(&folder, &need("function")?, &need("path")?, opt("notes").as_deref(), opt("run").as_deref())?;
             Ok(json!({ "queued": queued, "running": work_queued(app, &folder)? }))
         }
         _ => Err(format!("unknown op {op}")),
@@ -372,6 +385,13 @@ mod ops {
         fn set_budget(&self, _folder: &str, run: &str, usd: f64) -> Result<(), String> {
             self.calls.lock().unwrap().push(format!("budget {run} {usd}"));
             Ok(())
+        }
+        // The queue is the Engine's own: the same files, after the same folder guard.
+        fn triage(&self, folder: &str, path: &str, run: Option<&str>) -> Result<(), String> {
+            crate::swarm2::session::queue_triage(folder, path, run)
+        }
+        fn submit_proof(&self, folder: &str, function: &str, path: &str, notes: Option<&str>, run: Option<&str>) -> Result<Value, String> {
+            crate::swarm2::session::queue_review(folder, function, path, notes, run)
         }
     }
 

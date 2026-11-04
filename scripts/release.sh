@@ -43,7 +43,7 @@ fi
 echo "release: building $TAG"
 # A mounted Formal Mind image (or one left from a failed build) makes the .dmg step fail with "Resource busy".
 for v in /Volumes/dmg.* "/Volumes/Formal Mind"; do [ -d "$v" ] && diskutil eject force "$v" >/dev/null 2>&1 || true; done
-# One universal app for Apple Silicon and Intel Macs (the bundled Neovim is made universal by fetch-nvim.sh).
+# One universal app for Apple Silicon and Intel Macs.
 rustup target add aarch64-apple-darwin x86_64-apple-darwin >/dev/null
 (cd desktop && PATH="$PWD/../scripts/shims:$PATH" TAURI_SIGNING_PRIVATE_KEY="$(cat "$KEY")" TAURI_SIGNING_PRIVATE_KEY_PASSWORD="" bunx tauri build --target universal-apple-darwin)
 

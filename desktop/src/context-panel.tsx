@@ -69,7 +69,7 @@ export function ContextBody({ role, color, use, onCompact, rows: showRows = true
 					{rows.map((r) => (
 						<li key={r.label} className="flex items-center gap-2 tabular-nums">
 							<span className={`size-2.5 shrink-0 rounded-sm ${r.swatch}`} />
-							<span className="flex-1 truncate text-foreground">{r.label}</span>
+							<span className="min-w-0 flex-1 leading-tight text-foreground [overflow-wrap:anywhere]">{r.label}</span>
 							<span className="text-muted-foreground" title={use.estimated && r.label !== "Compaction buffer" && r.label !== "Free space" ? "Estimated from the text: Claude Code and Codex report only the total" : undefined}>
 								{use.estimated && ["System prompt", "Tools", "Task", "Messages"].includes(r.label) ? "≈" : ""}
 								{tokens(r.n)}

@@ -86,7 +86,7 @@ impl Settings {
 impl Config {
     /// Whether the app may read this folder: one you added, or the folder an imported repository is cloned (mapped) to.
     pub fn allows(&self, path: &str) -> bool {
-        self.folders.iter().any(|f| f == path) || self.repos.values().any(|f| f == path)
+        self.folders.iter().any(|f| f == path) || self.repos.values().any(|f| f == path) || is_project(path)
     }
 }
 
@@ -94,6 +94,11 @@ impl Config {
 thread_local! {
     /// A test's own ~/.formalmind, so tests never read or write the real one (per thread: tests run in parallel).
     pub static TEST_HOME: std::cell::RefCell<Option<PathBuf>> = const { std::cell::RefCell::new(None) };
+}
+
+/// The new version's one project, the copy of Formal Mind in ~/.formalmind/formalmind: always open, never listed.
+pub fn is_project(path: &str) -> bool {
+    home().map(|h| h.join("formalmind")).is_ok_and(|p| std::path::Path::new(path) == p)
 }
 
 /// ~/.formalmind (or %USERPROFILE%\.formalmind on Windows).
@@ -282,6 +287,15 @@ pub fn folder_tree(path: String) -> Result<Tree, String> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn b64_the_project_copy_is_always_allowed() {
+        let dir = std::env::temp_dir().join(format!("fm-home-{}", std::process::id()));
+        super::TEST_HOME.with(|h| *h.borrow_mut() = Some(dir.clone()));
+        let config = super::Config::default();
+        assert!(config.allows(&dir.join("formalmind").to_string_lossy()));
+        assert!(!config.allows(&dir.join("other").to_string_lossy()));
+    }
+
     use super::*;
 
     #[test]

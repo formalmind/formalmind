@@ -16,7 +16,8 @@ export { ROLE_COLORS };
  * rules in the proofs repository's `.github/formalmind/README.md`.
  */
 
-const W = 1200;
+/** The board's width: the default lanes fit it; wider lanes (dragged by the viewer) widen it. */
+let W = 1200;
 /** A finished run stays on the board this long before the replay takes over again. */
 export const LIVE_WINDOW_MS = 10 * 60_000;
 
@@ -60,20 +61,31 @@ export const LABEL_STYLES: Record<string, string> = {
 	README: "bg-muted text-muted-foreground",
 };
 
-const LANE_W = 176;
 const LANE_GAP = 16;
 const PAD = 24;
+/** A lane's width, and the card's inside it: the default, or what the viewer dragged a lane's edge to (kept per
+ * viewer, `fm:canvas-lane-w`). Module-wide, as the board's geometry is; the board sets it before each render. */
+const LANE_W0 = 176;
+let LANE_W = LANE_W0;
+let CARD_W = LANE_W - 16;
+const LANE_KEY = "fm:canvas-lane-w";
+function setLaneWidth(w: number) {
+	LANE_W = w;
+	CARD_W = w - 16;
+	W = Math.max(1200, PAD * 2 + LANES.length * w + (LANES.length - 1) * LANE_GAP);
+}
 const LANE_TOP = 64;
 const LANE_BOTTOM = 400;
 const CARD_TOP = 100;
 const CARD_MIN_H = 78;
 const CARD_GAP = 10;
-const CARD_W = 160;
 const PANEL_H = 136;
 /** Each project's lanes repeat this far below the last one's. */
 const GROUP_H = LANE_BOTTOM;
 /** In fill mode the board fits this much of its height to the screen; taller boards (more projects) pan. */
 const FIT_H = 900;
+/** The tallest a notebook card grows before it scrolls inside. */
+const PANEL_MAX = 520;
 
 const PANEL_W = 368;
 const PANEL_GAP = 24;
@@ -634,6 +646,8 @@ function cloneScene(scene: Scene): Scene {
  * `fill` makes the board fill its parent, scaled to fit both ways and centred, below a strip kept clear
  * for the pinned controls; otherwise it scales to the width. `title` and `actions` are pinned top-left and top-right.
  */
+const fit0 = { scale: 1, x: 0, y: 0, w: 0, h: 0 };
+
 export function SwarmCanvas({ state, fill = false, contain = false, title, actions, repo, onTalk, local = false, below, beside, side, pace = 1 }: {
 	state: SwarmState | null;
 	/** How fast the replay plays: 2 is twice as lively; 1 is the landing page's pace. */
@@ -657,7 +671,31 @@ export function SwarmCanvas({ state, fill = false, contain = false, title, actio
 	side?: { title: string; node: ReactNode };
 }) {
 	const frameRef = useRef<HTMLDivElement>(null);
-	const [fit, setFit] = useState({ scale: 1, x: 0, y: 0, w: 0, h: 0 });
+	// The lanes' width, as the viewer last dragged it; set on the module before anything below reads the geometry.
+	// Only on the app's canvas (fill: it pans); a board fitted to its frame (the landing demo) keeps the default.
+	const [laneW, setLaneW] = useState(() => {
+		if (!fill) return LANE_W0;
+		try {
+			return Number(localStorage.getItem(LANE_KEY)) || LANE_W0;
+		} catch {
+			return LANE_W0;
+		}
+	});
+	setLaneWidth(laneW);
+	// The app's canvas starts where you left it (its fit, zoom and pan, per repository) instead of jumping from a
+	// default, and keeps it until the frame changes size.
+	const viewKey = fill ? `fm:canvas:${repo ?? state?.repo ?? "local"}` : null;
+	const saved = useMemo(() => {
+		try {
+			return viewKey ? (JSON.parse(localStorage.getItem(viewKey) ?? "null") as { fit: typeof fit0; view: { k: number; x: number; y: number } } | null) : null;
+		} catch {
+			return null;
+		}
+		// eslint-disable-next-line react-hooks/exhaustive-deps
+	}, []);
+	const [fit, setFit] = useState(saved?.fit ?? fit0);
+	const fitNow = useRef(fit);
+	fitNow.current = fit;
 	const { scale } = fit;
 	// The panels grow with their text; the board grows with the tallest.
 	const [panelHs, setPanelHs] = useState([PANEL_H, PANEL_H, PANEL_H, PANEL_H]);
@@ -666,12 +704,48 @@ export function SwarmCanvas({ state, fill = false, contain = false, title, actio
 	// The live board has a lane group per project; the replay (and the board before any state) has one.
 	const projects = projectsOf(state);
 	const groups = state && (fill || isLiveRun(state.runs[0])) ? projects.length : 1;
-	const geo = useMemo(() => geometry(groups, panels), [groups, panels]);
+	const geo = useMemo(() => geometry(groups, panels), [groups, panels, laneW]);
 	const panelsEnd = Math.max(geo.height, geo.panelTop + Math.max(...panelHs.slice(0, panels)) + PAD);
 	const BELOW_GAP = 24;
 	// The card under the notebooks (and the one beside it) grow to show all they hold; dragging the bottom edge sets a
 	// height instead, kept per title (double-click goes back to fitting).
 	const belowKey = below ? `fm:canvas-below-h:${below.title}` : "";
+	// The git card's width (beside), dragged from its left edge, kept per title.
+	const besideKey = beside ? `fm:canvas-beside-w:${beside.title}` : "";
+	const [besideW, setBesideW] = useState<number | null>(() => {
+		try {
+			return Number(localStorage.getItem(besideKey)) || null;
+		} catch {
+			return null;
+		}
+	});
+	const [besideFitH, setBesideFitH] = useState<number | null>(null);
+	const [besideFitW, setBesideFitW] = useState<number | null>(null);
+	// As wide as its widest row unless the viewer dragged it (measured with the cards' heights, below).
+	const besideWidth = beside ? Math.min(Math.max(240, besideW ?? besideFitW ?? beside.width), W - PAD * 2 - 360) : 0;
+	/** A drag on an edge: calls `set` with the board-unit width as it moves, keeps it under `key` when it ends. */
+	const dragWidth = (e: React.PointerEvent, from: number, dir: 1 | -1, min: number, max: number, set: (w: number) => void, key: string) => {
+		e.preventDefault();
+		e.stopPropagation();
+		const x0 = e.clientX;
+		const k = s || 1;
+		let last = from;
+		const move = (ev: PointerEvent) => {
+			last = Math.min(max, Math.max(min, Math.round(from + (dir * (ev.clientX - x0)) / k)));
+			set(last);
+		};
+		const up = () => {
+			window.removeEventListener("pointermove", move);
+			window.removeEventListener("pointerup", up);
+			try {
+				localStorage.setItem(key, String(last));
+			} catch {
+				/* not kept */
+			}
+		};
+		window.addEventListener("pointermove", move);
+		window.addEventListener("pointerup", up);
+	};
 	const [belowH, setBelowH] = useState<number | null>(() => {
 		try {
 			return Number(localStorage.getItem(belowKey)) || null;
@@ -694,9 +768,34 @@ export function SwarmCanvas({ state, fill = false, contain = false, title, actio
 			const pad = parseFloat(getComputedStyle(scroller).paddingTop) + parseFloat(getComputedStyle(scroller).paddingBottom);
 			return top + pad + Array.from(scroller.children).reduce((h, c) => h + (c as HTMLElement).offsetHeight, 0);
 		};
+		// What the card beside needs across: its widest row (`data-hug-row`) at full length; a truncated span's
+		// scrollWidth is its whole text.
+		const across = (body: HTMLElement | null) => {
+			if (!body) return 0;
+			let w = 0;
+			for (const row of body.querySelectorAll<HTMLElement>("[data-hug-row]")) {
+				const cs = getComputedStyle(row);
+				const kids = Array.from(row.children) as HTMLElement[];
+				const gap = parseFloat(cs.columnGap) || 0;
+				w = Math.max(w, parseFloat(cs.paddingLeft) + parseFloat(cs.paddingRight) + kids.reduce((n, k) => n + k.scrollWidth, 0) + gap * Math.max(0, kids.length - 1));
+			}
+			return w;
+		};
 		const measure = () => {
-			const h = Math.ceil(Math.max(need(belowBody.current), need(besideBody.current))) + 36 + 8;
+			const h = Math.ceil(need(belowBody.current)) + 36 + 8;
 			setFitH((old) => (old === h ? old : h));
+			// The card beside is sized by its own content, not by the plan's: as tall as its rows (then it scrolls), as
+			// wide as its widest row.
+			// From its rows, where they're marked: the list's own end (a flex child that fills the card would measure the card).
+			const rows = besideBody.current?.querySelectorAll<HTMLElement>("[data-hug-row]");
+			const list = rows?.length ? (rows[0].parentElement as HTMLElement) : null;
+			const box = besideBody.current;
+			// On screen the board is zoomed and scaled: back to board units by the box's own on-screen-to-layout ratio.
+			const k = box && box.offsetWidth ? box.getBoundingClientRect().width / box.offsetWidth : 1;
+			const bh = list && box ? Math.ceil((list.getBoundingClientRect().bottom - box.getBoundingClientRect().top) / k + box.scrollTop) + 36 + 16 : 160;
+			setBesideFitH((old) => (old === bh ? old : bh));
+			const bw = Math.ceil(across(besideBody.current)) + 2;
+			setBesideFitW((old) => (old === bw ? old : bw));
 		};
 		measure();
 		// The plan and the history change as the swarm works: look again every second.
@@ -704,9 +803,19 @@ export function SwarmCanvas({ state, fill = false, contain = false, title, actio
 		return () => clearInterval(t);
 	}, [below]);
 	const belowHeight = below ? Math.max(240, belowH ?? fitH ?? below.height) : 0;
-	const boardH = below ? panelsEnd + BELOW_GAP + belowHeight + PAD : panelsEnd;
+	// Its own height: what its rows need, up to a screenful of the board (then it scrolls inside).
+	const besideHeight = beside ? Math.min(960, Math.max(160, besideFitH ?? belowHeight)) : 0;
+	const boardH = below ? panelsEnd + BELOW_GAP + Math.max(belowHeight, besideHeight) + PAD : panelsEnd;
 	// In fill mode people can pan and zoom: `view` sits on top of the fitted placement.
-	const [view, setRawView] = useState({ k: 1, x: 0, y: 0 });
+	const [view, setRawView] = useState(saved?.view ?? { k: 1, x: 0, y: 0 });
+	useEffect(() => {
+		if (!viewKey || fit.w === 0) return;
+		try {
+			localStorage.setItem(viewKey, JSON.stringify({ fit, view }));
+		} catch {
+			/* not kept */
+		}
+	}, [viewKey, fit, view]);
 	// The canvas is unbounded: pan anywhere; the fit button in the zoom pill brings the board back.
 	const setView = (next: (v: { k: number; x: number; y: number }) => { k: number; x: number; y: number }) => setRawView(next);
 	const setViewRef = useRef(setView);
@@ -784,12 +893,16 @@ export function SwarmCanvas({ state, fill = false, contain = false, title, actio
 				return setFit({ scale: next, x: 0, y: 0, w: W * next, h: boardH * next });
 			}
 			if (!fill) return setFit({ scale: width / W, x: 0, y: 0, w: width, h: height });
-			const next = Math.min(width / W, (height - PINNED) / Math.min(boardH, FIT_H));
-			setFit({ scale: next, x: (width - W * next) / 2, y: PINNED + Math.max(0, (height - PINNED - boardH * next) / 2), w: width, h: height });
+			// The frame is the size it was: keep the fit (cards measuring themselves would otherwise make it jitter).
+			const was = fitNow.current;
+			if (was.w > 0 && Math.abs(was.w - width) < 2 && Math.abs(was.h - height) < 2) return;
+			// Fitted to the default width, so lanes you widened stay wide and the board runs on to the right (pan to it).
+			const next = Math.min(width / 1200, (height - PINNED) / Math.min(boardH, FIT_H));
+			setFit({ scale: next, x: Math.max(0, (width - W * next) / 2), y: PINNED + Math.max(0, (height - PINNED - boardH * next) / 2), w: width, h: height });
 		});
 		observer.observe(el);
 		return () => observer.disconnect();
-	}, [fill, contain, boardH]);
+	}, [fill, contain, boardH, laneW]);
 
 	// The desktop popover closes on a press outside it (another card re-anchors it instead) or on Escape.
 	const popoverOpen = !isMobile && modal !== null;
@@ -906,6 +1019,17 @@ export function SwarmCanvas({ state, fill = false, contain = false, title, actio
 	const s = scale * view.k;
 	const ox = fit.x + view.x;
 	const oy = fit.y + view.y;
+	// The zoom the text is laid out at. CSS `zoom` keeps zoomed-in text sharp, but laying it out again at every wheel step
+	// makes it jitter, so mid-gesture the board is scaled from the last sharp zoom on the GPU and 160 ms after the last
+	// step the sharp zoom catches up. Below 1 it stays at 1 and the board is only scaled: under `zoom` WebKit's minimum
+	// font size keeps small text from shrinking while its lines do, and the lines overlap.
+	const target = Math.max(1, s);
+	const [sharp, setSharp] = useState(target);
+	useEffect(() => {
+		if (sharp === target) return;
+		const t = setTimeout(() => setSharp(target), 160);
+		return () => clearTimeout(t);
+	}, [target, sharp]);
 
 	// The demo always has the assistant follow you; in the app it's opt-in (it can get in the way), remembered here.
 	const [followPref, setFollowPref] = useState(() => {
@@ -1128,15 +1252,20 @@ export function SwarmCanvas({ state, fill = false, contain = false, title, actio
 				}}
 			>
 				<div
-					className="absolute left-0 top-0 origin-top-left"
+					// The board shows at once: no entrance animation on it (WebKit would also restart them when the zoom changes).
+					className="absolute left-0 top-0 origin-top-left [&_.animate-in]:![animation:none]"
 					style={{
 						width: W,
 						height: boardH,
-						// `zoom`, not `scale()`: the text is laid out again at the new size and stays sharp, where a scaled
-						// layer is drawn once and stretched (blurry in the Mac app's web view). Under `zoom` the translate is in
-						// the board's own units, hence the division.
-						zoom: s,
-						transform: `translate(${ox / s}px, ${oy / s}px)`,
+						// At rest `zoom`, not `scale()`: the text is laid out again at the new size and stays sharp, where a scaled
+						// layer is drawn once and stretched (blurry in the Mac app's web view). Mid-gesture a `scale()` from the
+						// last sharp zoom covers the difference (see `sharp`). Under `zoom` the translate is in the board's own
+						// units, hence the division.
+						zoom: sharp,
+						transform: `translate(${ox / sharp}px, ${oy / sharp}px)${sharp === s ? "" : ` scale(${s / sharp})`}`,
+						transformOrigin: "0 0",
+						// A layer only mid-gesture: at rest the scaled text is drawn at its final size, not stretched.
+						willChange: sharp === target ? undefined : "transform",
 						...(fill ? {} : DOTS),
 					}}
 				>
@@ -1150,8 +1279,27 @@ export function SwarmCanvas({ state, fill = false, contain = false, title, actio
 						<section
 							data-canvas-ui
 							className="absolute flex flex-col overflow-hidden rounded-xl border bg-card shadow-card"
-							style={{ left: W - PAD - beside.width, top: panelsEnd + BELOW_GAP, width: beside.width, height: belowHeight }}
+							style={{ left: W - PAD - besideWidth, top: panelsEnd + BELOW_GAP, width: besideWidth, height: besideHeight }}
 						>
+							{/* Drag the left edge to widen it (the card beside it narrows); double-click for the default. */}
+							<div
+								role="separator"
+								aria-orientation="vertical"
+								aria-label={`Resize ${beside.title}`}
+								title="Drag to resize · double-click to reset"
+								onPointerDown={(e) => dragWidth(e, besideWidth, -1, 240, W - PAD * 2 - 360, setBesideW, besideKey)}
+								onDoubleClick={() => {
+									setBesideW(null);
+									try {
+										localStorage.removeItem(besideKey);
+									} catch {
+										/* not kept */
+									}
+								}}
+								className="group/resize absolute inset-y-0 left-0 z-10 flex w-3 cursor-col-resize items-center"
+							>
+								<span className="ml-1 h-10 w-1 rounded-full bg-border transition-colors group-hover/resize:bg-muted-foreground/60" />
+							</div>
 							<div className="flex h-9 shrink-0 items-center gap-2 border-b px-4 font-mono text-[12px] font-medium text-muted-foreground">{beside.title}{beside.note ? <span className="truncate font-sans text-[11px] font-normal">{beside.note}</span> : null}</div>
 							<div ref={besideBody} data-scroll className="flex min-h-0 flex-1 flex-col overflow-auto">
 								{beside.node}
@@ -1162,7 +1310,7 @@ export function SwarmCanvas({ state, fill = false, contain = false, title, actio
 						<section
 							data-canvas-ui
 							className="absolute flex flex-col overflow-hidden rounded-xl border bg-card shadow-card"
-							style={{ left: PAD, top: panelsEnd + BELOW_GAP, width: W - PAD * 2 - (beside ? beside.width + BELOW_GAP : 0), height: belowHeight }}
+							style={{ left: PAD, top: panelsEnd + BELOW_GAP, width: W - PAD * 2 - (beside ? besideWidth + BELOW_GAP : 0), height: belowHeight }}
 						>
 							<div className="flex h-9 shrink-0 items-center gap-2 border-b px-4 font-mono text-[12px] font-medium text-muted-foreground">{below.title}{below.note ? <span className="font-sans text-[11px] font-normal">{below.note}</span> : null}</div>
 							<div ref={belowBody} data-scroll className="flex min-h-0 flex-1 flex-col overflow-auto">
@@ -1218,13 +1366,31 @@ export function SwarmCanvas({ state, fill = false, contain = false, title, actio
 							{LANES.map((lane) => (
 								<div
 									key={lane.key}
-									className="absolute rounded-lg border border-dashed bg-muted/40 animate-in fade-in-0 duration-700"
+									className="absolute rounded-lg border border-dashed bg-muted/40"
 									style={{ left: laneX(lane.key), top: groupY(group) + LANE_TOP, width: LANE_W, height: LANE_BOTTOM - LANE_TOP }}
 								>
 									<div className="flex items-center justify-between px-3 pt-2.5 font-mono text-[12px] font-medium text-muted-foreground">
 										<span>{lane.title}</span>
 										<span>{shown.cards.filter((c) => c.group === group && c.lane === lane.key).length}</span>
 									</div>
+									{/* Drag a lane's right edge to widen every lane (the board widens too); double-click for the default. */}
+									{fill ? <div
+										data-canvas-ui
+										role="separator"
+										aria-orientation="vertical"
+										aria-label="Resize the lanes"
+										title="Drag to widen the lanes · double-click to reset"
+										onPointerDown={(e) => dragWidth(e, laneW, 1, LANE_W0, 420, setLaneW, LANE_KEY)}
+										onDoubleClick={() => {
+											setLaneW(LANE_W0);
+											try {
+												localStorage.removeItem(LANE_KEY);
+											} catch {
+												/* not kept */
+											}
+										}}
+										className="absolute inset-y-0 -right-2 w-3 cursor-col-resize"
+									/> : null}
 								</div>
 							))}
 						</div>
@@ -1292,7 +1458,7 @@ export function SwarmCanvas({ state, fill = false, contain = false, title, actio
 					aria-label={modal.card.title}
 					data-canvas-ui
 					// The island's look in the board's units: compact type and spacing, scaled with the board.
-					className="absolute z-40 flex max-h-[min(60vh,420px)] flex-col rounded-2xl border border-black/5 bg-background p-3 shadow-[0_12px_32px_-12px_rgba(0,0,0,0.28)] animate-in fade-in-0 duration-200 dark:border-white/10"
+					className="absolute z-40 flex max-h-[min(60vh,420px)] flex-col rounded-2xl border border-black/5 bg-background p-3 shadow-[0_12px_32px_-12px_rgba(0,0,0,0.28)] dark:border-white/10"
 					style={{
 						width: POPOVER_W,
 						left: modal.anchor.left,
@@ -1482,7 +1648,10 @@ function ProjectHeader({ project, group, state }: { project: SwarmProject; group
 	);
 }
 
-const MOVE = "transition-transform duration-700 [transition-timing-function:cubic-bezier(0.22,1,0.36,1)] motion-reduce:transition-none";
+// Agents and cards jump to their place: no gliding.
+const MOVE = "";
+// Agents glide to their place, each a beat after the one before when they arrive together.
+const CURSOR_MOVE = "transition-transform duration-700 [transition-timing-function:cubic-bezier(0.22,1,0.36,1)] motion-reduce:transition-none";
 
 /** Every role's cursor stays at full strength; the turn pill says who is working. */
 /** `onTalk` makes the name pill a button that opens a chat with this agent. */
@@ -1509,8 +1678,8 @@ export function SwarmCursor({ role, x, y, say, turn, thinking, where, onWhereEnt
 	return (
 		<div
 			data-cursor={role}
-			className={`pointer-events-none absolute left-0 top-0 z-20 ${MOVE}`}
-			style={{ transform: `translate(${x}px, ${y}px)`, transitionProperty: "transform", transitionDelay: `${delay}ms` }}
+			className={`pointer-events-none absolute left-0 top-0 z-20 ${CURSOR_MOVE}`}
+			style={{ transform: `translate(${x}px, ${y}px)`, transitionDelay: `${delay}ms` }}
 		>
 			<div className="relative">
 			<svg width="28" height="28" viewBox="0 0 24 24" className="absolute -left-2 -top-[5px] drop-shadow-sm" aria-hidden>
@@ -1539,7 +1708,7 @@ export function SwarmCursor({ role, x, y, say, turn, thinking, where, onWhereEnt
 					);
 				})()}
 				{say ? (
-					<span key={say} className="pointer-events-auto w-max max-w-[240px] cursor-default rounded-lg border bg-popover px-2.5 py-1.5 text-[13px] leading-snug text-popover-foreground shadow-md animate-in fade-in-0 zoom-in-95 duration-200">
+					<span key={say} className="pointer-events-auto w-max max-w-[240px] cursor-default rounded-lg border bg-popover px-2.5 py-1.5 text-[13px] leading-snug text-popover-foreground shadow-md">
 						{thinking ? <span className="fm-dots mr-1.5 inline-flex gap-[3px] align-middle" aria-hidden><i /><i /><i /></span> : null}
 						{say}
 						{until ? <> <Countdown to={until} /></> : null}
@@ -1612,14 +1781,13 @@ function BoardCard({ card, x, y, hidden, href, onEnter, onLeave, onOpen, onMeasu
 				transform: `translate(${x}px, ${y}px)`,
 				opacity: hidden ? 0 : 1,
 				pointerEvents: hidden ? "none" : undefined,
-				transitionProperty: "transform, opacity, border-color",
 			}}
 		>
 			<div className="flex items-center gap-1.5 text-[12px]">
 				{card.kind === "doc" ? null : <span className="font-mono text-muted-foreground">{card.kind === "pr" ? "PR" : "#"}{card.number}</span>}
 				<span className={`rounded px-1.5 py-px font-mono text-[10px] ${LABEL_STYLES[card.label] ?? LABEL_STYLES.README}`}>{card.label}</span>
 			</div>
-			<p className="mt-1 text-[13px] leading-snug text-foreground">{card.title}</p>
+			<p className="mt-1 text-[13px] leading-snug text-foreground [overflow-wrap:anywhere]">{card.title}</p>
 		</Tag>
 	);
 }
@@ -1647,7 +1815,7 @@ export function ItemHoverCard({ item, repo, left, top, below, onEnter, onLeave }
 			role="tooltip"
 			onMouseEnter={onEnter}
 			onMouseLeave={onLeave}
-			className="absolute z-30 w-[320px] rounded-xl border bg-popover p-4 text-popover-foreground shadow-lg animate-in fade-in-0 zoom-in-95 duration-150"
+			className="absolute z-30 w-[320px] rounded-xl border bg-popover p-4 text-popover-foreground shadow-lg"
 			style={{ left, top, transform: below ? undefined : "translateY(-100%)" }}
 		>
 			<ItemPreview item={item} repo={repo} />
@@ -1706,7 +1874,7 @@ function TurnChip({ turn }: { turn: SwarmRole | null }) {
 	);
 }
 
-/** The job list with one pill that slides to the job in hand (transitions.dev tabs sliding). */
+/** The job list with one pill on the job in hand. */
 function DispatcherChip({ job }: { job: string | null }) {
 	const items = useRef(new Map<string, HTMLSpanElement>());
 	const [pill, setPill] = useState<{ x: number; w: number } | null>(null);
@@ -1727,7 +1895,6 @@ function DispatcherChip({ job }: { job: string | null }) {
 					transform: `translate(${pill?.x ?? 0}px, -50%)`,
 					left: 0,
 					opacity: pill ? 1 : 0,
-					transition: "transform var(--tabs-dur) var(--tabs-ease), width var(--tabs-dur) var(--tabs-ease), opacity var(--tabs-dur) var(--tabs-ease)",
 				}}
 			/>
 			<span className="font-medium" style={{ color: ROLE_COLORS.dispatcher }}>dispatcher</span>
@@ -1739,7 +1906,6 @@ function DispatcherChip({ job }: { job: string | null }) {
 							if (el) items.current.set(j, el);
 						}}
 						className={`relative rounded px-1.5 py-px ${job === j ? "text-background" : "text-muted-foreground"}`}
-						style={{ transition: "color var(--tabs-dur) var(--tabs-ease)" }}
 					>
 						{j}
 					</span>
@@ -1770,8 +1936,10 @@ function Panel({ index, title, repo, top = ONE.panelTop, onMeasure, count = 3, c
 		<div
 			ref={ref}
 			data-component
-			className="absolute flex cursor-default flex-col rounded-lg border bg-background p-3"
-			style={{ left: panelX(index, count), top, width: panelW(count), ...(grows ? { minHeight: PANEL_H } : { height: PANEL_H }) }}
+			className="absolute flex cursor-default flex-col rounded-lg border bg-background p-3 [overflow-wrap:anywhere]"
+			// A card that grows hugs what it holds, up to PANEL_MAX (then it scrolls inside), so a long run's task list
+			// doesn't stretch it down the board.
+			style={{ left: panelX(index, count), top, width: panelW(count), ...(grows ? { minHeight: PANEL_H, maxHeight: PANEL_MAX } : { height: PANEL_H }) }}
 		>
 			{repo ? (
 				<a
@@ -1785,7 +1953,7 @@ function Panel({ index, title, repo, top = ONE.panelTop, onMeasure, count = 3, c
 			) : (
 				<p className="font-mono text-[12px] font-medium text-muted-foreground">{title}</p>
 			)}
-			<div className="mt-2 flex min-h-0 flex-1 flex-col">{children}</div>
+			<div className="mt-2 flex min-h-0 flex-1 flex-col overflow-y-auto">{children}</div>
 		</div>
 	);
 }
@@ -1813,6 +1981,8 @@ function LedgerPanel({ spend, budget = 5, costs, ...mode }: PanelMode & { spend:
 }
 
 function NotebookPanel({ notes, ...mode }: PanelMode & { notes: Note[] }) {
+	// What's left first, then what's done.
+	notes = [...notes.filter((n) => !n.done), ...notes.filter((n) => n.done)];
 	return (
 		<Panel index={1} title="#55 Swarm notebook" {...mode}>
 			<ul className="space-y-1 text-[13px]">

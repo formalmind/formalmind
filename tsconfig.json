@@ -14,10 +14,9 @@
     "jsx": "react-jsx",
     "types": ["vite/client", "bun"],
     "paths": {
-      "@/*": ["./*"],
-      "@formalmind/ui/*": ["./packages/ui/formalmind/*", "./desktop/src/ui-fallback/*"]
+      "@/*": ["./*"]
     }
   },
   "include": ["**/*.ts", "**/*.tsx"],
-  "exclude": ["node_modules", "dist", ".open-next", ".next", ".wrangler", "packages/ui/blocks", "packages/ui/screens", "packages/ui/motion", "packages/ui/illustrations", "packages/ui/components"]
+  "exclude": ["node_modules", "dist", ".open-next", ".next", ".wrangler"]
 }

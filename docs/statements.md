@@ -158,7 +158,7 @@ Each obligation is a `prove` job for one function. The prover's task comes from 
 - the obligation as a theorem to prove, with its exact name and type. For an invariant:
   `theorem S02.preserved_withdraw (s : Vault.State) … (h : S02.inv s) : S02.inv (Vault.withdraw s …).2` (shaped to
   the generated def's signature and monad), and `S02.init` for setup;
-- the file to write: `Proofs/Swarm/S02Withdraw.lean`.
+- the file to write: `Proofs/Functions/S02Withdraw.lean`.
 
 `check_proof` runs unchanged: no cheats, `lake build`, and the def named. One check is added for an obligation: the theorem with its given name is in its given file, `#print axioms` shows no `sorryAx`, and its type, as `#check` prints it, names the def. A function or access obligation is stated in words, not as a Lean type, so the type isn't matched against an expected one. Instead the reviewer gets it as Lean prints it, next to the user's words and the back-translation, and approves only if it says what the obligation says. (Invariants, step 5, come with their Lean predicate, so their obligations' types can be checked exactly.)
 
@@ -204,8 +204,8 @@ the model". It is never rounded up to proved.
   callee's behaviour (a token's `transfer` really moving balances) is an assumption, written as one. Reentrancy: an
   invariant is proved for calls that don't reenter unless the model's `Ext` allows it. That limit goes into the
   statement's assumptions automatically, so a proved invariant never hides it.
-- **SolidCore.** When the roadmap's SolidCore decision lands, the predicates move to its state type. The plain words
-  and the obligations stay the same.
+- **Stele.** When statements move to EquiVM's Stele specs (the roadmap's semantics of record), the predicates move to
+  the spec's state type. The plain words and the obligations stay the same.
 
 ## 6. Not in v1
 

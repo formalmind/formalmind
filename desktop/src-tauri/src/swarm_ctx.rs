@@ -76,7 +76,33 @@ pub fn lake_dir(root: &Path) -> Option<PathBuf> {
     if let Some(d) = configured(root, "project").filter(|d| has_lakefile(d)) {
         return Some(d);
     }
-    [root.to_path_buf(), root.join("formal")].into_iter().find(|d| has_lakefile(d))
+    [root.to_path_buf(), root.join("formal")].into_iter().find(|d| has_lakefile(d)).or_else(|| nested_lake(root))
+}
+
+/// A Lake project deeper in the folder (Async Swap kept one in `validation/lean/`): the shallowest lakefile, at most
+/// three folders down, that declares the models' library. Without it the swarm would set up a second project (or, in
+/// older versions, write the models next to the folder's root) and prove against a copy Lake never builds.
+fn nested_lake(root: &Path) -> Option<PathBuf> {
+    let skip = [".git", ".lake", ".formal", ".claude", "node_modules", "lib", "dependencies", "out", "cache", "broadcast", "target", "dist"];
+    let mut level = vec![root.to_path_buf()];
+    for _ in 0..3 {
+        let mut next = vec![];
+        for d in &level {
+            let Ok(entries) = std::fs::read_dir(d) else { continue };
+            let mut dirs: Vec<PathBuf> = entries.flatten().filter(|e| e.file_type().is_ok_and(|t| t.is_dir()) && !skip.contains(&e.file_name().to_string_lossy().as_ref())).map(|e| e.path()).collect();
+            dirs.sort();
+            next.extend(dirs);
+        }
+        let found = next.iter().find(|d| {
+            let text: String = ["lakefile.toml", "lakefile.lean"].iter().filter_map(|f| std::fs::read_to_string(d.join(f)).ok()).collect();
+            ["Generated", "Specs"].iter().any(|l| text.contains(&format!("\"{l}\"")) || text.contains(&format!("lean_lib {l}")))
+        });
+        if let Some(d) = found {
+            return Some(d.clone());
+        }
+        level = next;
+    }
+    None
 }
 
 /// Where the Lake project's Lean sources are: formalmind.toml's `lean.sources`, else the lakefile's `srcDir` in the
@@ -105,6 +131,23 @@ pub fn layout(root: &Path) -> (&'static str, &'static str) {
     let declared = lakefile.is_some_and(|t| t.contains("\"Refinement\"") || t.contains("lean_lib Refinement") || t.contains("\"Generated\"") || t.contains("lean_lib Generated"));
     let legacy = declared || lean_src(root).is_some_and(|d| d.join("Generated").is_dir() || d.join("Refinement").is_dir());
     if legacy { ("Generated", "Refinement") } else { ("Specs", "Proofs") }
+}
+
+/// The folder under the proofs where the swarm writes one file per function: `Functions/`, or `Swarm/` where the project
+/// already keeps them there (an older project, or the `Refinement/` layout), so its proofs stay in one place.
+pub fn functions_dir(root: &Path) -> &'static str {
+    let proofs = layout(root).1;
+    let has = |d: &str| lean_src(root).is_some_and(|src| src.join(proofs).join(d).is_dir());
+    if proofs == "Refinement" || (has("Swarm") && !has("Functions")) { "Swarm" } else { "Functions" }
+}
+
+/// Where the proofs of statements (informal specs: claims in plain words) go, under the Lake sources:
+/// `Proofs/InformalSpecs`, or `<proofs>/Statements` where the project already keeps them there.
+pub fn informal_dir(root: &Path) -> String {
+    let proofs = layout(root).1;
+    let has = |d: &str| lean_src(root).is_some_and(|src| src.join(proofs).join(d).is_dir());
+    let dir = if proofs == "Refinement" || (has("Statements") && !has("InformalSpecs")) { "Statements" } else { "InformalSpecs" };
+    format!("{proofs}/{dir}")
 }
 
 pub fn lean_src(root: &Path) -> Option<PathBuf> {
@@ -428,13 +471,14 @@ impl Context {
         let short = u.name().rsplit('.').next().unwrap_or("").trim_start_matches('_');
         let module = format!("{}{}", c.name, name_part(short, true));
         let (specs, proofs) = layout(root);
+        let functions = functions_dir(root);
         let mut s = format!(
             "## The target\n\n`{}` in {} ({}) — Lean def `{lean}` in the generated model `{}`.\n{}\n\
 Prove what its slice says: the conditions under which it reverts (its guards), and on success the storage it writes \
 (its footprint) and what it returns or hands to its external calls. \
-Write the proof as `{lib}/{proofs}/Swarm/{module}.lean` (module `{proofs}.Swarm.{module}`), starting with `import {specs}.{}` (and `import {proofs}.Monad` for its simp lemmas when the project has it). \
+Write the proof as `{lib}/{proofs}/{functions}/{module}.lean` (module `{proofs}.{functions}.{module}`), starting with `import {specs}.{}` (and `import {proofs}.Monad` for its simp lemmas when the project has it). \
 Every theorem about the def must spell it fully qualified as `{lean}` in its statement — the Proofs page counts the function as proved only when a theorem without `sorry` names exactly that. \
-Check it with `lake build {proofs}.Swarm.{module}` (lake runs in {lake_rel}/). The swarm itself re-runs `lake build` and the coverage before your work goes to review.\n",
+Check it with `lake build {proofs}.{functions}.{module}` (lake runs in {lake_rel}/). The swarm itself re-runs `lake build` and the coverage before your work goes to review.\n",
             u.name(),
             c.name,
             u.at(),
@@ -449,7 +493,7 @@ Check it with `lake build {proofs}.Swarm.{module}` (lake runs in {lake_rel}/). T
             s.push_str(&format!("\n### Its generated def\n\n```lean\n{}\n```\n", d.trim_end()));
         }
         if let Some(sl) = c.slices.get(u.name()) {
-            s.push_str(&format!("\n### Its slice (from the AST)\n\n{}\n", crate::executor::clip(sl.clone())));
+            s.push_str(&format!("\n### Its slice (from the AST)\n\n{}\n", crate::swarm2::lake::clip(sl.clone())));
         }
         let earlier = archived_proofs(root, &lean);
         if !earlier.is_empty() {
@@ -677,6 +721,36 @@ mod tests {
         assert!(super::refresh(Some(&m(2, "30")), &m(2, "2")).unwrap().contains("code changed"), "a changed body");
         assert!(super::refresh(Some(&m(2, "30")), &m(3, "30")).unwrap().contains("1 more"));
         assert_eq!(super::refresh(Some(&m(3, "30")), &m(2, "2")), None, "never fewer functions than the file has");
+    }
+
+    #[test]
+    fn the_swarm_builds_only_against_the_configured_sources() {
+        let root = std::env::temp_dir().join(format!("fm-stray-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        // Async Swap before its root lakefile: the Lake project in validation/lean, found there rather than set up anew.
+        let lean = root.join("validation/lean");
+        std::fs::create_dir_all(lean.join("Generated")).unwrap();
+        std::fs::write(lean.join("lakefile.toml"), "name = \"p\"\ndefaultTargets = [\"Generated\", \"Refinement\"]\n[[lean_lib]]\nname = \"Generated\"\n").unwrap();
+        assert_eq!(super::lake_dir(&root), Some(lean.clone()));
+        assert_eq!(super::lean_src(&root), Some(lean.clone()));
+        // Then: a root lakefile with srcDir, and stale copies of the models and proofs next to it.
+        std::fs::write(root.join("lakefile.toml"), "name = \"p\"\nsrcDir = \"validation/lean\"\ndefaultTargets = [\"Generated\", \"Refinement\"]\n").unwrap();
+        std::fs::write(root.join(super::CONFIG), "[lean]\nproject = \".\"\nsources = \"validation/lean\"\n").unwrap();
+        std::fs::create_dir_all(root.join("Generated")).unwrap();
+        std::fs::create_dir_all(root.join("Refinement/Swarm")).unwrap();
+        std::fs::write(root.join("Generated/AsyncSwap.lean"), "-- stale").unwrap();
+        assert_eq!(super::lake_dir(&root), Some(root.clone()));
+        assert_eq!(super::lean_src(&root), Some(lean.clone()));
+        let why = crate::swarm2::fsguard::stray(&root, "Generated/AsyncSwap.lean").expect("the root copy is stray");
+        assert!(why.contains("use validation/lean/Generated/AsyncSwap.lean"), "{why}");
+        assert!(crate::swarm2::fsguard::stray(&root, "./Refinement/Swarm/AsyncFillerTradeFee.lean").is_some());
+        assert_eq!(crate::swarm2::fsguard::stray(&root, "validation/lean/Generated/AsyncSwap.lean"), None);
+        assert_eq!(crate::swarm2::fsguard::stray(&root, "src/AsyncSwap.sol"), None);
+        assert_eq!(crate::swarm2::fsguard::strays(&root), ["Generated", "Refinement"]);
+        // The agents' tools refusing the copies is swarm2's (fsguard, tools: B27).
+        // The model is written where Lake reads it.
+        assert_eq!(super::layout(&root).0, "Generated");
+        let _ = std::fs::remove_dir_all(&root);
     }
 
     #[test]
@@ -911,29 +985,6 @@ pub fn record_internal_finding(root: &Path, id: &str, input: &Value, poc: &str) 
     update_internal(root, |doc| upsert(doc, "findings", f))
 }
 
-/// A property the reviewer approved, in Formal Mind's audit file: `P-<plan item>`, the function, what holds and under
-/// which assumptions (the reviewer's words), the theorems that prove it and the proof's files.
-pub fn record_property(root: &Path, item: usize, item_text: &str, files: &[String], input: &Value) -> Result<String, String> {
-    let statement = input["statement"].as_str().unwrap_or("").trim();
-    if statement.is_empty() {
-        return Err("statement is required: what the proof establishes".into());
-    }
-    let assumptions = input["assumptions"].as_str().unwrap_or("").trim();
-    let description = if assumptions.is_empty() { statement.to_string() } else { format!("{statement}\n\n**Assumptions.** {assumptions}") };
-    let mut p = json!({
-        "id": format!("P-{item:02}"),
-        "title": item_text.split('`').nth(1).unwrap_or(item_text).to_string(),
-        "status": "verified",
-        "description": description,
-        "theorems": input["theorems"].as_array().into_iter().flatten().filter_map(|t| t.as_str()).map(|t| json!({ "name": t })).collect::<Vec<_>>(),
-        "files": files,
-    });
-    if let Some(c) = regex::Regex::new(r"\(((?:src|contracts)/[^):\s]+):(\d+)\)").expect("valid regex").captures(item_text) {
-        p["locations"] = json!([{ "file": &c[1], "line": c[2].parse::<u64>().unwrap_or(0) }]);
-    }
-    update_internal(root, |doc| upsert(doc, "properties", p))
-}
-
 /// A proved statement (.formal/statements.md) in Formal Mind's audit file: `P-S01`, titled by the maintainer's words.
 pub fn record_statement_property(root: &Path, id: &str, title: &str, files: &[String], input: &Value) -> Result<String, String> {
     let statement = input["statement"].as_str().unwrap_or("").trim();
@@ -967,10 +1018,10 @@ mod internal_tests {
         let (id, _) = file_finding(&root, &bug, "test/formal/F.t.sol", "exit 0").unwrap();
         let item = "`Router.swap` — Router (src/Router.sol:113): payable";
         let p = json!({ "statement": "It reverts unless the caller owns the order.", "assumptions": "`ext.get` returns what `ext.set` wrote.", "theorems": ["swap_owner"] });
-        record_property(&root, 4, item, &["formal/Refinement/Swarm/RouterSwap.lean".into()], &p).unwrap();
+        crate::swarm2::audit::record_property(&root, 4, item, &["formal/Refinement/Swarm/RouterSwap.lean".into()], &p).unwrap();
         // Approving again replaces it.
-        record_property(&root, 4, item, &[], &p).unwrap();
-        assert!(record_property(&root, 5, item, &[], &json!({})).is_err());
+        crate::swarm2::audit::record_property(&root, 4, item, &[], &p).unwrap();
+        assert!(crate::swarm2::audit::record_property(&root, 5, item, &[], &json!({})).is_err());
         let doc: Value = serde_json::from_str(&std::fs::read_to_string(internal_path(&root)).unwrap()).unwrap();
         assert_eq!((doc["kind"].as_str(), doc["findings"][0]["id"].as_str()), (Some("internal"), Some(id.as_str())));
         let f = &doc["findings"][0];

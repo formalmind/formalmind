@@ -64,7 +64,8 @@ export function TakeoverAgents({ phase, hero }: { phase: Phase; hero: DOMRect | 
 					: phase === "enter"
 						? [x, edge]
 						: phase === "drag"
-							? [x, 40]
+							? // Exactly as far as the hero goes (translateY(-110vh), same curve and time), so they hold its edge all the way off.
+								[x, edge - h * 1.1]
 							: phase === "grab"
 								? [w * (0.15 + at * 0.7), h - PEEK + 6]
 								: [w * (0.15 + at * 0.7), PANEL_TOP + 6];

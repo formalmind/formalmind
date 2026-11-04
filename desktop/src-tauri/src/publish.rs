@@ -239,7 +239,7 @@ pub fn after_approval(root: &Path, what: &str) {
     }
     let (root, what) = (root.to_path_buf(), what.to_string());
     tauri::async_runtime::spawn(async move {
-        match crate::ledger::build(&root, true, false).await {
+        match crate::swarm::ledger(&root, true, false).await {
             Ok(ledger) => {
                 let statements = crate::statements::load(&root).unwrap_or_default();
                 if let Err(e) = refresh_readme(&root, &readme_section(&ledger, &statements)) {

@@ -1,7 +1,7 @@
 import { streamObject } from "ai";
 import { openai } from "@/lib/openai";
 import { getJSON, kv, putJSON } from "@/lib/kv";
-import { EXAMPLE_REPOS, PLANNER_SYSTEM, parseRepo, planPrompt, planSchema, scanRepo, type RepoPlan } from "@/lib/plan";
+import { EXAMPLE_REPOS, PLANNER_SYSTEM, parseRepo, planPrompt, planAiSchema, scanRepo, type RepoPlan } from "@/lib/plan";
 
 /** Plans per visitor per hour; each one runs on our key. */
 const PER_HOUR = 5;
@@ -61,7 +61,7 @@ export async function POST(request: Request) {
 
 	const result = streamObject({
 		model: openai.responses("gpt-6-luna"),
-		schema: planSchema,
+		schema: planAiSchema,
 		system: PLANNER_SYSTEM,
 		prompt: planPrompt(scan),
 		onError: ({ error }) => console.error("[plan] stream failed:", error),

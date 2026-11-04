@@ -6,9 +6,9 @@ import type { Bridge } from "./swarm-panel";
 import { reportError } from "@/lib/report-error";
 
 /**
- * Vim mode in the Mac app: the bundled Neovim in a real terminal (a pseudo-terminal in src-tauri/src/term.rs, drawn
- * by xterm.js), so it looks and behaves exactly as in your own terminal — colours, cursor, plugins, LSP. Opening
- * another file sends `:edit`; when Neovim exits, any key starts it again.
+ * Vim mode in the Mac app: Neovim (installed on the machine) in a real terminal (a pseudo-terminal in
+ * src-tauri/src/term.rs, drawn by xterm.js), so it looks and behaves exactly as in your own terminal — colours, cursor,
+ * plugins, LSP. Opening another file sends `:edit`; when Neovim exits, any key starts it again.
  */
 export function NvimTerminal({ bridge, folder, path, line }: { bridge: Bridge; folder: string; path: string; line: number | null }) {
 	const box = useRef<HTMLDivElement | null>(null);

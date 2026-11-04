@@ -25,7 +25,7 @@ Formal Mind keeps everything in your folder, as ordinary files you can read, edi
 | `.formal/ledger.json` | the proof ledger: what Lean checked for each theorem and the reviewer's approvals, by def ([Proofs](/proofs#the-ledger)) |
 | `.formal/bugs/` | findings, one Markdown file each |
 | `.formal/findings.sarif` | suspicions and notes on lines, which editors with SARIF support show inline |
-| `formal/` | the Lean project (or wherever `formalmind.toml` says): `Specs/` (the model of each contract, rewritten when the contract's code changes or formal-ast can translate more of it), `Proofs/Swarm/` (proofs of the plan's items), `Proofs/Statements/` (proofs of statements). A folder with no Lake project gets one with these two libraries; a project set up before they were named this way keeps `Generated/` and `Refinement/` |
+| `formal/` | the Lean project (or wherever `formalmind.toml` says): `Specs/` (the model of each contract, rewritten when the contract's code changes or formal-ast can translate more of it), `Proofs/Functions/` (proofs of the plan's items), `Proofs/InformalSpecs/` (proofs of statements). A folder with no Lake project gets one with these two libraries; a project set up before they were named this way keeps `Generated/` and `Refinement/` |
 | `test/formal/` | proof-of-concept tests for findings |
 | your audit folder | `formal-mind.audit.json`, `formal-mind-swarm.md`, the index's rows, and `.audit.json` files read from reports |
 

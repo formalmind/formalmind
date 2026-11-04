@@ -25,14 +25,18 @@ A tick doesn't stay just because it was given once. When a contract's code chang
 and Lean checks the proofs again. Any checked function that no longer counts as proved goes back to `[ ]`, with the
 reason in the chat ("reopened `Pool.fee`: …"), and is proved again against the new code. Only theorems in the folder
 Lake builds count (formalmind.toml's `sources`, or the lakefile's `srcDir`). A stray copy of `Specs/` or
-`Proofs/` elsewhere in the repository proves nothing.
+`Proofs/` elsewhere in the repository proves nothing: the planner names it in the chat, and the agents can't read,
+write or check files in it. A Lake project in a subfolder (say `validation/lean/`) is found there.
+
+To have functions proved again yourself, say so in the chat ("reprove `AsyncSwap.useNonce`"): the swarm reopens those
+items and carries on with the plan, even when your message arrives as a run is finishing.
 
 ## One function, start to finish
 
 1. **The prover** takes the next open item. It gets a brief built from the syntax tree: the function's generated
    Lean definition, its guards, the storage it reads and writes, and its callees. It writes a proof of what the
    function does (when it reverts, what it writes, what it returns or sends) in
-   `formal/Proofs/Swarm/<Contract><Function>.lean`, and checks it with `lake build`.
+   `formal/Proofs/Functions/<Contract><Function>.lean`, and checks it with `lake build`.
 2. **The swarm checks the proof** before anyone reviews it: no `sorry`, `admit`, new axioms or `native_decide`,
    `lake build` passes, and the Proofs page now counts the function as proved. If not, the prover gets the output
    back. After three tries the item is marked `[!]`.
@@ -47,9 +51,10 @@ Your messages come first: the **assistant** answers anything you type before the
 or add a [statement](/statements). A chat started with a message answers it and stops; ask for work ("prove the functions left") and the assistant
 sets the swarm going on the plan after its answer. Start with no message to run the plan straight away.
 
-In the chat, the agent at work shows its steps with a field to steer it. **Enter** queues a note, which the agent reads
-at its next step. **⌘ Enter**, or **Now** on a queued note, stops the session and starts it again on your note. When
-several agents work at once, the chat shows them as a tree under the swarm: pick one to see its steps.
+While the agents work, the chat's input steers them. **Enter** queues what you typed for the agent's next step; the
+note waits above the input until it is picked up. **⌘ Enter**, or **Now** on a queued note, stops the session and starts
+it again on your note. When several agents work at once, the chat shows them as a tree under the swarm: pick one to
+see its steps.
 
 ## Sessions, stopping and the cap
 
@@ -58,8 +63,7 @@ conversation is saved as it goes. Quit at any point: the next start resumes the 
 your unanswered messages are still waiting, and finished work is never redone.
 
 On your own key, the swarm stops when it reaches the spending cap shown in the chat's header. Raise it and
-resume to carry on. On your Claude plan nothing is charged, and your plan's usage limits apply instead (see
-[Models and costs](/models)).
+resume to carry on. On your Claude plan nothing is charged, and your plan's usage limits apply instead.
 
 ## What it never does
 

@@ -39,7 +39,7 @@ doesn't go on through the whole plan.
    **Edit** in the list.
 3. **Prove.** Each function becomes its own proof job, through the same prove, check and review loop as the plan.
    The theorem is named for the statement (`S01.Morpho_setFeeRecipient`) and lives in
-   `formal/Proofs/Statements/S01/`. The swarm checks that it exists under that name and has no `sorry`, and shows
+   `formal/Proofs/InformalSpecs/S01/`. The swarm checks that it exists under that name and has no `sorry`, and shows
    its type, as Lean prints it, to the reviewer.
 4. **Record.** When every function is approved, the statement is proved and goes into your audit file as one
    property (`P-S01`): your words as its title, what it was confirmed to mean, and every theorem.

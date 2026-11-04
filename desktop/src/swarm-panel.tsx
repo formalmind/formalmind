@@ -1,6 +1,5 @@
 import { MarkGithubIcon } from "@primer/octicons-react";
 import { isTauri } from "@tauri-apps/api/core";
-import { SemanticsPanel } from "./semantics-panel";
 import { ProofWorkspace } from "./proof-workspace";
 import { ProofRail, fnKey, proofGutter, useFileProofs } from "./code-proof-panel";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
@@ -8,12 +7,11 @@ import { createPortal } from "react-dom";
 import { NvimTerminal } from "./nvim-terminal";
 import { reportError } from "@/lib/report-error";
 import { JsonTree } from "./json-tree";
-import { ArrowDown, Bug, Check, Pencil, ChevronDown, ChevronRight, CircleCheck, CircleX, LoaderCircle, MoreHorizontal, Pause, Code2, Copy, FileCode2, Folder, Network, Plus, ScanSearch, ThumbsDown, ThumbsUp, WandSparkles, ArrowLeft, ArrowRight, History } from "lucide-react";
+import { ArrowDown, Bug, Check, Pencil, ChevronDown, ChevronRight, CircleCheck, CircleX, LoaderCircle, MoreHorizontal, Pause, Code2, Copy, FileCode2, Folder, Network, Plus, ScanSearch, WandSparkles, ArrowLeft, ArrowRight, History } from "lucide-react";
 
 // The project roadmap (GitHub Projects-style), the same view the web app had on its own page.
 import { motion as vimMotion, search as vimSearch, setVimMode, useVimMode, type Cursor } from "@/components/vim-mode";
 import { useNavigate, useSearchParams } from "react-router";
-import { ChatComposer } from "@/components/chat-composer";
 import { useReportDirs } from "@/lib/report-dirs";
 import { auditJsonPath, parseAuditDoc, type AuditDoc, type AuditFindingDoc } from "@/lib/audit-format";
 import { readEntryPoints, setMainEntryPoint } from "@/lib/entry-points";
@@ -25,13 +23,13 @@ import { useHighlightedCode } from "@/hooks/use-highlighted-code";
 import { Message, MessageContent, MessageHeader } from "@/components/ui/message";
 import { SwarmCanvas } from "@/components/swarm/swarm-canvas";
 import { ROLE_COLORS, roleName } from "@/lib/swarm-roles";
-// AffectUI's run card from the private UI package when it is checked out; `null` otherwise (desktop/src/ui-fallback).
-import { RunCard, type Steer } from "@formalmind/ui/run-card";
-import { Composer } from "@formalmind/ui/composer";
-import { ContextCard } from "@formalmind/ui/context";
-import { ReplyActions as AuiReplyActions } from "@formalmind/ui/reply-actions";
+import { RunCard, type Steer } from "./chat-ui/run-card";
+import { PANE_VIEWS, TalkIcon } from "./pane-views";
+import { Composer } from "./chat-ui/composer";
+import { ContextCard } from "./chat-ui/context";
+import { ReplyActions } from "./chat-ui/reply-actions";
 import { localBoard } from "./local-board";
-import { ContextBody, ContextPanel, parseContext } from "./context-panel";
+import { ContextBody, parseContext } from "./context-panel";
 import type { Scan } from "./local";
 
 /** What the panel needs from its host: the desktop app's Tauri commands and events, or the web demo's stand-ins. */
@@ -438,41 +436,6 @@ function ToolOutput({ call, text }: { call: string; text: string }) {
 }
 
 /** One agent's message: who said it (and on which item), then the text flat as Markdown; a bug opens its report. */
-/** Under an agent's reply, as Mike's chat draws it: copy (a tick for a moment) and a thumbs up or down. */
-function ReplyActions({ text }: { text: string }) {
-	// AffectUI's message actions from the private UI package when it is checked out.
-	if (AuiReplyActions) return <AuiReplyActions text={text} />;
-	return <OwnReplyActions text={text} />;
-}
-
-function OwnReplyActions({ text }: { text: string }) {
-	const [copied, setCopied] = useState(false);
-	const [vote, setVote] = useState<"up" | "down" | null>(null);
-	return (
-		<div className="mt-1 flex items-center gap-3.5 text-muted-foreground/70 opacity-0 transition-opacity group-hover/reply:opacity-100 [@media(hover:none)]:opacity-100">
-			<button
-				type="button"
-				title="Copy"
-				onClick={() =>
-					void navigator.clipboard.writeText(text).then(() => {
-						setCopied(true);
-						setTimeout(() => setCopied(false), 1500);
-					})
-				}
-				className="hover:text-foreground"
-			>
-				{copied ? <Check className="size-3.5 text-emerald-600 dark:text-emerald-400" /> : <Copy className="size-3.5" />}
-			</button>
-			<button type="button" title="Good reply" onClick={() => setVote(vote === "up" ? null : "up")} className="hover:text-foreground">
-				<ThumbsUp className={`size-3.5 ${vote === "up" ? "fill-current text-foreground" : ""}`} />
-			</button>
-			<button type="button" title="Bad reply" onClick={() => setVote(vote === "down" ? null : "down")} className="hover:text-foreground">
-				<ThumbsDown className={`size-3.5 ${vote === "down" ? "fill-current text-foreground" : ""}`} />
-			</button>
-		</div>
-	);
-}
-
 /** An `ask` event's text: the question, and the replies the agent drafted for you. */
 function parseAsk(text: string): { question: string; replies: string[] } {
 	try {
@@ -1436,13 +1399,6 @@ export type Mode = "code" | "chat" | "swarm" | "roadmap" | "audit" | "bugs";
 /** How many of a session's latest messages the chat draws at first (and adds per "Show earlier messages"). */
 const CHAT_WINDOW = 150;
 
-const PANE_VIEWS: { id: Mode; label: string; icon: React.ComponentType<{ className?: string }> }[] = [
-	{ id: "chat", label: "Chat", icon: TalkIcon },
-	{ id: "swarm", label: "Canvas", icon: Network },
-	{ id: "audit", label: "Proofs", icon: ScanSearch },
-	{ id: "bugs", label: "Bugs", icon: Bug },
-	{ id: "code", label: "Code", icon: Code2 },
-];
 
 const MODES: { id: Mode; label: string; icon: React.ComponentType<{ className?: string }> }[] = [
 	{ id: "code", label: "Code", icon: Code2 },
@@ -1506,18 +1462,6 @@ export function NavGroup({ name, git, mode, onMode, inBar, compact }: { name: st
 }
 
 
-/** A filled speech bubble with two lines cut out of it: the "Talk to the swarm" mark. */
-export function TalkIcon({ className }: { className?: string }) {
-	return (
-		<svg viewBox="0 0 16 16" className={className} aria-hidden>
-			<path
-				fillRule="evenodd"
-				fill="currentColor"
-				d="M4 1h8a3.5 3.5 0 0 1 3.5 3.5v4A3.5 3.5 0 0 1 12 12H8.2l-3.9 2.6A.8.8 0 0 1 3 13.9V12h0A3.5 3.5 0 0 1 .5 8.5v-4A3.5 3.5 0 0 1 4 1Zm.6 4a.7.7 0 0 0 0 1.4h6.8a.7.7 0 0 0 0-1.4H4.6Zm1.4 2.8a.7.7 0 0 0 0 1.4h4a.7.7 0 0 0 0-1.4H6Z"
-			/>
-		</svg>
-	);
-}
 
 /**
  * The mode a link asks for, as the page has it: Roadmap and Chat have no tab now (the roadmap is on the Swarm canvas),
@@ -1752,28 +1696,9 @@ function CoverageView({ data, scripts, onOpenFile }: { data: Formal; scripts: Sc
 	);
 }
 
-/** Audit mode: what's been established for the contract picked here, as Lean coverage; on the Mac, also the SolidCore experiment. */
+/** Audit mode: what's been established for the contract picked here, as Lean coverage. */
 export function AuditView(props: { folder: string; scan: Scan | null; invoke: Bridge["invoke"]; onOpenFile: (path: string, line?: number) => void; reload?: number }) {
-	const [view, setView] = useState<"coverage" | "semantics">("coverage");
-	const views = isTauri() ? (["coverage", "semantics"] as const) : (["coverage"] as const);
-	const switcher =
-		views.length > 1 ? (
-			<span role="tablist" aria-label="Proofs view" className="inline-flex h-6 items-center rounded-md border bg-muted/60 p-0.5">
-				{views.map((v) => (
-					<button key={v} type="button" role="tab" aria-selected={view === v} onClick={() => setView(v)} className={`h-5 rounded px-2 text-[11px] ${view === v ? "bg-background font-medium text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"}`}>
-						{v === "coverage" ? "Coverage" : "Semantics"}
-					</button>
-				))}
-			</span>
-		) : null;
-	return view === "semantics" ? (
-		<>
-			<div className="flex h-8 shrink-0 items-center gap-2 px-1.5">{switcher}</div>
-			<SemanticsPanel invoke={props.invoke} />
-		</>
-	) : (
-		<CoverageAuditView {...props} switcher={switcher} />
-	);
+	return <CoverageAuditView {...props} />;
 }
 
 function CoverageAuditView({ folder, scan, invoke, onOpenFile, reload = 0, switcher }: { folder: string; scan: Scan | null; invoke: Bridge["invoke"]; onOpenFile: (path: string, line?: number) => void; reload?: number; switcher?: React.ReactNode }) {
@@ -2174,7 +2099,7 @@ export function SwarmPanel({ folder, name, scan, bridge, session, file: openPath
 		window.addEventListener("keydown", on);
 		return () => window.removeEventListener("keydown", on);
 	}, []);
-	// Code navigation (solidity-language-server in the app): ⌘/Ctrl-click goes to the definition; resting on a
+	// Code navigation (`forge lsp` in the app): ⌘/Ctrl-click goes to the definition; resting on a
 	// symbol shows its hover.
 	const [hover, setHover] = useState<{ x: number; y: number; text: string } | null>(null);
 	const hoverTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -2450,6 +2375,22 @@ export function SwarmPanel({ folder, name, scan, bridge, session, file: openPath
 		// Braces matter: scrollTo returns a Promise in newer browsers, and an effect must return nothing or a cleanup.
 		chat.current?.scrollTo({ top: chat.current.scrollHeight });
 	}, [events]);
+	// A session that just loaded opens at its latest messages: the scroll above ran while the skeleton showed. And while
+	// you're at the bottom it stays there as messages settle (off screen they hold a placeholder height, then their own).
+	useEffect(() => {
+		if (loadingHistory) return;
+		atBottom.current = true;
+		setAway(false);
+		const el = chat.current;
+		if (!el) return;
+		const pin = () => {
+			if (atBottom.current) el.scrollTop = el.scrollHeight;
+		};
+		pin();
+		const ro = new ResizeObserver(pin);
+		for (const child of Array.from(el.children)) ro.observe(child);
+		return () => ro.disconnect();
+	}, [loadingHistory, viewing]);
 
 	// `onlyQueued`: a run for the work already queued (reading a report), which stops when that's done.
 	// The page says what to start; the backend (its control API, as the MCP uses it) picks the model
@@ -2490,8 +2431,9 @@ export function SwarmPanel({ folder, name, scan, bridge, session, file: openPath
 		const text = say.trim();
 		if (!text || !run) return;
 		setSay("");
-		// The app sends it back as a `you` event (desktop/src-tauri/src/swarm.rs), logged with the session.
-		await invoke("swarm_say", { folder, run, text }).catch((e) => setError(String(e)));
+		// Queued for the agent at work (it reads it at its next step); the app sends it back as a `you` event
+		// (desktop/src-tauri/src/swarm.rs), logged with the session.
+		await steerSend(text, false);
 	};
 
 	// Skill commands in the composer, as Claude Code writes them: `/skills`, `/skills add <id>`, `/skills remove <id>`
@@ -2584,7 +2526,7 @@ export function SwarmPanel({ folder, name, scan, bridge, session, file: openPath
 			last = -1;
 		};
 		chatBlocks.forEach((b, i) => {
-			if ("e" in b && b.e.kind === "you") return close();
+			if ("e" in b && (b.e.kind === "you" || b.e.kind === "start")) return close();
 			if ("e" in b && b.e.kind === "say") {
 				texts.push(b.e.text);
 				last = i;
@@ -2636,20 +2578,19 @@ export function SwarmPanel({ folder, name, scan, bridge, session, file: openPath
 				// the length of the chat; its last measured height holds its place.
 				<div key={i} data-msg={i} className="fm-settle [contain-intrinsic-size:auto_96px] [content-visibility:auto]">
 					{"steps" in block ? (
-						(() => {
-							const Card = RunCard ?? Steps;
-							return (
-								<Card
+						(
+								<RunCard
 									steps={block.steps}
 									running={i === liveBlock}
-									steering={i === liveBlock ? { notes: steerNotes, send: (text, now, queued) => void steerSend(text, now, queued) } : undefined}
 									// The plan item the run works on, by its text (bold markers and code ticks off).
 									title={itemTitle(block.steps)}
 									onPause={run ? () => void invoke("swarm_stop", { folder, run }) : undefined}
+									// Retry from the Agents tree: the session carries on, back on that item.
+									onRetry={(role, item) => void start(item ? `Retry plan item ${item}: the ${role} failed on it.` : `Retry: the ${role} failed.`, true)}
 								/>
-							);
-						})()
-					) : block.e.kind === "you" ? (
+						)
+					) : block.e.kind === "you" || block.e.kind === "start" ? (
+						// Your message (a session's opening one comes as its `start`).
 						<Message align="end">
 							<MessageContent>
 								{/* Your message: on the right, as wide as its text up to most of the chat, wrapping long words. */}
@@ -2948,12 +2889,8 @@ export function SwarmPanel({ folder, name, scan, bridge, session, file: openPath
 				</span>
 				{ctxPct}%
 			</DropdownMenuTrigger>
-			<DropdownMenuContent align="end" className="w-auto rounded-2xl border-0 bg-transparent p-0 shadow-lg">
-				{(() => {
-					// AffectUI's context window from the private UI package when it is checked out; the app's own otherwise.
-					const Card = ContextCard ?? ContextPanel;
-					return <Card role={working.role} color={colorOf(working.role)} use={ctx} onCompact={run ? () => invoke("swarm_compact", { folder, run }) : undefined} />;
-				})()}
+			<DropdownMenuContent align="end" className="w-[340px] max-w-[calc(100vw-1.5rem)] rounded-2xl border-0 bg-transparent p-0 shadow-lg">
+				<ContextCard role={working.role} color={colorOf(working.role)} use={ctx} onCompact={run ? () => invoke("swarm_compact", { folder, run }) : undefined} />
 			</DropdownMenuContent>
 		</DropdownMenu>
 	) : null;
@@ -3184,12 +3121,35 @@ export function SwarmPanel({ folder, name, scan, bridge, session, file: openPath
 
 				<div className="shrink-0 space-y-2 p-2">
 					{error ? <p className="text-xs text-red-600">{error}</p> : null}
+					{/* Your notes to the agent at work, until it takes them in at its next step; Now interrupts with one. */}
+					{run && queuedSteer.length ? (
+						<div className="flex flex-wrap items-center gap-1.5 px-1 text-[12px]">
+							<span className="text-muted-foreground">Queued for the next step</span>
+							{queuedSteer.map((n) => (
+								<span key={n.id} className="inline-flex max-w-full items-center gap-1 rounded-full bg-muted py-0.5 pl-2.5 pr-1">
+									<span className="truncate">{n.text}</span>
+									<button type="button" onClick={() => void steerSend(n.text, true, n.id)} title="Interrupt the agent with this note now (⌘↵)" className="shrink-0 rounded-full px-1.5 text-muted-foreground hover:bg-background hover:text-foreground">
+										Now
+									</button>
+								</span>
+							))}
+						</div>
+					) : null}
 					{/* The Swarm page's composer: steer while it runs; before that, what you type is its focus and ↑ starts it. */}
-					{(() => {
-						// AffectUI's composer from the private UI package when it is checked out; the app's own otherwise.
-						const Box = (Composer ?? ChatComposer) as typeof ChatComposer;
-						return (
-					<Box
+					{(
+					// While it runs, ↵ queues what you typed for the agent's next step and ⌘↵ interrupts it with it now.
+					<div
+						className="contents"
+						onKeyDownCapture={(e) => {
+							if (!run || e.key !== "Enter" || !(e.metaKey || e.ctrlKey) || !say.trim()) return;
+							e.preventDefault();
+							e.stopPropagation();
+							const text = say.trim();
+							setSay("");
+							void steerSend(text, true);
+						}}
+					>
+					<Composer
 						compact
 						rounded="rounded-2xl"
 						value={run ? say : goal}
@@ -3224,7 +3184,7 @@ export function SwarmPanel({ folder, name, scan, bridge, session, file: openPath
 								store.set("fm:effort", v);
 							},
 						} : undefined}
-						placeholder={run ? "Talk to the agents: a question, a new focus, an idea to check…" : "What should the swarm focus on? (optional) ↑ starts it"}
+						placeholder={run ? "Talk to the agents: ↵ for their next step, ⌘↵ to interrupt now…" : "What should the swarm focus on? (optional) ↑ starts it"}
 						context={
 							<span className="inline-flex items-center gap-1.5">
 								<span className="inline-flex h-7 items-center gap-1.5 rounded-full bg-secondary px-2.5 text-[12px] font-medium text-secondary-foreground" title={folder}><Folder className="size-3 shrink-0" />{name}</span>
@@ -3238,8 +3198,8 @@ export function SwarmPanel({ folder, name, scan, bridge, session, file: openPath
 							</button>
 						) : null}
 					/>
-						);
-					})()}
+					</div>
+					)}
 				</div>
 				</div>
 		</>
@@ -3447,7 +3407,7 @@ export function SwarmPanel({ folder, name, scan, bridge, session, file: openPath
 							{file.url ? (
 								<iframe src={file.url} title={file.path} className="h-full w-full border-0" />
 							) : vim && slot ? (
-								// The Mac app runs real Neovim (bundled); the web keeps the light cursor below.
+								// The Mac app runs real Neovim (installed on the machine); the web keeps the light cursor below.
 								<NvimTerminal bridge={bridge} folder={folder} path={file.path} line={markLine} />
 							) : jsonOk && !jsonRaw ? (
 								<JsonTree text={file.text} />

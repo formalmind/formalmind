@@ -2,7 +2,7 @@
 
 import { useRef, useState } from "react";
 import { experimental_useObject as useObject } from "@ai-sdk/react";
-import { parseRepo, planSchema, type RepoPlan } from "@/lib/plan";
+import { parseRepo, planAiSchema, type RepoPlan } from "@/lib/plan";
 
 const DRAFT_KEY = "fm-onboarding-draft";
 /** A visitor's landing progress is kept for three days, then the page goes back to its demo. */
@@ -63,7 +63,7 @@ export function usePlan(onDone?: (draft: PlanDraft) => void) {
 	const [resumed, setResumed] = useState<RepoPlan | null>(null);
 	const { object, submit, isLoading, error, stop } = useObject({
 		api: "/api/onboarding/plan",
-		schema: planSchema,
+		schema: planAiSchema,
 		onFinish: ({ object: plan }) => {
 			const planned = repoRef.current;
 			if (plan && planned) {

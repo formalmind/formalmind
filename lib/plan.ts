@@ -3,6 +3,7 @@
  * would verify first. Runs on our key, so the inputs are kept small (a few cents a plan).
  */
 import { z } from "zod";
+import { aiSchema } from "@/lib/ai-schema";
 
 /** The repositories the landing page offers to try; their plans are kept for good and shared with everyone. */
 export const EXAMPLE_REPOS = ["Uniswap/v4-core", "morpho-org/morpho-blue", "transmissions11/solmate"];
@@ -31,6 +32,8 @@ export const planSchema = z.object({
 });
 
 export type RepoPlan = z.infer<typeof planSchema>;
+/** The plan schema for the AI SDK (streamObject, useObject). */
+export const planAiSchema = aiSchema<RepoPlan>(planSchema);
 
 export type RepoScan = {
 	repo: string;

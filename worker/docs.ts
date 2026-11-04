@@ -7,12 +7,10 @@ import { DOC_PAGES, DOCS_ORIGIN, pageFor, type DocPage } from "@/content/docs/pa
 import { CONTENT_SIGNAL } from "./markdown";
 import index from "@/content/docs/index.md";
 import install from "@/content/docs/install.md";
-import firstRun from "@/content/docs/first-run.md";
 import swarm from "@/content/docs/swarm.md";
 import statements from "@/content/docs/statements.md";
 import proofs from "@/content/docs/proofs.md";
 import bugs from "@/content/docs/bugs.md";
-import models from "@/content/docs/models.md";
 import files from "@/content/docs/files.md";
 import agents from "@/content/docs/agents.md";
 import auditFormat from "@/content/docs/audit-format.md";
@@ -20,12 +18,10 @@ import auditFormat from "@/content/docs/audit-format.md";
 const TEXT: Record<string, string> = {
   index,
   install,
-  "first-run": firstRun,
   swarm,
   statements,
   proofs,
   bugs,
-  models,
   files,
   agents,
   "audit-format": auditFormat,

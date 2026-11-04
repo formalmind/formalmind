@@ -53,7 +53,7 @@ A **project** is a Solidity repository: a folder on your computer in the desktop
 **The local swarm.** Press Start on a folder, with an optional focus and a spending cap:
 
 1. **Plan**, without a model: \`.formal/plan.md\` gets one item per function in scope, the scripts' calls first, then the functions that write storage, then views. Functions already proved come checked.
-2. **Prove**: a prover takes the next item with the function's slice of the AST and its generated Lean model (\`formal/Specs/<Contract>.lean\`), writes \`formal/Proofs/Swarm/<Contract><Fn>.lean\` and runs \`lake build\`.
+2. **Prove**: a prover takes the next item with the function's slice of the AST and its generated Lean model (\`formal/Specs/<Contract>.lean\`), writes \`formal/Proofs/Functions/<Contract><Fn>.lean\` and runs \`lake build\`.
 3. **Check**: no \`sorry\`, \`admit\`, \`axiom\` or \`native_decide\`, a clean build, and the Proofs tab counting the function as proved. Three failures block the item.
 4. **Review**: a reviewer checks the theorems and the prover's notes against the Solidity. Approved properties are written to \`audit/formal-mind.audit.json\`.
 5. **Bugs**: a finding needs a Foundry PoC under \`test/\` that the swarm runs with \`forge test\`; it goes to \`audit/formal-mind-swarm.md\`, the audit index \`audit/README.md\` and \`audit/formal-mind.audit.json\`, and shows on Bugs.

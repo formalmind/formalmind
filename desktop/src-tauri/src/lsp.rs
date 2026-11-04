@@ -1,4 +1,4 @@
-//! Code navigation in the Code tab: one solidity-language-server per folder, spoken to over stdio (JSON-RPC).
+//! Code navigation in the Code tab: one `forge lsp` per folder, spoken to over stdio (JSON-RPC).
 //!
 //! The server builds the project's AST in the background after a file opens, so the first request on a file can come
 //! back empty; requests retry for a few seconds before giving up.
@@ -26,9 +26,9 @@ fn servers() -> &'static Mutex<HashMap<String, Arc<Server>>> {
     S.get_or_init(Default::default)
 }
 
-/// Apps opened from Finder don't get the shell's PATH, so look where cargo and Homebrew install it first.
+/// Apps opened from Finder don't get the shell's PATH, so look where Foundry installs `forge` first.
 fn binary() -> PathBuf {
-    crate::platform::find_tool("solidity-language-server")
+    crate::platform::find_tool("forge")
 }
 
 fn send(stdin: &Mutex<ChildStdin>, msg: &Value) -> Result<(), String> {
@@ -40,13 +40,13 @@ fn send(stdin: &Mutex<ChildStdin>, msg: &Value) -> Result<(), String> {
 impl Server {
     fn start(folder: &str) -> Result<Arc<Server>, String> {
         let mut child = Command::new(binary())
-            .arg("--stdio")
+            .args(["lsp", "--stdio"])
             .current_dir(folder)
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::null())
             .spawn()
-            .map_err(|e| format!("Couldn't start solidity-language-server ({e}). Install it with `cargo install solidity-language-server`."))?;
+            .map_err(|e| format!("Couldn't start `forge lsp` ({e}). Install Foundry with `curl -L https://foundry.paradigm.xyz | bash`, then run `foundryup`."))?;
         let stdin = child.stdin.take().ok_or("no stdin")?;
         let stdout = child.stdout.take().ok_or("no stdout")?;
         let pending: Arc<Mutex<HashMap<i64, Sender<Value>>>> = Arc::default();

@@ -6,6 +6,8 @@ import { MarkGithubIcon } from "@primer/octicons-react";
 import { useEffect, useRef, useState } from "react";
 import { Loader2, Lock } from "lucide-react";
 import { SwarmCanvas } from "@/components/swarm/swarm-canvas";
+import { BringYourPlan } from "./bring-your-plan";
+import { McpSection } from "./mcp-section";
 import { SetupPreview } from "./setup-preview";
 import { PANEL_TOP, PEEK, TakeoverAgents, usePhase } from "./takeover";
 import { readDraft, usePlan } from "./use-plan";
@@ -32,6 +34,7 @@ const FOOTER = [
 		links: [
 			{ label: "Brand kit", href: "/brand/" },
 			{ label: "GitHub", href: "https://github.com/formalmind" },
+			{ label: "Source", href: "https://github.com/formalmind/formalmind" },
 			{ label: "Lean template", href: "https://github.com/formalmind/lean-template" },
 		],
 	},
@@ -40,6 +43,7 @@ const FOOTER = [
 		links: [
 			{ label: "Privacy", href: "/privacy/" },
 			{ label: "Terms", href: "/terms/" },
+			{ label: "License", href: "https://github.com/formalmind/formalmind/blob/main/LICENSE" },
 		],
 	},
 ];
@@ -201,6 +205,11 @@ export function Landing({ signedIn }: { signedIn: boolean }) {
 						<SwarmCanvas state={null} />
 					)}
 				</section>
+
+				<div className={`transition-opacity duration-300 ${gone ? "pointer-events-none opacity-0" : ""}`}>
+					<BringYourPlan />
+					<McpSection />
+				</div>
 
 				<footer className={`mt-8 w-full shrink-0 border-t transition-opacity duration-300 ${gone ? "pointer-events-none opacity-0" : ""}`}>
 					<div className="mx-auto grid w-full max-w-6xl grid-cols-2 gap-8 px-4 py-10 text-sm sm:grid-cols-4 sm:px-6">
